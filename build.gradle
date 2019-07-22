@@ -13,41 +13,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import org.ajoberstar.grgit.Grgit
-
 import java.nio.charset.StandardCharsets
 
 buildscript {
-  repositories {
-    mavenCentral()
-    jcenter()
-    maven {
-      url "https://plugins.gradle.org/m2/"
+    repositories {
+      mavenCentral()
     }
-  }
   apply from: file('gradle/buildscript.gradle'), to: buildscript
   apply from: "$rootDir/gradle/dependencies.gradle"
 
   dependencies {
     // For Apache Rat plugin to ignore non-Git files
-    classpath "org.ajoberstar.grgit:grgit-core:$versions.grgit"
-    classpath "com.github.ben-manes:gradle-versions-plugin:$versions.gradleVersionsPlugin"
     classpath "org.scoverage:gradle-scoverage:$versions.scoveragePlugin"
-    classpath "com.github.jengelman.gradle.plugins:shadow:$versions.shadowPlugin"
     classpath "org.owasp:dependency-check-gradle:$versions.owaspDepCheckPlugin"
-    classpath "com.diffplug.spotless:spotless-plugin-gradle:$versions.spotlessPlugin"
-    classpath "gradle.plugin.com.github.spotbugs:spotbugs-gradle-plugin:$versions.spotbugsPlugin"
   }
 }
-
-apply plugin: "com.diffplug.gradle.spotless"
-spotless {
-  scala {
-    target 'streams/**/*.scala'
-    scalafmt("$versions.scalafmt").configFile('checkstyle/.scalafmt.conf')
-  }
-}
-
 
 allprojects {
 
@@ -57,30 +37,6 @@ allprojects {
   
   apply plugin: 'idea'
   apply plugin: 'org.owasp.dependencycheck'
-  apply plugin: 'com.github.ben-manes.versions'
-
-  dependencyUpdates {
-    revision="release"
-    resolutionStrategy = {
-      componentSelection { rules ->
-        rules.all { ComponentSelection selection ->
-          boolean rejected = ['snap', 'alpha', 'beta', 'rc', 'cr', 'm'].any { qualifier ->
-            selection.candidate.version ==~ /(?i).*[.-]${qualifier}[.\d-]*/
-          }
-          if (rejected) {
-            selection.reject('Release candidate')
-          }
-        }
-      }
-    }
-    configurations {
-      runtime {
-        resolutionStrategy {
-          force "com.fasterxml.jackson.core:jackson-annotations:$versions.jackson"
-        }
-      }
-    }
-  }
 
   tasks.withType(Javadoc) {
     // disable the crazy super-strict doclint tool in Java 8
@@ -117,28 +73,6 @@ apply from: file('wrapper.gradle')
 
 if (file('.git').exists()) {
   apply from: file('gradle/rat.gradle')
-  rat {
-    // Exclude everything under the directory that git should be ignoring via .gitignore or that isn't checked in. These
-    // restrict us only to files that are checked in or are staged.
-    def repo = Grgit.open(currentDir: project.getRootDir())
-    excludes = new ArrayList<String>(repo.clean(ignore: false, directories: true, dryRun: true))
-    // And some of the files that we have checked in should also be excluded from this check
-    excludes.addAll([
-        '**/.git/**',
-        '**/build/**',
-        'CONTRIBUTING.md',
-        'PULL_REQUEST_TEMPLATE.md',
-        'gradlew',
-        'gradlew.bat',
-        'TROGDOR.md',
-        '**/README.md',
-        '**/id_rsa',
-        '**/id_rsa.pub',
-        'checkstyle/suppressions.xml',
-        'streams/quickstart/java/src/test/resources/projects/basic/goal.txt',
-        'streams/streams-scala/logs/*'
-    ])
-  }
 }
 
 
@@ -152,7 +86,6 @@ subprojects {
   apply plugin: 'maven'
   apply plugin: 'signing'
   apply plugin: 'checkstyle'
-  apply plugin: "com.github.spotbugs"
 
   sourceCompatibility = minJavaVersion
   targetCompatibility = minJavaVersion
@@ -380,6 +313,8 @@ subprojects {
       classifier = 'scaladoc'
       from "$rootDir/LICENSE"
       from "$rootDir/NOTICE"
+      from "$rootDir/NOTICE"
+      from "$rootDir/NOTICE"
       from scaladoc.destinationDir
     }
 
@@ -447,20 +382,6 @@ subprojects {
 
   test.dependsOn('checkstyleMain', 'checkstyleTest')
 
-  spotbugs {
-    toolVersion = "$versions.spotbugs"
-    excludeFilter = file("$rootDir/gradle/spotbugs-exclude.xml")
-    ignoreFailures = false
-  }
-  test.dependsOn('spotbugsMain')
-
-  tasks.withType(com.github.spotbugs.SpotBugsTask) {
-    reports {
-      // Continue supporting `xmlFindBugsReport` for compatibility
-      xml.enabled(project.hasProperty('xmlSpotBugsReport') || project.hasProperty('xmlFindBugsReport'))
-      html.enabled(!project.hasProperty('xmlSpotBugsReport') && !project.hasProperty('xmlFindBugsReport'))
-    }
-  }
 
   // Ignore core since its a scala project
   if (it.path != ':core') {
@@ -1374,14 +1295,6 @@ project(':streams:upgrade-system-tests-22') {
 }
 
 project(':jmh-benchmarks') {
-
-  apply plugin: 'com.github.johnrengelman.shadow'
-
-  shadowJar {
-    baseName = 'kafka-jmh-benchmarks-all'
-    classifier = null
-    version = null
-  }
 
   dependencies {
     compile project(':clients')
