@@ -30,6 +30,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
@@ -53,7 +55,7 @@ import java.util.regex.Pattern;
  * defs.define(&quot;config_with_validator&quot;, Type.INT, 42, Range.atLeast(0), &quot;Configuration with user provided validator.&quot;);
  * defs.define(&quot;config_with_dependents&quot;, Type.INT, &quot;Configuration with dependents.&quot;, &quot;group&quot;, 1, &quot;Config With Dependents&quot;, Arrays.asList(&quot;config_with_default&quot;,&quot;config_with_validator&quot;));
  *
- * Map&lt;String, String&gt; props = new HashMap&lt;&gt();
+ * Map&lt;String, String&gt; props = new HashMap&lt;&gt;();
  * props.put(&quot;config_with_default&quot;, &quot;some value&quot;);
  * props.put(&quot;config_with_dependents&quot;, &quot;some other value&quot;);
  *
@@ -705,9 +707,16 @@ public class ConfigDef {
                 case CLASS:
                     if (value instanceof Class)
                         return value;
-                    else if (value instanceof String)
-                        return Class.forName(trimmed, true, Utils.getContextOrKafkaClassLoader());
-                    else
+                    else if (value instanceof String) {
+                        ClassLoader contextOrKafkaClassLoader = Utils.getContextOrKafkaClassLoader();
+                        // Use loadClass here instead of Class.forName because the name we use here may be an alias
+                        // and not match the name of the class that gets loaded. If that happens, Class.forName can
+                        // throw an exception.
+                        Class<?> klass = contextOrKafkaClassLoader.loadClass(trimmed);
+                        // Invoke forName here with the true name of the requested class to cause class
+                        // initialization to take place.
+                        return Class.forName(klass.getName(), true, contextOrKafkaClassLoader);
+                    } else
                         throw new ConfigException(name, value, "Expected a Class instance or class name.");
                 default:
                     throw new IllegalStateException("Unknown type.");
@@ -952,6 +961,32 @@ public class ConfigDef {
         }
     }
 
+    public static class LambdaValidator implements Validator {
+        BiConsumer<String, Object> ensureValid;
+        Supplier<String> toStringFunction;
+
+        private LambdaValidator(BiConsumer<String, Object> ensureValid,
+                                Supplier<String> toStringFunction) {
+            this.ensureValid = ensureValid;
+            this.toStringFunction = toStringFunction;
+        }
+
+        public static LambdaValidator with(BiConsumer<String, Object> ensureValid,
+                                           Supplier<String> toStringFunction) {
+            return new LambdaValidator(ensureValid, toStringFunction);
+        }
+
+        @Override
+        public void ensureValid(String name, Object value) {
+            ensureValid.accept(name, value);
+        }
+
+        @Override
+        public String toString() {
+            return toStringFunction.get();
+        }
+    }
+
     public static class CompositeValidator implements Validator {
         private final List<Validator> validators;
 
@@ -1078,6 +1113,10 @@ public class ConfigDef {
         public boolean hasDefault() {
             return !NO_DEFAULT_VALUE.equals(this.defaultValue);
         }
+
+        public Type type() {
+            return type;
+        }
     }
 
     protected List<String> headers() {
@@ -1133,7 +1172,7 @@ public class ConfigDef {
      * If <code>dynamicUpdateModes</code> is non-empty, a "Dynamic Update Mode" column
      * will be included n the table with the value of the update mode. Default
      * mode is "read-only".
-     * @param dynamicUpdateModes Config name -> update mode mapping
+     * @param dynamicUpdateModes Config name -&gt; update mode mapping
      */
     public String toHtmlTable(Map<String, String> dynamicUpdateModes) {
         boolean hasUpdateModes = !dynamicUpdateModes.isEmpty();
@@ -1314,7 +1353,16 @@ public class ConfigDef {
      */
     private static Validator embeddedValidator(final String keyPrefix, final Validator base) {
         if (base == null) return null;
-        return (name, value) -> base.ensureValid(name.substring(keyPrefix.length()), value);
+        return new Validator() {
+            public void ensureValid(String name, Object value) {
+                base.ensureValid(name.substring(keyPrefix.length()), value);
+            }
+
+            @Override
+            public String toString() {
+                return base.toString();
+            }
+        };
     }
 
     /**

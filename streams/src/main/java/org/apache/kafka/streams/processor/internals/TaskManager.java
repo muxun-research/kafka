@@ -16,7 +16,7 @@
  */
 package org.apache.kafka.streams.processor.internals;
 
-import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.DeleteRecordsResult;
 import org.apache.kafka.clients.admin.RecordsToDelete;
 import org.apache.kafka.clients.consumer.Consumer;
@@ -57,7 +57,7 @@ public class TaskManager {
     private final StreamThread.AbstractTaskCreator<StandbyTask> standbyTaskCreator;
     private final StreamsMetadataState streamsMetadataState;
 
-    final AdminClient adminClient;
+    final Admin adminClient;
     private DeleteRecordsResult deleteRecordsResult;
 
     // following information is updated during rebalance phase by the partition assignor
@@ -74,7 +74,7 @@ public class TaskManager {
                 final StreamsMetadataState streamsMetadataState,
                 final StreamThread.AbstractTaskCreator<StreamTask> taskCreator,
                 final StreamThread.AbstractTaskCreator<StandbyTask> standbyTaskCreator,
-                final AdminClient adminClient,
+                final Admin adminClient,
                 final AssignedStreamsTasks active,
                 final AssignedStandbyTasks standby) {
         this.changelogReader = changelogReader;
@@ -99,11 +99,11 @@ public class TaskManager {
             throw new IllegalStateException(logPrefix + "consumer has not been initialized while adding stream tasks. This should not happen.");
         }
 
-        changelogReader.reset();
         // do this first as we may have suspended standby tasks that
         // will become active or vice versa
         standby.closeNonAssignedSuspendedTasks(assignedStandbyTasks);
         active.closeNonAssignedSuspendedTasks(assignedActiveTasks);
+
         addStreamTasks(assignment);
         addStandbyTasks();
         // Pause all the partitions until the underlying state store is ready for all the active tasks.
@@ -208,7 +208,7 @@ public class TaskManager {
                 try {
                     final TaskId id = TaskId.parse(dir.getName());
                     // if the checkpoint file exists, the state is valid.
-                    if (new File(dir, ProcessorStateManager.CHECKPOINT_FILE_NAME).exists()) {
+                    if (new File(dir, StateManagerUtil.CHECKPOINT_FILE_NAME).exists()) {
                         tasks.add(id);
                     }
                 } catch (final TaskIdFormatException e) {
@@ -240,7 +240,14 @@ public class TaskManager {
         final AtomicReference<RuntimeException> firstException = new AtomicReference<>(null);
 
         firstException.compareAndSet(null, active.suspend());
+        // close all restoring tasks as well and then reset changelog reader;
+        // for those restoring and still assigned tasks, they will be re-created
+        // in addStreamTasks.
+        firstException.compareAndSet(null, active.closeAllRestoringTasks());
+        changelogReader.reset();
+
         firstException.compareAndSet(null, standby.suspend());
+
         // remove the changelog partitions from restore consumer
         restoreConsumer.unsubscribe();
 
@@ -278,7 +285,7 @@ public class TaskManager {
         }
     }
 
-    AdminClient getAdminClient() {
+    Admin getAdminClient() {
         return adminClient;
     }
 
@@ -327,7 +334,7 @@ public class TaskManager {
             log.trace("Resuming partitions {}", assignment);
             consumer.resume(assignment);
             assignStandbyPartitions();
-            return true;
+            return standby.allTasksRunning();
         }
         return false;
     }
@@ -368,7 +375,7 @@ public class TaskManager {
     }
 
     public void setAssignmentMetadata(final Map<TaskId, Set<TopicPartition>> activeTasks,
-                               final Map<TaskId, Set<TopicPartition>> standbyTasks) {
+                                      final Map<TaskId, Set<TopicPartition>> standbyTasks) {
         this.assignedActiveTasks = activeTasks;
         this.assignedStandbyTasks = standbyTasks;
     }

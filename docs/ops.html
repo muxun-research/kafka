@@ -453,7 +453,7 @@
   There are two interfaces that can be used to engage a throttle. The simplest, and safest, is to apply a throttle when invoking the kafka-reassign-partitions.sh, but kafka-configs.sh can also be used to view and alter the throttle values directly.
   <p></p>
   So for example, if you were to execute a rebalance, with the below command, it would move partitions at no more than 50MB/s.
-  <pre class="brush: bash;">$ bin/kafka-reassign-partitions.sh --zookeeper myhost:2181--execute --reassignment-json-file bigger-cluster.json —throttle 50000000</pre>
+  <pre class="brush: bash;">$ bin/kafka-reassign-partitions.sh --zookeeper localhost:2181 --execute --reassignment-json-file bigger-cluster.json —throttle 50000000</pre>
   When you execute this script you will see the throttle engage:
   <pre class="brush: bash;">
   The throttle limit was set to 50000000 B/s
@@ -786,6 +786,16 @@
   <code>records-consumed-rate</code> has a corresponding metric named <code>records-consumed-total</code>.
   <p>
   The easiest way to see the available metrics is to fire up jconsole and point it at a running kafka client or server; this will allow browsing all metrics with JMX.
+
+  <h4><a id="remote_jmx" href="#remote_jmx">Security Considerations for Remote Monitoring using JMX</a></h4>
+  Apache Kafka disables remote JMX by default. You can enable remote monitoring using JMX by setting the environment variable
+  <code>JMX_PORT</code> for processes started using the CLI or standard Java system properties to enable remote JMX programmatically.
+  You must enable security when enabling remote JMX in production scenarios to ensure that unauthorized users cannot monitor or
+  control your broker or application as well as the platform on which these are running. Note that authentication is disabled for
+  JMX by default in Kafka and security configs must be overridden for production deployments by setting the environment variable
+  <code>KAFKA_JMX_OPTS</code> for processes started using the CLI or by setting appropriate Java system properties. See
+  <a href=https://docs.oracle.com/javase/8/docs/technotes/guides/management/agent.html">Monitoring and Management Using JMX Technology</a>
+  for details on securing JMX.
   <p>
   We do graphing and alerting on the following metrics:
   <table class="data-table">
@@ -863,6 +873,11 @@
       <tr>
         <td># of under minIsr partitions (|ISR| &lt min.insync.replicas)</td>
         <td>kafka.server:type=ReplicaManager,name=UnderMinIsrPartitionCount</td>
+        <td>0</td>
+      </tr>
+      <tr>
+        <td># of at minIsr partitions (|ISR| = min.insync.replicas)</td>
+        <td>kafka.server:type=ReplicaManager,name=AtMinIsrPartitionCount</td>
         <td>0</td>
       </tr>
       <tr>
@@ -1013,6 +1028,26 @@
         <td>kafka.server:type=SessionExpireListener,name=SessionState</td>
         <td>Connection status of broker's ZooKeeper session which may be one of
             Disconnected|SyncConnected|AuthFailed|ConnectedReadOnly|SaslAuthenticated|Expired.</td>
+      </tr>
+      <tr>
+        <td>Max time to load group metadata</td>
+        <td>kafka.server:type=group-coordinator-metrics,name=partition-load-time-max</td>
+        <td>maximum time, in milliseconds, it took to load offsets and group metadata from the consumer offset partitions loaded in the last 30 seconds</td>
+      </tr>
+      <tr>
+        <td>Avg time to load group metadata</td>
+        <td>kafka.server:type=group-coordinator-metrics,name=partition-load-time-avg</td>
+        <td>average time, in milliseconds, it took to load offsets and group metadata from the consumer offset partitions loaded in the last 30 seconds</td>
+      </tr>
+      <tr>
+        <td>Max time to load transaction metadata</td>
+        <td>kafka.server:type=transaction-coordinator-metrics,name=partition-load-time-max</td>
+        <td>maximum time, in milliseconds, it took to load transaction metadata from the consumer offset partitions loaded in the last 30 seconds</td>
+      </tr>
+      <tr>
+        <td>Avg time to load transaction metadata</td>
+        <td>kafka.server:type=transaction-coordinator-metrics,name=partition-load-time-avg</td>
+        <td>average time, in milliseconds, it took to load transaction metadata from the consumer offset partitions loaded in the last 30 seconds</td>
       </tr>
   </tbody></table>
 
@@ -1728,6 +1763,7 @@ All the following metrics have a recording level of <code>debug</code>:
   <ul>
     <li><code>in-memory-state</code></li>
     <li><code>in-memory-lru-state</code></li>
+    <li><code>in-memory-window-state</code></li>
     <li><code>rocksdb-state</code> (for RocksDB backed key-value store)</li>
     <li><code>rocksdb-window-state</code> (for RocksDB backed window store)</li>
     <li><code>rocksdb-session-state</code> (for RocksDB backed session store)</li>
@@ -1998,7 +2034,7 @@ All the following metrics have a recording level of <code>debug</code>:
   <h3><a id="zk" href="#zk">6.7 ZooKeeper</a></h3>
 
   <h4><a id="zkversion" href="#zkversion">Stable version</a></h4>
-  The current stable branch is 3.4 and the latest release of that branch is 3.4.9.
+  The current stable branch is 3.5. Kafka is regularly updated to include the latest release in the 3.5 series.
 
   <h4><a id="zkops" href="#zkops">Operationalizing ZooKeeper</a></h4>
   Operationally, we do the following for a healthy ZooKeeper installation:

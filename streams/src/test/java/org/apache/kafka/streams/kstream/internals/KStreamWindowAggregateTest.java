@@ -23,6 +23,7 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
+import org.apache.kafka.streams.KeyValueTimestamp;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.TopologyTestDriver;
 import org.apache.kafka.streams.kstream.Consumed;
@@ -61,8 +62,8 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertEquals;
 
 public class KStreamWindowAggregateTest {
-
-    private final ConsumerRecordFactory<String, String> recordFactory = new ConsumerRecordFactory<>(new StringSerializer(), new StringSerializer());
+    private final ConsumerRecordFactory<String, String> recordFactory =
+        new ConsumerRecordFactory<>(new StringSerializer(), new StringSerializer());
     private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.String(), Serdes.String());
 
     @Test
@@ -79,7 +80,7 @@ public class KStreamWindowAggregateTest {
         final MockProcessorSupplier<Windowed<String>, String> supplier = new MockProcessorSupplier<>();
         table2.toStream().process(supplier);
 
-        try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props, 0L)) {
+        try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             driver.pipeInput(recordFactory.create(topic1, "A", "1", 0L));
             driver.pipeInput(recordFactory.create(topic1, "B", "2", 1L));
             driver.pipeInput(recordFactory.create(topic1, "C", "3", 2L));
@@ -91,33 +92,51 @@ public class KStreamWindowAggregateTest {
             driver.pipeInput(recordFactory.create(topic1, "D", "4", 7L));
             driver.pipeInput(recordFactory.create(topic1, "B", "2", 8L));
             driver.pipeInput(recordFactory.create(topic1, "C", "3", 9L));
+
             driver.pipeInput(recordFactory.create(topic1, "A", "1", 10L));
             driver.pipeInput(recordFactory.create(topic1, "B", "2", 11L));
             driver.pipeInput(recordFactory.create(topic1, "D", "4", 12L));
             driver.pipeInput(recordFactory.create(topic1, "B", "2", 13L));
             driver.pipeInput(recordFactory.create(topic1, "C", "3", 14L));
+
+            driver.pipeInput(recordFactory.create(topic1, "B", "1", 3L));
+            driver.pipeInput(recordFactory.create(topic1, "B", "2", 2L));
+            driver.pipeInput(recordFactory.create(topic1, "B", "3", 9L));
         }
 
         assertEquals(
             asList(
-                "[A@0/10]:0+1",
-                "[B@0/10]:0+2",
-                "[C@0/10]:0+3",
-                "[D@0/10]:0+4",
-                "[A@0/10]:0+1+1",
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(0, 10)), "0+1", 0),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(0, 10)), "0+2", 1),
+                new KeyValueTimestamp<>(new Windowed<>("C", new TimeWindow(0, 10)), "0+3", 2),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(0, 10)), "0+4", 3),
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(0, 10)), "0+1+1", 4),
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(0, 10)),  "0+1+1+1",  5),
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(5, 15)),  "0+1",  5),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(0, 10)),  "0+2+2",  6),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(5, 15)),  "0+2",  6),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(0, 10)),  "0+4+4",  7),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(5, 15)),  "0+4",  7),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(0, 10)),  "0+2+2+2",  8),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(5, 15)),  "0+2+2",  8),
+                new KeyValueTimestamp<>(new Windowed<>("C", new TimeWindow(0, 10)),  "0+3+3",  9),
+                new KeyValueTimestamp<>(new Windowed<>("C", new TimeWindow(5, 15)),  "0+3",  9),
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(5, 15)),  "0+1+1",  10),
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(10, 20)),  "0+1",  10),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(5, 15)),  "0+2+2+2",  11),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(10, 20)),  "0+2",  11),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(5, 15)),  "0+4+4",  12),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(10, 20)),  "0+4",  12),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(5, 15)),  "0+2+2+2+2",  13),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(10, 20)),  "0+2+2",  13),
+                new KeyValueTimestamp<>(new Windowed<>("C", new TimeWindow(5, 15)),  "0+3+3",  14),
+                new KeyValueTimestamp<>(new Windowed<>("C", new TimeWindow(10, 20)),  "0+3",  14),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(0, 10)),  "0+2+2+2+1",  8),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(0, 10)),  "0+2+2+2+1+2",  8),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(0, 10)),  "0+2+2+2+1+2+3",  9),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(5, 15)),  "0+2+2+2+2+3",  13)
 
-                "[A@0/10]:0+1+1+1", "[A@5/15]:0+1",
-                "[B@0/10]:0+2+2", "[B@5/15]:0+2",
-                "[D@0/10]:0+4+4", "[D@5/15]:0+4",
-                "[B@0/10]:0+2+2+2", "[B@5/15]:0+2+2",
-                "[C@0/10]:0+3+3", "[C@5/15]:0+3",
-
-                "[A@5/15]:0+1+1", "[A@10/20]:0+1",
-                "[B@5/15]:0+2+2+2", "[B@10/20]:0+2",
-                "[D@5/15]:0+4+4", "[D@10/20]:0+4",
-                "[B@5/15]:0+2+2+2+2", "[B@10/20]:0+2+2",
-                "[C@5/15]:0+3+3", "[C@10/20]:0+3"
-            ),
+                ),
             supplier.theCapturedProcessor().processed
         );
     }
@@ -142,30 +161,29 @@ public class KStreamWindowAggregateTest {
             .groupByKey(Grouped.with(Serdes.String(), Serdes.String()))
             .windowedBy(TimeWindows.of(ofMillis(10)).advanceBy(ofMillis(5)))
             .aggregate(MockInitializer.STRING_INIT, MockAggregator.TOSTRING_ADDER, Materialized.<String, String, WindowStore<Bytes, byte[]>>as("topic2-Canonized").withValueSerde(Serdes.String()));
-
         table2.toStream().process(supplier);
-
 
         table1.join(table2, (p1, p2) -> p1 + "%" + p2).toStream().process(supplier);
 
-        try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props, 0L)) {
+        try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             driver.pipeInput(recordFactory.create(topic1, "A", "1", 0L));
             driver.pipeInput(recordFactory.create(topic1, "B", "2", 1L));
             driver.pipeInput(recordFactory.create(topic1, "C", "3", 2L));
             driver.pipeInput(recordFactory.create(topic1, "D", "4", 3L));
-            driver.pipeInput(recordFactory.create(topic1, "A", "1", 4L));
+            driver.pipeInput(recordFactory.create(topic1, "A", "1", 9L));
 
             final List<MockProcessor<Windowed<String>, String>> processors = supplier.capturedProcessors(3);
 
             processors.get(0).checkAndClearProcessResult(
-                "[A@0/10]:0+1",
-                "[B@0/10]:0+2",
-                "[C@0/10]:0+3",
-                "[D@0/10]:0+4",
-                "[A@0/10]:0+1+1"
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(0, 10)),  "0+1",  0),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(0, 10)),  "0+2",  1),
+                new KeyValueTimestamp<>(new Windowed<>("C", new TimeWindow(0, 10)),  "0+3",  2),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(0, 10)),  "0+4",  3),
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(0, 10)),  "0+1+1",  9),
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(5, 15)),  "0+1",  9)
             );
-            processors.get(1).checkAndClearProcessResult();
-            processors.get(2).checkAndClearProcessResult();
+            processors.get(1).checkAndClearProcessResult(new KeyValueTimestamp[0]);
+            processors.get(2).checkAndClearProcessResult(new KeyValueTimestamp[0]);
 
             driver.pipeInput(recordFactory.create(topic1, "A", "1", 5L));
             driver.pipeInput(recordFactory.create(topic1, "B", "2", 6L));
@@ -174,56 +192,67 @@ public class KStreamWindowAggregateTest {
             driver.pipeInput(recordFactory.create(topic1, "C", "3", 9L));
 
             processors.get(0).checkAndClearProcessResult(
-                "[A@0/10]:0+1+1+1", "[A@5/15]:0+1",
-                "[B@0/10]:0+2+2", "[B@5/15]:0+2",
-                "[D@0/10]:0+4+4", "[D@5/15]:0+4",
-                "[B@0/10]:0+2+2+2", "[B@5/15]:0+2+2",
-                "[C@0/10]:0+3+3", "[C@5/15]:0+3"
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(0, 10)),  "0+1+1+1",  9),
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(5, 15)),  "0+1+1",  9),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(0, 10)),  "0+2+2",  6),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(5, 15)),  "0+2",  6),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(0, 10)),  "0+4+4",  7),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(5, 15)),  "0+4",  7),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(0, 10)),  "0+2+2+2",  8),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(5, 15)),  "0+2+2",  8),
+                new KeyValueTimestamp<>(new Windowed<>("C", new TimeWindow(0, 10)),  "0+3+3",  9),
+                new KeyValueTimestamp<>(new Windowed<>("C", new TimeWindow(5, 15)),  "0+3",  9)
             );
-            processors.get(1).checkAndClearProcessResult();
-            processors.get(2).checkAndClearProcessResult();
+            processors.get(1).checkAndClearProcessResult(new KeyValueTimestamp[0]);
+            processors.get(2).checkAndClearProcessResult(new KeyValueTimestamp[0]);
 
             driver.pipeInput(recordFactory.create(topic2, "A", "a", 0L));
             driver.pipeInput(recordFactory.create(topic2, "B", "b", 1L));
             driver.pipeInput(recordFactory.create(topic2, "C", "c", 2L));
-            driver.pipeInput(recordFactory.create(topic2, "D", "d", 3L));
-            driver.pipeInput(recordFactory.create(topic2, "A", "a", 4L));
+            driver.pipeInput(recordFactory.create(topic2, "D", "d", 20L));
+            driver.pipeInput(recordFactory.create(topic2, "A", "a", 20L));
 
-            processors.get(0).checkAndClearProcessResult();
+            processors.get(0).checkAndClearProcessResult(new KeyValueTimestamp[0]);
             processors.get(1).checkAndClearProcessResult(
-                "[A@0/10]:0+a",
-                "[B@0/10]:0+b",
-                "[C@0/10]:0+c",
-                "[D@0/10]:0+d",
-                "[A@0/10]:0+a+a"
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(0, 10)),  "0+a",  0),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(0, 10)),  "0+b",  1),
+                new KeyValueTimestamp<>(new Windowed<>("C", new TimeWindow(0, 10)),  "0+c",  2),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(15, 25)),  "0+d",  20),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(20, 30)),  "0+d",  20),
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(15, 25)),  "0+a",  20),
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(20, 30)),  "0+a",  20)
             );
             processors.get(2).checkAndClearProcessResult(
-                "[A@0/10]:0+1+1+1%0+a",
-                "[B@0/10]:0+2+2+2%0+b",
-                "[C@0/10]:0+3+3%0+c",
-                "[D@0/10]:0+4+4%0+d",
-                "[A@0/10]:0+1+1+1%0+a+a");
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(0, 10)),  "0+1+1+1%0+a",  9),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(0, 10)),  "0+2+2+2%0+b",  8),
+                new KeyValueTimestamp<>(new Windowed<>("C", new TimeWindow(0, 10)),  "0+3+3%0+c",  9));
 
             driver.pipeInput(recordFactory.create(topic2, "A", "a", 5L));
             driver.pipeInput(recordFactory.create(topic2, "B", "b", 6L));
             driver.pipeInput(recordFactory.create(topic2, "D", "d", 7L));
-            driver.pipeInput(recordFactory.create(topic2, "B", "b", 8L));
-            driver.pipeInput(recordFactory.create(topic2, "C", "c", 9L));
+            driver.pipeInput(recordFactory.create(topic2, "D", "d", 18L));
+            driver.pipeInput(recordFactory.create(topic2, "A", "a", 21L));
 
-            processors.get(0).checkAndClearProcessResult();
+            processors.get(0).checkAndClearProcessResult(new KeyValueTimestamp[0]);
             processors.get(1).checkAndClearProcessResult(
-                "[A@0/10]:0+a+a+a", "[A@5/15]:0+a",
-                "[B@0/10]:0+b+b", "[B@5/15]:0+b",
-                "[D@0/10]:0+d+d", "[D@5/15]:0+d",
-                "[B@0/10]:0+b+b+b", "[B@5/15]:0+b+b",
-                "[C@0/10]:0+c+c", "[C@5/15]:0+c"
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(0, 10)),  "0+a+a",  5),
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(5, 15)),  "0+a",  5),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(0, 10)),  "0+b+b",  6),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(5, 15)),  "0+b",  6),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(0, 10)),  "0+d",  7),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(5, 15)),  "0+d",  7),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(10, 20)),  "0+d",  18),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(15, 25)),  "0+d+d",  20),
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(15, 25)),  "0+a+a",  21),
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(20, 30)),  "0+a+a",  21)
             );
             processors.get(2).checkAndClearProcessResult(
-                "[A@0/10]:0+1+1+1%0+a+a+a", "[A@5/15]:0+1%0+a",
-                "[B@0/10]:0+2+2+2%0+b+b", "[B@5/15]:0+2+2%0+b",
-                "[D@0/10]:0+4+4%0+d+d", "[D@5/15]:0+4%0+d",
-                "[B@0/10]:0+2+2+2%0+b+b+b", "[B@5/15]:0+2+2%0+b+b",
-                "[C@0/10]:0+3+3%0+c+c", "[C@5/15]:0+3%0+c"
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(0, 10)),  "0+1+1+1%0+a+a",  9),
+                new KeyValueTimestamp<>(new Windowed<>("A", new TimeWindow(5, 15)),  "0+1+1%0+a",  9),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(0, 10)),  "0+2+2+2%0+b+b",  8),
+                new KeyValueTimestamp<>(new Windowed<>("B", new TimeWindow(5, 15)),  "0+2+2%0+b",  8),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(0, 10)),  "0+4+4%0+d",  7),
+                new KeyValueTimestamp<>(new Windowed<>("D", new TimeWindow(5, 15)),  "0+4%0+d",  7)
             );
         }
     }
@@ -244,7 +273,7 @@ public class KStreamWindowAggregateTest {
             );
 
         final LogCaptureAppender appender = LogCaptureAppender.createAndRegister();
-        try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props, 0L)) {
+        try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             driver.pipeInput(recordFactory.create(topic, null, "1"));
             LogCaptureAppender.unregister(appender);
 
@@ -273,7 +302,7 @@ public class KStreamWindowAggregateTest {
 
         LogCaptureAppender.setClassLoggerToDebug(KStreamWindowAggregate.class);
         final LogCaptureAppender appender = LogCaptureAppender.createAndRegister();
-        try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props, 0L)) {
+        try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             driver.pipeInput(recordFactory.create(topic, "k", "100", 100L));
             driver.pipeInput(recordFactory.create(topic, "k", "0", 0L));
             driver.pipeInput(recordFactory.create(topic, "k", "1", 1L));
@@ -292,13 +321,13 @@ public class KStreamWindowAggregateTest {
             );
 
             assertThat(appender.getMessages(), hasItems(
-                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[1] timestamp=[0] window=[0,10) expiration=[10]",
-                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[2] timestamp=[1] window=[0,10) expiration=[10]",
-                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[3] timestamp=[2] window=[0,10) expiration=[10]",
-                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[4] timestamp=[3] window=[0,10) expiration=[10]",
-                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[5] timestamp=[4] window=[0,10) expiration=[10]",
-                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[6] timestamp=[5] window=[0,10) expiration=[10]",
-                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[7] timestamp=[6] window=[0,10) expiration=[10]"
+                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[1] timestamp=[0] window=[0,10) expiration=[10] streamTime=[100]",
+                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[2] timestamp=[1] window=[0,10) expiration=[10] streamTime=[100]",
+                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[3] timestamp=[2] window=[0,10) expiration=[10] streamTime=[100]",
+                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[4] timestamp=[3] window=[0,10) expiration=[10] streamTime=[100]",
+                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[5] timestamp=[4] window=[0,10) expiration=[10] streamTime=[100]",
+                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[6] timestamp=[5] window=[0,10) expiration=[10] streamTime=[100]",
+                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[7] timestamp=[6] window=[0,10) expiration=[10] streamTime=[100]"
             ));
 
             OutputVerifier.compareKeyValueTimestamp(getOutput(driver), "[k@95/105]", "+100", 100);
@@ -328,7 +357,7 @@ public class KStreamWindowAggregateTest {
 
         LogCaptureAppender.setClassLoggerToDebug(KStreamWindowAggregate.class);
         final LogCaptureAppender appender = LogCaptureAppender.createAndRegister();
-        try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props, 0L)) {
+        try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             driver.pipeInput(recordFactory.create(topic, "k", "100", 200L));
             driver.pipeInput(recordFactory.create(topic, "k", "0", 100L));
             driver.pipeInput(recordFactory.create(topic, "k", "1", 101L));
@@ -342,13 +371,13 @@ public class KStreamWindowAggregateTest {
             assertLatenessMetrics(driver, is(7.0), is(194.0), is(97.375));
 
             assertThat(appender.getMessages(), hasItems(
-                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[1] timestamp=[100] window=[100,110) expiration=[110]",
-                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[2] timestamp=[101] window=[100,110) expiration=[110]",
-                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[3] timestamp=[102] window=[100,110) expiration=[110]",
-                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[4] timestamp=[103] window=[100,110) expiration=[110]",
-                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[5] timestamp=[104] window=[100,110) expiration=[110]",
-                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[6] timestamp=[105] window=[100,110) expiration=[110]",
-                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[7] timestamp=[6] window=[0,10) expiration=[110]"
+                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[1] timestamp=[100] window=[100,110) expiration=[110] streamTime=[200]",
+                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[2] timestamp=[101] window=[100,110) expiration=[110] streamTime=[200]",
+                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[3] timestamp=[102] window=[100,110) expiration=[110] streamTime=[200]",
+                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[4] timestamp=[103] window=[100,110) expiration=[110] streamTime=[200]",
+                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[5] timestamp=[104] window=[100,110) expiration=[110] streamTime=[200]",
+                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[6] timestamp=[105] window=[100,110) expiration=[110] streamTime=[200]",
+                "Skipping record for expired window. key=[k] topic=[topic] partition=[0] offset=[7] timestamp=[6] window=[0,10) expiration=[110] streamTime=[200]"
             ));
 
             OutputVerifier.compareKeyValueTimestamp(getOutput(driver), "[k@200/210]", "+100", 200);
@@ -370,9 +399,7 @@ public class KStreamWindowAggregateTest {
                 mkEntry("processor-node-id", "KSTREAM-AGGREGATE-0000000001")
             )
         );
-
         assertThat(driver.metrics().get(dropMetric).metricValue(), dropTotal);
-
 
         final MetricName dropRate = new MetricName(
             "late-record-drop-rate",
@@ -384,7 +411,6 @@ public class KStreamWindowAggregateTest {
                 mkEntry("processor-node-id", "KSTREAM-AGGREGATE-0000000001")
             )
         );
-
         assertThat(driver.metrics().get(dropRate).metricValue(), not(0.0));
 
         final MetricName latenessMaxMetric = new MetricName(

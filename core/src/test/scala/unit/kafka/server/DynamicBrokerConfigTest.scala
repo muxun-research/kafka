@@ -28,12 +28,12 @@ import org.apache.kafka.common.config.{ConfigException, SslConfigs}
 import org.easymock.EasyMock
 import org.junit.Assert._
 import org.junit.Test
-import org.scalatest.junit.JUnitSuite
+import org.scalatest.Assertions.intercept
 
 import scala.collection.JavaConverters._
 import scala.collection.Set
 
-class DynamicBrokerConfigTest extends JUnitSuite {
+class DynamicBrokerConfigTest {
 
   @Test
   def testConfigUpdate(): Unit = {
@@ -186,9 +186,15 @@ class DynamicBrokerConfigTest extends JUnitSuite {
     //test invalid address
     verifyConfigUpdate(KafkaConfig.MaxConnectionsPerIpOverridesProp, "hostName#:100", perBrokerConfig = true,
       expectFailure = true)
+
+    verifyConfigUpdate(KafkaConfig.MaxConnectionsProp, "100", perBrokerConfig = true, expectFailure = false)
+    verifyConfigUpdate(KafkaConfig.MaxConnectionsProp, "100", perBrokerConfig = false, expectFailure = false)
+    val listenerMaxConnectionsProp = s"listener.name.external.${KafkaConfig.MaxConnectionsProp}"
+    verifyConfigUpdate(listenerMaxConnectionsProp, "10", perBrokerConfig = true, expectFailure = false)
+    verifyConfigUpdate(listenerMaxConnectionsProp, "10", perBrokerConfig = false, expectFailure = false)
   }
 
-  private def verifyConfigUpdate(name: String, value: Object, perBrokerConfig: Boolean, expectFailure: Boolean) {
+  private def verifyConfigUpdate(name: String, value: Object, perBrokerConfig: Boolean, expectFailure: Boolean): Unit = {
     val configProps = TestUtils.createBrokerConfig(0, TestUtils.MockZkConnect, port = 8181)
     configProps.put(KafkaConfig.PasswordEncoderSecretProp, "broker.secret")
     val config = KafkaConfig(configProps)

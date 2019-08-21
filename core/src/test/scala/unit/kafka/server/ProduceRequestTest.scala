@@ -28,6 +28,7 @@ import org.apache.kafka.common.record._
 import org.apache.kafka.common.requests.{ProduceRequest, ProduceResponse}
 import org.junit.Assert._
 import org.junit.Test
+import org.scalatest.Assertions.fail
 
 import scala.collection.JavaConverters._
 
@@ -38,7 +39,7 @@ import scala.collection.JavaConverters._
 class ProduceRequestTest extends BaseRequestTest {
 
   @Test
-  def testSimpleProduceRequest() {
+  def testSimpleProduceRequest(): Unit = {
     val (partition, leader) = createTopicAndFindPartitionWithLeader("topic")
 
     def sendAndCheck(memoryRecords: MemoryRecords, expectedOffset: Long): ProduceResponse.PartitionResponse = {
@@ -64,7 +65,7 @@ class ProduceRequestTest extends BaseRequestTest {
   }
 
   @Test
-  def testProduceToNonReplica() {
+  def testProduceToNonReplica(): Unit = {
     val topic = "topic"
     val partition = 0
 
@@ -95,7 +96,7 @@ class ProduceRequestTest extends BaseRequestTest {
   }
 
   @Test
-  def testCorruptLz4ProduceRequest() {
+  def testCorruptLz4ProduceRequest(): Unit = {
     val (partition, leader) = createTopicAndFindPartitionWithLeader("topic")
     val timestamp = 1000000
     val memoryRecords = MemoryRecords.withRecords(CompressionType.LZ4,

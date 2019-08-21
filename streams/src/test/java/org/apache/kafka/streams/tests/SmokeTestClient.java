@@ -21,6 +21,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KafkaStreams;
+import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.Topology;
@@ -31,13 +32,18 @@ import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KTable;
 import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.kstream.Produced;
+import org.apache.kafka.streams.kstream.Suppressed.BufferConfig;
 import org.apache.kafka.streams.kstream.TimeWindows;
+import org.apache.kafka.streams.kstream.Windowed;
 import org.apache.kafka.streams.state.Stores;
 import org.apache.kafka.streams.state.WindowStore;
 import org.apache.kafka.test.TestUtils;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Properties;
+
+import static org.apache.kafka.streams.kstream.Suppressed.untilWindowCloses;
 
 public class SmokeTestClient extends SmokeTestUtil {
 
@@ -110,7 +116,7 @@ public class SmokeTestClient extends SmokeTestUtil {
         final Topology build = getTopology();
         final KafkaStreams streamsClient = new KafkaStreams(build, getStreamsConfig(props));
         streamsClient.setStateListener((newState, oldState) -> {
-            System.out.printf("%s: %s -> %s%n", name, oldState, newState);
+            System.out.printf("%s %s: %s -> %s%n", name, Instant.now(), oldState, newState);
             if (oldState == KafkaStreams.State.REBALANCING && newState == KafkaStreams.State.RUNNING) {
                 started = true;
             }
@@ -127,26 +133,46 @@ public class SmokeTestClient extends SmokeTestUtil {
         final StreamsBuilder builder = new StreamsBuilder();
         final Consumed<String, Integer> stringIntConsumed = Consumed.with(stringSerde, intSerde);
         final KStream<String, Integer> source = builder.stream("data", stringIntConsumed);
-        source.to("echo", Produced.with(stringSerde, intSerde));
+        source.filterNot((k, v) -> k.equals("flush"))
+              .to("echo", Produced.with(stringSerde, intSerde));
         final KStream<String, Integer> data = source.filter((key, value) -> value == null || value != END);
         data.process(SmokeTestUtil.printProcessorSupplier("data", name));
 
         // min
         final KGroupedStream<String, Integer> groupedData = data.groupByKey(Grouped.with(stringSerde, intSerde));
 
-        groupedData
-            .windowedBy(TimeWindows.of(Duration.ofDays(1)))
+        final KTable<Windowed<String>, Integer> minAggregation = groupedData
+            .windowedBy(TimeWindows.of(Duration.ofDays(1)).grace(Duration.ofMinutes(1)))
             .aggregate(
                 () -> Integer.MAX_VALUE,
                 (aggKey, value, aggregate) -> (value < aggregate) ? value : aggregate,
-                Materialized.<String, Integer, WindowStore<Bytes, byte[]>>as("uwin-min").withValueSerde(intSerde))
+                Materialized
+                    .<String, Integer, WindowStore<Bytes, byte[]>>as("uwin-min")
+                    .withValueSerde(intSerde)
+                    .withRetention(Duration.ofHours(25))
+            );
+
+        streamify(minAggregation, "min-raw");
+
+        streamify(minAggregation.suppress(untilWindowCloses(BufferConfig.unbounded())), "min-suppressed");
+
+        minAggregation
             .toStream(new Unwindow<>())
+            .filterNot((k, v) -> k.equals("flush"))
             .to("min", Produced.with(stringSerde, intSerde));
+
+        final KTable<Windowed<String>, Integer> smallWindowSum = groupedData
+            .windowedBy(TimeWindows.of(Duration.ofSeconds(2)).advanceBy(Duration.ofSeconds(1)).grace(Duration.ofSeconds(30)))
+            .reduce((l, r) -> l + r);
+
+        streamify(smallWindowSum, "sws-raw");
+        streamify(smallWindowSum.suppress(untilWindowCloses(BufferConfig.unbounded())), "sws-suppressed");
 
         final KTable<String, Integer> minTable = builder.table(
             "min",
             Consumed.with(stringSerde, intSerde),
             Materialized.as("minStoreName"));
+
         minTable.toStream().process(SmokeTestUtil.printProcessorSupplier("min", name));
 
         // max
@@ -157,6 +183,7 @@ public class SmokeTestClient extends SmokeTestUtil {
                 (aggKey, value, aggregate) -> (value > aggregate) ? value : aggregate,
                 Materialized.<String, Integer, WindowStore<Bytes, byte[]>>as("uwin-max").withValueSerde(intSerde))
             .toStream(new Unwindow<>())
+            .filterNot((k, v) -> k.equals("flush"))
             .to("max", Produced.with(stringSerde, intSerde));
 
         final KTable<String, Integer> maxTable = builder.table(
@@ -173,6 +200,7 @@ public class SmokeTestClient extends SmokeTestUtil {
                 (aggKey, value, aggregate) -> (long) value + aggregate,
                 Materialized.<String, Long, WindowStore<Bytes, byte[]>>as("win-sum").withValueSerde(longSerde))
             .toStream(new Unwindow<>())
+            .filterNot((k, v) -> k.equals("flush"))
             .to("sum", Produced.with(stringSerde, longSerde));
 
         final Consumed<String, Long> stringLongConsumed = Consumed.with(stringSerde, longSerde);
@@ -184,6 +212,7 @@ public class SmokeTestClient extends SmokeTestUtil {
             .windowedBy(TimeWindows.of(Duration.ofDays(2)))
             .count(Materialized.as("uwin-cnt"))
             .toStream(new Unwindow<>())
+            .filterNot((k, v) -> k.equals("flush"))
             .to("cnt", Produced.with(stringSerde, longSerde));
 
         final KTable<String, Long> cntTable = builder.table(
@@ -198,6 +227,7 @@ public class SmokeTestClient extends SmokeTestUtil {
                 minTable,
                 (value1, value2) -> value1 - value2)
             .toStream()
+            .filterNot((k, v) -> k.equals("flush"))
             .to("dif", Produced.with(stringSerde, intSerde));
 
         // avg
@@ -206,6 +236,7 @@ public class SmokeTestClient extends SmokeTestUtil {
                 cntTable,
                 (value1, value2) -> (double) value1 / (double) value2)
             .toStream()
+            .filterNot((k, v) -> k.equals("flush"))
             .to("avg", Produced.with(stringSerde, doubleSerde));
 
         // test repartition
@@ -219,5 +250,13 @@ public class SmokeTestClient extends SmokeTestUtil {
                 .to("tagg", Produced.with(stringSerde, longSerde));
 
         return builder.build();
+    }
+
+    private static void streamify(final KTable<Windowed<String>, Integer> windowedTable, final String topic) {
+        windowedTable
+            .toStream()
+            .filterNot((k, v) -> k.key().equals("flush"))
+            .map((key, value) -> new KeyValue<>(key.toString(), value))
+            .to(topic, Produced.with(stringSerde, intSerde));
     }
 }
