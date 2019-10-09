@@ -958,24 +958,32 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 	 * @throws KafkaException 执行异常
      */
     private ClusterAndWaitTime waitOnMetadata(String topic, Integer partition, long maxWaitMs) throws InterruptedException {
-		// 从缓存中获取集群信息
+		// add topic to metadata topic list if it is not there already and reset expiry
+		// 将指定topic添加到topic元数据列表中
+		// 如果不存在指定的topic，会重新更新它的失效时间
         Cluster cluster = metadata.fetch();
-		// 检查topic是否与非法状态
+
+		// topic是不可用的
         if (cluster.invalidTopics().contains(topic))
             throw new InvalidTopicException(topic);
-		// 将topic添加到元数据保存的topic列表中，
+
+		// 添加topic
         metadata.add(topic);
-		// 获取topic的分区总数量
+		// 获取指定topic的partition数量
         Integer partitionsCount = cluster.partitionCountForTopic(topic);
-		// 在有缓存的情况下，使用我们缓存的元数据
-		// 如果记录的分区既没有被声明，或者在一直的分区范围内
+		// 返回缓存元数据，如果指定记录的partition既没有声明，或者在已知的partition范围内
+		// 返回集群等待时间为0的ClusterAndWaitTime
+>>>>>>>d2b03115f7683352eaef1621489e84ff96f79799
         if (partitionsCount != null && (partition == null || partition < partitionsCount))
 			// 返回新的集群元数据及等待时间
             return new ClusterAndWaitTime(cluster, 0);
 
+		// 当前时间节点
         long begin = time.milliseconds();
+		// 持续等待时间
         long remainingWaitMs = maxWaitMs;
         long elapsed;
+		// 持续发送metadata请求，自导我们获取到指定topic的metadata
         // Issue metadata requests until we have metadata for the topic and the requested partition,
         // or until maxWaitTimeMs is exceeded. This is necessary in case the metadata
         // is stale and the number of partitions for this topic has increased in the meantime.

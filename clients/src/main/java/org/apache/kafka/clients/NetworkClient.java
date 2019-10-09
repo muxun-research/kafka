@@ -29,8 +29,8 @@ import org.apache.kafka.common.network.NetworkReceive;
 import org.apache.kafka.common.network.Selectable;
 import org.apache.kafka.common.network.Send;
 import org.apache.kafka.common.protocol.ApiKeys;
-import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.protocol.CommonFields;
+import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.protocol.types.Struct;
 import org.apache.kafka.common.requests.AbstractRequest;
 import org.apache.kafka.common.requests.AbstractResponse;
@@ -118,7 +118,9 @@ public class NetworkClient implements KafkaClient {
     private final ApiVersions apiVersions;
 
     private final Map<String, ApiVersionsRequest.Builder> nodesNeedingApiVersionsFetch = new HashMap<>();
-
+	/**
+	 * 在发送过程中，出现的注入UnsupportedVersionException异常等响应集合
+	 */
     private final List<ClientResponse> abortedSends = new LinkedList<>();
 
     private final Sensor throttleTimeSensor;
@@ -411,24 +413,28 @@ public class NetworkClient implements KafkaClient {
         // if we need to update our metadata now declare all requests unready to make metadata requests first
         // priority
         return !metadataUpdater.isUpdateDue(now) && canSendRequest(node.idString(), now);
-    }
+	}
 
-    /**
-     * Are we connected and ready and able to send more requests to the given connection?
-     *
-     * @param node The node
-     * @param now the current timestamp
+	/**
+	 * 判断node状态是否可以支持发送更多的请求
+	 * @param node 指定node
+	 * @param now 当前时间戳
      */
     private boolean canSendRequest(String node, long now) {
+		// node的连接状态处于正常状态
+		// selector的channel也处于正常状态
+		// 发送中的请求，支持发送更多的请求
+		// 以上状态判断均针对指定node
         return connectionStates.isReady(node, now) && selector.isChannelReady(node) &&
             inFlightRequests.canSendMore(node);
-    }
+	}
 
-    /**
-     * Queue up the given request for sending. Requests can only be sent out to ready nodes.
-     * @param request The request
-     * @param now The current timestamp
-     */
+	/**
+	 * 请求只会发送到就绪的节点
+	 * 将需要发送的请求放入队列
+	 * @param request 请求
+	 * @param now     当前时间戳
+	 */
     @Override
     public void send(ClientRequest request, long now) {
         doSend(request, false, now);
@@ -441,40 +447,41 @@ public class NetworkClient implements KafkaClient {
     }
 
     private void doSend(ClientRequest clientRequest, boolean isInternalRequest, long now) {
+		// 确保client处于存活状态
         ensureActive();
+		// 请求的目的地node id
         String nodeId = clientRequest.destination();
+		// 不是内部请求
         if (!isInternalRequest) {
-            // If this request came from outside the NetworkClient, validate
-            // that we can send data.  If the request is internal, we trust
-            // that internal code has done this validation.  Validation
-            // will be slightly different for some internal requests (for
-            // example, ApiVersionsRequests can be sent prior to being in
-            // READY state.)
+			// 如果请求来在于NetworkClient外部，我们需要校验是否可以发送数据
+			// 如果请求是内部请求，我们就会相信内部代码已经做过了校验
+			// 内部请求的校验可能会有所不同
+			// 比如ApiVersionRequests就可以在READY状态之前被发送
             if (!canSendRequest(nodeId, now))
                 throw new IllegalStateException("Attempt to send a request to node " + nodeId + " which is not ready.");
-        }
+		}
+		// 获取当前请求的建造者模型
         AbstractRequest.Builder<?> builder = clientRequest.requestBuilder();
-        try {
+		try {
+			// 获取指定节点的版本信息
             NodeApiVersions versionInfo = apiVersions.get(nodeId);
             short version;
-            // Note: if versionInfo is null, we have no server version information. This would be
-            // the case when sending the initial ApiVersionRequest which fetches the version
-            // information itself.  It is also the case when discoverBrokerVersions is set to false.
+			// 如果没有目标节点的版本信息，就取允许的最新版本
             if (versionInfo == null) {
                 version = builder.latestAllowedVersion();
                 if (discoverBrokerVersions && log.isTraceEnabled())
                     log.trace("No version information found when sending {} with correlation id {} to node {}. " +
                             "Assuming version {}.", clientRequest.apiKey(), clientRequest.correlationId(), nodeId, version);
             } else {
+				// 存在目标节点的版本信息，就取可用的最新版本
                 version = versionInfo.latestUsableVersion(clientRequest.apiKey(), builder.oldestAllowedVersion(),
                         builder.latestAllowedVersion());
-            }
-            // The call to build may also throw UnsupportedVersionException, if there are essential
-            // fields that cannot be represented in the chosen version.
+			}
+			// doSend()调用可能会抛出UnsupportedVersionException异常，如果出现了在选择的版本中，使用了不支持的必需字段
             doSend(clientRequest, isInternalRequest, now, builder.build(version));
         } catch (UnsupportedVersionException unsupportedVersionException) {
-            // If the version is not supported, skip sending the request over the wire.
-            // Instead, simply add it to the local queue of aborted requests.
+			// 如果版本不支持，那么跳过直接传输请求
+			// 简单的将请求添加到中断的本地队列中
             log.debug("Version mismatch when attempting to send {} with correlation id {} to {}", builder,
                     clientRequest.correlationId(), clientRequest.destination(), unsupportedVersionException);
             ClientResponse clientResponse = new ClientResponse(clientRequest.makeHeader(builder.latestAllowedVersion()),
@@ -482,7 +489,9 @@ public class NetworkClient implements KafkaClient {
                     false, unsupportedVersionException, null, null);
             abortedSends.add(clientResponse);
 
+			// 如果是内部请求，并且请求是关于metadata的
             if (isInternalRequest && clientRequest.apiKey() == ApiKeys.METADATA)
+				// 我们需要处理metadata更新中出现的版本不支持异常
                 metadataUpdater.handleFatalException(unsupportedVersionException);
         }
     }
@@ -510,26 +519,27 @@ public class NetworkClient implements KafkaClient {
                 now);
         this.inFlightRequests.add(inFlightRequest);
         selector.send(send);
-    }
+	}
 
-    /**
-     * Do actual reads and writes to sockets.
-     *
-     * @param timeout The maximum amount of time to wait (in ms) for responses if there are none immediately,
-     *                must be non-negative. The actual timeout will be the minimum of timeout, request timeout and
-     *                metadata timeout
-     * @param now The current time in milliseconds
-     * @return The list of responses received
-     */
+	/**
+	 * 执行真正的读写socket操作
+	 * @param timeout 在立即返回none的情况下，等待响应的最大时间，单位ms，不能为非负数
+	 *                真实的等待时间一定是timeout、request timeout和metadata timeout的最小值
+	 * @param now     当前时间戳
+	 * @return 响应列表
+	 */
     @Override
     public List<ClientResponse> poll(long timeout, long now) {
+		// 确认当前客户端是活跃的
         ensureActive();
-
+		// 有异常响应集合
         if (!abortedSends.isEmpty()) {
-            // If there are aborted sends because of unsupported version exceptions or disconnects,
-            // handle them immediately without waiting for Selector#poll.
+			// 异常响应集合一般是出现了UnsupportedVersionException或者disconnect
+			// 立即处理它们，不需要等待Selector#poll
             List<ClientResponse> responses = new ArrayList<>();
+			// 将abortedSends中的内容转移到临时集合中
             handleAbortedSends(responses);
+			// 调用onComplete()完成请求
             completeResponses(responses);
             return responses;
         }
@@ -614,12 +624,15 @@ public class NetworkClient implements KafkaClient {
     @Override
     public boolean active() {
         return state.get() == State.ACTIVE;
-    }
+	}
 
-    private void ensureActive() {
-        if (!active())
-            throw new DisconnectException("NetworkClient is no longer active, state is " + state);
-    }
+	/**
+	 * 确认当前客户端状态等于ACTIVE
+	 */
+	private void ensureActive() {
+		if (!active())
+			throw new DisconnectException("NetworkClient is no longer active, state is " + state);
+	}
 
     /**
      * Close the network client
@@ -984,18 +997,21 @@ public class NetworkClient implements KafkaClient {
 
         @Override
         public long maybeUpdate(long now) {
-            // should we update our metadata?
+			// 是否需要更新metadata
+			// 获取下一次需要更新metadata的时间戳
             long timeToNextMetadataUpdate = metadata.timeToNextUpdate(now);
+			// 计算等拉取metada的时间
             long waitForMetadataFetch = hasFetchInProgress() ? defaultRequestTimeoutMs : 0;
-
+			// 取二者之间的最大值
             long metadataTimeout = Math.max(timeToNextMetadataUpdate, waitForMetadataFetch);
-
+			// 返回metadata的超时时间
             if (metadataTimeout > 0) {
                 return metadataTimeout;
-            }
+			}
 
-            // Beware that the behavior of this method and the computation of timeouts for poll() are
-            // highly dependent on the behavior of leastLoadedNode.
+			// 如果没有获取到真正的超时时间
+			// 注意，maybeUpdate()方法的表现，poll()计算超时时间，高度依赖与leastLoadedNode的表现
+			// 获取
             Node node = leastLoadedNode(now);
             if (node == null) {
                 log.debug("Give up sending metadata request since no node is available");
@@ -1082,14 +1098,15 @@ public class NetworkClient implements KafkaClient {
                 }
             }
             return false;
-        }
+		}
 
-        /**
-         * Add a metadata request to the list of sends if we can make one
+		/**
+		 * 添加一个更新metadata的请求到send列表
          */
         private long maybeUpdate(long now, Node node) {
+			// 获取node connection id
             String nodeConnectionId = node.idString();
-
+			// 添加更新metadata请求
             if (canSendRequest(nodeConnectionId, now)) {
                 Metadata.MetadataRequestAndVersion requestAndVersion = metadata.newMetadataRequestAndVersion();
                 this.inProgressRequestVersion = requestAndVersion.requestVersion;

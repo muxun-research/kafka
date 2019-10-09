@@ -169,12 +169,10 @@ public class TransactionManager {
 
     private final Map<TopicPartition, CommittedOffset> pendingTxnOffsetCommits;
 
-    // If a batch bound for a partition expired locally after being sent at least once, the partition has is considered
-    // to have an unresolved state. We keep track fo such partitions here, and cannot assign any more sequence numbers
-    // for this partition until the unresolved state gets cleared. This may happen if other inflight batches returned
-    // successfully (indicating that the expired batch actually made it to the broker). If we don't get any successful
-    // responses for the partition once the inflight request count falls to zero, we reset the producer id and
-    // consequently clear this data structure as well.
+	// 如果一个分区的，那么分区就会被认为有一个未解决的状态，我们将会把这样的分区记录在这个Set中
+	// 并且不能继续为这个分区分配更多的sequence numbers，直到解决所有未解决的状态
+	// 这种情况可能发生在其他正在发送的batch返回成功（证明失效的batch真的传送给了broker）
+	// 如果我们没有从指定分区获取任何成功的响应，但是发送中的请求数量跌至0，我们就需要重置producer id，并且同时清理数据结构
     private final Set<TopicPartition> partitionsWithUnresolvedSequences;
 
     private final PriorityQueue<TxnRequestHandler> pendingRequests;
