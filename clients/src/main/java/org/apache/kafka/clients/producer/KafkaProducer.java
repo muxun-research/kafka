@@ -979,8 +979,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     }
 
     /**
-     * Wait for cluster metadata including partitions for the given topic to be available.
-     * @param topic The topic we want metadata for
+	 * 等待指定topic集群包含分区的元数据是可以用的
+	 * @param topic 指定的Topic
      * @param partition A specific partition expected to exist in metadata, or null if there's no preference
      * @param maxWaitMs The maximum time in ms for waiting on the metadata
      * @return The cluster containing topic metadata and the amount of time we waited in ms
@@ -988,22 +988,29 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      */
     private ClusterAndWaitTime waitOnMetadata(String topic, Integer partition, long maxWaitMs) throws InterruptedException {
         // add topic to metadata topic list if it is not there already and reset expiry
+		// 将指定topic添加到topic元数据列表中
+		// 如果不存在指定的topic，会重新更新它的失效时间
         Cluster cluster = metadata.fetch();
 
+		// topic是不可用的
         if (cluster.invalidTopics().contains(topic))
             throw new InvalidTopicException(topic);
 
+		// 添加topic
         metadata.add(topic);
-
+		// 获取指定topic的partition数量
         Integer partitionsCount = cluster.partitionCountForTopic(topic);
-        // Return cached metadata if we have it, and if the record's partition is either undefined
-        // or within the known partition range
+		// 返回缓存元数据，如果指定记录的partition既没有声明，或者在已知的partition范围内
+		// 返回集群等待时间为0的ClusterAndWaitTime
         if (partitionsCount != null && (partition == null || partition < partitionsCount))
             return new ClusterAndWaitTime(cluster, 0);
 
+		// 当前时间节点
         long begin = time.milliseconds();
+		// 持续等待时间
         long remainingWaitMs = maxWaitMs;
         long elapsed;
+		// 持续发送metadata请求，自导我们获取到指定topic的metadata
         // Issue metadata requests until we have metadata for the topic and the requested partition,
         // or until maxWaitTimeMs is exceeded. This is necessary in case the metadata
         // is stale and the number of partitions for this topic has increased in the meantime.

@@ -411,13 +411,12 @@ public final class ProducerBatch {
     }
 
     /**
-     * Abort the record builder and reset the state of the underlying buffer. This is used prior to aborting
-     * the batch with {@link #abort(RuntimeException)} and ensures that no record previously appended can be
-     * read. This is used in scenarios where we want to ensure a batch ultimately gets aborted, but in which
-     * it is not safe to invoke the completion callbacks (e.g. because we are holding a lock,
-     * {@link RecordAccumulator#abortBatches()}).
+	 * 中断record builder，并且重置潜在buffer的状态
+	 * 这个用于终于batch之前使用，确保之前追加的record不会被读取
+	 * 用于在我们希望确保批处理最终被中止的情况下使用，但是在这种情况，调用完成回调任务是不安全的
      */
     public void abortRecordAppends() {
+		// 中断当前batch的追加
         recordsBuilder.abort();
     }
 

@@ -22,13 +22,15 @@ import org.apache.kafka.common.requests.AbstractResponse;
 import org.apache.kafka.common.requests.RequestHeader;
 
 /**
- * A response from the server. Contains both the body of the response as well as the correlated request
- * metadata that was originally sent.
+ * Server的响应实体，既包含了response body，也包含了原始发送时相关的request metadata
  */
 public class ClientResponse {
 
     private final RequestHeader requestHeader;
-    private final RequestCompletionHandler callback;
+	/**
+	 * 请求完成回调任务
+	 */
+	private final RequestCompletionHandler callback;
     private final String destination;
     private final long receivedTimeMs;
     private final long latencyMs;
@@ -102,12 +104,15 @@ public class ClientResponse {
 
     public long requestLatencyMs() {
         return latencyMs;
-    }
+	}
 
-    public void onComplete() {
-        if (callback != null)
-            callback.onComplete(this);
-    }
+	/**
+	 * 响应完成回调
+	 */
+	public void onComplete() {
+		if (callback != null)
+			callback.onComplete(this);
+	}
 
     @Override
     public String toString() {

@@ -16,19 +16,6 @@
  */
 package org.apache.kafka.clients.producer.internals;
 
-import java.nio.ByteBuffer;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Deque;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.common.Cluster;
@@ -57,6 +44,20 @@ import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.slf4j.Logger;
 
+import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicInteger;
+
 /**
  * This class acts as a queue that accumulates records into {@link MemoryRecords}
  * instances to be sent to the server.
@@ -79,10 +80,16 @@ public final class RecordAccumulator {
     private final Time time;
     private final ApiVersions apiVersions;
     private final ConcurrentMap<TopicPartition, Deque<ProducerBatch>> batches;
-    private final IncompleteBatches incomplete;
-    // The following variables are only accessed by the sender thread, so we don't need to protect them.
+	/**
+	 * 已经发送、还未发送，未收到ack的batch
+	 */
+	private final IncompleteBatches incomplete;
+	// 下面的变量将仅会通过sender线程访问，所以我们无需关系并发的情况
     private final Map<TopicPartition, Long> muted;
-    private int drainIndex;
+	/**
+	 * 进行排空的索引
+	 */
+	private int drainIndex;
     private final TransactionManager transactionManager;
     private long nextBatchExpiryTimeMs = Long.MAX_VALUE; // the earliest time (absolute) a batch will expire.
 
@@ -276,51 +283,64 @@ public final class RecordAccumulator {
     }
 
     private boolean isMuted(TopicPartition tp, long now) {
-        // Take care to avoid unnecessary map look-ups because this method is a hotspot if producing to a
-        // large number of partitions
+		// 要小心避免不必要的map查找，因为此方法会因为向大规模分区生产消息而产生热区域
+		// 获取设置的阈值
         Long throttleUntilTime = muted.get(tp);
+		// 不存在阈值的话，直接返回false
         if (throttleUntilTime == null)
             return false;
-
+		// 当前时间超出阈值，返回false，并去除监控
         if (now >= throttleUntilTime) {
             muted.remove(tp);
             return false;
-        }
-        
+		}
+		// 在没有超过阈值的情况下，返回true
         return true;
-    }
+	}
 
-    public void resetNextBatchExpiryTime() {
-        nextBatchExpiryTimeMs = Long.MAX_VALUE;
-    }
+	/**
+	 * 计算下一个batch的失效时间
+	 */
+	public void resetNextBatchExpiryTime() {
+		nextBatchExpiryTimeMs = Long.MAX_VALUE;
+	}
 
-    public void maybeUpdateNextBatchExpiryTime(ProducerBatch batch) {
-        if (batch.createdMs + deliveryTimeoutMs  > 0) {
-            // the non-negative check is to guard us against potential overflow due to setting
-            // a large value for deliveryTimeoutMs
-            nextBatchExpiryTimeMs = Math.min(nextBatchExpiryTimeMs, batch.createdMs + deliveryTimeoutMs);
-        } else {
-            log.warn("Skipping next batch expiry time update due to addition overflow: "
-                + "batch.createMs={}, deliveryTimeoutMs={}", batch.createdMs, deliveryTimeoutMs);
-        }
-    }
+	/**
+	 * 更新当前batch的下一次失效时间
+	 * @param batch
+	 */
+	public void maybeUpdateNextBatchExpiryTime(ProducerBatch batch) {
+		if (batch.createdMs + deliveryTimeoutMs > 0) {
+			// 非负数检查是为了保证避免设置的deliveryTimeoutMs的值过大
+			nextBatchExpiryTimeMs = Math.min(nextBatchExpiryTimeMs, batch.createdMs + deliveryTimeoutMs);
+		} else {
+			log.warn("Skipping next batch expiry time update due to addition overflow: "
+					+ "batch.createMs={}, deliveryTimeoutMs={}", batch.createdMs, deliveryTimeoutMs);
+		}
+	}
 
-    /**
-     * Get a list of batches which have been sitting in the accumulator too long and need to be expired.
+	/**
+	 * 获取在累加器中，存在时间特别长，需要执行过期策略的batch列表集合
      */
     public List<ProducerBatch> expiredBatches(long now) {
         List<ProducerBatch> expiredBatches = new ArrayList<>();
         for (Map.Entry<TopicPartition, Deque<ProducerBatch>> entry : this.batches.entrySet()) {
-            // expire the batches in the order of sending
+			// 遍历所有的batch
             Deque<ProducerBatch> deque = entry.getValue();
             synchronized (deque) {
                 while (!deque.isEmpty()) {
                     ProducerBatch batch = deque.getFirst();
+					// 因为是按照创建时间进行排序的，所以对队列中第一个batch进行判断即可
+					// 如果已经发送超时
                     if (batch.hasReachedDeliveryTimeout(deliveryTimeoutMs, now)) {
+						// 去除来，并且中断record追加
                         deque.poll();
                         batch.abortRecordAppends();
-                        expiredBatches.add(batch);
-                    } else {
+						// 添加到失效batch集合中
+						expiredBatches.add(batch);
+						// 如果没有发送超时
+					} else {
+						// 更新指定batch的下一次失效时间
                         maybeUpdateNextBatchExpiryTime(batch);
                         break;
                     }
@@ -428,69 +448,76 @@ public final class RecordAccumulator {
             // At this point, the incoming batch has been queued in the correct place according to its sequence.
         } else {
             deque.addFirst(batch);
-        }
-    }
+		}
+	}
 
-    /**
-     * Get a list of nodes whose partitions are ready to be sent, and the earliest time at which any non-sendable
-     * partition will be ready; Also return the flag for whether there are any unknown leaders for the accumulated
-     * partition batches.
-     * <p>
-     * A destination node is ready to send data if:
-     * <ol>
-     * <li>There is at least one partition that is not backing off its send
-     * <li><b>and</b> those partitions are not muted (to prevent reordering if
-     *   {@value org.apache.kafka.clients.producer.ProducerConfig#MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION}
-     *   is set to one)</li>
-     * <li><b>and <i>any</i></b> of the following are true</li>
-     * <ul>
-     *     <li>The record set is full</li>
-     *     <li>The record set has sat in the accumulator for at least lingerMs milliseconds</li>
-     *     <li>The accumulator is out of memory and threads are blocking waiting for data (in this case all partitions
-     *     are immediately considered ready).</li>
-     *     <li>The accumulator has been closed</li>
-     * </ul>
-     * </ol>
+	/**
+	 * 获取准备就绪的分区节点列表，以及最早的不可发送分区的准备就绪时间，并且返回累加的分区batch中，是否有不清楚首领分区节点
+	 * 作为目的地的节点，知道满足以下情况才算准备就绪
+	 * 至少有一个分区没有后退其发送，并且这些分区都不是未完成的（避免重新排序，如果{@value org.apache.kafka.clients.producer.ProducerConfig#MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION}设置为1）
+	 * 并且满足如下的任一条件：
+	 * 	1. record集合已经满了
+	 * 	2. record集合已经放入到累加器中
+	 * 	3. 累加器已经超出内存，线程正在阻塞等待空间（此时所有的分区立即会被确认为就绪状态）
+	 * 	4. 累加器已经关闭
      */
     public ReadyCheckResult ready(Cluster cluster, long nowMs) {
         Set<Node> readyNodes = new HashSet<>();
         long nextReadyCheckDelayMs = Long.MAX_VALUE;
         Set<String> unknownLeaderTopics = new HashSet<>();
-
+		// 是否有等待获取内存的线程
         boolean exhausted = this.free.queued() > 0;
+		// 遍历每个分区
         for (Map.Entry<TopicPartition, Deque<ProducerBatch>> entry : this.batches.entrySet()) {
+			// 获取每个分区的record双向队列
             Deque<ProducerBatch> deque = entry.getValue();
-            synchronized (deque) {
-                // When producing to a large number of partitions, this path is hot and deques are often empty.
-                // We check whether a batch exists first to avoid the more expensive checks whenever possible.
+			// 对双向队列进行同步操作
+			synchronized (deque) {
+				// 当向比较多的分区生产消息时，当前调用是个热区域
+				// 我们通常校验第一个batch，用于避免更昂贵的校验
+				// 获取队列中第一个封装好的batch
                 ProducerBatch batch = deque.peekFirst();
-                if (batch != null) {
+				if (batch != null) {
+					// 获取分区信息
                     TopicPartition part = entry.getKey();
+					// 获取当前分区的首领节点
                     Node leader = cluster.leaderFor(part);
-                    if (leader == null) {
-                        // This is a partition for which leader is not known, but messages are available to send.
-                        // Note that entries are currently not removed from batches when deque is empty.
+					if (leader == null) {
+						// 如果当前分区不存在首领节点，添加到未知手里能节点topic集合中
+						// 首领节点不存在的情况下，也是可以进行消息发送的
+						// 需要注意的是，即使双向队列为空，也不会将元素从batch中移除
                         unknownLeaderTopics.add(part.topic());
+						// 此时分区存在首领节点
+						// 如果就绪节点集合中没有当前节点，并且当且节点处于
                     } else if (!readyNodes.contains(leader) && !isMuted(part, nowMs)) {
+						// 获取当前batch的等待时间
                         long waitedTimeMs = batch.waitedTimeMs(nowMs);
+						// 是否需要进行反馈
                         boolean backingOff = batch.attempts() > 0 && waitedTimeMs < retryBackoffMs;
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
+						// 判断batch是否处于满的状态，半满也算满
                         boolean full = deque.size() > 1 || batch.isFull();
+						// 是否已经过期
                         boolean expired = waitedTimeMs >= timeToWaitMs;
+						// 判断是否可发送
                         boolean sendable = full || expired || exhausted || closed || flushInProgress();
+						// 如果可发送，且不需要进行反馈，则当前节点处于就绪状态
                         if (sendable && !backingOff) {
                             readyNodes.add(leader);
-                        } else {
+						} else {
+							// 计算剩余等待时间
                             long timeLeftMs = Math.max(timeToWaitMs - waitedTimeMs, 0);
-                            // Note that this results in a conservative estimate since an un-sendable partition may have
-                            // a leader that will later be found to have sendable data. However, this is good enough
-                            // since we'll just wake up and then sleep again for the remaining time.
+							// 备注，这是一个保守的估计结果，因为一个不可发送数据的分区可能会有一个手里能借点，不久之后会发现拥有可发送的数据
+							// 然而这已经足够好了，因为我们只是唤醒一下，然后就会继续sleep剩余的持续时间
+							// 取剩余等待时间和下一次就绪状态检查时间的最小值
                             nextReadyCheckDelayMs = Math.min(timeLeftMs, nextReadyCheckDelayMs);
                         }
                     }
-                }
-            }
-        }
+				}
+			}
+		}
+		// 包装就绪检查结果
+		// 参数包括，就绪的节点，下一次就绪检查的时间，以及没有首领节点的topic集合
         return new ReadyCheckResult(readyNodes, nextReadyCheckDelayMs, unknownLeaderTopics);
     }
 
@@ -533,97 +560,118 @@ public final class RecordAccumulator {
                 // We only move on when the next in line batch is complete (either successfully or due to
                 // a fatal broker error). This effectively reduces our in flight request count to 1.
                 return true;
-        }
-        return false;
-    }
+		}
+		return false;
+	}
 
-    private List<ProducerBatch> drainBatchesForOneNode(Cluster cluster, Node node, int maxSize, long now) {
-        int size = 0;
-        List<PartitionInfo> parts = cluster.partitionsForNode(node.id());
-        List<ProducerBatch> ready = new ArrayList<>();
-        /* to make starvation less likely this loop doesn't start at 0 */
-        int start = drainIndex = drainIndex % parts.size();
-        do {
-            PartitionInfo part = parts.get(drainIndex);
-            TopicPartition tp = new TopicPartition(part.topic(), part.partition());
-            this.drainIndex = (this.drainIndex + 1) % parts.size();
+	/**
+	 * 排空单个节点的batch
+	 * @param cluster 指定集群
+	 * @param node    指定节点
+	 * @param maxSize 排空数据的最大字节数
+	 * @param now     当前时间戳
+	 * @return 指定节点需要排空的batch列表集合
+	 */
+	private List<ProducerBatch> drainBatchesForOneNode(Cluster cluster, Node node, int maxSize, long now) {
+		int size = 0;
+		// 获取当前节点的分区信息
+		List<PartitionInfo> parts = cluster.partitionsForNode(node.id());
 
-            // Only proceed if the partition has no in-flight batches.
-            if (isMuted(tp, now))
-                continue;
+		List<ProducerBatch> ready = new ArrayList<>();
+		// 为了减少竞争，循环不从索引0开始
+		int start = drainIndex = drainIndex % parts.size();
+		do {
+			// 获取指定索引的分区
+			PartitionInfo part = parts.get(drainIndex);
+			// 创建topic-partition对象，存储关联信息
+			TopicPartition tp = new TopicPartition(part.topic(), part.partition());
+			// 计算新的排空索引
+			this.drainIndex = (this.drainIndex + 1) % parts.size();
 
-            Deque<ProducerBatch> deque = getDeque(tp);
-            if (deque == null)
-                continue;
+			// 如果当前分区请求处于已关闭状态，继续遍历下一个partition
+			if (isMuted(tp, now))
+				continue;
+			// 获取当前partition的batch队列
+			Deque<ProducerBatch> deque = getDeque(tp);
+			if (deque == null)
+				// 如果队列为空，继续遍历下一个partition
+				continue;
+			// 队列不为空的情况下，需要对队列进行同步操作
+			synchronized (deque) {
+				// 获取当前partition batch队列的第一个batch
+				ProducerBatch first = deque.peekFirst();
+				// 如果不存在第一个batch，继续遍历下一个partition
+				if (first == null)
+					continue;
 
-            synchronized (deque) {
-                // invariant: !isMuted(tp,now) && deque != null
-                ProducerBatch first = deque.peekFirst();
-                if (first == null)
-                    continue;
+				// 如果存在第一个batch
+				// 判断是否需要进行失败重试
+				boolean backoff = first.attempts() > 0 && first.waitedTimeMs(now) < retryBackoffMs;
+				// 需要进行失败重试，继续遍历下一个partition
+				if (backoff)
+					continue;
+				// 如果大小总和已经超过当次发送总大小的阈值，并且节点就绪batch列表不为空
+				if (size + first.estimatedSizeInBytes() > maxSize && !ready.isEmpty()) {
+					// 不需要继续发送了，跳出循环
+					break;
+				} else {
+					// 如果没有超出发送总大小阈值
+					// 首先对是否停止排空进行验证
+					if (shouldStopDrainBatchesForPartition(first, tp))
+						break;
+					// 判断当前partition是否处于事务状态
+					boolean isTransactional = transactionManager != null && transactionManager.isTransactional();
+					// 是否需要producer id以及epoch
+					ProducerIdAndEpoch producerIdAndEpoch =
+							transactionManager != null ? transactionManager.producerIdAndEpoch() : null;
+					// 在把当前batch放回到队列中
+					ProducerBatch batch = deque.pollFirst();
+					// 如果需要produce id以及epoch，同时batch不需要序列号
+					if (producerIdAndEpoch != null && !batch.hasSequence()) {
+						// 如果当前batch已经分配了一个序列号，我们就不要去修改produce id和序列号，因为可能会产生重复的情况
+						// 尤其是在前一次尚持可能被接受的情况，并且如果我们修改了producer id和序列号，本次尝试也可能会被接受，引发了重复
+						// 除此之外，我们会更新为当前分区更新下一个序列号，同时也可以用事务管理器记录batch，这样即使在接收到顺序之外的请求，我们也能根据序列号继续确保维持序列号的顺序
+						batch.setProducerState(producerIdAndEpoch, transactionManager.sequenceNumber(batch.topicPartition), isTransactional);
+						transactionManager.incrementSequenceNumber(batch.topicPartition, batch.recordCount);
+						log.debug("Assigned producerId {} and producerEpoch {} to batch with base sequence " +
+										"{} being sent to partition {}", producerIdAndEpoch.producerId,
+								producerIdAndEpoch.epoch, batch.baseSequence(), tp);
 
-                // first != null
-                boolean backoff = first.attempts() > 0 && first.waitedTimeMs(now) < retryBackoffMs;
-                // Only drain the batch if it is not during backoff period.
-                if (backoff)
-                    continue;
+						transactionManager.addInFlightBatch(batch);
+					}
+					// 关闭batch
+					batch.close();
+					// 修改传输的字节数大小
+					size += batch.records().sizeInBytes();
+					// 在就绪batch集合中添加当前batch
+					ready.add(batch);
+					// 设置当前的排空时间
+					batch.drained(now);
+				}
+			}
+		} while (start != drainIndex);
+		return ready;
+	}
 
-                if (size + first.estimatedSizeInBytes() > maxSize && !ready.isEmpty()) {
-                    // there is a rare case that a single batch size is larger than the request size due to
-                    // compression; in this case we will still eventually send this batch in a single request
-                    break;
-                } else {
-                    if (shouldStopDrainBatchesForPartition(first, tp))
-                        break;
-
-                    boolean isTransactional = transactionManager != null && transactionManager.isTransactional();
-                    ProducerIdAndEpoch producerIdAndEpoch =
-                        transactionManager != null ? transactionManager.producerIdAndEpoch() : null;
-                    ProducerBatch batch = deque.pollFirst();
-                    if (producerIdAndEpoch != null && !batch.hasSequence()) {
-                        // If the batch already has an assigned sequence, then we should not change the producer id and
-                        // sequence number, since this may introduce duplicates. In particular, the previous attempt
-                        // may actually have been accepted, and if we change the producer id and sequence here, this
-                        // attempt will also be accepted, causing a duplicate.
-                        //
-                        // Additionally, we update the next sequence number bound for the partition, and also have
-                        // the transaction manager track the batch so as to ensure that sequence ordering is maintained
-                        // even if we receive out of order responses.
-                        batch.setProducerState(producerIdAndEpoch, transactionManager.sequenceNumber(batch.topicPartition), isTransactional);
-                        transactionManager.incrementSequenceNumber(batch.topicPartition, batch.recordCount);
-                        log.debug("Assigned producerId {} and producerEpoch {} to batch with base sequence " +
-                                "{} being sent to partition {}", producerIdAndEpoch.producerId,
-                            producerIdAndEpoch.epoch, batch.baseSequence(), tp);
-
-                        transactionManager.addInFlightBatch(batch);
-                    }
-                    batch.close();
-                    size += batch.records().sizeInBytes();
-                    ready.add(batch);
-
-                    batch.drained(now);
-                }
-            }
-        } while (start != drainIndex);
-        return ready;
-    }
-
-    /**
-     * Drain all the data for the given nodes and collate them into a list of batches that will fit within the specified
-     * size on a per-node basis. This method attempts to avoid choosing the same topic-node over and over.
-     *
-     * @param cluster The current cluster metadata
-     * @param nodes The list of node to drain
-     * @param maxSize The maximum number of bytes to drain
-     * @param now The current unix time in milliseconds
-     * @return A list of {@link ProducerBatch} for each node specified with total size less than the requested maxSize.
+	/**
+	 * 排空给定节点集合的数据，将它们居合道一个batch列表中
+	 * batch集合将会在每个节点的基础上，适配特定的大小
+	 * 方法的目的在于避免重复选择同样的topic节点
+	 * @param cluster 当前集群
+	 * @param nodes 需要排空的节点集合
+	 * @param maxSize 需要排空的最大字节数
+	 * @param now 当前时间戳
+	 * @return key: node id
+	 * 			value: 一个 {@link ProducerBatch} 的列表集合，每个节点的数据总大小小于请求的总大小
+	 * A list of {@link ProducerBatch} for each node specified with total size less than the requested maxSize.
      */
     public Map<Integer, List<ProducerBatch>> drain(Cluster cluster, Set<Node> nodes, int maxSize, long now) {
         if (nodes.isEmpty())
             return Collections.emptyMap();
 
         Map<Integer, List<ProducerBatch>> batches = new HashMap<>();
-        for (Node node : nodes) {
+		for (Node node : nodes) {
+			// 汇总每个节点需要发送的batch列表
             List<ProducerBatch> ready = drainBatchesForOneNode(cluster, node, maxSize, now);
             batches.put(node.id(), ready);
         }
@@ -747,35 +795,48 @@ public final class RecordAccumulator {
         abortBatches(new KafkaException("Producer is closed forcefully."));
     }
 
-    /**
-     * Abort all incomplete batches (whether they have been sent or not)
+	/**
+	 * 中断所有未完成batch
      */
     void abortBatches(final RuntimeException reason) {
         for (ProducerBatch batch : incomplete.copyAll()) {
             Deque<ProducerBatch> dq = getDeque(batch.topicPartition);
+			// 获取到指定分区对应的分去
             synchronized (dq) {
-                batch.abortRecordAppends();
-                dq.remove(batch);
-            }
-            batch.abort(reason);
-            deallocate(batch);
-        }
-    }
+				batch.abortRecordAppends();
+				// 从当前队列中删除
+				dq.remove(batch);
+			}
+			// 设置中断原因
+			batch.abort(reason);
+			// 取消分配batch
+			deallocate(batch);
+		}
+	}
 
-    /**
-     * Abort any batches which have not been drained
+	/**
+	 * 中断还没有发送出去的batch
+	 * @param reason 中断的原因，一般是运行时异常
      */
     void abortUndrainedBatches(RuntimeException reason) {
+		// 复制一份还未收到ack的batch
         for (ProducerBatch batch : incomplete.copyAll()) {
+			// 由于存储的是batch，我们还需要获取存储batch的双向队列
             Deque<ProducerBatch> dq = getDeque(batch.topicPartition);
-            boolean aborted = false;
-            synchronized (dq) {
+			boolean aborted = false;
+			// 对batch所在的双向队列进行同步操作
+			synchronized (dq) {
+				// 如果拥有事务管理器的情况下，batch没有设置序列号
+				// 或者在没有事务管理的情况下，batch没有处于关闭状态
                 if ((transactionManager != null && !batch.hasSequence()) || (transactionManager == null && !batch.isClosed())) {
-                    aborted = true;
+					// 可以中断
+					aborted = true;
+					// 中断并移除batch
                     batch.abortRecordAppends();
-                    dq.remove(batch);
-                }
-            }
+					dq.remove(batch);
+				}
+			}
+			// 如果当前batch执行了中断，记录中断原因，释放batch
             if (aborted) {
                 batch.abort(reason);
                 deallocate(batch);
