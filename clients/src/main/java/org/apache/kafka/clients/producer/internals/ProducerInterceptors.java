@@ -41,18 +41,14 @@ public class ProducerInterceptors<K, V> implements Closeable {
     }
 
     /**
-     * This is called when client sends the record to KafkaProducer, before key and value gets serialized.
-     * The method calls {@link ProducerInterceptor#onSend(ProducerRecord)} method. ProducerRecord
-     * returned from the first interceptor's onSend() is passed to the second interceptor onSend(), and so on in the
-     * interceptor chain. The record returned from the last interceptor is returned from this method.
+	 * 在key和value进行序列化之前，客户端发送记录到KafkaProducer时调用此方法
+	 * 会进行连接器的责任链调用
+	 * 在最后一个拦截器被调用后，返回
      *
-     * This method does not throw exceptions. Exceptions thrown by any of interceptor methods are caught and ignored.
-     * If an interceptor in the middle of the chain, that normally modifies the record, throws an exception,
-     * the next interceptor in the chain will be called with a record returned by the previous interceptor that did not
-     * throw an exception.
+	 * 此方法不会抛出异常，任何由拦截器抛出的异常将会被忽略
      *
-     * @param record the record from client
-     * @return producer record to send to topic/partition
+	 * @param record 客户端发送的记录
+	 * @return 记录将要发往的信息
      */
     public ProducerRecord<K, V> onSend(ProducerRecord<K, V> record) {
         ProducerRecord<K, V> interceptRecord = record;
@@ -60,8 +56,8 @@ public class ProducerInterceptors<K, V> implements Closeable {
             try {
                 interceptRecord = interceptor.onSend(interceptRecord);
             } catch (Exception e) {
-                // do not propagate interceptor exception, log and continue calling other interceptors
-                // be careful not to throw exception from here
+				// 不会继续传播拦截器的异常，日志记录一下，然后继续调用其他的拦截器
+				// 也不要抛出任何异常
                 if (record != null)
                     log.warn("Error executing interceptor onSend callback for topic: {}, partition: {}", record.topic(), record.partition(), e);
                 else

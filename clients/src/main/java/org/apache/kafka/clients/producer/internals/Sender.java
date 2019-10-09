@@ -68,23 +68,31 @@ import java.util.Objects;
 import static org.apache.kafka.common.record.RecordBatch.NO_TIMESTAMP;
 
 /**
- * The background thread that handles the sending of produce requests to the Kafka cluster. This thread makes metadata
- * requests to renew its view of the cluster and then sends produce requests to the appropriate nodes.
+ * 用于处理发送生产请求到Kafka集群的后台线程
+ * 后台线程用于刷新cluster的视图信息，并且将生产请求发送到合适的节点
  */
 public class Sender implements Runnable {
 
     private final Logger log;
 
-    /* the state of each nodes connection */
+	/**
+	 * 连接节点的客户端
+	 */
     private final KafkaClient client;
 
-    /* the record accumulator that batches records */
+	/**
+	 * 记录record的累加器
+	 */
     private final RecordAccumulator accumulator;
 
-    /* the metadata for the client */
+	/**
+	 * client的元数据
+	 */
     private final ProducerMetadata metadata;
 
-    /* the flag indicating whether the producer should guarantee the message order on the broker or not. */
+	/**
+	 * 是否需要保证生产时的顺序
+	 */
     private final boolean guaranteeMessageOrder;
 
     /* the maximum request size to attempt to send to the server */
@@ -227,13 +235,13 @@ public class Sender implements Runnable {
         return transactionManager != null && transactionManager.hasPendingRequests() && transactionManager.hasOngoingTransaction();
     }
 
-    /**
-     * The main run loop for the sender thread
+	/**
+	 * sender线程核心工作线程
      */
     public void run() {
         log.debug("Starting Kafka producer I/O thread.");
 
-        // main loop, runs until close is called
+		// 死循环，直到线程被关闭
         while (running) {
             try {
                 runOnce();
@@ -278,7 +286,8 @@ public class Sender implements Runnable {
             log.debug("Aborting incomplete batches due to forced shutdown");
             this.accumulator.abortIncompleteBatches();
         }
-        try {
+		try {
+			// 关闭client
             this.client.close();
         } catch (Exception e) {
             log.error("Failed to close network client", e);
@@ -287,11 +296,11 @@ public class Sender implements Runnable {
         log.debug("Shutdown of Kafka producer I/O thread has completed.");
     }
 
-    /**
-     * Run a single iteration of sending
-     *
+	/**
+	 * 执行一次发送迭代
      */
     void runOnce() {
+		// 如果需要进行事务处理
         if (transactionManager != null) {
             try {
                 transactionManager.resetProducerIdIfNeeded();

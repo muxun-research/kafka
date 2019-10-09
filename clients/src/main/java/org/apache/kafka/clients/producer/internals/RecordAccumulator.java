@@ -16,19 +16,6 @@
  */
 package org.apache.kafka.clients.producer.internals;
 
-import java.nio.ByteBuffer;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Deque;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.common.Cluster;
@@ -57,12 +44,23 @@ import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.slf4j.Logger;
 
+import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicInteger;
+
 /**
- * This class acts as a queue that accumulates records into {@link MemoryRecords}
- * instances to be sent to the server.
- * <p>
- * The accumulator uses a bounded amount of memory and append calls will block when that memory is exhausted, unless
- * this behavior is explicitly disabled.
+ * 用于累加客户端发送的消息，等到一个batch满了之后，再用同意的sender线程进行统一的发送
+ * 累加器使用了一个有限的内存空间，如果资源被耗尽，那么继续添加会引发阻塞，除非这个功能被明确地禁止
  */
 public final class RecordAccumulator {
 
@@ -78,7 +76,12 @@ public final class RecordAccumulator {
     private final BufferPool free;
     private final Time time;
     private final ApiVersions apiVersions;
-    private final ConcurrentMap<TopicPartition, Deque<ProducerBatch>> batches;
+	/**
+	 * key: partition信息
+	 * value: 存储batch的双向队列
+	 * 用于存储每个分区双向队列batch的并发容器
+	 */
+	private final ConcurrentMap<TopicPartition, Deque<ProducerBatch>> batches;
     private final IncompleteBatches incomplete;
     // The following variables are only accessed by the sender thread, so we don't need to protect them.
     private final Map<TopicPartition, Long> muted;
@@ -164,23 +167,20 @@ public final class RecordAccumulator {
         MetricName rateMetricName = metrics.metricName("buffer-exhausted-rate", metricGrpName, "The average per-second number of record sends that are dropped due to buffer exhaustion");
         MetricName totalMetricName = metrics.metricName("buffer-exhausted-total", metricGrpName, "The total number of record sends that are dropped due to buffer exhaustion");
         bufferExhaustedRecordSensor.add(new Meter(rateMetricName, totalMetricName));
-    }
+	}
 
-    /**
-     * Add a record to the accumulator, return the append result
-     * <p>
-     * The append result will contain the future metadata, and flag for whether the appended batch is full or a new batch is created
-     * <p>
-     *
-     * @param tp The topic/partition to which this record is being sent
-     * @param timestamp The timestamp of the record
-     * @param key The key for the record
-     * @param value The value for the record
-     * @param headers the Headers for the record
-     * @param callback The user-supplied callback to execute when the request is complete
-     * @param maxTimeToBlock The maximum time in milliseconds to block for buffer memory to be available
-     * @param abortOnNewBatch A boolean that indicates returning before a new batch is created and 
-     *                        running the the partitioner's onNewBatch method before trying to append again
+	/**
+	 * 添加一条记录到记录累加器，返回追加结果
+	 * 追加结果包括future元数据，是否batch已满，或者一个新的batch已经创建
+	 *
+	 * @param tp 记录要发送到的分区
+	 * @param timestamp 记录的时间戳
+	 * @param key 记录的key
+	 * @param value 记录的value
+	 * @param headers 记录的headers
+	 * @param callback 请求完成时，用户提供的callback
+	 * @param maxTimeToBlock 缓冲存储器可用的最大时间，以毫秒为单位进行阻塞
+	 * @param abortOnNewBatch 用于证明是否需要在一个新的batch创建后再返回，再次追加时，使用partition的新batch
      */
     public RecordAppendResult append(TopicPartition tp,
                                      long timestamp,
@@ -190,29 +190,32 @@ public final class RecordAccumulator {
                                      Callback callback,
                                      long maxTimeToBlock,
                                      boolean abortOnNewBatch) throws InterruptedException {
-        // We keep track of the number of appending thread to make sure we do not miss batches in
-        // abortIncompleteBatches().
+		// 累加器的计数器操作
         appendsInProgress.incrementAndGet();
         ByteBuffer buffer = null;
+		// 默认是一个空header
         if (headers == null) headers = Record.EMPTY_HEADERS;
-        try {
-            // check if we have an in-progress batch
+		try {
+			// 校验我们是已有一个在运行中的batch deque
             Deque<ProducerBatch> dq = getOrCreateDeque(tp);
+			// 进行同步操作
             synchronized (dq) {
                 if (closed)
                     throw new KafkaException("Producer closed while send in progress");
+				// 尝试写入到batch中
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, headers, callback, dq);
                 if (appendResult != null)
                     return appendResult;
-            }
+			}
 
-            // we don't have an in-progress record batch try to allocate a new batch
+			// 如果是在创建一个新的batch
             if (abortOnNewBatch) {
-                // Return a result that will cause another call to append.
+				// 返回null结果，让其他调用继续追加
                 return new RecordAppendResult(null, false, false, true);
-            }
-            
+			}
+			// 获取producer最大的batch大小
             byte maxUsableMagic = apiVersions.maxUsableProduceMagic();
+			// 估算消息的字节数大小
             int size = Math.max(this.batchSize, AbstractRecords.estimateSizeInBytesUpperBound(maxUsableMagic, compression, key, value, headers));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {}", size, tp.topic(), tp.partition());
             buffer = free.allocate(size, maxTimeToBlock);
@@ -252,24 +255,28 @@ public final class RecordAccumulator {
                 "support the required message format (v2). The broker must be version 0.11 or later.");
         }
         return MemoryRecords.builder(buffer, maxUsableMagic, compression, TimestampType.CREATE_TIME, 0L);
-    }
+	}
 
-    /**
-     *  Try to append to a ProducerBatch.
-     *
-     *  If it is full, we return null and a new batch is created. We also close the batch for record appends to free up
-     *  resources like compression buffers. The batch will be fully closed (ie. the record batch headers will be written
-     *  and memory records built) in one of the following cases (whichever comes first): right before send,
-     *  if it is expired, or when the producer is closed.
+	/**
+	 *  尝试将record写入到ProducerBatch中
+	 *  如果deque已经满了，我们会return null，并且创建一个新的batch，我们会关闭指定写入的deque，然后做一些压缩buffer等释放资源的操作
+	 *  在以下情况下，deque会完全关闭：
+	 *  1. 等待发送
+	 *  2. 失效
+	 *  3. producer已经关闭
      */
     private RecordAppendResult tryAppend(long timestamp, byte[] key, byte[] value, Header[] headers,
                                          Callback callback, Deque<ProducerBatch> deque) {
+		// 获取最后一个ProducerBatch，最后一个是要写入的batch
         ProducerBatch last = deque.peekLast();
         if (last != null) {
             FutureRecordMetadata future = last.tryAppend(timestamp, key, value, headers, callback, time.milliseconds());
+			// 如果返回null，证明最后一个deque已经写不下了
             if (future == null)
+				// 关闭当前batch集合的写入
                 last.closeForRecordAppends();
-            else
+			else
+				// 组装追加结果
                 return new RecordAppendResult(future, deque.size() > 1 || last.isFull(), false, false);
         }
         return null;
@@ -639,16 +646,19 @@ public final class RecordAccumulator {
 
     private Deque<ProducerBatch> getDeque(TopicPartition tp) {
         return batches.get(tp);
-    }
+	}
 
-    /**
-     * Get the deque for the given topic-partition, creating it if necessary.
+	/**
+	 * 从指定的分区中获取存储record的双向队列，如有必要，创建一个
      */
     private Deque<ProducerBatch> getOrCreateDeque(TopicPartition tp) {
+		// 从缓存中获取
         Deque<ProducerBatch> d = this.batches.get(tp);
         if (d != null)
-            return d;
+			return d;
+		// 没有指定的分区的batch deque，创建一个新的
         d = new ArrayDeque<>();
+		// 避免出现并发的情况，获取覆盖的值，如果其他线程已经创建了新deque，则使用此deque，否则使用当前线程创建的deque
         Deque<ProducerBatch> previous = this.batches.putIfAbsent(tp, d);
         if (previous == null)
             return d;
@@ -796,16 +806,20 @@ public final class RecordAccumulator {
      */
     public void close() {
         this.closed = true;
-    }
+	}
 
-    /*
-     * Metadata about a record just appended to the record accumulator
+	/*
+	 * 记录追加累加器
      */
     public final static class RecordAppendResult {
-        public final FutureRecordMetadata future;
-        public final boolean batchIsFull;
-        public final boolean newBatchCreated;
-        public final boolean abortForNewBatch;
+		// 存储的记录元数据
+		public final FutureRecordMetadata future;
+		// batch是否已满
+		public final boolean batchIsFull;
+		// 是否创建了新的batch
+		public final boolean newBatchCreated;
+		// 创建新的batch是否中断
+		public final boolean abortForNewBatch;
 
         public RecordAppendResult(FutureRecordMetadata future, boolean batchIsFull, boolean newBatchCreated, boolean abortForNewBatch) {
             this.future = future;

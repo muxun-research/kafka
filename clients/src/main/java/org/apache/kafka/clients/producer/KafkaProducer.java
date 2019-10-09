@@ -44,10 +44,13 @@ import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.errors.AuthorizationException;
 import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.InvalidTopicException;
+import org.apache.kafka.common.errors.OutOfOrderSequenceException;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.errors.RecordTooLargeException;
 import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.errors.TimeoutException;
+import org.apache.kafka.common.errors.UnsupportedForMessageFormatException;
+import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeaders;
@@ -236,14 +239,23 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     public static final String PRODUCER_METRIC_GROUP_NAME = "producer-metrics";
 
     private final String clientId;
-    // Visible for testing
+	/**
+	 * 用于测试
+	 */
     final Metrics metrics;
-    private final Partitioner partitioner;
+	/**
+	 * 分区器
+	 */
+	private final Partitioner partitioner;
+
     private final int maxRequestSize;
     private final long totalMemorySize;
     private final ProducerMetadata metadata;
     private final RecordAccumulator accumulator;
-    private final Sender sender;
+	/**
+	 * 处理生产请求的后台线程
+	 */
+	private final Sender sender;
     private final Thread ioThread;
     private final CompressionType compressionType;
     private final Sensor errors;
@@ -256,16 +268,12 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     private final ApiVersions apiVersions;
     private final TransactionManager transactionManager;
 
-    /**
-     * A producer is instantiated by providing a set of key-value pairs as configuration. Valid configuration strings
-     * are documented <a href="http://kafka.apache.org/documentation.html#producerconfigs">here</a>. Values can be
-     * either strings or Objects of the appropriate type (for example a numeric configuration would accept either the
-     * string "42" or the integer 42).
-     * <p>
-     * Note: after creating a {@code KafkaProducer} you must always {@link #close()} it to avoid resource leaks.
-     * @param configs   The producer configs
-     *
-     */
+	/**
+	 * 使用键值对提供配置信息的生产者
+	 * 值既可以是字符串，也可以是Object的泛型
+	 * 创建一个KafkaProducer之后，你必须关闭它，避免产生资源泄露
+	 * @param configs 生产者配置
+	 */
     public KafkaProducer(final Map<String, Object> configs) {
         this(configs, null, null, null, null, null, Time.SYSTEM);
     }
@@ -734,143 +742,90 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         result.await(maxBlockTimeMs, TimeUnit.MILLISECONDS);
     }
 
-    /**
-     * Asynchronously send a record to a topic. Equivalent to <code>send(record, null)</code>.
-     * See {@link #send(ProducerRecord, Callback)} for details.
+	/**
+	 * 异步发送记录到topic，相当于#send(record, null)方法
+	 * {@link #send(ProducerRecord, Callback)}
      */
     @Override
     public Future<RecordMetadata> send(ProducerRecord<K, V> record) {
         return send(record, null);
     }
 
-    /**
-     * Asynchronously send a record to a topic and invoke the provided callback when the send has been acknowledged.
-     * <p>
-     * The send is asynchronous and this method will return immediately once the record has been stored in the buffer of
-     * records waiting to be sent. This allows sending many records in parallel without blocking to wait for the
-     * response after each one.
-     * <p>
-     * The result of the send is a {@link RecordMetadata} specifying the partition the record was sent to, the offset
-     * it was assigned and the timestamp of the record. If
-     * {@link org.apache.kafka.common.record.TimestampType#CREATE_TIME CreateTime} is used by the topic, the timestamp
-     * will be the user provided timestamp or the record send time if the user did not specify a timestamp for the
-     * record. If {@link org.apache.kafka.common.record.TimestampType#LOG_APPEND_TIME LogAppendTime} is used for the
-     * topic, the timestamp will be the Kafka broker local time when the message is appended.
-     * <p>
-     * Since the send call is asynchronous it returns a {@link java.util.concurrent.Future Future} for the
-     * {@link RecordMetadata} that will be assigned to this record. Invoking {@link java.util.concurrent.Future#get()
-     * get()} on this future will block until the associated request completes and then return the metadata for the record
-     * or throw any exception that occurred while sending the record.
-     * <p>
-     * If you want to simulate a simple blocking call you can call the <code>get()</code> method immediately:
-     *
-     * <pre>
-     * {@code
-     * byte[] key = "key".getBytes();
-     * byte[] value = "value".getBytes();
-     * ProducerRecord<byte[],byte[]> record = new ProducerRecord<byte[],byte[]>("my-topic", key, value)
-     * producer.send(record).get();
-     * }</pre>
-     * <p>
-     * Fully non-blocking usage can make use of the {@link Callback} parameter to provide a callback that
-     * will be invoked when the request is complete.
-     *
-     * <pre>
-     * {@code
-     * ProducerRecord<byte[],byte[]> record = new ProducerRecord<byte[],byte[]>("the-topic", key, value);
-     * producer.send(myRecord,
-     *               new Callback() {
-     *                   public void onCompletion(RecordMetadata metadata, Exception e) {
-     *                       if(e != null) {
-     *                          e.printStackTrace();
-     *                       } else {
-     *                          System.out.println("The offset of the record we just sent is: " + metadata.offset());
-     *                       }
-     *                   }
-     *               });
-     * }
-     * </pre>
-     *
-     * Callbacks for records being sent to the same partition are guaranteed to execute in order. That is, in the
-     * following example <code>callback1</code> is guaranteed to execute before <code>callback2</code>:
-     *
-     * <pre>
+	/**
+	 * 异步发送记录到topic，在有回调时，调用提供的callback方法
+	 *
+	 * 发送的动作是异步的，当记录已经存储在等待发送的记录buffer中时，方法就会返回结果，所以它允许一次并发发送多条记录，避免因为等待每一条记录的返回结果而阻塞
+	 *
+	 * 发送消息返回的结果是{@link RecordMetadata}，它指定了记录被发送到了哪个分区
+	 * 时间戳既可以是开发者提供的时间戳，也可以是记录发送的时间戳
+	 * 如果使用了{@link org.apache.kafka.common.record.TimestampType#LOG_APPEND_TIME LogAppendTime}，时间戳将会采用Kafka Broker的本地时间
+	 *
+	 * 发送消息的返回结果是{@link Future}，存储了{@link RecordMetadata}，调用{@link java.util.concurrent.Future#get()}方法会一直阻塞到请求完成并返回，或者抛出异常
+	 * 我们可以使用{@link Callback}进行同步非阻塞的使用，当请求完成时，就会执行{@link Callback}
+	 *
+	 * 发送至相同分区的记录，callback的是按照发送的优先级顺序执行的，
      * {@code
      * producer.send(new ProducerRecord<byte[],byte[]>(topic, partition, key1, value1), callback1);
      * producer.send(new ProducerRecord<byte[],byte[]>(topic, partition, key2, value2), callback2);
-     * }
-     * </pre>
-     * <p>
-     * When used as part of a transaction, it is not necessary to define a callback or check the result of the future
-     * in order to detect errors from <code>send</code>. If any of the send calls failed with an irrecoverable error,
-     * the final {@link #commitTransaction()} call will fail and throw the exception from the last failed send. When
-     * this happens, your application should call {@link #abortTransaction()} to reset the state and continue to send
-     * data.
-     * </p>
-     * <p>
-     * Some transactional send errors cannot be resolved with a call to {@link #abortTransaction()}.  In particular,
-     * if a transactional send finishes with a {@link ProducerFencedException}, a {@link org.apache.kafka.common.errors.OutOfOrderSequenceException},
-     * a {@link org.apache.kafka.common.errors.UnsupportedVersionException}, or an
-     * {@link org.apache.kafka.common.errors.AuthorizationException}, then the only option left is to call {@link #close()}.
-     * Fatal errors cause the producer to enter a defunct state in which future API calls will continue to raise
-     * the same underyling error wrapped in a new {@link KafkaException}.
-     * </p>
-     * <p>
-     * It is a similar picture when idempotence is enabled, but no <code>transactional.id</code> has been configured.
-     * In this case, {@link org.apache.kafka.common.errors.UnsupportedVersionException} and
-     * {@link org.apache.kafka.common.errors.AuthorizationException} are considered fatal errors. However,
-     * {@link ProducerFencedException} does not need to be handled. Additionally, it is possible to continue
-     * sending after receiving an {@link org.apache.kafka.common.errors.OutOfOrderSequenceException}, but doing so
-     * can result in out of order delivery of pending messages. To ensure proper ordering, you should close the
-     * producer and create a new instance.
-     * </p>
-     * <p>
-     * If the message format of the destination topic is not upgraded to 0.11.0.0, idempotent and transactional
-     * produce requests will fail with an {@link org.apache.kafka.common.errors.UnsupportedForMessageFormatException}
-     * error. If this is encountered during a transaction, it is possible to abort and continue. But note that future
-     * sends to the same topic will continue receiving the same exception until the topic is upgraded.
-     * </p>
-     * <p>
-     * Note that callbacks will generally execute in the I/O thread of the producer and so should be reasonably fast or
-     * they will delay the sending of messages from other threads. If you want to execute blocking or computationally
-     * expensive callbacks it is recommended to use your own {@link java.util.concurrent.Executor} in the callback body
-     * to parallelize processing.
-     *
-     * @param record The record to send
-     * @param callback A user-supplied callback to execute when the record has been acknowledged by the server (null
-     *        indicates no callback)
-     *
-     * @throws AuthenticationException if authentication fails. See the exception for more details
-     * @throws AuthorizationException fatal error indicating that the producer is not allowed to write
-     * @throws IllegalStateException if a transactional.id has been configured and no transaction has been started, or
-     *                               when send is invoked after producer has been closed.
-     * @throws InterruptException If the thread is interrupted while blocked
-     * @throws SerializationException If the key or value are not valid objects given the configured serializers
-     * @throws TimeoutException If the time taken for fetching metadata or allocating memory for the record has surpassed <code>max.block.ms</code>.
-     * @throws KafkaException If a Kafka related error occurs that does not belong to the public API exceptions.
+	 * }
+	 * 我们使用了一部分的事务，用声明一个callback，或者检查Future#get()返回值方式来发现send()方法的错误是没有必要的，如果send()方法的调用，产生了一个无法恢复的错误
+	 * 最后再调用{@link #commitTransaction()}时会失败并抛出异常
+	 * 当出现{@link #commitTransaction()}调用异常时，我们应该重置状态并重新发送消息
+	 *
+	 * 一些事务发送错误并不能通过调用{@link #abortTransaction()}来解决，尤其是在一个事务发送结束于一连串的错误异常，那么此时剩下的唯一解决方案就是调用close()方法，将KafkaProducer进行关闭
+	 * 致命错误可能会导致producer进入一个不再起作用的状态，继续调用future的api，将会导致产生更多的相同的错误
+	 *
+	 * 可能会存在已经开启幂等，但是transactional.id还是没有配置的情况
+	 * 在这种情况下，{@link UnsupportedVersionException}、{@link AuthorizationException}被认为是致命错误
+	 * 然而{@link ProducerFencedException}不需要进行处理。除此之外，也可以在收到{@link OutOfOrderSequenceException}后继续发送记录
+	 * 但是这样做可能会导致挂起的消息，处理的不正确
+	 * 为了确保正确的排序，我们需要重新实例化一个producer实例
+	 *
+	 * 如果目标topic的消息格式没有升级到0.11.0.0版本，幂等和事务的特性，将会因为{@link UnsupportedForMessageFormatException}而失效
+	 * 如果是在事务过程中出现了异常错误，可以中断然后继续，但是需要注意的是，直到升级topic之前，我们还是会收到相同的异常
+	 *
+	 * 需要注意的是，callback的执行，将会依赖与producer的io线程，所以callback的执行应该很快，否则就会阻塞后续的其他线程的执行
+	 * 如果你想要执行一些阻塞，或者具有昂贵计算代价的callback，建议使用线程池来执行
+	 *
+	 * @param record 需要发送的记录
+	 * @param callback 用户提供的callback，在记录被服务端接收之后执行，null意味着没有callback
+	 *
+	 * @throws AuthenticationException 身份验证失败
+	 * @throws AuthorizationException producer不允许写入
+	 * @throws IllegalStateException 如果已经配置了一个transaction.id，但是没有任何事务启动
+	 * 								 或者在producer已经关闭的情况下，继续调用send()方法
+	 * @throws InterruptException Thread在阻塞过程中被中断
+	 * @throws SerializationException key或者value不是给定配置的序列化器的合法对象
+	 * @throws TimeoutException 取回元数据超过了max.block.ms
+	 * 						    获取为记录申请的内存已经超过阈值
+	 * @throws KafkaException 发生了非具体制定的Kafka异常
      */
     @Override
     public Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
-        // intercept the record, which can be potentially modified; this method does not throw exceptions
+		// 拦截记录，进行一些Kafka的修改
+		// 这个方法不会抛出异常
         ProducerRecord<K, V> interceptedRecord = this.interceptors.onSend(record);
         return doSend(interceptedRecord, callback);
-    }
+	}
 
-    // Verify that this producer instance has not been closed. This method throws IllegalStateException if the producer
-    // has already been closed.
+	/**
+	 * 验证producer是否已经被关闭
+	 * @throws IllegalStateException 在producer关闭的情况下抛出异常
+	 */
     private void throwIfProducerClosed() {
         if (sender == null || !sender.isRunning())
             throw new IllegalStateException("Cannot perform operation after producer has been closed");
     }
 
-    /**
-     * Implementation of asynchronously send a record to a topic.
+	/**
+	 * 异步发送消息
      */
     private Future<RecordMetadata> doSend(ProducerRecord<K, V> record, Callback callback) {
         TopicPartition tp = null;
-        try {
+		try {
+			// producer状态校验
             throwIfProducerClosed();
-            // first make sure the metadata for the topic is available
+			// 首先确认topic的元数据是可用的
             ClusterAndWaitTime clusterAndWaitTime;
             try {
                 clusterAndWaitTime = waitOnMetadata(record.topic(), record.partition(), maxBlockTimeMs);
@@ -878,11 +833,14 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 if (metadata.isClosed())
                     throw new KafkaException("Producer closed while send in progress", e);
                 throw e;
-            }
+			}
+			// 计算剩余的等待时间
             long remainingWaitMs = Math.max(0, maxBlockTimeMs - clusterAndWaitTime.waitedOnMetadataMs);
+			// 获取集群信息
             Cluster cluster = clusterAndWaitTime.cluster;
             byte[] serializedKey;
-            try {
+			try {
+				// 对记录的topic、header、key使用keySerializer进行序列化
                 serializedKey = keySerializer.serialize(record.topic(), record.headers(), record.key());
             } catch (ClassCastException cce) {
                 throw new SerializationException("Can't convert key of class " + record.key().getClass().getName() +
@@ -890,61 +848,75 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                         " specified in key.serializer", cce);
             }
             byte[] serializedValue;
-            try {
+			try {
+				// 使用valueSerializer对record的topic、header、value进行序列化
                 serializedValue = valueSerializer.serialize(record.topic(), record.headers(), record.value());
             } catch (ClassCastException cce) {
                 throw new SerializationException("Can't convert value of class " + record.value().getClass().getName() +
                         " to class " + producerConfig.getClass(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG).getName() +
                         " specified in value.serializer", cce);
-            }
+			}
+			// 获取消息将要发往的分区编号
             int partition = partition(record, serializedKey, serializedValue, cluster);
+			// 创建将要发往的分区信息
             tp = new TopicPartition(record.topic(), partition);
-
+			// 指定记录，只读设置
             setReadOnly(record.headers());
+			// 获取请求的Header信息
             Header[] headers = record.headers().toArray();
-
+			// 获取序列化之后，整个记录的大小
             int serializedSize = AbstractRecords.estimateSizeInBytesUpperBound(apiVersions.maxUsableProduceMagic(),
                     compressionType, serializedKey, serializedValue, headers);
+			// 确保记录的大小处于有效范围内
             ensureValidRecordSize(serializedSize);
+			// 记录的时间戳配置
             long timestamp = record.timestamp() == null ? time.milliseconds() : record.timestamp();
             if (log.isTraceEnabled()) {
                 log.trace("Attempting to append record {} with callback {} to topic {} partition {}", record, callback, record.topic(), partition);
-            }
-            // producer callback will make sure to call both 'callback' and interceptor callback
+			}
+			// 创建拦截器的callback，其中会包装我们自定义的callback
             Callback interceptCallback = new InterceptorCallback<>(callback, this.interceptors, tp);
-
+			// 如果开启了事务，会对事务需要的状态进行校验
             if (transactionManager != null && transactionManager.isTransactional()) {
                 transactionManager.failIfNotReadyForSend();
-            }
+			}
+			// 尝试record累加器中追加record，获取追加结果
             RecordAccumulator.RecordAppendResult result = accumulator.append(tp, timestamp, serializedKey,
                     serializedValue, headers, interceptCallback, remainingWaitMs, true);
-            
+			// 如果是因为需要创建新batch而中断追加
             if (result.abortForNewBatch) {
+				// 上一次计算的分区索引
                 int prevPartition = partition;
+				// 在分区上创建新的粘性分区
                 partitioner.onNewBatch(record.topic(), cluster, prevPartition);
+				// 创建新的分区，返回的是新分区的编号
                 partition = partition(record, serializedKey, serializedValue, cluster);
+				// 新的分区
                 tp = new TopicPartition(record.topic(), partition);
                 if (log.isTraceEnabled()) {
                     log.trace("Retrying append due to new batch creation for topic {} partition {}. The old partition was {}", record.topic(), partition, prevPartition);
-                }
-                // producer callback will make sure to call both 'callback' and interceptor callback
+				}
+				// 创建拦截器callback和开发者自定义callback
                 interceptCallback = new InterceptorCallback<>(callback, this.interceptors, tp);
-
+				// 继续追加一次record
                 result = accumulator.append(tp, timestamp, serializedKey,
                     serializedValue, headers, interceptCallback, remainingWaitMs, false);
-            }
-            
+			}
+			// 如果需要进行事务
             if (transactionManager != null && transactionManager.isTransactional())
+				// 将分区添加到事务中
                 transactionManager.maybeAddPartitionToTransaction(tp);
-
+			// 如果追加的结果是batch已经满了，或者新的batch已经创建
             if (result.batchIsFull || result.newBatchCreated) {
                 log.trace("Waking up the sender since topic {} partition {} is either full or getting a new batch", record.topic(), partition);
+				// 唤醒sender线程，发送缓冲区存储的record
                 this.sender.wakeup();
-            }
+			}
+			// 返回追加的任务
             return result.future;
-            // handling exceptions and record the errors;
-            // for API exceptions return them in the future,
-            // for other exceptions throw directly
+			// 处理异常并记录错误
+			// 对于API型异常，将在future中进行返回
+			// 其他异常，将直接抛出异常
         } catch (ApiException e) {
             log.debug("Exception occurred during message send:", e);
             if (callback != null)
@@ -966,7 +938,6 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             this.interceptors.onSendError(record, tp, e);
             throw e;
         } catch (Exception e) {
-            // we notify interceptor about all exceptions, since onSend is called before anything else in this method
             this.interceptors.onSendError(record, tp, e);
             throw e;
         }
@@ -978,27 +949,28 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         }
     }
 
-    /**
-     * Wait for cluster metadata including partitions for the given topic to be available.
-     * @param topic The topic we want metadata for
-     * @param partition A specific partition expected to exist in metadata, or null if there's no preference
-     * @param maxWaitMs The maximum time in ms for waiting on the metadata
-     * @return The cluster containing topic metadata and the amount of time we waited in ms
-     * @throws KafkaException for all Kafka-related exceptions, including the case where this method is called after producer close
+	/**
+	 * 等待集群的元数据，包括给定的topic的分区是否是可用的
+	 * @param topic 我们想要获取元数据的来源topic
+	 * @param partition 一个希望存在元数据的分区，如果没有指定，则为null
+	 * @param maxWaitMs 等待元数据的最大时间
+	 * @return 集群及包含topic元数据的信息，以及等待获取元数据的实际时间
+	 * @throws KafkaException 执行异常
      */
     private ClusterAndWaitTime waitOnMetadata(String topic, Integer partition, long maxWaitMs) throws InterruptedException {
-        // add topic to metadata topic list if it is not there already and reset expiry
+		// 从缓存中获取集群信息
         Cluster cluster = metadata.fetch();
-
+		// 检查topic是否与非法状态
         if (cluster.invalidTopics().contains(topic))
             throw new InvalidTopicException(topic);
-
+		// 将topic添加到元数据保存的topic列表中，
         metadata.add(topic);
-
+		// 获取topic的分区总数量
         Integer partitionsCount = cluster.partitionCountForTopic(topic);
-        // Return cached metadata if we have it, and if the record's partition is either undefined
-        // or within the known partition range
+		// 在有缓存的情况下，使用我们缓存的元数据
+		// 如果记录的分区既没有被声明，或者在一直的分区范围内
         if (partitionsCount != null && (partition == null || partition < partitionsCount))
+			// 返回新的集群元数据及等待时间
             return new ClusterAndWaitTime(cluster, 0);
 
         long begin = time.milliseconds();
@@ -1012,20 +984,27 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 log.trace("Requesting metadata update for partition {} of topic {}.", partition, topic);
             } else {
                 log.trace("Requesting metadata update for topic {}.", topic);
-            }
+			}
+			// 向元数据中添加topic信息
             metadata.add(topic);
+			// 更新集群信息
             int version = metadata.requestUpdate();
+			// 唤醒select线程模型
             sender.wakeup();
-            try {
+			try {
+				// 等待更新元数据
                 metadata.awaitUpdate(version, remainingWaitMs);
             } catch (TimeoutException ex) {
                 // Rethrow with original maxWaitMs to prevent logging exception with remainingWaitMs
                 throw new TimeoutException(
                         String.format("Topic %s not present in metadata after %d ms.",
                                 topic, maxWaitMs));
-            }
+			}
+			// 从缓存中获取cluster信息
             cluster = metadata.fetch();
+			// 计算等待时间
             elapsed = time.milliseconds() - begin;
+			// 如果已经超出等待时间，则直接抛出异常
             if (elapsed >= maxWaitMs) {
                 throw new TimeoutException(partitionsCount == null ?
                         String.format("Topic %s not present in metadata after %d ms.",
@@ -1035,21 +1014,24 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             }
             metadata.maybeThrowExceptionForTopic(topic);
             remainingWaitMs = maxWaitMs - elapsed;
+			// 获取指定topic的partition的总数量
             partitionsCount = cluster.partitionCountForTopic(topic);
         } while (partitionsCount == null || (partition != null && partition >= partitionsCount));
 
         return new ClusterAndWaitTime(cluster, elapsed);
     }
 
-    /**
-     * Validate that the record size isn't too large
+	/**
+	 * 校验记录的总大小
      */
     private void ensureValidRecordSize(int size) {
+		// 请求最大大小校验
         if (size > this.maxRequestSize)
             throw new RecordTooLargeException("The message is " + size +
                     " bytes when serialized which is larger than the maximum request size you have configured with the " +
                     ProducerConfig.MAX_REQUEST_SIZE_CONFIG +
                     " configuration.");
+		// 总共占用内存大小校验
         if (size > this.totalMemorySize)
             throw new RecordTooLargeException("The message is " + size +
                     " bytes when serialized which is larger than the total memory buffer you have configured with the " +
@@ -1249,12 +1231,14 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         return clusterResourceListeners;
     }
 
-    /**
-     * computes partition for given record.
-     * if the record has partition returns the value otherwise
-     * calls configured partitioner class to compute the partition.
+	/**
+	 * 为指定的记录计算分区索引
+	 * 开发者指定了分区，则使用指定的分区
+	 * 如果没有指定分区，使用开发者指定的策略来计算分区，默认的分区策略时DefaultPartitioner
      */
     private int partition(ProducerRecord<K, V> record, byte[] serializedKey, byte[] serializedValue, Cluster cluster) {
+		// 如果开发者已经指定了的分区编号，使用自定义的分区编号
+		// 否则kafka会自己选择一个分区编号
         Integer partition = record.partition();
         return partition != null ?
                 partition :
@@ -1274,8 +1258,14 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     }
 
     private static class ClusterAndWaitTime {
-        final Cluster cluster;
-        final long waitedOnMetadataMs;
+		/**
+		 * 集群
+		 */
+		final Cluster cluster;
+		/**
+		 * 等待元数据的时间
+		 */
+		final long waitedOnMetadataMs;
         ClusterAndWaitTime(Cluster cluster, long waitedOnMetadataMs) {
             this.cluster = cluster;
             this.waitedOnMetadataMs = waitedOnMetadataMs;
@@ -1317,9 +1307,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
     }
 
-    /**
-     * A callback called when producer request is complete. It in turn calls user-supplied callback (if given) and
-     * notifies producer interceptors about the request completion.
+	/**
+	 * 在请求完成之后的callback任务，它会反过来调用开发者提供的callback，然后通知producer的拦截器，请求已经完成了
      */
     private static class InterceptorCallback<K, V> implements Callback {
         private final Callback userCallback;

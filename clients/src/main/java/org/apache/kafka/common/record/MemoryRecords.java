@@ -37,21 +37,28 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * A {@link Records} implementation backed by a ByteBuffer. This is used only for reading or
- * modifying in-place an existing buffer of record batches. To create a new buffer see {@link MemoryRecordsBuilder},
- * or one of the {@link #builder(ByteBuffer, byte, CompressionType, TimestampType, long)} variants.
+ * 一个Records的基于ByteBuffer的实现，也就是真正存储消息的对象
+ * 它仅用于读操作，或者修改已经就位存在的record batches buffer
+ * 使用MemoryRecordsBuilder创建一个新buffer
+ * 或者使用builder()的变体，也可以创建一个新buffer
  */
 public class MemoryRecords extends AbstractRecords {
     private static final Logger log = LoggerFactory.getLogger(MemoryRecords.class);
     public static final MemoryRecords EMPTY = MemoryRecords.readableRecords(ByteBuffer.allocate(0));
-
+	/**
+	 * 一个用于存储一条Record的NIO buffer
+	 */
     private final ByteBuffer buffer;
-
+	/**
+	 * MutableRecordBatch迭代器
+	 */
     private final Iterable<MutableRecordBatch> batches = this::batchIterator;
 
     private int validBytes = -1;
 
-    // Construct a writable memory records
+	/**
+	 * 创建一个可写的MemoryRecords
+	 */
     private MemoryRecords(ByteBuffer buffer) {
         Objects.requireNonNull(buffer, "buffer should not be null");
         this.buffer = buffer;
@@ -60,28 +67,31 @@ public class MemoryRecords extends AbstractRecords {
     @Override
     public int sizeInBytes() {
         return buffer.limit();
-    }
+	}
 
-    @Override
-    public long writeTo(GatheringByteChannel channel, long position, int length) throws IOException {
-        if (position > Integer.MAX_VALUE)
-            throw new IllegalArgumentException("position should not be greater than Integer.MAX_VALUE: " + position);
-        if (position + length > buffer.limit())
-            throw new IllegalArgumentException("position+length should not be greater than buffer.limit(), position: "
-                    + position + ", length: " + length + ", buffer.limit(): " + buffer.limit());
+	/**
+	 * 写入到channel中
+	 */
+	@Override
+	public long writeTo(GatheringByteChannel channel, long position, int length) throws IOException {
+		if (position > Integer.MAX_VALUE)
+			throw new IllegalArgumentException("position should not be greater than Integer.MAX_VALUE: " + position);
+		if (position + length > buffer.limit())
+			throw new IllegalArgumentException("position+length should not be greater than buffer.limit(), position: "
+					+ position + ", length: " + length + ", buffer.limit(): " + buffer.limit());
 
-        int pos = (int) position;
-        ByteBuffer dup = buffer.duplicate();
-        dup.position(pos);
-        dup.limit(pos + length);
-        return channel.write(dup);
-    }
+		int pos = (int) position;
+		ByteBuffer dup = buffer.duplicate();
+		dup.position(pos);
+		dup.limit(pos + length);
+		return channel.write(dup);
+	}
 
-    /**
-     * Write all records to the given channel (including partial records).
-     * @param channel The channel to write to
-     * @return The number of bytes written
-     * @throws IOException For any IO errors writing to the channel
+	/**
+	 * 将所有的记录全部写入到指定的channel中，包括没写满的部分
+	 * @param channel 写入的channel
+	 * @return 写入的字节数
+	 * @throws IOException IO异常
      */
     public int writeFullyTo(GatheringByteChannel channel) throws IOException {
         buffer.mark();

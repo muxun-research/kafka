@@ -24,10 +24,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Maintains node api versions for access outside of NetworkClient (which is where the information is derived).
- * The pattern is akin to the use of {@link Metadata} for topic metadata.
- *
- * NOTE: This class is intended for INTERNAL usage only within Kafka.
+ * 包含节点的api版本号，用于请求外部client
  */
 public class ApiVersions {
 

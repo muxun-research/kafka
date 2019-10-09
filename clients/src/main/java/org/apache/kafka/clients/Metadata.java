@@ -139,7 +139,7 @@ public class Metadata implements Closeable {
     }
 
     /**
-     * Request an update of the current cluster metadata info, return the current updateVersion before the update
+	 * 请求更新一次当前的cluster，返回最近一次更新的版本号
      */
     public synchronized int requestUpdate() {
         this.needUpdate = true;
@@ -375,11 +375,12 @@ public class Metadata implements Closeable {
     }
 
     /**
-     * If any non-retriable exceptions were encountered during metadata update, throw exception if the exception
-     * is fatal or related to the specified topic. All exceptions from the last metadata update are cleared.
-     * This is used by the producer to propagate topic metadata errors for send requests.
+	 * 如何不可继续延续的异常在元数据更新期间被碰到，在异常时比较严重，或者异常与指定的topic有关
+	 * 所有的异常都在最后一次元数据更新时被清除
+	 * 这种方法通常用于更好的传递topic的元数据
      */
     public synchronized void maybeThrowExceptionForTopic(String topic) {
+		// 清理可能需要抛出异常的错误，并对指定topic进行异常修复
         clearErrorsAndMaybeThrowException(() -> recoverableExceptionForTopic(topic));
     }
 
@@ -425,7 +426,7 @@ public class Metadata implements Closeable {
     }
 
     /**
-     * @return The current metadata updateVersion
+	 * @return 当前元数据的更新版本号
      */
     public synchronized int updateVersion() {
         return this.updateVersion;
@@ -455,12 +456,17 @@ public class Metadata implements Closeable {
         return this.isClosed;
     }
 
-    public synchronized void requestUpdateForNewTopics() {
-        // Override the timestamp of last refresh to let immediate update.
-        this.lastRefreshMs = 0;
-        this.requestVersion++;
-        requestUpdate();
-    }
+	/**
+	 * 更新新topic信息
+	 */
+	public synchronized void requestUpdateForNewTopics() {
+		// 将最近一次更新时间戳设为0，以便迅速开启更新
+		this.lastRefreshMs = 0;
+		// 计数器操作
+		this.requestVersion++;
+		// 请求进行topic更新
+		requestUpdate();
+	}
 
     public synchronized MetadataRequestAndVersion newMetadataRequestAndVersion() {
         return new MetadataRequestAndVersion(newMetadataRequestBuilder(), requestVersion);

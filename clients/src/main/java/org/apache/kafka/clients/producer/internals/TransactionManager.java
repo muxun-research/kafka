@@ -337,33 +337,44 @@ public class TransactionManager {
         return handler.result;
     }
 
-    public synchronized void maybeAddPartitionToTransaction(TopicPartition topicPartition) {
-        if (isPartitionAdded(topicPartition) || isPartitionPendingAdd(topicPartition))
-            return;
+	/**
+	 * 将分区添加到事务中
+	 * 同步操作
+	 * @param topicPartition 追加record的分区
+	 */
+	public synchronized void maybeAddPartitionToTransaction(TopicPartition topicPartition) {
+		// 首先判断分区是否已经缓存在事务中了
+		// 接着判断
+		if (isPartitionAdded(topicPartition) || isPartitionPendingAdd(topicPartition))
+			return;
 
-        log.debug("Begin adding new partition {} to transaction", topicPartition);
-        topicPartitionBookkeeper.addPartition(topicPartition);
-        newPartitionsInTransaction.add(topicPartition);
-    }
+		log.debug("Begin adding new partition {} to transaction", topicPartition);
+		topicPartitionBookkeeper.addPartition(topicPartition);
+		newPartitionsInTransaction.add(topicPartition);
+	}
 
     RuntimeException lastError() {
         return lastError;
-    }
+	}
 
-    public synchronized void failIfNotReadyForSend() {
-        if (hasError())
-            throw new KafkaException("Cannot perform send because at least one previous transactional or " +
-                    "idempotent request has failed with errors.", lastError);
+	/**
+	 * 事务状态校验：在producer没有准备好进行发送时，直接失败
+	 */
+	public synchronized void failIfNotReadyForSend() {
+		// 如果partition状态处于ABORTABLE_ERROR或者FETAL_ERROR状态
+		if (hasError())
+			throw new KafkaException("Cannot perform send because at least one previous transactional or " +
+					"idempotent request has failed with errors.", lastError);
+		// 如果已经分配了transaction.id，但是没有producerId，或者是当前partition状态不处于IN_TRANSACTION状态
+		if (isTransactional()) {
+			if (!hasProducerId())
+				throw new IllegalStateException("Cannot perform a 'send' before completing a call to initTransactions " +
+						"when transactions are enabled.");
 
-        if (isTransactional()) {
-            if (!hasProducerId())
-                throw new IllegalStateException("Cannot perform a 'send' before completing a call to initTransactions " +
-                        "when transactions are enabled.");
-
-            if (currentState != State.IN_TRANSACTION)
-                throw new IllegalStateException("Cannot call send in state " + currentState);
-        }
-    }
+			if (currentState != State.IN_TRANSACTION)
+				throw new IllegalStateException("Cannot call send in state " + currentState);
+		}
+	}
 
     synchronized boolean isSendToPartitionAllowed(TopicPartition tp) {
         if (hasFatalError())
@@ -415,9 +426,11 @@ public class TransactionManager {
     // visible for testing
     synchronized boolean isPartitionAdded(TopicPartition partition) {
         return partitionsInTransaction.contains(partition);
-    }
+	}
 
-    // visible for testing
+	/**
+	 * 仅适用于测试
+	 */
     synchronized boolean isPartitionPendingAdd(TopicPartition partition) {
         return newPartitionsInTransaction.contains(partition) || pendingPartitionsInTransaction.contains(partition);
     }
@@ -467,19 +480,25 @@ public class TransactionManager {
      * produce error to the user and let them abort the transaction and close the producer explicitly.
      */
     synchronized void resetProducerId() {
+		// producer存在transaction.id的情况下，不允许重置producer.id
         if (isTransactional())
             throw new IllegalStateException("Cannot reset producer state for a transactional producer. " +
                     "You must either abort the ongoing transaction or reinitialize the transactional producer instead");
+		// 重置producer.id
         setProducerIdAndEpoch(ProducerIdAndEpoch.NONE);
+
         topicPartitionBookkeeper.reset();
         this.partitionsWithUnresolvedSequences.clear();
-    }
+	}
 
-    synchronized void resetProducerIdIfNeeded() {
-        if (shouldResetProducerStateAfterResolvingSequences())
-            // Check if the previous run expired batches which requires a reset of the producer state.
-            resetProducerId();
-    }
+	/**
+	 * 重置producer.id
+	 */
+	synchronized void resetProducerIdIfNeeded() {
+		if (shouldResetProducerStateAfterResolvingSequences())
+			// Check if the previous run expired batches which requires a reset of the producer state.
+			resetProducerId();
+	}
 
     /**
      * Returns the next sequence number to be written to the given TopicPartition.
