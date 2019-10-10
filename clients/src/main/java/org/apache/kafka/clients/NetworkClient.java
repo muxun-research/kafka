@@ -76,8 +76,13 @@ public class NetworkClient implements KafkaClient {
     private final Logger log;
 
     /* the selector used to perform network i/o */
-    private final Selectable selector;
-
+	/**
+	 * 执行IO操作的Selector
+	 */
+	private final Selectable selector;
+	/**
+	 * Cluster metadata更新器
+	 */
     private final MetadataUpdater metadataUpdater;
 
     private final Random randOffset;
@@ -85,7 +90,9 @@ public class NetworkClient implements KafkaClient {
     /* the state of each node's connection */
     private final ClusterConnectionStates connectionStates;
 
-    /* the set of requests currently being sent or awaiting a response */
+	/**
+	 * 目前正在发送或者等待响应的请求集合
+	 */
     private final InFlightRequests inFlightRequests;
 
     /* the socket send buffer size in bytes */
@@ -497,9 +504,12 @@ public class NetworkClient implements KafkaClient {
     }
 
     private void doSend(ClientRequest clientRequest, boolean isInternalRequest, long now, AbstractRequest request) {
+		// 获取当前请求的目标节点
         String destination = clientRequest.destination();
+		// 创建当前请求的请求头
         RequestHeader header = clientRequest.makeHeader(request.version());
         if (log.isDebugEnabled()) {
+			// 对版本进行日志记录
             int latestClientVersion = clientRequest.apiKey().latestVersion();
             if (header.apiVersion() == latestClientVersion) {
                 log.trace("Sending {} {} with correlation id {} to node {}", clientRequest.apiKey(), request,
@@ -508,15 +518,18 @@ public class NetworkClient implements KafkaClient {
                 log.debug("Using older server API v{} to send {} {} with correlation id {} to node {}",
                         header.apiVersion(), clientRequest.apiKey(), request, clientRequest.correlationId(), destination);
             }
-        }
+		}
+		// 创建发送模型
         Send send = request.toSend(destination, header);
+		// 创建运行中请求
         InFlightRequest inFlightRequest = new InFlightRequest(
                 clientRequest,
                 header,
                 isInternalRequest,
                 request,
                 send,
-                now);
+				now);
+		// 添加到等待集合中
         this.inFlightRequests.add(inFlightRequest);
         selector.send(send);
 	}
@@ -542,8 +555,8 @@ public class NetworkClient implements KafkaClient {
 			// 调用onComplete()完成请求
             completeResponses(responses);
             return responses;
-        }
-
+		}
+		// 计算集群metadata的下一次进行更新的时间
         long metadataTimeout = metadataUpdater.maybeUpdate(now);
         try {
             this.selector.poll(Utils.min(timeout, metadataTimeout, defaultRequestTimeoutMs));

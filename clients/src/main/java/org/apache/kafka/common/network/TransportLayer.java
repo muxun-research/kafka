@@ -16,101 +16,95 @@
  */
 package org.apache.kafka.common.network;
 
-/*
- * Transport layer for underlying communication.
- * At very basic level it is wrapper around SocketChannel and can be used as substitute for SocketChannel
- * and other network Channel implementations.
- * As NetworkClient replaces BlockingChannel and other implementations we will be using KafkaChannel as
- * a network I/O channel.
- */
-import java.io.IOException;
-import java.nio.channels.FileChannel;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.SocketChannel;
-import java.nio.channels.ScatteringByteChannel;
-import java.nio.channels.GatheringByteChannel;
-
-import java.security.Principal;
-
 import org.apache.kafka.common.errors.AuthenticationException;
 
+import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.GatheringByteChannel;
+import java.nio.channels.ScatteringByteChannel;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.SocketChannel;
+import java.security.Principal;
+
+/*
+ * 核心传输层
+ * 在最基本的层次上，它是SocketChannel的包装，并且可以作为SocketChannel的替代品，已经其他Network Channel的实现
+ * 我们使用NetworkClient替代了BlockingChannel和其他实现，我们也将使用KafkaChannel作为网络IO的channel
+ */
 public interface TransportLayer extends ScatteringByteChannel, GatheringByteChannel {
 
-    /**
-     * Returns true if the channel has handshake and authentication done.
-     */
-    boolean ready();
+	/**
+	 * 在握手及验证完成的情况下，返回true
+	 */
+	boolean ready();
 
-    /**
-     * Finishes the process of connecting a socket channel.
-     */
-    boolean finishConnect() throws IOException;
+	/**
+	 * 判断是否结束和一个socket channel的连接进程
+	 */
+	boolean finishConnect() throws IOException;
 
-    /**
-     * disconnect socketChannel
-     */
-    void disconnect();
+	/**
+	 * 断开和socket channel的链接
+	 */
+	void disconnect();
 
-    /**
-     * Tells whether or not this channel's network socket is connected.
-     */
-    boolean isConnected();
+	/**
+	 * Tells whether or not this channel's network socket is connected.
+	 * 判断channel的网络socket是否连接
+	 */
+	boolean isConnected();
 
-    /**
-     * returns underlying socketChannel
-     */
-    SocketChannel socketChannel();
+	/**
+	 * 返回潜在的socket channel
+	 */
+	SocketChannel socketChannel();
 
-    /**
-     * Get the underlying selection key
-     */
-    SelectionKey selectionKey();
+	/**
+	 * 获取潜在的selection key
+	 */
+	SelectionKey selectionKey();
 
-    /**
-     * This a no-op for the non-secure PLAINTEXT implementation. For SSL, this performs
-     * SSL handshake. The SSL handshake includes client authentication if configured using
-     * {@link org.apache.kafka.common.config.SslConfigs#SSL_CLIENT_AUTH_CONFIG}.
-     * @throws AuthenticationException if handshake fails due to an {@link javax.net.ssl.SSLException}.
-     * @throws IOException if read or write fails with an I/O error.
-    */
-    void handshake() throws AuthenticationException, IOException;
+	/**
+	 * 这对于非安全的纯文本来说是一个无操作
+	 * 对于SSL，将使用SSL握手方式，在使用{@link org.apache.kafka.common.config.SslConfigs#SSL_CLIENT_AUTH_CONFIG}的情况下，SSL握手方式包括客户端身份验证
+	 * @throws AuthenticationException 如果握手失败是由于一个 {@link javax.net.ssl.SSLException}异常，抛出身份验证失败异常
+	 * @throws IOException             读写失败抛出IO异常
+	 */
+	void handshake() throws AuthenticationException, IOException;
 
-    /**
-     * Returns true if there are any pending writes
-     */
-    boolean hasPendingWrites();
+	/**
+	 * 判断是否存在待定的写入
+	 */
+	boolean hasPendingWrites();
 
-    /**
-     * Returns `SSLSession.getPeerPrincipal()` if this is a SslTransportLayer and there is an authenticated peer,
-     * `KafkaPrincipal.ANONYMOUS` is returned otherwise.
-     */
-    Principal peerPrincipal() throws IOException;
+	/**
+	 * 如果是一个SslTransportLayer并且已经拥有一个已验证的节点，返回SSLSession.getPeerPrincipal()结果
+	 * 其他情况下返回KafkaPrincipal.ANONYMOUS
+	 */
+	Principal peerPrincipal() throws IOException;
 
-    void addInterestOps(int ops);
+	void addInterestOps(int ops);
 
-    void removeInterestOps(int ops);
+	void removeInterestOps(int ops);
 
-    boolean isMute();
+	boolean isMute();
 
-    /**
-     * @return true if channel has bytes to be read in any intermediate buffers
-     * which may be processed without reading additional data from the network.
-     */
-    boolean hasBytesBuffered();
+	/**
+	 * @return 在channel有需要读取的在中间层buffer的字节时，返回true
+	 * 中间层buffer可能不会读取网络传输中的额外数据
+	 */
+	boolean hasBytesBuffered();
 
-    /**
-     * Transfers bytes from `fileChannel` to this `TransportLayer`.
-     *
-     * This method will delegate to {@link FileChannel#transferTo(long, long, java.nio.channels.WritableByteChannel)},
-     * but it will unwrap the destination channel, if possible, in order to benefit from zero copy. This is required
-     * because the fast path of `transferTo` is only executed if the destination buffer inherits from an internal JDK
-     * class.
-     *
-     * @param fileChannel The source channel
-     * @param position The position within the file at which the transfer is to begin; must be non-negative
-     * @param count The maximum number of bytes to be transferred; must be non-negative
-     * @return The number of bytes, possibly zero, that were actually transferred
-     * @see FileChannel#transferTo(long, long, java.nio.channels.WritableByteChannel)
-     */
-    long transferFrom(FileChannel fileChannel, long position, long count) throws IOException;
+	/**
+	 * 将字节从fileChannel传输到当前的TransportLayer
+	 * 这个方法将会代理{@link FileChannel#transferTo(long, long, java.nio.channels.WritableByteChannel)}方法
+	 * 但是在可能的情况下，它将会打开目的地的channel，目的是为了利用零拷贝的优势
+	 * 这是必需的，因为只有目标缓冲区从内部JDK类继承时，才会执行“transferTo”的快速路径
+	 * @param fileChannel 资源的channel
+	 * @param position    传输开始的位置，必须为非负数
+	 * @param count       传输字节数的最大值，必须为非负数
+	 * @return 真是传输的字节数，可能为0
+	 * @see FileChannel#transferTo(long, long, java.nio.channels.WritableByteChannel)
+	 */
+	long transferFrom(FileChannel fileChannel, long position, long count) throws IOException;
 }

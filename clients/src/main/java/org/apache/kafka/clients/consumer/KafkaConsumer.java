@@ -16,8 +16,6 @@
  */
 package org.apache.kafka.clients.consumer;
 
-import static org.apache.kafka.clients.consumer.internals.PartitionAssignorAdapter.getAssignorInstances;
-
 import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.ClientDnsLookup;
 import org.apache.kafka.clients.ClientUtils;
@@ -80,9 +78,10 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
+import static org.apache.kafka.clients.consumer.internals.PartitionAssignorAdapter.getAssignorInstances;
+
 /**
- * A client that consumes records from a Kafka cluster.
- * <p>
+ * 一个消费来自Kafka集群的record的客户端
  * This client transparently handles the failure of Kafka brokers, and transparently adapts as topic partitions
  * it fetches migrate within the cluster. This client also interacts with the broker to allow groups of
  * consumers to load balance consumption using <a href="#consumergroups">consumer groups</a>.
@@ -897,41 +896,30 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         }
     }
 
-    /**
-     * Subscribe to the given list of topics to get dynamically
-     * assigned partitions. <b>Topic subscriptions are not incremental. This list will replace the current
-     * assignment (if there is one).</b> Note that it is not possible to combine topic subscription with group management
-     * with manual partition assignment through {@link #assign(Collection)}.
-     *
-     * If the given list of topics is empty, it is treated the same as {@link #unsubscribe()}.
-     *
-     * <p>
-     * As part of group management, the consumer will keep track of the list of consumers that belong to a particular
-     * group and will trigger a rebalance operation if any one of the following events are triggered:
-     * <ul>
-     * <li>Number of partitions change for any of the subscribed topics
-     * <li>A subscribed topic is created or deleted
-     * <li>An existing member of the consumer group is shutdown or fails
-     * <li>A new member is added to the consumer group
-     * </ul>
-     * <p>
-     * When any of these events are triggered, the provided listener will be invoked first to indicate that
-     * the consumer's assignment has been revoked, and then again when the new assignment has been received.
-     * Note that rebalances will only occur during an active call to {@link #poll(Duration)}, so callbacks will
-     * also only be invoked during that time.
-     *
-     * The provided listener will immediately override any listener set in a previous call to subscribe.
-     * It is guaranteed, however, that the partitions revoked/assigned through this interface are from topics
-     * subscribed in this call. See {@link ConsumerRebalanceListener} for more details.
-     *
-     * @param topics The list of topics to subscribe to
-     * @param listener Non-null listener instance to get notifications on partition assignment/revocation for the
-     *                 subscribed topics
-     * @throws IllegalArgumentException If topics is null or contains null or empty elements, or if listener is null
-     * @throws IllegalStateException If {@code subscribe()} is called previously with pattern, or assign is called
-     *                               previously (without a subsequent call to {@link #unsubscribe()}), or if not
-     *                               configured at-least one partition assignment strategy
-     */
+	/**
+	 * 订阅给定的topic列表，动态获取分配的集群信息
+	 * topic订阅不是递增的，我们会将列表进行直接替换
+	 * 请注意，通过{@link #assign(Collection)}使用手动分配分区来合并topic订阅是不可能的
+	 * 如果给定的topic列表是空的，可以以{@link #unsubscribe()}来对待
+	 * <p>
+	 * 作为集群管理的一部分，consumer会记录consumer组的轨迹
+	 * consumer集合属于一个特殊的组，如果以下事件触发，同时也会触发再平衡操作
+	 * 1. 任何订阅的topic的分区数量发生了变化
+	 * 2. 一个订阅的topic创建或者删除
+	 * 3. 消费组中的成员关闭或者请求失败了
+	 * 4. 一个新消费者添加到消费组中
+	 * <p>
+	 * 任何一个事件被触发，提供的listener就会首先被调用，以此来证明消费者分配已经被调用，然后新的分配也已经接收到
+	 * 需要注意的是，再平衡只会发生在活跃的{@link #poll(Duration)}方法调用，所以回调任何也会在{@link #poll(Duration)}方法调用中进行
+	 * <p>
+	 * 提供的listener将会立即替换之前设置的listener，然而，可以通过保证来自本次调用中订阅的topic的接口来撤销/分配分区
+	 * 详细信息请看{@link ConsumerRebalanceListener}
+	 * @param topics   需要订阅的topic集合
+	 * @param listener 非空的listener实例，用来获取订阅的topic分区的分配和撤销通知
+	 * @throws IllegalArgumentException topic或者listener的校验异常
+	 * @throws IllegalStateException    如果{@code subscribe()}已经调用，或者已经分配（没有经过随后的一个{@link #unsubscribe()}调用）
+	 *                                  或者没有配置至少有一个分区需要分配的策略，将会抛出此异常
+	 */
     @Override
     public void subscribe(Collection<String> topics, ConsumerRebalanceListener listener) {
         acquireAndEnsureOpen();

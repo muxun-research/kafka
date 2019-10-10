@@ -366,7 +366,7 @@ public final class ProducerBatch {
     }
 
     /**
-     * Returns if the batch is been retried for sending to kafka
+	 * 判断batch是否在发送数据过程中进行了重试
      */
     public boolean inRetry() {
         return this.retry;

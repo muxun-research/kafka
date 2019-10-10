@@ -26,7 +26,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * The set of requests which have been sent or are being sent but haven't yet received a response
+ * 已经发送或者正在发送的请求集合，这些请求还没有收到响应
  */
 final class InFlightRequests {
 
@@ -40,7 +40,7 @@ final class InFlightRequests {
     }
 
     /**
-     * Add the given request to the queue for the connection it was directed to
+	 * 添加到以目的地维度的请求等待队列中
      */
     public void add(NetworkClient.InFlightRequest request) {
         String destination = request.destination;
@@ -50,11 +50,12 @@ final class InFlightRequests {
             this.requests.put(destination, reqs);
         }
         reqs.addFirst(request);
+		// 运行中的请求计数器
         inFlightRequestCount.incrementAndGet();
     }
 
     /**
-     * Get the request queue for the given node
+	 * 获取指定节点的请求队列
      */
     private Deque<NetworkClient.InFlightRequest> requestQueue(String node) {
         Deque<NetworkClient.InFlightRequest> reqs = requests.get(node);

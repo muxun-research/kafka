@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.common.network;
 
-import java.net.SocketAddress;
 import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.memory.MemoryPool;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
@@ -25,6 +24,7 @@ import org.apache.kafka.common.utils.Utils;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.Socket;
+import java.net.SocketAddress;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 import java.util.List;
@@ -159,22 +159,24 @@ public class KafkaChannel implements AutoCloseable {
     }
 
     /**
-     * Does handshake of transportLayer and authentication using configured authenticator.
-     * For SSL with client authentication enabled, {@link TransportLayer#handshake()} performs
-     * authentication. For SASL, authentication is performed by {@link Authenticator#authenticate()}.
+	 * 使用配置的验证器，进行握手操作和权限验证
+	 * 如果开启客户端SSL校验，{@link TransportLayer#handshake()}会执行验证
+	 * 如果开启的是SASL校验，{@link Authenticator#authenticate()}将执行验证
      */
     public void prepare() throws AuthenticationException, IOException {
         boolean authenticating = false;
         try {
+			// 如果传输层没有就绪，传输层进行握手连接
             if (!transportLayer.ready())
                 transportLayer.handshake();
+			// 如果传输层已经就绪，但是验证还未完成，使用验证器进行验证
             if (transportLayer.ready() && !authenticator.complete()) {
                 authenticating = true;
                 authenticator.authenticate();
             }
         } catch (AuthenticationException e) {
-            // Clients are notified of authentication exceptions to enable operations to be terminated
-            // without retries. Other errors are handled as network exceptions in Selector.
+			// 向客户端进行身份验证时发生了异常，接下来的处理可以使操作中止而无需仓欧冠农户处
+			// 其他错误会作为网络异常在Selector中进行处理
             String remoteDesc = remoteAddress != null ? remoteAddress.toString() : null;
             state = new ChannelState(ChannelState.State.AUTHENTICATION_FAILED, e, remoteDesc);
             if (authenticating) {
@@ -183,6 +185,7 @@ public class KafkaChannel implements AutoCloseable {
             }
             throw e;
         }
+		// 均处于就绪状态，增加验证次数，channel置为就绪状态
         if (ready()) {
             ++successfulAuthentications;
             state = ChannelState.READY;
@@ -361,12 +364,18 @@ public class KafkaChannel implements AutoCloseable {
         return transportLayer.socketChannel().socket().getInetAddress();
     }
 
-    public String socketDescription() {
-        Socket socket = transportLayer.socketChannel().socket();
-        if (socket.getInetAddress() == null)
-            return socket.getLocalAddress().toString();
-        return socket.getInetAddress().toString();
-    }
+	/**
+	 * 获取socket的描述
+	 * 实际内容是socket的地址
+	 * @return socket地址
+	 */
+	public String socketDescription() {
+		// 获取
+		Socket socket = transportLayer.socketChannel().socket();
+		if (socket.getInetAddress() == null)
+			return socket.getLocalAddress().toString();
+		return socket.getInetAddress().toString();
+	}
 
     public void setSend(Send send) {
         if (this.send != null)
@@ -392,16 +401,21 @@ public class KafkaChannel implements AutoCloseable {
             mute();
         }
         return result;
-    }
+	}
 
-    public Send write() throws IOException {
-        Send result = null;
-        if (send != null && send(send)) {
-            result = send;
-            send = null;
-        }
-        return result;
-    }
+	/**
+	 * 写入channel
+	 * @return 正常情况下是构建发送请求时的Send对象
+	 * @throws IOException 写入异常，抛出IO异常
+	 */
+	public Send write() throws IOException {
+		Send result = null;
+		if (send != null && send(send)) {
+			result = send;
+			send = null;
+		}
+		return result;
+	}
 
     /**
      * Accumulates network thread time for this channel.
@@ -422,17 +436,27 @@ public class KafkaChannel implements AutoCloseable {
 
     private long receive(NetworkReceive receive) throws IOException {
         return receive.readFrom(transportLayer);
-    }
+	}
 
-    private boolean send(Send send) throws IOException {
-        midWrite = true;
-        send.writeTo(transportLayer);
-        if (send.completed()) {
-            midWrite = false;
-            transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
-        }
-        return send.completed();
-    }
+	/**
+	 * 通过传输层发送数据
+	 * @param send 传输请求
+	 * @return 传输是否成功
+	 * @throws IOException 传输异常，抛出IO异常
+	 */
+	private boolean send(Send send) throws IOException {
+		midWrite = true;
+		// 向channel中写入数据
+		send.writeTo(transportLayer);
+		// 传输完成
+		if (send.completed()) {
+			midWrite = false;
+			// 去除selection key的写标识
+			transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
+		}
+		// 返回发送完成结果
+		return send.completed();
+	}
 
     /**
      * @return true if underlying transport has bytes remaining to be read from any underlying intermediate buffers.

@@ -22,9 +22,8 @@ public final class TransportLayers {
 
     private TransportLayers() {}
 
-    // This is temporary workaround as Send and Receive interfaces are used by BlockingChannel.
-    // Once BlockingChannel is removed we can make Send and Receive work with TransportLayer rather than
-    // GatheringByteChannel or ScatteringByteChannel.
+	// 这是一个临时解决方案，因为发送或者接收接口用于BlockingChannel
+	// 我们可以通过使用TransportLayer来移除一个BlockingChannel，这样做会比GatheringByteChannel和ScatteringByteChannel更好
     public static boolean hasPendingWrites(GatheringByteChannel channel) {
         if (channel instanceof TransportLayer)
             return ((TransportLayer) channel).hasPendingWrites();

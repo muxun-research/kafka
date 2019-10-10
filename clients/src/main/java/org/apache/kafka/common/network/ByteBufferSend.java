@@ -22,7 +22,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.GatheringByteChannel;
 
 /**
- * A send backed by an array of byte buffers
+ * 一个发送buffer数组的备份
  */
 public class ByteBufferSend implements Send {
 
@@ -35,6 +35,7 @@ public class ByteBufferSend implements Send {
     public ByteBufferSend(String destination, ByteBuffer... buffers) {
         this.destination = destination;
         this.buffers = buffers;
+		// 计算剩余未发送的字节数
         for (ByteBuffer buffer : buffers)
             remaining += buffer.remaining();
         this.size = remaining;
@@ -57,11 +58,15 @@ public class ByteBufferSend implements Send {
 
     @Override
     public long writeTo(GatheringByteChannel channel) throws IOException {
+		// 向channel中写入buffer
         long written = channel.write(buffers);
+		// 写入的字节数为非负数，视为异常
         if (written < 0)
             throw new EOFException("Wrote negative bytes to channel. This shouldn't happen.");
+		// 计算剩余需要写入的字节数
         remaining -= written;
-        pending = TransportLayers.hasPendingWrites(channel);
+
+		pending = TransportLayers.hasPendingWrites(channel);
         return written;
     }
 }

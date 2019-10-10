@@ -117,7 +117,9 @@ public class Sender implements Runnable {
     /* true when the caller wants to ignore all unsent/inflight messages and force close.  */
     private volatile boolean forceClose;
 
-    /* metrics */
+	/**
+	 * Sender发送数据线程专属计数器
+	 */
     private final SenderMetrics sensors;
 
     /* the max time to wait for the server to respond to the request*/
@@ -366,8 +368,9 @@ public class Sender implements Runnable {
 		}
 		// 获取当前时间戳
         long currentTimeMs = time.milliseconds();
-
+		// 发送生产数据，这里这是构建发送数据请求，然后将请求放入到Channel中，等待执行
         long pollTimeout = sendProducerData(currentTimeMs);
+		// 真正的执行请求
         client.poll(pollTimeout, currentTimeMs);
 	}
 
@@ -431,33 +434,38 @@ public class Sender implements Runnable {
 		// 请了解@TransactionState.resetProducerId来理解为什么我们在这里需要重置producer id
 		if (!expiredBatches.isEmpty())
 			log.trace("Expired {} batches in accumulator", expiredBatches.size());
+		// 遍历所有失效的batch，将它们置为失效
 		for (ProducerBatch expiredBatch : expiredBatches) {
 			String errorMessage = "Expiring " + expiredBatch.recordCount + " record(s) for " + expiredBatch.topicPartition
 					+ ":" + (now - expiredBatch.createdMs) + " ms has passed since batch creation";
+			// 对失效batch执行失败操作
 			failBatch(expiredBatch, -1, NO_TIMESTAMP, new TimeoutException(errorMessage), false);
+			// 在拥有事务管理器的情况下，并且失效的batch进入了重试
 			if (transactionManager != null && expiredBatch.inRetry()) {
-				// This ensures that no new batches are drained until the current in flight batches are fully resolved.
+				// 到这里将会确认，在运行中的batch全部解决之前，没有新的batch需要排空
 				transactionManager.markSequenceUnresolved(expiredBatch.topicPartition);
 			}
 		}
+		// Sender发送数据线程专属计数器，统计发送的batch
 		sensors.updateProduceRequestMetrics(batches);
 
-		// If we have any nodes that are ready to send + have sendable data, poll with 0 timeout so this can immediately
-		// loop and try sending more data. Otherwise, the timeout will be the smaller value between next batch expiry
-		// time, and the delay time for checking data availability. Note that the nodes may have data that isn't yet
-		// sendable due to lingering, backing off, etc. This specifically does not include nodes with sendable data
-		// that aren't ready to send since they would cause busy looping.
+		// 如果我们拥有一些节点，这些节点已经准备好发送或者拥有可发送的数据，那么调用poll()方法的时间为0，这样可以立即循环，并且尝试发送更多的数据
+		// 其他情况下，poll()方法的超时时间将会是下一个batch的失效时间和检查数据可用性的延长时间，二者的最小值
+		// 请注意，节点可能存在延迟，撤回等问题，导致无法发送数据
+		// 这种特殊的情况不包括拥有可发送数据，但是还没有准备好发送的节点，这样可能导致频繁的循环
 		long pollTimeout = Math.min(result.nextReadyCheckDelayMs, notReadyTimeout);
 		pollTimeout = Math.min(pollTimeout, this.accumulator.nextExpiryTimeMs() - now);
+		// 等待时间必须大于0
 		pollTimeout = Math.max(pollTimeout, 0);
+		// 如果有准备就绪的节点，
 		if (!result.readyNodes.isEmpty()) {
 			log.trace("Nodes with data ready to send: {}", result.readyNodes);
-			// if some partitions are already ready to be sent, the select time would be 0;
-			// otherwise if some partition already has some data accumulated but not ready yet,
-			// the select time will be the time difference between now and its linger expiry time;
-			// otherwise the select time will be the time difference between now and the metadata expiry time;
+			// 如果一些分区已经准备好发送数据了，select时间为0
+			// 其它情况下，如果一些分区拥有累加的数据，但是还没有就绪，那么select时间为当前时间戳和过期时间之差
+			// 在上述情况的其它情况下，select时间是当前时间戳和集群metadata过期时间之差
 			pollTimeout = 0;
 		}
+		// 构建生产消息请求，返回获取结果的等待时间
 		sendProduceRequests(batches, now);
 		return pollTimeout;
 	}

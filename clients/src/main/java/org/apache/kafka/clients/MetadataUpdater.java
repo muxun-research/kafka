@@ -25,10 +25,10 @@ import java.io.Closeable;
 import java.util.List;
 
 /**
- * The interface used by `NetworkClient` to request cluster metadata info to be updated and to retrieve the cluster nodes
- * from such metadata. This is an internal class.
- * <p>
- * This class is not thread-safe!
+ * NetworkClient使用的用于请求Cluster metadata信息的接口模型
+ * 请求用于更新metadata，以及遍历metadata中存储的集群节点信息
+ * 这是一个内部类
+ * 请注意，并不是线程安全的
  */
 public interface MetadataUpdater extends Closeable {
 
