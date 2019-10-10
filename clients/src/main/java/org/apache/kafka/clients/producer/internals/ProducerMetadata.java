@@ -55,12 +55,17 @@ public class ProducerMetadata extends Metadata {
         return new MetadataRequest.Builder(new ArrayList<>(topics.keySet()), true);
     }
 
-    public synchronized void add(String topic) {
-        Objects.requireNonNull(topic, "topic cannot be null");
-        if (topics.put(topic, TOPIC_EXPIRY_NEEDS_UPDATE) == null) {
-            requestUpdateForNewTopics();
-        }
-    }
+	/**
+	 * 添加topic
+	 * 如果之前已经缓存过这个topic，更新缓存时间
+	 * 如果之前没有缓存过这个topic，添加topic后，更新cluster信息
+	 */
+	public synchronized void add(String topic) {
+		Objects.requireNonNull(topic, "topic cannot be null");
+		if (topics.put(topic, TOPIC_EXPIRY_NEEDS_UPDATE) == null) {
+			requestUpdateForNewTopics();
+		}
+	}
 
     // Visible for testing
     synchronized Set<String> topics() {
@@ -86,17 +91,18 @@ public class ProducerMetadata extends Metadata {
         } else {
             return true;
         }
-    }
+	}
 
-    /**
-     * Wait for metadata update until the current version is larger than the last version we know of
+	/**
+	 * 等待最新更新版本号，比上一次版本号大
      */
     public synchronized void awaitUpdate(final int lastVersion, final long timeoutMs) throws InterruptedException {
         long currentTimeMs = time.milliseconds();
         long deadlineMs = currentTimeMs + timeoutMs < 0 ? Long.MAX_VALUE : currentTimeMs + timeoutMs;
         time.waitObject(this, () -> {
-            // Throw fatal exceptions, if there are any. Recoverable topic errors will be handled by the caller.
+			// 可能会抛出致命错误
             maybeThrowFatalException();
+			// 当更新完cluster信息，或者cluster已经关闭的情况下，解除阻塞
             return updateVersion() > lastVersion || isClosed();
         }, deadlineMs);
 

@@ -68,25 +68,35 @@ import java.util.Objects;
 import static org.apache.kafka.common.record.RecordBatch.NO_TIMESTAMP;
 
 /**
- * The background thread that handles the sending of produce requests to the Kafka cluster. This thread makes metadata
- * requests to renew its view of the cluster and then sends produce requests to the appropriate nodes.
+ * 用于处理发送生产请求到Kafka集群的后台线程
+ * 后台线程用于刷新cluster的视图信息，并且将生产请求发送到合适的节点
  */
 public class Sender implements Runnable {
 
     private final Logger log;
 
-    /* the state of each nodes connection */
+	/**
+	 * 连接节点的客户端
+	 */
     private final KafkaClient client;
 
-    /* the record accumulator that batches records */
+	/**
+	 * 记录record的累加器
+	 */
     private final RecordAccumulator accumulator;
 
 	/**
+	 <<<<<<< HEAD
+	 * client的元数据
+	 =======
 	 * 连接client的元数据
+	 >>>>>>> d2b03115f7683352eaef1621489e84ff96f79799
 	 */
     private final ProducerMetadata metadata;
 
-    /* the flag indicating whether the producer should guarantee the message order on the broker or not. */
+	/**
+	 * 是否需要保证生产时的顺序
+	 */
     private final boolean guaranteeMessageOrder;
 
     /* the maximum request size to attempt to send to the server */
@@ -174,7 +184,7 @@ public class Sender implements Runnable {
             if (batches.isEmpty()) {
                 inFlightBatches.remove(batch.topicPartition);
             }
-        }
+		}
 	}
 
 	/**
@@ -243,8 +253,8 @@ public class Sender implements Runnable {
         return transactionManager != null && transactionManager.hasPendingRequests() && transactionManager.hasOngoingTransaction();
     }
 
-    /**
-     * The main run loop for the sender thread
+	/**
+	 * sender线程核心工作线程
      */
     public void run() {
         log.debug("Starting Kafka producer I/O thread.");
@@ -297,7 +307,7 @@ public class Sender implements Runnable {
             log.debug("Aborting incomplete batches due to forced shutdown");
 			// 中断没有完成的batch
             this.accumulator.abortIncompleteBatches();
-		}
+        }
 		try {
 			// 关闭client
             this.client.close();
@@ -312,6 +322,7 @@ public class Sender implements Runnable {
 	 * 执行一次发送迭代
      */
     void runOnce() {
+		// 如果需要进行事务处理
         if (transactionManager != null) {
 			try {
 				// 在需要的情况下，重置producerId
@@ -600,7 +611,7 @@ public class Sender implements Runnable {
             }
             log.trace("Retry InitProducerIdRequest in {}ms.", retryBackoffMs);
             time.sleep(retryBackoffMs);
-            metadata.requestUpdate();
+			metadata.requestUpdate();
 		}
 	}
 
@@ -796,7 +807,7 @@ public class Sender implements Runnable {
 	 * 根据给定的record batch集合，创建生产请求
      */
     private void sendProduceRequest(long now, int destination, short acks, int timeout, List<ProducerBatch> batches) {
-        if (batches.isEmpty())
+		if (batches.isEmpty())
 			return;
 		// 分区以及分区需要传输的record集合
         Map<TopicPartition, MemoryRecords> produceRecordsByPartition = new HashMap<>(batches.size());

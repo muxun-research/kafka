@@ -22,10 +22,9 @@ import java.nio.ByteBuffer;
 import java.util.Iterator;
 
 /**
- * A record batch is a container for records. In old versions of the record format (versions 0 and 1),
- * a batch consisted always of a single record if no compression was enabled, but could contain
- * many records otherwise. Newer versions (magic versions 2 and above) will generally contain many records
- * regardless of compression.
+ * RecordBatch是一个用于存储records的容器，
+ * 在record旧版本的格式中（0.x版本或者1.x版本），如果没有开启压缩功能，一个batch经常被认为是一条记录，但是却能存储多条记录
+ * 在新版本中，在不考虑压缩的情况，通常也能存储多条记录
  */
 public interface RecordBatch extends Iterable<Record> {
 
@@ -61,30 +60,27 @@ public interface RecordBatch extends Iterable<Record> {
     int NO_PARTITION_LEADER_EPOCH = -1;
 
     /**
-     * Check whether the checksum of this batch is correct.
-     *
+	 * 检查当前batch的状态
      * @return true If so, false otherwise
      */
     boolean isValid();
 
     /**
-     * Raise an exception if the checksum is not valid.
+	 * 确认状态是否是合法的
      */
     void ensureValid();
 
     /**
-     * Get the checksum of this record batch, which covers the batch header as well as all of the records.
-     *
-     * @return The 4-byte unsigned checksum represented as a long
+	 * 获取当前RecordBatch的checksum，将会覆盖batch header以及所有包含的record
+	 * @return 一个4字节无符号的checksum，类型为long
      */
     long checksum();
 
     /**
-     * Get the max timestamp or log append time of this record batch.
-     *
+	 * 获取最大的时间戳，或者是记录添加时间
      * If the timestamp type is create time, this is the max timestamp among all records contained in this batch and
      * the value is updated during compaction.
-     *
+	 * 如果时间戳的类型是create time，这几塑化城
      * @return The max timestamp
      */
     long maxTimestamp();

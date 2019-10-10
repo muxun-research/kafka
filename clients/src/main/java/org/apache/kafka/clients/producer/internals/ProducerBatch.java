@@ -95,26 +95,31 @@ public final class ProducerBatch {
     }
 
     /**
-     * Append the record to the current record set and return the relative offset within that record set
-     *
-     * @return The RecordSend corresponding to this record or null if there isn't sufficient room.
+	 * 向record集合中添加record，返回record集合最近一次的offset
+	 * @return 添加到record set的描述，或者是null
      */
     public FutureRecordMetadata tryAppend(long timestamp, byte[] key, byte[] value, Header[] headers, Callback callback, long now) {
+		// 校验当前batch还能继续写入
         if (!recordsBuilder.hasRoomFor(timestamp, key, value, headers)) {
+			// 不能继续写入，返回null
             return null;
         } else {
+			// 向MemoryRecords中追加内容
             Long checksum = this.recordsBuilder.append(timestamp, key, value, headers);
+			// 计算当前record的总大小
             this.maxRecordSize = Math.max(this.maxRecordSize, AbstractRecords.estimateSizeInBytesUpperBound(magic(),
                     recordsBuilder.compressionType(), key, value, headers));
+			// 更新追加时间
             this.lastAppendTime = now;
+
             FutureRecordMetadata future = new FutureRecordMetadata(this.produceFuture, this.recordCount,
                                                                    timestamp, checksum,
                                                                    key == null ? -1 : key.length,
                                                                    value == null ? -1 : value.length,
                                                                    Time.SYSTEM);
-            // we have to keep every future returned to the users in case the batch needs to be
-            // split to several new batches and resent.
+			// 我们必须确保每个返回给开发者的future，以防batch出现需要分隔成为几个新的batch，然后再重新发送
             thunks.add(new Thunk(callback, future));
+			// 操作record计数器
             this.recordCount++;
             return future;
         }
