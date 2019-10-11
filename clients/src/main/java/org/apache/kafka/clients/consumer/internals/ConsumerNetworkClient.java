@@ -592,17 +592,14 @@ public class ConsumerNetworkClient implements Closeable {
     }
 
     /**
-     * When invoking poll from a multi-threaded environment, it is possible that the condition that
-     * the caller is awaiting has already been satisfied prior to the invocation of poll. We therefore
-     * introduce this interface to push the condition checking as close as possible to the invocation
-     * of poll. In particular, the check will be done while holding the lock used to protect concurrent
-     * access to {@link org.apache.kafka.clients.NetworkClient}, which means implementations must be
-     * very careful about locking order if the callback must acquire additional locks.
+	 * 在多线程环境下调用poll()方法，在调用poll()之前，可能已经满足了调用者的条件
+	 * 因此，我们引入了此接口，以便条件检查尽可能接近于poll()的调用，尤其是，在持有保护并发请求到ConsumerNetworkClient锁时，检查就将完成
+	 * 这意味着，如果回调必须获得其他锁，则实现必须在锁定顺序时非常小心
      */
     public interface PollCondition {
         /**
-         * Return whether the caller is still awaiting an IO event.
-         * @return true if so, false otherwise.
+		 * 判断调用是否需要等IO时间
+		 * @return 需要等待，返回true
          */
         boolean shouldBlock();
     }

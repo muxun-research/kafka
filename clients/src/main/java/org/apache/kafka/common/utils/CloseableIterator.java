@@ -20,10 +20,8 @@ import java.io.Closeable;
 import java.util.Iterator;
 
 /**
- * Iterators that need to be closed in order to release resources should implement this interface.
- *
- * Warning: before implementing this interface, consider if there are better options. The chance of misuse is
- * a bit high since people are used to iterating without closing.
+ * 闭环迭代器
+ * 注意，在实现这个接口之前，考虑下是否有更好的选座，避免由于不习惯闭环，而导致滥用
  */
 public interface CloseableIterator<T> extends Iterator<T>, Closeable {
     void close();

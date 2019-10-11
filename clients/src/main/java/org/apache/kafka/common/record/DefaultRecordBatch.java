@@ -279,26 +279,36 @@ public class DefaultRecordBatch extends AbstractRecordBatch implements MutableRe
         }
     }
 
-    private CloseableIterator<Record> uncompressedIterator() {
-        final ByteBuffer buffer = this.buffer.duplicate();
-        buffer.position(RECORDS_OFFSET);
-        return new RecordIterator() {
-            @Override
-            protected Record readNext(long baseOffset, long firstTimestamp, int baseSequence, Long logAppendTime) {
-                try {
-                    return DefaultRecord.readFrom(buffer, baseOffset, firstTimestamp, baseSequence, logAppendTime);
-                } catch (BufferUnderflowException e) {
-                    throw new InvalidRecordException("Incorrect declared batch size, premature EOF reached");
-                }
-            }
-            @Override
-            protected boolean ensureNoneRemaining() {
-                return !buffer.hasRemaining();
-            }
-            @Override
-            public void close() {}
-        };
-    }
+	/**
+	 * 创建一个RecordIterator迭代器
+	 * @return RecordIterator迭代器
+	 */
+	private CloseableIterator<Record> uncompressedIterator() {
+		// 复制一份RecordBatch的buffer
+		final ByteBuffer buffer = this.buffer.duplicate();
+		// 调整到offset的读取起始位置
+		buffer.position(RECORDS_OFFSET);
+		return new RecordIterator() {
+			@Override
+			protected Record readNext(long baseOffset, long firstTimestamp, int baseSequence, Long logAppendTime) {
+				try {
+					// 根据offset读取数据
+					return DefaultRecord.readFrom(buffer, baseOffset, firstTimestamp, baseSequence, logAppendTime);
+				} catch (BufferUnderflowException e) {
+					throw new InvalidRecordException("Incorrect declared batch size, premature EOF reached");
+				}
+			}
+
+			@Override
+			protected boolean ensureNoneRemaining() {
+				return !buffer.hasRemaining();
+			}
+
+			@Override
+			public void close() {
+			}
+		};
+	}
 
     @Override
     public Iterator<Record> iterator() {
@@ -340,9 +350,11 @@ public class DefaultRecordBatch extends AbstractRecordBatch implements MutableRe
 
     @Override
     public CloseableIterator<Record> streamingIterator(BufferSupplier bufferSupplier) {
+		// 如果开启了压缩，则进行压缩迭代
         if (isCompressed())
             return compressedIterator(bufferSupplier, false);
-        else
+		else
+			// 未开启压缩使用正常的迭代器
             return uncompressedIterator();
     }
 

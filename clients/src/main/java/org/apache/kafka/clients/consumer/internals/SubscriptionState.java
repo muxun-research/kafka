@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.clients.consumer.internals;
 
-import java.util.ArrayList;
 import org.apache.kafka.clients.Metadata;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.NoOffsetForPartitionException;
@@ -30,6 +29,7 @@ import org.apache.kafka.common.requests.IsolationLevel;
 import org.apache.kafka.common.utils.LogContext;
 import org.slf4j.Logger;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -70,9 +70,11 @@ public class SubscriptionState {
 
     private final Logger log;
 
-    private enum SubscriptionType {
-        NONE, AUTO_TOPICS, AUTO_PATTERN, USER_ASSIGNED
-    }
+	/**
+	 * 消费组需要注册的主题，可能会包括一些在订阅topic列表中不存在的topic
+	 * 这样做的原因是它有责任在进行一个消费组的再平衡时，保护元数据的变化
+	 */
+	private Set<String> groupSubscription;
 
     /* the type of subscription */
     private SubscriptionType subscriptionType;
@@ -83,10 +85,14 @@ public class SubscriptionState {
     /* the list of topics the user has requested */
     private Set<String> subscription;
 
-    /* The list of topics the group has subscribed to. This may include some topics which are not part
-     * of `subscription` for the leader of a group since it is responsible for detecting metadata changes
-     * which require a group rebalance. */
-    private Set<String> groupSubscription;
+	public synchronized boolean subscribe(Set<String> topics, ConsumerRebalanceListener listener) {
+		// 注册再平衡listener
+		registerRebalanceListener(listener);
+		// 设置订阅类型为自动注册指定的topic
+		setSubscriptionType(SubscriptionType.AUTO_TOPICS);
+		// 更新订阅的topic
+		return changeSubscription(topics);
+    }
 
     /* the partitions that are currently assigned, note that the order of partition matters (see FetchBuilder for more details) */
     private final PartitionStates<TopicPartitionState> assignment;
@@ -156,41 +162,52 @@ public class SubscriptionState {
             this.subscriptionType = type;
         else if (this.subscriptionType != type)
             throw new IllegalStateException(SUBSCRIPTION_EXCEPTION_MESSAGE);
-    }
+	}
 
-    public synchronized boolean subscribe(Set<String> topics, ConsumerRebalanceListener listener) {
-        registerRebalanceListener(listener);
-        setSubscriptionType(SubscriptionType.AUTO_TOPICS);
-        return changeSubscription(topics);
-    }
+	/**
+	 * 更新订阅的topic集合
+	 * @param topicsToSubscribe 需要订阅的topic集合
+	 * @return 是否发生更新
+	 */
+	private boolean changeSubscription(Set<String> topicsToSubscribe) {
+		// 如果订阅topic没有发生变化，返回false
+		if (subscription.equals(topicsToSubscribe))
+			return false;
+		// 置换需要注册的topic
+		subscription = topicsToSubscribe;
+		// 如果订阅类型是Kafka分配的模式
+		if (subscriptionType != SubscriptionType.USER_ASSIGNED) {
+			// 增量添加新订阅的topic，不进行冗余处理
+			groupSubscription = new HashSet<>(groupSubscription);
+			groupSubscription.addAll(topicsToSubscribe);
+		} else {
+			// 手动模式下，直接替换为新订阅的topic
+			groupSubscription = new HashSet<>(topicsToSubscribe);
+		}
+		return true;
+	}
 
-    public synchronized void subscribe(Pattern pattern, ConsumerRebalanceListener listener) {
-        registerRebalanceListener(listener);
-        setSubscriptionType(SubscriptionType.AUTO_PATTERN);
-        this.subscribedPattern = pattern;
-    }
+	public synchronized void subscribe(Pattern pattern, ConsumerRebalanceListener listener) {
+		registerRebalanceListener(listener);
+		setSubscriptionType(SubscriptionType.AUTO_PATTERN);
+		this.subscribedPattern = pattern;
+	}
 
-    public synchronized boolean subscribeFromPattern(Set<String> topics) {
-        if (subscriptionType != SubscriptionType.AUTO_PATTERN)
-            throw new IllegalArgumentException("Attempt to subscribe from pattern while subscription type set to " +
-                    subscriptionType);
+	public synchronized boolean subscribeFromPattern(Set<String> topics) {
+		if (subscriptionType != SubscriptionType.AUTO_PATTERN)
+			throw new IllegalArgumentException("Attempt to subscribe from pattern while subscription type set to " +
+					subscriptionType);
 
-        return changeSubscription(topics);
-    }
+		return changeSubscription(topics);
+	}
 
-    private boolean changeSubscription(Set<String> topicsToSubscribe) {
-        if (subscription.equals(topicsToSubscribe))
-            return false;
-
-        subscription = topicsToSubscribe;
-        if (subscriptionType != SubscriptionType.USER_ASSIGNED) {
-            groupSubscription = new HashSet<>(groupSubscription);
-            groupSubscription.addAll(topicsToSubscribe);
-        } else {
-            groupSubscription = new HashSet<>(topicsToSubscribe);
-        }
-        return true;
-    }
+	/**
+	 * 当前消费者订阅的消费分区的拷贝
+	 * @return 消费分区信息的拷贝
+	 */
+	public synchronized Set<TopicPartition> assignedPartitions() {
+		return new HashSet<>(this.assignment.partitionSet());
+	}
 
     /**
      * Add topics to the current group subscription. This is used by the group leader to ensure
@@ -378,14 +395,23 @@ public class SubscriptionState {
         } else {
             log.info("Resetting offset for partition {} to offset {}.", tp, offset);
             state.seekUnvalidated(new FetchPosition(offset));
-        }
-    }
+		}
+	}
 
-    /**
-     * @return a modifiable copy of the currently assigned partitions
-     */
-    public synchronized Set<TopicPartition> assignedPartitions() {
-        return new HashSet<>(this.assignment.partitionSet());
+	private enum SubscriptionType {
+		NONE,
+		/**
+		 * 根据指定的topic进行订阅，自动分配分区
+		 */
+		AUTO_TOPICS,
+		/**
+		 * 按照指定的正则表达式匹配topic订阅，自动分配分区
+		 */
+		AUTO_PATTERN,
+		/**
+		 * 用户指定consumer的topic和分区
+		 */
+		USER_ASSIGNED
     }
 
     /**
@@ -673,18 +699,118 @@ public class SubscriptionState {
         Map<TopicPartition, TopicPartitionState> map = new HashMap<>(assignments.size());
         for (TopicPartition tp : assignments)
             map.put(tp, new TopicPartitionState());
-        return map;
-    }
+		return map;
+	}
 
-    private static class TopicPartitionState {
+	/**
+	 * An enumeration of all the possible fetch states. The state transitions are encoded in the values returned by
+	 * {@link FetchState#validTransitions}.
+	 */
+	enum FetchStates implements FetchState {
+		INITIALIZING() {
+			@Override
+			public Collection<FetchState> validTransitions() {
+				return Arrays.asList(FetchStates.FETCHING, FetchStates.AWAIT_RESET, FetchStates.AWAIT_VALIDATION);
+			}
 
-        private FetchState fetchState;
+			@Override
+			public boolean hasPosition() {
+				return false;
+			}
+
+			@Override
+			public boolean hasValidPosition() {
+				return false;
+			}
+		},
+
+		FETCHING() {
+			@Override
+			public Collection<FetchState> validTransitions() {
+				return Arrays.asList(FetchStates.FETCHING, FetchStates.AWAIT_RESET, FetchStates.AWAIT_VALIDATION);
+			}
+
+			@Override
+			public boolean hasPosition() {
+				return true;
+			}
+
+			@Override
+			public boolean hasValidPosition() {
+				return true;
+			}
+		},
+
+		AWAIT_RESET() {
+			@Override
+			public Collection<FetchState> validTransitions() {
+				return Arrays.asList(FetchStates.FETCHING, FetchStates.AWAIT_RESET);
+			}
+
+			@Override
+			public boolean hasPosition() {
+				return true;
+			}
+
+			@Override
+			public boolean hasValidPosition() {
+				return false;
+			}
+		},
+
+		AWAIT_VALIDATION() {
+			@Override
+			public Collection<FetchState> validTransitions() {
+				return Arrays.asList(FetchStates.FETCHING, FetchStates.AWAIT_RESET, FetchStates.AWAIT_VALIDATION);
+			}
+
+			@Override
+			public boolean hasPosition() {
+				return true;
+			}
+
+			@Override
+			public boolean hasValidPosition() {
+				return false;
+			}
+		}
+	}
+
+	/**
+	 * The fetch state of a partition. This class is used to determine valid state transitions and expose the some of
+	 * the behavior of the current fetch state. Actual state variables are stored in the {@link TopicPartitionState}.
+	 */
+	interface FetchState {
+		default FetchState transitionTo(FetchState newState) {
+			if (validTransitions().contains(newState)) {
+				return newState;
+			} else {
+				return this;
+			}
+		}
+
+		Collection<FetchState> validTransitions();
+
+		boolean hasPosition();
+
+		boolean hasValidPosition();
+	}
+
+	private static class TopicPartitionState {
+
+		private FetchState fetchState;
+		/**
+		 * 上一次消费的位置
+		 */
         private FetchPosition position; // last consumed position
 
         private Long highWatermark; // the high watermark from last fetch
-        private Long logStartOffset; // the log start offset
-        private Long lastStableOffset;
-        private boolean paused;  // whether this partition has been paused by the user
+		private Long logStartOffset; // the log start offset
+		private Long lastStableOffset;
+		/**
+		 * 开发者是否暂停了当前分区
+		 */
+        private boolean paused;
         private OffsetResetStrategy resetStrategy;  // the strategy to use if the offset needs resetting
         private Long nextRetryTimeMs;
         private Integer preferredReadReplica;
@@ -872,115 +998,24 @@ public class SubscriptionState {
         }
 
         private OffsetResetStrategy resetStrategy() {
-            return resetStrategy;
+			return resetStrategy;
         }
     }
 
     /**
-     * The fetch state of a partition. This class is used to determine valid state transitions and expose the some of
-     * the behavior of the current fetch state. Actual state variables are stored in the {@link TopicPartitionState}.
-     */
-    interface FetchState {
-        default FetchState transitionTo(FetchState newState) {
-            if (validTransitions().contains(newState)) {
-                return newState;
-            } else {
-                return this;
-            }
-        }
-
-        Collection<FetchState> validTransitions();
-
-        boolean hasPosition();
-
-        boolean hasValidPosition();
-    }
-
-    /**
-     * An enumeration of all the possible fetch states. The state transitions are encoded in the values returned by
-     * {@link FetchState#validTransitions}.
-     */
-    enum FetchStates implements FetchState {
-        INITIALIZING() {
-            @Override
-            public Collection<FetchState> validTransitions() {
-                return Arrays.asList(FetchStates.FETCHING, FetchStates.AWAIT_RESET, FetchStates.AWAIT_VALIDATION);
-            }
-
-            @Override
-            public boolean hasPosition() {
-                return false;
-            }
-
-            @Override
-            public boolean hasValidPosition() {
-                return false;
-            }
-        },
-
-        FETCHING() {
-            @Override
-            public Collection<FetchState> validTransitions() {
-                return Arrays.asList(FetchStates.FETCHING, FetchStates.AWAIT_RESET, FetchStates.AWAIT_VALIDATION);
-            }
-
-            @Override
-            public boolean hasPosition() {
-                return true;
-            }
-
-            @Override
-            public boolean hasValidPosition() {
-                return true;
-            }
-        },
-
-        AWAIT_RESET() {
-            @Override
-            public Collection<FetchState> validTransitions() {
-                return Arrays.asList(FetchStates.FETCHING, FetchStates.AWAIT_RESET);
-            }
-
-            @Override
-            public boolean hasPosition() {
-                return true;
-            }
-
-            @Override
-            public boolean hasValidPosition() {
-                return false;
-            }
-        },
-
-        AWAIT_VALIDATION() {
-            @Override
-            public Collection<FetchState> validTransitions() {
-                return Arrays.asList(FetchStates.FETCHING, FetchStates.AWAIT_RESET, FetchStates.AWAIT_VALIDATION);
-            }
-
-            @Override
-            public boolean hasPosition() {
-                return true;
-            }
-
-            @Override
-            public boolean hasValidPosition() {
-                return false;
-            }
-        }
-    }
-
-    /**
-     * Represents the position of a partition subscription.
-     *
+     * partition的分区订阅位置信息
      * This includes the offset and epoch from the last record in
      * the batch from a FetchResponse. It also includes the leader epoch at the time the batch was consumed.
-     *
-     * The last fetch epoch is used to
-     */
-    public static class FetchPosition {
-        public final long offset;
-        final Optional<Integer> offsetEpoch;
+	 *
+	 * The last fetch epoch is used to
+	 */
+	public static class FetchPosition {
+		/**
+		 * 偏移量
+		 */
+		public final long offset;
+
+		final Optional<Integer> offsetEpoch;
         final Metadata.LeaderAndEpoch currentLeader;
 
         FetchPosition(long offset) {

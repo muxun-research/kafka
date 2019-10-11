@@ -86,7 +86,7 @@ public class FetchMetadata {
     }
 
     /**
-     * Returns true if this is a full fetch request.
+	 * 版本为初始化或者最后一次拉取
      */
     public boolean isFull() {
         return (this.epoch == INITIAL_EPOCH) || (this.epoch == FINAL_EPOCH);

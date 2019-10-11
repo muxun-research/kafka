@@ -56,6 +56,7 @@ public class ConsumerInterceptors<K, V> implements Closeable {
      */
     public ConsumerRecords<K, V> onConsume(ConsumerRecords<K, V> records) {
         ConsumerRecords<K, V> interceptRecords = records;
+		// 批量执行拦截器
         for (ConsumerInterceptor<K, V> interceptor : this.interceptors) {
             try {
                 interceptRecords = interceptor.onConsume(interceptRecords);
