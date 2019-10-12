@@ -677,23 +677,30 @@ public class Fetcher<K, V> implements Closeable {
 					nextInLineRecords = null;
 				} else {
 					// nextInLineRecords处于正常需要处理的状态
-					// 拉取数据
+					// 转换拉取到的数据
 					List<ConsumerRecord<K, V>> records = fetchRecords(nextInLineRecords, recordsRemaining);
-
+					// 如果需要处理拉取到的数据
 					if (!records.isEmpty()) {
+						// 获取当前的topic-partition信息
 						TopicPartition partition = nextInLineRecords.partition;
+						// 检查当前topic-partition是否还有没有处理完成的record
 						List<ConsumerRecord<K, V>> currentRecords = fetched.get(partition);
+						// 如果当前topic-partition没有需要处理的record，处理本次拉取到的record
 						if (currentRecords == null) {
 							fetched.put(partition, records);
 						} else {
-							// this case shouldn't usually happen because we only send one fetch at a time per partition,
-							// but it might conceivably happen in some rare cases (such as partition leader changes).
-							// we have to copy to a new list because the old one may be immutable
+							// 当前topic-partition存在没有需要处理的record
+							// 这种情况不经常发生，因为我们在同一时间对每个分区只会发送一个fetch请求
+							// 但是它却能让人信服地发生在一些罕见的场合，比如partition的leader节点发生了变化
+							// 我们必须拷贝到一个新的list，因为旧的list可能是不可变的
+							// 创建一个新的用于存放record的集合
 							List<ConsumerRecord<K, V>> newRecords = new ArrayList<>(records.size() + currentRecords.size());
 							newRecords.addAll(currentRecords);
 							newRecords.addAll(records);
+							// 新、旧需要处理的record全部添加进去，并覆盖已有的信息
 							fetched.put(partition, newRecords);
 						}
+						// 递减需要处理的record，进行下一个PartitionRecords的处理
 						recordsRemaining -= records.size();
 					}
 				}
@@ -702,8 +709,7 @@ public class Fetcher<K, V> implements Closeable {
 			if (fetched.isEmpty())
 				throw e;
 		} finally {
-			// add any polled completed fetches for paused partitions back to the completed fetches queue to be
-			// re-evaluated in the next poll
+			// 将轮询到的已完成的，但是因为种种原因partition处于暂停状态的fetch，重新放回completedFetches中，等待在下一次轮询中重新进行评估
 			completedFetches.addAll(pausedCompletedFetches);
 		}
 
@@ -737,26 +743,30 @@ public class Fetcher<K, V> implements Closeable {
 			if (partitionRecords.nextFetchOffset == position.offset) {
 				// 获取指定数目的records
 				List<ConsumerRecord<K, V>> partRecords = partitionRecords.fetchRecords(maxRecords);
-
+				// 如果请求时的offset大于订阅列表已有的offset
 				if (partitionRecords.nextFetchOffset > position.offset) {
+					// 设置新的读取offset位置，覆盖订阅列表中的记录的offset
 					SubscriptionState.FetchPosition nextPosition = new SubscriptionState.FetchPosition(
 							partitionRecords.nextFetchOffset,
 							partitionRecords.lastEpoch,
 							position.currentLeader);
 					log.trace("Returning fetched records at offset {} for assigned partition {} and update " +
 							"position to {}", position, partitionRecords.partition, nextPosition);
+					// 更新订阅的position位置
 					subscriptions.position(partitionRecords.partition, nextPosition);
 				}
-
+				//
 				Long partitionLag = subscriptions.partitionLag(partitionRecords.partition, isolationLevel);
 				if (partitionLag != null)
+					// 存在消息积压的情况，使用计数器记录消息积压情况
 					this.sensors.recordPartitionLag(partitionRecords.partition, partitionLag);
-
+				// 获取当前consumer已经消费的offset
 				Long lead = subscriptions.partitionLead(partitionRecords.partition);
+				// 记录当前consumer已经消费的offset
 				if (lead != null) {
 					this.sensors.recordPartitionLead(partitionRecords.partition, lead);
 				}
-
+				// 返回已经解析完成的ConsumerRecord集合
 				return partRecords;
 			} else {
 				// 这些records并不是基于上一次已消费的位置来进行处理，忽略它们
@@ -765,7 +775,7 @@ public class Fetcher<K, V> implements Closeable {
 						partitionRecords.partition, partitionRecords.nextFetchOffset, position);
 			}
 		}
-
+		// 走到这里，证明命中了上面的异常情况，不处理当前拉取到的PartitionRecord，返回空ConsumerRecord
 		log.trace("Draining fetched records for partition {}", partitionRecords.partition);
 		partitionRecords.drain();
 
@@ -1924,11 +1934,16 @@ public class Fetcher<K, V> implements Closeable {
 						break;
 					// 构建ConsumerRecord
 					records.add(parseRecord(partition, currentBatch, lastRecord));
+					// 读取的计数器+1
 					recordsRead++;
+					// 累加读取的字节数
 					bytesRead += lastRecord.sizeInBytes();
+					// 累加offset
 					nextFetchOffset = lastRecord.offset() + 1;
 					// In some cases, the deserialization may have thrown an exception and the retry may succeed,
 					// we allow user to move forward in this case.
+					// 在某些场景下，反序列化可能会抛出异常，并且重试可能会成功
+					// 在这写场景下，我们允许开发者继续进行下去
 					cachedRecordException = null;
 				}
 			} catch (SerializationException se) {

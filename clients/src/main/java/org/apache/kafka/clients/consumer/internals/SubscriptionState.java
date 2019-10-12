@@ -505,18 +505,36 @@ public class SubscriptionState {
         return assignedState(tp).position;
     }
 
-    synchronized Long partitionLag(TopicPartition tp, IsolationLevel isolationLevel) {
-        TopicPartitionState topicPartitionState = assignedState(tp);
-        if (isolationLevel == IsolationLevel.READ_COMMITTED)
-            return topicPartitionState.lastStableOffset == null ? null : topicPartitionState.lastStableOffset - topicPartitionState.position.offset;
-        else
-            return topicPartitionState.highWatermark == null ? null : topicPartitionState.highWatermark - topicPartitionState.position.offset;
-    }
+	/**
+	 * 获取消费积压情况
+	 * @param tp             需要查看消费积压的分区
+	 * @param isolationLevel 事务等级
+	 * @return 消费积压情况
+	 */
+	synchronized Long partitionLag(TopicPartition tp, IsolationLevel isolationLevel) {
+		// 获取当前topic-partition的状态
+		TopicPartitionState topicPartitionState = assignedState(tp);
+		// 如果开启了可重读事务等级
+		if (isolationLevel == IsolationLevel.READ_COMMITTED)
+			// 如果不存在上一次提交的offset，则没有积压
+			// 如果存在上一次提交的offset，则积压数=上一次提交的offset-当前订阅中记录的offset（在fetch的时候，已经被更新过）
+			return topicPartitionState.lastStableOffset == null ? null : topicPartitionState.lastStableOffset - topicPartitionState.position.offset;
+		else
+			// 如果没有开启事务，则使用highWaterMark进行计算
+			// 如果没有highWaterMark，则返回没有积压
+			// 如果有highWaterMark，则积压数=当前消费者得到的highWaterMark-当前订阅中记录的offset（在fetch的时候，已经被更新过）
+			return topicPartitionState.highWatermark == null ? null : topicPartitionState.highWatermark - topicPartitionState.position.offset;
+	}
 
-    synchronized Long partitionLead(TopicPartition tp) {
-        TopicPartitionState topicPartitionState = assignedState(tp);
-        return topicPartitionState.logStartOffset == null ? null : topicPartitionState.position.offset - topicPartitionState.logStartOffset;
-    }
+	/**
+	 * 计算目前为止，当前consumer已经消费指定topic-partition的offset
+	 * @param tp 指定的topic-partition
+	 * @return 当前consumer已经消费的offset
+	 */
+	synchronized Long partitionLead(TopicPartition tp) {
+		TopicPartitionState topicPartitionState = assignedState(tp);
+		return topicPartitionState.logStartOffset == null ? null : topicPartitionState.position.offset - topicPartitionState.logStartOffset;
+	}
 
     synchronized void updateHighWatermark(TopicPartition tp, long highWatermark) {
         assignedState(tp).highWatermark(highWatermark);
@@ -800,18 +818,32 @@ public class SubscriptionState {
 
 		private FetchState fetchState;
 		/**
-		 * 上一次消费的位置
+		 * 上一次消费到的位置
 		 */
-        private FetchPosition position; // last consumed position
-
+		private FetchPosition position;
+		/**
+		 * 消费者可以看到的最高的日志记录offset
+		 * 比如一个topic有三个broker，三个broker每个都有自己的日志文件
+		 * highWaterMark则是这几个日志文件末尾offset的最小值
+		 * 消费者只能拉取到highWaterMark之前的消息
+		 */
         private Long highWatermark; // the high watermark from last fetch
+		/**
+		 * 记录的起始offset
+		 */
 		private Long logStartOffset; // the log start offset
+		/**
+		 * 最后一次提交的offset
+		 */
 		private Long lastStableOffset;
 		/**
 		 * 开发者是否暂停了当前分区
 		 */
         private boolean paused;
-        private OffsetResetStrategy resetStrategy;  // the strategy to use if the offset needs resetting
+		/**
+		 * offset重置策略
+		 */
+		private OffsetResetStrategy resetStrategy;
         private Long nextRetryTimeMs;
         private Integer preferredReadReplica;
         private Long preferredReadReplicaExpireTimeMs;
