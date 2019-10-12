@@ -247,18 +247,26 @@ public abstract class AbstractCoordinator implements Closeable {
         return !coordinatorUnknown();
     }
 
-    protected synchronized RequestFuture<Void> lookupCoordinator() {
-        if (findCoordinatorFuture == null) {
-            // find a node to ask about the coordinator
-            Node node = this.client.leastLoadedNode();
-            if (node == null) {
-                log.debug("No broker available to send FindCoordinator request");
-                return RequestFuture.noBrokersAvailable();
-            } else
-                findCoordinatorFuture = sendFindCoordinatorRequest(node);
-        }
-        return findCoordinatorFuture;
-    }
+	/**
+	 * 查询当前consumer的协调者
+	 * 是线程安全的
+	 * @return 包装了协调者的异步结果
+	 */
+	protected synchronized RequestFuture<Void> lookupCoordinator() {
+		if (findCoordinatorFuture == null) {
+			// 找到最近工作的node节点，向它询问现在的协调者是哪个节点
+			Node node = this.client.leastLoadedNode();
+			if (node == null) {
+				log.debug("No broker available to send FindCoordinator request");
+				// 如果连这样的节点都没有找到，那真只能失败了，返回没有可用的broker结果
+				return RequestFuture.noBrokersAvailable();
+			} else
+				// 向当前节点咨询当前的协调者是哪个节点
+				findCoordinatorFuture = sendFindCoordinatorRequest(node);
+		}
+		// 返回包装了协调者的异步结果
+		return findCoordinatorFuture;
+	}
 
     private synchronized void clearFindCoordinatorFuture() {
         findCoordinatorFuture = null;
@@ -771,12 +779,12 @@ public abstract class AbstractCoordinator implements Closeable {
             // Pending callbacks will be invoked with a DisconnectException on the next call to poll.
             if (!isDisconnected)
                 client.disconnectAsync(oldCoordinator);
-        }
-    }
+		}
+	}
 
-    /**
-     * Get the current generation state if the group is stable.
-     * @return the current generation or null if the group is unjoined/rebalancing
+	/**
+	 * 获取稳定消费组的当前版本
+	 * @return 获取当前的版本，如果消费组处于未加入或者再平衡，返回null
      */
     protected synchronized Generation generation() {
         if (this.state != MemberState.STABLE)

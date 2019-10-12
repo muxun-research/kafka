@@ -94,7 +94,11 @@ public class SubscriptionState {
 		return changeSubscription(topics);
     }
 
-    /* the partitions that are currently assigned, note that the order of partition matters (see FetchBuilder for more details) */
+	/**
+	 * 当前已分配的partition状态集合
+	 * 需要注意的是，分区的顺序很重要
+	 * 详细请看FetchBuilder
+	 */
     private final PartitionStates<TopicPartitionState> assignment;
 
     /* Default offset reset strategy */
@@ -378,11 +382,17 @@ public class SubscriptionState {
 
     public void seek(TopicPartition tp, long offset) {
         seekValidated(tp, new FetchPosition(offset));
-    }
+	}
 
-    public void seekUnvalidated(TopicPartition tp, FetchPosition position) {
-        assignedState(tp).seekUnvalidated(position);
-    }
+	/**
+	 * 在不进行校验的情况下，进行提交
+	 * @param tp
+	 * @param position
+	 */
+	public void seekUnvalidated(TopicPartition tp, FetchPosition position) {
+		// 获取当前当前的partition状态，在不进行校验的情况下，进行提交
+		assignedState(tp).seekUnvalidated(position);
+	}
 
     synchronized void maybeSeekUnvalidated(TopicPartition tp, long offset, OffsetResetStrategy requestedResetStrategy) {
         TopicPartitionState state = assignedStateOrNull(tp);
@@ -579,18 +589,25 @@ public class SubscriptionState {
      */
     public synchronized Optional<Integer> clearPreferredReadReplica(TopicPartition tp) {
         return assignedState(tp).clearPreferredReadReplica();
-    }
+	}
 
-    public synchronized Map<TopicPartition, OffsetAndMetadata> allConsumed() {
-        Map<TopicPartition, OffsetAndMetadata> allConsumed = new HashMap<>();
-        assignment.stream().forEach(state -> {
-            TopicPartitionState partitionState = state.value();
-            if (partitionState.hasValidPosition())
-                allConsumed.put(state.topicPartition(), new OffsetAndMetadata(partitionState.position.offset,
-                        partitionState.position.offsetEpoch, ""));
-        });
-        return allConsumed;
-    }
+	/**
+	 * 获取所有参与消费的OffsetAndMetadata信息
+	 * @return topic-partition维度的OffsetAndMetadata信息
+	 */
+	public synchronized Map<TopicPartition, OffsetAndMetadata> allConsumed() {
+		Map<TopicPartition, OffsetAndMetadata> allConsumed = new HashMap<>();
+		// 遍历已经分配的partition，不能并发遍历，顺序很重要
+		assignment.stream().forEach(state -> {
+			TopicPartitionState partitionState = state.value();
+			// 如果有合法的消费为止
+			if (partitionState.hasValidPosition())
+				// 构建offset信息，放入到已消费的集群中
+				allConsumed.put(state.topicPartition(), new OffsetAndMetadata(partitionState.position.offset,
+						partitionState.position.offsetEpoch, ""));
+		});
+		return allConsumed;
+	}
 
     public synchronized void requestOffsetReset(TopicPartition partition, OffsetResetStrategy offsetResetStrategy) {
         assignedState(partition).reset(offsetResetStrategy);
@@ -795,14 +812,16 @@ public class SubscriptionState {
 	}
 
 	/**
-	 * The fetch state of a partition. This class is used to determine valid state transitions and expose the some of
-	 * the behavior of the current fetch state. Actual state variables are stored in the {@link TopicPartitionState}.
+	 * 一个partition的fetch状态，这个类用来确认可供传输的合法的状态，并公开当前获取状态的一些行为
+	 * 真正的状态变量存储于{@link TopicPartitionState}中
 	 */
 	interface FetchState {
 		default FetchState transitionTo(FetchState newState) {
+			// 如果在可进行传输的状态中包含次状态，则返回此状态
 			if (validTransitions().contains(newState)) {
 				return newState;
 			} else {
+				// 否则返回当前状态
 				return this;
 			}
 		}
@@ -858,15 +877,21 @@ public class SubscriptionState {
             this.resetStrategy = null;
             this.nextRetryTimeMs = null;
             this.preferredReadReplica = null;
-        }
+		}
 
-        private void transitionState(FetchState newState, Runnable runIfTransitioned) {
-            FetchState nextState = this.fetchState.transitionTo(newState);
-            if (nextState.equals(newState)) {
-                this.fetchState = nextState;
-                runIfTransitioned.run();
-            }
-        }
+		/**
+		 * 传输fetch状态
+		 * @param newState          新的fetch状态
+		 * @param runIfTransitioned
+		 */
+		private void transitionState(FetchState newState, Runnable runIfTransitioned) {
+			FetchState nextState = this.fetchState.transitionTo(newState);
+			if (nextState.equals(newState)) {
+				this.fetchState = nextState;
+				// 更新状态后，执行任务
+				runIfTransitioned.run();
+			}
+		}
 
         private Optional<Integer> preferredReadReplica(long timeMs) {
             if (preferredReadReplicaExpireTimeMs != null && timeMs > preferredReadReplicaExpireTimeMs) {
@@ -917,23 +942,29 @@ public class SubscriptionState {
                 validatePosition(newPosition);
                 preferredReadReplica = null;
             }
-            return this.fetchState.equals(FetchStates.AWAIT_VALIDATION);
-        }
+			return this.fetchState.equals(FetchStates.AWAIT_VALIDATION);
+		}
 
-        private void validatePosition(FetchPosition position) {
-            if (position.offsetEpoch.isPresent() && position.currentLeader.epoch.isPresent()) {
-                transitionState(FetchStates.AWAIT_VALIDATION, () -> {
-                    this.position = position;
-                    this.nextRetryTimeMs = null;
-                });
-            } else {
-                // If we have no epoch information for the current position, then we can skip validation
-                transitionState(FetchStates.FETCHING, () -> {
-                    this.position = position;
-                    this.nextRetryTimeMs = null;
-                });
-            }
-        }
+		/**
+		 * 校验fetch时的位置
+		 * @param position
+		 */
+		private void validatePosition(FetchPosition position) {
+			// 如果fetch时获取到了leader的epoch，并且也拥有当前leader的epoch
+			if (position.offsetEpoch.isPresent() && position.currentLeader.epoch.isPresent()) {
+
+				transitionState(FetchStates.AWAIT_VALIDATION, () -> {
+					this.position = position;
+					this.nextRetryTimeMs = null;
+				});
+			} else {
+				// If we have no epoch information for the current position, then we can skip validation
+				transitionState(FetchStates.FETCHING, () -> {
+					this.position = position;
+					this.nextRetryTimeMs = null;
+				});
+			}
+		}
 
         /**
          * Clear the awaiting validation state and enter fetching.

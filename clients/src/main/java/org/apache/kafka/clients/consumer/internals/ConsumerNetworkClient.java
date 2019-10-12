@@ -58,7 +58,10 @@ public class ConsumerNetworkClient implements Closeable {
     // flag and the request completion queue below).
     private final Logger log;
     private final KafkaClient client;
-    private final UnsentRequests unsent = new UnsentRequests();
+	/**
+	 * 缓存的没有发送的请求
+	 */
+	private final UnsentRequests unsent = new UnsentRequests();
     private final Metadata metadata;
     private final Time time;
     private final long retryBackoffMs;
@@ -93,41 +96,38 @@ public class ConsumerNetworkClient implements Closeable {
         this.retryBackoffMs = retryBackoffMs;
         this.maxPollTimeoutMs = Math.min(maxPollTimeoutMs, MAX_POLL_TIMEOUT_MS);
         this.requestTimeoutMs = requestTimeoutMs;
-    }
+	}
 
 
-    /**
-     * Send a request with the default timeout. See {@link #send(Node, AbstractRequest.Builder, int)}.
+	/**
+	 * 在默认的等待时间内，发送请求
      */
     public RequestFuture<ClientResponse> send(Node node, AbstractRequest.Builder<?> requestBuilder) {
         return send(node, requestBuilder, requestTimeoutMs);
-    }
+	}
 
-    /**
-     * Send a new request. Note that the request is not actually transmitted on the
-     * network until one of the {@link #poll(Timer)} variants is invoked. At this
-     * point the request will either be transmitted successfully or will fail.
-     * Use the returned future to obtain the result of the send. Note that there is no
-     * need to check for disconnects explicitly on the {@link ClientResponse} object;
-     * instead, the future will be failed with a {@link DisconnectException}.
-     *
-     * @param node The destination of the request
-     * @param requestBuilder A builder for the request payload
-     * @param requestTimeoutMs Maximum time in milliseconds to await a response before disconnecting the socket and
-     *                         cancelling the request. The request may be cancelled sooner if the socket disconnects
-     *                         for any reason.
-     * @return A future which indicates the result of the send.
+	/**
+	 * 发送一个新的请求，需要注意的是，请求不会真实的执行，直到poll()方法实例调用
+	 * 请求可能成功，可能失败
+	 * 使用future来包装发送结果，需要注意的是，不需要去在{@link ClientResponse}对象中刻意检查连接是否断开，因为它会自动抛出{@link DisconnectException}异常
+	 * @param node 请求发送的目的地
+	 * @param requestBuilder request payload载体
+	 * @param requestTimeoutMs 等待请求的最大时间，如果请求被取消，socket会以任何理由断开socket连接
+	 * @return 请求发送的结果
      */
     public RequestFuture<ClientResponse> send(Node node,
                                               AbstractRequest.Builder<?> requestBuilder,
                                               int requestTimeoutMs) {
         long now = time.milliseconds();
+		// 创建请求完成处理器，并添加请求处理中
         RequestFutureCompletionHandler completionHandler = new RequestFutureCompletionHandler();
         ClientRequest clientRequest = client.newClientRequest(node.idString(), requestBuilder, now, true,
                 requestTimeoutMs, completionHandler);
+		// 向待发送的请求中添加发送请求
         unsent.put(node, clientRequest);
 
-        // wakeup the client in case it is blocking in poll so that we can send the queued request
+		// 当前client和在poll()方法向broker进行轮询的client是同一个ConsumerNetworkClient，唤醒client以便可以继续发送请求
+		// 请求和是发送是由client决定的，而非事件方法掉用决定的
         client.wakeup();
         return completionHandler.future;
     }
@@ -294,10 +294,10 @@ public class ConsumerNetworkClient implements Closeable {
         firePendingCompletedRequests();
 
         metadata.maybeThrowAnyException();
-    }
+	}
 
-    /**
-     * Poll for network IO and return immediately. This will not trigger wakeups.
+	/**
+	 * 轮询网络IO，并立即返回，不会触发唤醒操作
      */
     public void pollNoWakeup() {
         poll(time.timer(0), null, true);

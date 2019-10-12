@@ -19,16 +19,16 @@ package org.apache.kafka.clients.consumer.internals;
 import org.apache.kafka.clients.GroupRebalanceConfig;
 import org.apache.kafka.clients.consumer.CommitFailedException;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor;
 import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
+import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor;
+import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor.Assignment;
 import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor.GroupSubscription;
+import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor.RebalanceProtocol;
 import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor.Subscription;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.OffsetCommitCallback;
 import org.apache.kafka.clients.consumer.RetriableCommitFailedException;
-import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor.Assignment;
-import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor.RebalanceProtocol;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.Node;
@@ -103,7 +103,10 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     private MetadataSnapshot metadataSnapshot;
     private MetadataSnapshot assignmentSnapshot;
     private Timer nextAutoCommitTimer;
-    private AtomicBoolean asyncCommitFenced;
+	/**
+	 * 异步提交栅栏
+	 */
+	private AtomicBoolean asyncCommitFenced;
 
     // hold onto request&future for committed offset requests to enable async calls.
     private PendingCommittedOffsetRequest pendingCommittedOffsetRequest = null;
@@ -824,82 +827,127 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     }
 
     // visible for testing
-    void invokeCompletedOffsetCommitCallbacks() {
-        if (asyncCommitFenced.get()) {
-            throw new FencedInstanceIdException("Get fenced exception for group.instance.id "
-                + rebalanceConfig.groupInstanceId.orElse("unset_instance_id")
-                + ", current member.id is " + memberId());
-        }
-        while (true) {
-            OffsetCommitCompletion completion = completedOffsetCommits.poll();
-            if (completion == null) {
-                break;
-            }
-            completion.invoke();
-        }
-    }
 
-    public void commitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, final OffsetCommitCallback callback) {
-        invokeCompletedOffsetCommitCallbacks();
+	/**
+	 * 调用已完成offset提交的回调任务
+	 */
+	void invokeCompletedOffsetCommitCallbacks() {
+		// 获取异步提交栅栏，如果存在栅栏，视为不正常情况，抛出异常
+		if (asyncCommitFenced.get()) {
+			throw new FencedInstanceIdException("Get fenced exception for group.instance.id "
+					+ rebalanceConfig.groupInstanceId.orElse("unset_instance_id")
+					+ ", current member.id is " + memberId());
+		}
+		// 不存在提交栅栏的情况下，处理已完成的offset提交的任务的回调
+		while (true) {
+			OffsetCommitCompletion completion = completedOffsetCommits.poll();
+			if (completion == null) {
+				break;
+			}
+			completion.invoke();
+		}
+	}
 
-        if (!coordinatorUnknown()) {
-            doCommitOffsetsAsync(offsets, callback);
-        } else {
-            // we don't know the current coordinator, so try to find it and then send the commit
-            // or fail (we don't want recursive retries which can cause offset commits to arrive
-            // out of order). Note that there may be multiple offset commits chained to the same
-            // coordinator lookup request. This is fine because the listeners will be invoked in
-            // the same order that they were added. Note also that AbstractCoordinator prevents
-            // multiple concurrent coordinator lookup requests.
-            pendingAsyncCommits.incrementAndGet();
-            lookupCoordinator().addListener(new RequestFutureListener<Void>() {
-                @Override
-                public void onSuccess(Void value) {
-                    pendingAsyncCommits.decrementAndGet();
-                    doCommitOffsetsAsync(offsets, callback);
-                    client.pollNoWakeup();
-                }
+	/**
+	 * 异步提交offset
+	 * @param offsets  以topic-partition为维度，需要进行提交的offset集合
+	 * @param callback 提交后的回调任务
+	 */
+	public void commitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, final OffsetCommitCallback callback) {
+		// 调用已完成offset提交的回调任务
+		invokeCompletedOffsetCommitCallbacks();
+		// 如果协调器状态不处于未知状态
+		if (!coordinatorUnknown()) {
+			// 执行异步提交offset
+			doCommitOffsetsAsync(offsets, callback);
+		} else {
+			// 如果没有协调者，也就代表没有提交offset的请求目标
+			// 我们需要尝试去寻找协调者，或者执行失败操作
+			// 我们不希望递归重试操作，因为这可能导致offset提交的顺序打乱
+			// 需要注意的是，对于同一个协调者，可能会有多个offset提交链
+			// 这是可以接受的，因为listener的顺序就是提交的顺序
+			// 还需要注意的是，AbstractCoordinator会保护多个协调者的并发请求
+			pendingAsyncCommits.incrementAndGet();
+			// 向查找协调者的异步结果中添加listener
+			lookupCoordinator().addListener(new RequestFutureListener<Void>() {
+				/**
+				 * 请求成功
+				 * @param value
+				 */
+				@Override
+				public void onSuccess(Void value) {
+					// 挂起的异步提交数量-1
+					pendingAsyncCommits.decrementAndGet();
+					// 异步执行commit提交
+					doCommitOffsetsAsync(offsets, callback);
+					// 不触发唤醒的情况下，进行一次轮询
+					client.pollNoWakeup();
+				}
 
-                @Override
-                public void onFailure(RuntimeException e) {
-                    pendingAsyncCommits.decrementAndGet();
-                    completedOffsetCommits.add(new OffsetCommitCompletion(callback, offsets,
-                            new RetriableCommitFailedException(e)));
-                }
-            });
-        }
+				/**
+				 * 请求失败
+				 * @param e
+				 */
+				@Override
+				public void onFailure(RuntimeException e) {
+					// 也进行挂起的异步提交数量-1
+					pendingAsyncCommits.decrementAndGet();
+					// 同时添加已完成的offset提交任务
+					completedOffsetCommits.add(new OffsetCommitCompletion(callback, offsets,
+							new RetriableCommitFailedException(e)));
+				}
+			});
+		}
 
-        // ensure the commit has a chance to be transmitted (without blocking on its completion).
-        // Note that commits are treated as heartbeats by the coordinator, so there is no need to
-        // explicitly allow heartbeats through delayed task execution.
-        client.pollNoWakeup();
-    }
+		// 确认当前提交有机会进行传输，避免阻塞
+		// 需要注意的是，提交将会被协调者判定为心跳连接，因为无需通过延迟任务的执行来明确允许心跳
+		client.pollNoWakeup();
+	}
 
-    private void doCommitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, final OffsetCommitCallback callback) {
-        RequestFuture<Void> future = sendOffsetCommitRequest(offsets);
-        final OffsetCommitCallback cb = callback == null ? defaultOffsetCommitCallback : callback;
-        future.addListener(new RequestFutureListener<Void>() {
-            @Override
-            public void onSuccess(Void value) {
-                if (interceptors != null)
-                    interceptors.onCommit(offsets);
-                completedOffsetCommits.add(new OffsetCommitCompletion(cb, offsets, null));
-            }
+	/**
+	 * 执行异步提交offset
+	 * @param offsets  需要提交变异量的集合
+	 * @param callback 提交后需要执行的回调任务
+	 */
+	private void doCommitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, final OffsetCommitCallback callback) {
+		// 发送提交offset请求
+		RequestFuture<Void> future = sendOffsetCommitRequest(offsets);
+		// 没有指定提交后的回调任务，使用默认的offset提交回调任务
+		final OffsetCommitCallback cb = callback == null ? defaultOffsetCommitCallback : callback;
+		future.addListener(new RequestFutureListener<Void>() {
+			/**
+			 * 提交成功处理
+			 * @param value
+			 */
+			@Override
+			public void onSuccess(Void value) {
+				// 执行拦截器操作
+				if (interceptors != null)
+					interceptors.onCommit(offsets);
+				// 已完成的offset提交添加新处理完成的offset提交
+				completedOffsetCommits.add(new OffsetCommitCompletion(cb, offsets, null));
+			}
 
-            @Override
-            public void onFailure(RuntimeException e) {
-                Exception commitException = e;
+			/**
+			 * 提交失败处理
+			 * @param e
+			 */
+			@Override
+			public void onFailure(RuntimeException e) {
+				Exception commitException = e;
 
-                if (e instanceof RetriableException) {
-                    commitException = new RetriableCommitFailedException(e);
-                }
-                completedOffsetCommits.add(new OffsetCommitCompletion(cb, offsets, commitException));
-                if (commitException instanceof FencedInstanceIdException) {
-                    asyncCommitFenced.set(true);
-                }
-            }
-        });
-    }
+				if (e instanceof RetriableException) {
+					commitException = new RetriableCommitFailedException(e);
+				}
+				// 提交失败，也放入到已完成提交的offset集合中
+				completedOffsetCommits.add(new OffsetCommitCompletion(cb, offsets, commitException));
+				// 如果返回FencedInstanceIdException异常，设置异步提交栅栏
+				if (commitException instanceof FencedInstanceIdException) {
+					asyncCommitFenced.set(true);
+				}
+			}
+		});
+	}
 
     /**
      * Commit offsets synchronously. This method will retry until the commit completes successfully
@@ -943,37 +991,47 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             timer.sleep(rebalanceConfig.retryBackoffMs);
         } while (timer.notExpired());
 
-        return false;
-    }
+		return false;
+	}
 
-    public void maybeAutoCommitOffsetsAsync(long now) {
-        if (autoCommitEnabled) {
-            nextAutoCommitTimer.update(now);
-            if (nextAutoCommitTimer.isExpired()) {
-                nextAutoCommitTimer.reset(autoCommitIntervalMs);
-                doAutoCommitOffsetsAsync();
-            }
-        }
-    }
+	/**
+	 * 异步提交offset
+	 * @param now 当前时间戳
+	 */
+	public void maybeAutoCommitOffsetsAsync(long now) {
+		// 在开启自动提交的情况下
+		if (autoCommitEnabled) {
+			//
+			nextAutoCommitTimer.update(now);
+			if (nextAutoCommitTimer.isExpired()) {
+				nextAutoCommitTimer.reset(autoCommitIntervalMs);
+				doAutoCommitOffsetsAsync();
+			}
+		}
+	}
 
-    private void doAutoCommitOffsetsAsync() {
-        Map<TopicPartition, OffsetAndMetadata> allConsumedOffsets = subscriptions.allConsumed();
-        log.debug("Sending asynchronous auto-commit of offsets {}", allConsumedOffsets);
-
-        commitOffsetsAsync(allConsumedOffsets, (offsets, exception) -> {
-            if (exception != null) {
-                if (exception instanceof RetriableException) {
-                    log.debug("Asynchronous auto-commit of offsets {} failed due to retriable error: {}", offsets,
-                        exception);
-                    nextAutoCommitTimer.updateAndReset(rebalanceConfig.retryBackoffMs);
-                } else {
-                    log.warn("Asynchronous auto-commit of offsets {} failed: {}", offsets, exception.getMessage());
-                }
-            } else {
-                log.debug("Completed asynchronous auto-commit of offsets {}", offsets);
-            }
-        });
-    }
+	/**
+	 * 执行异步自动提交offset
+	 */
+	private void doAutoCommitOffsetsAsync() {
+		// 获取所有已消费的分区offset记录
+		Map<TopicPartition, OffsetAndMetadata> allConsumedOffsets = subscriptions.allConsumed();
+		log.debug("Sending asynchronous auto-commit of offsets {}", allConsumedOffsets);
+		// 异步提交offset，已经异常的回调处理
+		commitOffsetsAsync(allConsumedOffsets, (offsets, exception) -> {
+			if (exception != null) {
+				if (exception instanceof RetriableException) {
+					log.debug("Asynchronous auto-commit of offsets {} failed due to retriable error: {}", offsets,
+							exception);
+					nextAutoCommitTimer.updateAndReset(rebalanceConfig.retryBackoffMs);
+				} else {
+					log.warn("Asynchronous auto-commit of offsets {} failed: {}", offsets, exception.getMessage());
+				}
+			} else {
+				log.debug("Completed asynchronous auto-commit of offsets {}", offsets);
+			}
+		});
+	}
 
     private void maybeAutoCommitOffsetsSync(Timer timer) {
         if (autoCommitEnabled) {
@@ -1010,49 +1068,63 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
      * @return A request future whose value indicates whether the commit was successful or not
      */
     private RequestFuture<Void> sendOffsetCommitRequest(final Map<TopicPartition, OffsetAndMetadata> offsets) {
+		// 如果没有需要提交的offset
         if (offsets.isEmpty())
-            return RequestFuture.voidSuccess();
-
+			// 直接返回请求成功的异步结果
+			return RequestFuture.voidSuccess();
+		// 获取协调者节点
         Node coordinator = checkAndGetCoordinator();
-        if (coordinator == null)
-            return RequestFuture.coordinatorNotAvailable();
+		if (coordinator == null)
+			// 不存在协调者，返回协调者不可用异步结果
+			return RequestFuture.coordinatorNotAvailable();
 
-        // create the offset commit request
+		// 创建offset提交请求
+		// topic维度，记录的partition的offset提交数据信息
         Map<String, OffsetCommitRequestData.OffsetCommitRequestTopic> requestTopicDataMap = new HashMap<>();
         for (Map.Entry<TopicPartition, OffsetAndMetadata> entry : offsets.entrySet()) {
             TopicPartition topicPartition = entry.getKey();
             OffsetAndMetadata offsetAndMetadata = entry.getValue();
-            if (offsetAndMetadata.offset() < 0) {
+			if (offsetAndMetadata.offset() < 0) {
+				// 对于异常的offset情况，返回IllegalArgumentException异常异步结果
                 return RequestFuture.failure(new IllegalArgumentException("Invalid offset: " + offsetAndMetadata.offset()));
-            }
-
+			}
+			// 以topic维度，获取需要提交topic的partition列表
+			// 如果没有指定topic，则创建对应topic的第一个partition提交offset信息，放入的map中
             OffsetCommitRequestData.OffsetCommitRequestTopic topic = requestTopicDataMap
                     .getOrDefault(topicPartition.topic(),
                             new OffsetCommitRequestData.OffsetCommitRequestTopic()
-                                    .setName(topicPartition.topic())
-                    );
-
+									.setName(topicPartition.topic())
+					);
+			// 添加需要提交的数据信息，是向列表中增量添加提交的数据信息
             topic.partitions().add(new OffsetCommitRequestData.OffsetCommitRequestPartition()
-                    .setPartitionIndex(topicPartition.partition())
-                    .setCommittedOffset(offsetAndMetadata.offset())
+					// partition索引
+					.setPartitionIndex(topicPartition.partition())
+					// 需要提交的partition的offset
+					.setCommittedOffset(offsetAndMetadata.offset())
+					// 设置提交的leader epoch
                     .setCommittedLeaderEpoch(offsetAndMetadata.leaderEpoch().orElse(RecordBatch.NO_PARTITION_LEADER_EPOCH))
+					// 设置提交metadata
                     .setCommittedMetadata(offsetAndMetadata.metadata())
-            );
+			);
+			// 重新覆盖
             requestTopicDataMap.put(topicPartition.topic(), topic);
-        }
-
-        final Generation generation;
-        if (subscriptions.partitionsAutoAssigned()) {
-            generation = generation();
-            // if the generation is null, we are not part of an active group (and we expect to be).
-            // the only thing we can do is fail the commit and let the user rejoin the group in poll()
+		}
+		// 获取提交版本
+		final Generation generation;
+		// 如果是动态分配partition
+		if (subscriptions.partitionsAutoAssigned()) {
+			// 获取当前消费组的版本
+			generation = generation();
+			// 如果消费组的版本为null，证明consumer不在集群中，或者消费组处于再平衡状态
+			// 我们唯一能做的就是失败掉当前的commit，然后让开发者在poll()方法中重新加入消费组
             if (generation == null) {
                 log.info("Failing OffsetCommit request since the consumer is not part of an active group");
                 return RequestFuture.failure(new CommitFailedException());
-            }
+			}
         } else
-            generation = Generation.NO_GENERATION;
-
+			// 如果是手动非配的，不需要有版本的概念
+			generation = Generation.NO_GENERATION;
+		// 构建offset提交请求
         OffsetCommitRequest.Builder builder = new OffsetCommitRequest.Builder(
                 new OffsetCommitRequestData()
                         .setGroupId(this.rebalanceConfig.groupId)
@@ -1063,7 +1135,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         );
 
         log.trace("Sending OffsetCommit request with {} to coordinator {}", offsets, coordinator);
-
+		// 向指定的协调者发送提交offset请求，并声明offset提交响应的处理器
         return client.send(coordinator, builder)
                 .compose(new OffsetCommitResponseHandler(offsets));
     }

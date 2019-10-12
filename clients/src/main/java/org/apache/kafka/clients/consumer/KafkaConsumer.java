@@ -1074,42 +1074,40 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     }
 
     /**
-     * Manually assign a list of partitions to this consumer. This interface does not allow for incremental assignment
-     * and will replace the previous assignment (if there is one).
-     * <p>
-     * If the given list of topic partitions is empty, it is treated the same as {@link #unsubscribe()}.
-     * <p>
-     * Manual topic assignment through this method does not use the consumer's group management
-     * functionality. As such, there will be no rebalance operation triggered when group membership or cluster and topic
-     * metadata change. Note that it is not possible to use both manual partition assignment with {@link #assign(Collection)}
-     * and group assignment with {@link #subscribe(Collection, ConsumerRebalanceListener)}.
-     * <p>
-     * If auto-commit is enabled, an async commit (based on the old assignment) will be triggered before the new
-     * assignment replaces the old one.
+	 * 手动分配partition给consumer
+	 * 此方法不允许增量赋值，每次分配将重新替换
+	 * 如果给定的partition为空，则视为{@link #unsubscribe()}对待
+	 * 通过这个方法进行手动topic分配，不会使用consumer的集群管理功能，照这样来看的话，在消费组关系发生变化，或者cluster、topic元数据发生变化，也不会有再平衡操作触发
+	 * 需要注意的是，是不能同时使用{@link #assign(Collection)}和{@link #subscribe(Collection, ConsumerRebalanceListener)}两种策略的
+	 *
+	 * 如果允许自动提交，一个异步的提交（基于老的分配策略）将会在新的分配策略替换老的分配策略之前触发
      *
-     * @param partitions The list of partitions to assign this consumer
-     * @throws IllegalArgumentException If partitions is null or contains null or empty topics
-     * @throws IllegalStateException If {@code subscribe()} is called previously with topics or pattern
-     *                               (without a subsequent call to {@link #unsubscribe()})
+	 * @param partitions 分配给当前consumer的partition列表
+	 * @throws IllegalArgumentException 分配partition列表校验异常
+	 * @throws IllegalStateException 如果先前已经调用过{@code subscribe()}而没有调用{@link #unsubscribe()}，视为非法使用
      */
     @Override
     public void assign(Collection<TopicPartition> partitions) {
+		// 获取轻量级锁
         acquireAndEnsureOpen();
         try {
             if (partitions == null) {
                 throw new IllegalArgumentException("Topic partition collection to assign to cannot be null");
             } else if (partitions.isEmpty()) {
+				// partition为空，视为取消订阅
                 this.unsubscribe();
             } else {
+				// 遍历需要分配的partition
                 for (TopicPartition tp : partitions) {
+					// 获取需要分配的partition的topic，并检查topic
                     String topic = (tp != null) ? tp.topic() : null;
                     if (topic == null || topic.trim().isEmpty())
                         throw new IllegalArgumentException("Topic partitions to assign to cannot have null or empty topic");
                 }
+				// 释放不属于新的分配分区的缓冲区数据
                 fetcher.clearBufferedDataForUnassignedPartitions(partitions);
 
-                // make sure the offsets of topic partitions the consumer is unsubscribing from
-                // are committed since there will be no following rebalance
+				// 确认不会进行订阅的partition的offset已经提交
                 if (coordinator != null)
                     this.coordinator.maybeAutoCommitOffsetsAsync(time.milliseconds());
 
@@ -1118,6 +1116,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     metadata.requestUpdateForNewTopics();
             }
         } finally {
+			// 释放轻量级锁
             release();
         }
     }
@@ -1478,84 +1477,78 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     }
 
     /**
-     * Commit offsets returned on the last {@link #poll(Duration) poll()} for the subscribed list of topics and partitions.
-     * <p>
-     * This commits offsets only to Kafka. The offsets committed using this API will be used on the first fetch after
-     * every rebalance and also on startup. As such, if you need to store offsets in anything other than Kafka, this API
-     * should not be used.
-     * <p>
-     * This is an asynchronous call and will not block. Any errors encountered are either passed to the callback
-     * (if provided) or discarded.
-     * <p>
-     * Offsets committed through multiple calls to this API are guaranteed to be sent in the same order as
-     * the invocations. Corresponding commit callbacks are also invoked in the same order. Additionally note that
-     * offsets committed through this API are guaranteed to complete before a subsequent call to {@link #commitSync()}
-     * (and variants) returns.
+	 * 提交最近一次poll()方法订阅的topic-partition列表的offset
+	 * 这个API会在每次再平衡或者启动时，第一次fetch请求中使用，因此，如果你需要将offset保存在除Kafka之外的其他位置，就不应该使用这个API
+	 *
+	 * 这是一个不会阻塞的异步调用，遇到的任何错误都将传递给回调任务或者被丢弃
+	 *
+	 * 如果出现了并发调用提交offset，这个API将会保证调用顺序就是发送提交的顺序，相应的，回调任务的执行顺序也是同样的顺序
+	 * 除此之外需要注意的是，通过此API提交offset，如果是在随后一个{@link #commitSync()}调用之前完成及返回
      *
-     * @param callback Callback to invoke when the commit completes
-     * @throws org.apache.kafka.common.errors.FencedInstanceIdException if this consumer instance gets fenced by broker.
+	 * @param callback 提交完成后的回调任务
+	 * @throws org.apache.kafka.common.errors.FencedInstanceIdException broker返回需要提交栅栏，需要暂停提交
      */
     @Override
     public void commitAsync(OffsetCommitCallback callback) {
         commitAsync(subscriptions.allConsumed(), callback);
     }
 
-    /**
-     * Commit the specified offsets for the specified list of topics and partitions to Kafka.
-     * <p>
-     * This commits offsets to Kafka. The offsets committed using this API will be used on the first fetch after every
-     * rebalance and also on startup. As such, if you need to store offsets in anything other than Kafka, this API
-     * should not be used. The committed offset should be the next message your application will consume,
-     * i.e. lastProcessedMessageOffset + 1.
-     * <p>
-     * This is an asynchronous call and will not block. Any errors encountered are either passed to the callback
-     * (if provided) or discarded.
-     * <p>
-     * Offsets committed through multiple calls to this API are guaranteed to be sent in the same order as
-     * the invocations. Corresponding commit callbacks are also invoked in the same order. Additionally note that
-     * offsets committed through this API are guaranteed to complete before a subsequent call to {@link #commitSync()}
-     * (and variants) returns.
-     *
-     * @param offsets A map of offsets by partition with associate metadata. This map will be copied internally, so it
-     *                is safe to mutate the map after returning.
-     * @param callback Callback to invoke when the commit completes
-     * @throws org.apache.kafka.common.errors.FencedInstanceIdException if this consumer instance gets fenced by broker.
-     */
+	/**
+	 * 提交指定的offset，以topic-partition维度
+	 * 这个API会在每次再平衡或者启动时，第一次fetch请求中使用，因此，
+	 * 提交的偏移量是你的应用程序下一个需要消费的信息，举个例子：lastProcessedMessageOffset + 1
+	 * <p>
+	 * 这是一个不会阻塞的异步调用，遇到的任何错误都将传递给回调任务或者被丢弃
+	 * <p>
+	 * 如果出现了并发调用提交offset，这个API将会保证调用顺序就是发送提交的顺序，相应的，回调任务的执行顺序也是同样的顺序
+	 * 除此之外需要注意的是，通过此API提交offset，如果是在随后一个{@link #commitSync()}调用之前完成及返回
+	 * @param offsets  topic-partition维度的offset提交数据，内部会进行一次拷贝，所以对于这个返回值来说，对这个map是安全的
+	 * @param callback 提交任务完成时，执行的回调任务
+	 * @throws org.apache.kafka.common.errors.FencedInstanceIdException broker返回需要提交栅栏，需要暂停提交
+	 */
     @Override
     public void commitAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, OffsetCommitCallback callback) {
+		// 获取轻量级锁
         acquireAndEnsureOpen();
         try {
+			// 如果没有消费组，则抛出异常
             maybeThrowInvalidGroupIdException();
+			// 日志记录需要进行提交的offset数据
             log.debug("Committing offsets: {}", offsets);
+			// 遍历每个需要提交的partition，更新当前每个提交partition的leader epoch
             offsets.forEach(this::updateLastSeenEpochIfNewer);
+			// 由协调者异步发送offset数据
             coordinator.commitOffsetsAsync(new HashMap<>(offsets), callback);
-        } finally {
-            release();
-        }
-    }
+		} finally {
+			// 释放轻量级锁
+			release();
+		}
+	}
 
-    /**
-     * Overrides the fetch offsets that the consumer will use on the next {@link #poll(Duration) poll(timeout)}. If this API
-     * is invoked for the same partition more than once, the latest offset will be used on the next poll(). Note that
-     * you may lose data if this API is arbitrarily used in the middle of consumption, to reset the fetch offsets
-     *
-     * @throws IllegalArgumentException if the provided offset is negative
-     * @throws IllegalStateException if the provided TopicPartition is not assigned to this consumer
-     */
+	/**
+	 * 覆盖下一次poll()操作consumer将要使用的offset，如果对于同一partition使用了多次该方法，下一次轮询将会使用最新的offset
+	 * 需要注意的是，如果在使用过程中随意使用此API来重置获取的offset，可能会导致丢失数据
+	 * @throws IllegalArgumentException 提交的offset为负数，抛出此异常
+	 * @throws IllegalStateException    如果提供的partition，没有分配给次consumer，抛出此异常
+	 */
     @Override
     public void seek(TopicPartition partition, long offset) {
-        if (offset < 0)
+		if (offset < 0)
+			// offset校验
             throw new IllegalArgumentException("seek offset must not be a negative number");
-
+		// 获取轻量级锁
         acquireAndEnsureOpen();
         try {
             log.info("Seeking to offset {} for partition {}", offset, partition);
+			// 构建新的fetch位置，使用指定的offset
             SubscriptionState.FetchPosition newPosition = new SubscriptionState.FetchPosition(
-                    offset,
-                    Optional.empty(), // This will ensure we skip validation
+					offset,
+					Optional.empty(), // 这个将会确保我们会跳过校验
                     this.metadata.leaderAndEpoch(partition));
+			//
             this.subscriptions.seekUnvalidated(partition, newPosition);
         } finally {
+			// 释放轻量级锁
             release();
         }
     }
@@ -2316,11 +2309,17 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         if (groupId == null)
             throw new InvalidGroupIdException("To use the group management or offset commit APIs, you must " +
                     "provide a valid " + ConsumerConfig.GROUP_ID_CONFIG + " in the consumer configuration.");
-    }
+	}
 
-    private void updateLastSeenEpochIfNewer(TopicPartition topicPartition, OffsetAndMetadata offsetAndMetadata) {
-        offsetAndMetadata.leaderEpoch().ifPresent(epoch -> metadata.updateLastSeenEpochIfNewer(topicPartition, epoch));
-    }
+	/**
+	 * 更新当前consumer的leader epoch
+	 * @param topicPartition    需要更新的partition
+	 * @param offsetAndMetadata 需要提交的offset
+	 */
+	private void updateLastSeenEpochIfNewer(TopicPartition topicPartition, OffsetAndMetadata offsetAndMetadata) {
+		// 当前的leader epoch，如果不存在，则从metadata获取最新的leader epoch
+		offsetAndMetadata.leaderEpoch().ifPresent(epoch -> metadata.updateLastSeenEpochIfNewer(topicPartition, epoch));
+	}
 
     // Visible for testing
     String getClientId() {
