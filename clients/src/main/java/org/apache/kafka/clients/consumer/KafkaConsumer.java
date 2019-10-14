@@ -680,16 +680,18 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     @SuppressWarnings("unchecked")
     private KafkaConsumer(ConsumerConfig config, Deserializer<K> keyDeserializer, Deserializer<V> valueDeserializer) {
         try {
+			// 获取配置的client.id属性
             String clientId = config.getString(ConsumerConfig.CLIENT_ID_CONFIG);
             if (clientId.isEmpty())
+				// 如果没有指定client.id，则使用默认的序列号生成一个
                 clientId = "consumer-" + CONSUMER_CLIENT_ID_SEQUENCE.getAndIncrement();
             this.clientId = clientId;
             this.groupId = config.getString(ConsumerConfig.GROUP_ID_CONFIG);
-
+			// 创建当前consumer的消费组的再平衡配置
             GroupRebalanceConfig groupRebalanceConfig = new GroupRebalanceConfig(config,
                                                                                  GroupRebalanceConfig.ProtocolType.CONSUMER);
             LogContext logContext;
-            // If group.instance.id is set, we will append it to the log context.
+			// 如果配置了group.instance.id属性，我们就会将其添加到LogContext中，便于日志记录
             if (groupRebalanceConfig.groupInstanceId.isPresent()) {
                 logContext = new LogContext("[Consumer instanceId=" + groupRebalanceConfig.groupInstanceId.get() +
                         ", clientId=" + clientId + ", groupId=" + groupId + "] ");
@@ -698,17 +700,24 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             }
 
             this.log = logContext.logger(getClass());
+			// 获取配置的enable.auto.commit属性
             boolean enableAutoCommit = config.getBoolean(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG);
             if (groupId == null) { // overwrite in case of default group id where the config is not explicitly provided
+				// 如果用于的原始属性值，也没有配置自动提交属性
                 if (!config.originals().containsKey(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG))
+					// 设置不开启自动提交
                     enableAutoCommit = false;
                 else if (enableAutoCommit)
+					// 在没有配置group.id的情况下，是不允许开启自动提交的
                     throw new InvalidConfigurationException(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG + " cannot be set to true when default group id (null) is used.");
             } else if (groupId.isEmpty())
+				// 如果group.id配置的为空字符串，则进行日志告警，在下个版本不能声明为空group.id
                 log.warn("Support for using the empty group id by consumers is deprecated and will be removed in the next major release.");
 
             log.debug("Initializing the Kafka consumer");
+			// 获取配置的request.timeout.ms属性
             this.requestTimeoutMs = config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG);
+			// 获取配置的default.api.timeout.ms属性
             this.defaultApiTimeoutMs = config.getInt(ConsumerConfig.DEFAULT_API_TIMEOUT_MS_CONFIG);
             this.time = Time.SYSTEM;
             this.metrics = buildMetrics(config, time, clientId);
@@ -717,9 +726,11 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             // load interceptors and make sure they get clientId
             Map<String, Object> userProvidedConfigs = config.originals();
             userProvidedConfigs.put(ConsumerConfig.CLIENT_ID_CONFIG, clientId);
+			// 获取配置的interceptor.classes属性，并构建consumer的拦截器列表
             List<ConsumerInterceptor<K, V>> interceptorList = (List) (new ConsumerConfig(userProvidedConfigs, false)).getConfiguredInstances(ConsumerConfig.INTERCEPTOR_CLASSES_CONFIG,
                     ConsumerInterceptor.class);
             this.interceptors = new ConsumerInterceptors<>(interceptorList);
+			// 配置反序列化器
             if (keyDeserializer == null) {
                 this.keyDeserializer = config.getConfiguredInstance(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, Deserializer.class);
                 this.keyDeserializer.configure(config.originals(), true);
@@ -734,7 +745,9 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                 config.ignore(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG);
                 this.valueDeserializer = valueDeserializer;
             }
+			// 获取offset的重置策略
             OffsetResetStrategy offsetResetStrategy = OffsetResetStrategy.valueOf(config.getString(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG).toUpperCase(Locale.ROOT));
+			// 构建当前consumer的订阅状态
             this.subscriptions = new SubscriptionState(logContext, offsetResetStrategy);
             ClusterResourceListeners clusterResourceListeners = configureClusterResourceListeners(keyDeserializer,
                     valueDeserializer, metrics.reporters(), interceptorList);
@@ -743,16 +756,21 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     !config.getBoolean(ConsumerConfig.EXCLUDE_INTERNAL_TOPICS_CONFIG),
                     config.getBoolean(ConsumerConfig.ALLOW_AUTO_CREATE_TOPICS_CONFIG),
                     subscriptions, logContext, clusterResourceListeners);
+			// 构建和cluster进行连接的地址集合
             List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(
                     config.getList(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG), config.getString(ConsumerConfig.CLIENT_DNS_LOOKUP_CONFIG));
             this.metadata.bootstrap(addresses, time.milliseconds());
             String metricGrpPrefix = "consumer";
-
+			// 构建fetcher的计数器
             FetcherMetricsRegistry metricsRegistry = new FetcherMetricsRegistry(Collections.singleton(CLIENT_ID_METRIC_TAG), metricGrpPrefix);
+			// Channel的建造者，Channel用于传输数据
             ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(config, time);
+			// 事务等级
             IsolationLevel isolationLevel = IsolationLevel.valueOf(
                     config.getString(ConsumerConfig.ISOLATION_LEVEL_CONFIG).toUpperCase(Locale.ROOT));
+
             Sensor throttleTimeSensor = Fetcher.throttleTimeSensor(metrics, metricsRegistry);
+			// 获取心跳间隔配置
             int heartbeatIntervalMs = config.getInt(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG);
 
             ApiVersions apiVersions = new ApiVersions();
@@ -772,6 +790,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     apiVersions,
                     throttleTimeSensor,
                     logContext);
+			// 构建Consumer的连接Broker的网络客户端
             this.client = new ConsumerNetworkClient(
                     logContext,
                     netClient,
@@ -779,17 +798,17 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     time,
                     retryBackoffMs,
                     config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG),
-                    heartbeatIntervalMs); //Will avoid blocking an extended period of time to prevent heartbeat thread starvation
+					heartbeatIntervalMs);
 
             this.assignors = getAssignorInstances(config.getList(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG), config.originals());
 
-            // no coordinator will be constructed for the default (null) group id
+			// 如果没有配置group.id，那么就无需构建协调者
             this.coordinator = groupId == null ? null :
                 new ConsumerCoordinator(groupRebalanceConfig,
                         logContext,
-                        this.client,
-                        assignors,
-                        this.metadata,
+						this.client,
+						assignors,
+						this.metadata,
                         this.subscriptions,
                         metrics,
                         metricGrpPrefix,
@@ -797,6 +816,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                         enableAutoCommit,
                         config.getInt(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG),
                         this.interceptors);
+			// 构建record拉取器
             this.fetcher = new Fetcher<>(
                     logContext,
                     this.client,
@@ -818,14 +838,14 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     this.requestTimeoutMs,
                     isolationLevel,
                     apiVersions);
-
             config.logUnused();
             AppInfoParser.registerAppInfo(JMX_PREFIX, clientId, metrics, time.milliseconds());
             log.debug("Kafka consumer initialized");
         } catch (Throwable t) {
-            // call close methods if internal objects are already constructed; this is to prevent resource leak. see KAFKA-2121
+			// 如果内部对象已经创建，那么在出现异常时，就需要释放对象，避免内存泄露
+			// KAFKA-2121
             close(0, true);
-            // now propagate the exception
+			// 抛出异常
             throw new KafkaException("Failed to construct kafka consumer", t);
         }
     }
@@ -1216,6 +1236,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                 client.maybeTriggerWakeup();
 
                 if (includeMetadataInTimeout) {
+					// 更新分配的元数据失败，返回空record
                     if (!updateAssignmentMetadataIfNeeded(timer)) {
                         return ConsumerRecords.empty();
                     }
@@ -1247,13 +1268,14 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     }
 
     /**
-     * Visible for testing
+	 * 在需要的情况下，更新分配的元数据
      */
     boolean updateAssignmentMetadataIfNeeded(final Timer timer) {
+		// 如果当前consumer存在协调者，但是协调者在指定的等待时间内没有
         if (coordinator != null && !coordinator.poll(timer)) {
             return false;
         }
-
+		// 在规定的等待时间内，更新拉取的位置
         return updateFetchPositions(timer);
 	}
 
@@ -2193,15 +2215,16 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         this.client.wakeup();
     }
 
-    private ClusterResourceListeners configureClusterResourceListeners(Deserializer<K> keyDeserializer, Deserializer<V> valueDeserializer, List<?>... candidateLists) {
-        ClusterResourceListeners clusterResourceListeners = new ClusterResourceListeners();
-        for (List<?> candidateList: candidateLists)
-            clusterResourceListeners.maybeAddAll(candidateList);
+	//
+	private ClusterResourceListeners configureClusterResourceListeners(Deserializer<K> keyDeserializer, Deserializer<V> valueDeserializer, List<?>... candidateLists) {
+		ClusterResourceListeners clusterResourceListeners = new ClusterResourceListeners();
+		for (List<?> candidateList : candidateLists)
+			clusterResourceListeners.maybeAddAll(candidateList);
 
-        clusterResourceListeners.maybeAdd(keyDeserializer);
-        clusterResourceListeners.maybeAdd(valueDeserializer);
-        return clusterResourceListeners;
-    }
+		clusterResourceListeners.maybeAdd(keyDeserializer);
+		clusterResourceListeners.maybeAdd(valueDeserializer);
+		return clusterResourceListeners;
+	}
 
     private void close(long timeoutMs, boolean swallowException) {
         log.trace("Closing the Kafka consumer");
@@ -2231,35 +2254,30 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     }
 
     /**
-     * Set the fetch position to the committed position (if there is one)
-     * or reset it using the offset reset policy the user has configured.
-     *
-     * @throws org.apache.kafka.common.errors.AuthenticationException if authentication fails. See the exception for more details
-     * @throws NoOffsetForPartitionException If no offset is stored for a given partition and no offset reset policy is
-     *             defined
-     * @return true iff the operation completed without timing out
+	 * 将fetch position设置为committed position
+	 * 或者使用开发者配置的offset重置策略
+	 * @throws org.apache.kafka.common.errors.AuthenticationException 身份校验失败，抛出异常
+	 * @throws NoOffsetForPartitionException 指定的分区没有存储offset，或者没有声明offset重置策略
+	 * @return 在等待时间内完成，返回true
      */
     private boolean updateFetchPositions(final Timer timer) {
-        // If any partitions have been truncated due to a leader change, we need to validate the offsets
+		// 如果由于leader节点发生了变更，和导致分区被阶段，需要校验offset
         fetcher.validateOffsetsIfNeeded();
-
+		// 获取所有已经拉取的的partition的状态
         cachedSubscriptionHashAllFetchPositions = subscriptions.hasAllFetchPositions();
+		// 如果全部都拥有合法的position，无需更新
         if (cachedSubscriptionHashAllFetchPositions) return true;
 
-        // If there are any partitions which do not have a valid position and are not
-        // awaiting reset, then we need to fetch committed offsets. We will only do a
-        // coordinator lookup if there are partitions which have missing positions, so
-        // a consumer with manually assigned partitions can avoid a coordinator dependence
-        // by always ensuring that assigned partitions have an initial position.
+		// 如果存在partition没有合法的position，并且也没有等待重置，我们需要拉取提交的offset
+		// 如果一些partition缺失了position，我们只需要进行一次协调者查找即可
+		// 所以手动配置partition的consumer可以通过确认分区的是否拥有初始化的位置来避免依赖协调者
         if (coordinator != null && !coordinator.refreshCommittedOffsetsIfNeeded(timer)) return false;
 
-        // If there are partitions still needing a position and a reset policy is defined,
-        // request reset using the default policy. If no reset strategy is defined and there
-        // are partitions with a missing position, then we will raise an exception.
+		// 如果一些partition仍然需要一个position，并且也声明了重置策略，使用默认的策略进行重置
+		// 如果没有声明重置策略，并且有确认position的partition，会抛出异常
         subscriptions.resetMissingPositions();
 
-        // Finally send an asynchronous request to lookup and update the positions of any
-        // partitions which are awaiting reset.
+		// 最后，发送异步请求来查找和更新任何处于等待重置的position
         fetcher.resetOffsetsIfNeeded();
 
 		return true;

@@ -16,12 +16,6 @@
  */
 package org.apache.kafka.clients.consumer.internals;
 
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor;
 import org.apache.kafka.common.Cluster;
@@ -30,6 +24,13 @@ import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.utils.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * This adapter class is used to ensure backwards compatibility for those who have implemented the {@link PartitionAssignor}
@@ -91,9 +92,9 @@ public class PartitionAssignorAdapter implements ConsumerPartitionAssignor {
     }
 
     /**
-     * Get a list of configured instances of {@link org.apache.kafka.clients.consumer.ConsumerPartitionAssignor}
-     * based on the class names/types specified by {@link org.apache.kafka.clients.consumer.ConsumerConfig#PARTITION_ASSIGNMENT_STRATEGY_CONFIG}
-     * where any instances of the old {@link PartitionAssignor} interface are wrapped in an adapter to the new
+	 * 获取已经配置的实例列表
+	 * 基于{@link org.apache.kafka.clients.consumer.ConsumerConfig#PARTITION_ASSIGNMENT_STRATEGY_CONFIG}配置的类名和类型
+	 * 之前使用的旧的{@link PartitionAssignor}会被包装成新的{@link org.apache.kafka.clients.consumer.ConsumerPartitionAssignor}
      * {@link org.apache.kafka.clients.consumer.ConsumerPartitionAssignor} interface
      */
     public static List<ConsumerPartitionAssignor> getAssignorInstances(List<String> assignorClasses, Map<String, Object> configs) {

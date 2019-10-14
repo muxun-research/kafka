@@ -472,11 +472,20 @@ public class Fetcher<K, V> implements Closeable {
 			return client.send(node, request);
 	}
 
+	/**
+	 * 计算重置策略时间戳
+	 * @param partition 指定partition
+	 * @return 重置策略时间戳
+	 */
 	private Long offsetResetStrategyTimestamp(final TopicPartition partition) {
+		// 获取指定partition的重置策略
 		OffsetResetStrategy strategy = subscriptions.resetStrategy(partition);
+		// 根据不同的策略，返回相应的时间戳
 		if (strategy == OffsetResetStrategy.EARLIEST)
+			// 最早重置策略
 			return ListOffsetRequest.EARLIEST_TIMESTAMP;
 		else if (strategy == OffsetResetStrategy.LATEST)
+			// 最近重置策略
 			return ListOffsetRequest.LATEST_TIMESTAMP;
 		else
 			return null;
@@ -492,22 +501,22 @@ public class Fetcher<K, V> implements Closeable {
 	}
 
 	/**
-	 * Reset offsets for all assigned partitions that require it.
-	 * @throws org.apache.kafka.clients.consumer.NoOffsetForPartitionException If no offset reset strategy is defined
-	 *                                                                         and one or more partitions aren't awaiting a seekToBeginning() or seekToEnd().
+	 * 重置需要的已分配的partition的offset
+	 * @throws org.apache.kafka.clients.consumer.NoOffsetForPartitionException 如果没有重置策略，或者至少一个partition没有在等待seekToBeginning()或者seekToEnd()
 	 */
 	public void resetOffsetsIfNeeded() {
-		// Raise exception from previous offset fetch if there is one
+		// 抛出上一次拉取offset产生的错误
 		RuntimeException exception = cachedListOffsetsException.getAndSet(null);
 		if (exception != null)
 			throw exception;
-
+		// 构建需要重置offset的集合
 		Set<TopicPartition> partitions = subscriptions.partitionsNeedingReset(time.milliseconds());
 		if (partitions.isEmpty())
 			return;
 
 		final Map<TopicPartition, Long> offsetResetTimestamps = new HashMap<>();
 		for (final TopicPartition partition : partitions) {
+			// 获取重置策略时间戳
 			Long timestamp = offsetResetStrategyTimestamp(partition);
 			if (timestamp != null)
 				offsetResetTimestamps.put(partition, timestamp);
@@ -517,25 +526,27 @@ public class Fetcher<K, V> implements Closeable {
 	}
 
 	/**
-	 * Validate offsets for all assigned partitions for which a leader change has been detected.
+	 * 如果检测到发生了leader节点变更，需要校验已分配的所有offset
 	 */
 	public void validateOffsetsIfNeeded() {
+		// 出现了leader异常，直接抛出leader异常
 		RuntimeException exception = cachedOffsetForLeaderException.getAndSet(null);
 		if (exception != null)
 			throw exception;
 
-		// Validate each partition against the current leader and epoch
+		// 通过当前的leader和leader epoch，校验每个分区的信息
 		subscriptions.assignedPartitions().forEach(topicPartition -> {
 			ConsumerMetadata.LeaderAndEpoch leaderAndEpoch = metadata.leaderAndEpoch(topicPartition);
+			// 判断当前partition是否需要进行校验
 			subscriptions.maybeValidatePositionForCurrentLeader(topicPartition, leaderAndEpoch);
 		});
 
-		// Collect positions needing validation, with backoff
+		// 收集以partition维度，需要校验的position，并设置失败重试时间间隔
 		Map<TopicPartition, SubscriptionState.FetchPosition> partitionsToValidate = subscriptions
 				.partitionsNeedingValidation(time.milliseconds())
 				.stream()
 				.collect(Collectors.toMap(Function.identity(), subscriptions::position));
-
+		// 异步校验offset
 		validateOffsetsAsync(partitionsToValidate);
 	}
 
@@ -782,30 +793,54 @@ public class Fetcher<K, V> implements Closeable {
 		return emptyList();
 	}
 
+	/**
+	 * 重置offset
+	 * @param partition 需要重置offset的partition
+	 * @param requestedResetStrategy 请求重置时的策略
+	 * @param offsetData 进行重置的数据
+	 */
 	private void resetOffsetIfNeeded(TopicPartition partition, OffsetResetStrategy requestedResetStrategy, ListOffsetData offsetData) {
+		// 根据新的offset和leader epoch构建最新的position
 		SubscriptionState.FetchPosition position = new SubscriptionState.FetchPosition(
 				offsetData.offset, offsetData.leaderEpoch, metadata.leaderAndEpoch(partition));
+		// 更新拉取的最新的leader epoch数据
 		offsetData.leaderEpoch.ifPresent(epoch -> metadata.updateLastSeenEpochIfNewer(partition, epoch));
+		// 手动修改offset
 		subscriptions.maybeSeekUnvalidated(partition, position.offset, requestedResetStrategy);
 	}
 
+	/**
+	 * 异步重置offset
+	 * @param partitionResetTimestamps partition重置集合
+	 */
 	private void resetOffsetsAsync(Map<TopicPartition, Long> partitionResetTimestamps) {
+		// 将以partition维度的重置，转换为node维度的
 		Map<Node, Map<TopicPartition, ListOffsetRequest.PartitionData>> timestampsToSearchByNode =
 				groupListOffsetRequests(partitionResetTimestamps, new HashSet<>());
+		// 遍历每个node
 		for (Map.Entry<Node, Map<TopicPartition, ListOffsetRequest.PartitionData>> entry : timestampsToSearchByNode.entrySet()) {
 			Node node = entry.getKey();
+			// 获取每个node的partition-重置时间戳集合
 			final Map<TopicPartition, ListOffsetRequest.PartitionData> resetTimestamps = entry.getValue();
+			// 设置下一次该node下partition重试时间
 			subscriptions.setNextAllowedRetry(resetTimestamps.keySet(), time.milliseconds() + requestTimeoutMs);
-
+			// 发送重置请求，并添加响应listener
 			RequestFuture<ListOffsetResult> future = sendListOffsetRequest(node, resetTimestamps, false);
+			// 发送请求后，通过回调任务，已经将合法的offset封装进future中，此时将会处理future任务
 			future.addListener(new RequestFutureListener<ListOffsetResult>() {
+				/**
+				 * future完成回调成功任务
+				 * @param result
+				 */
 				@Override
 				public void onSuccess(ListOffsetResult result) {
+					// 处理需要重试重置的partition
 					if (!result.partitionsToRetry.isEmpty()) {
 						subscriptions.requestFailed(result.partitionsToRetry, time.milliseconds() + retryBackoffMs);
+						// 更新metadata
 						metadata.requestUpdate();
 					}
-
+					// 遍历每个partition最新的offset数据，进行重置
 					for (Map.Entry<TopicPartition, ListOffsetData> fetchedOffset : result.fetchedOffsets.entrySet()) {
 						TopicPartition partition = fetchedOffset.getKey();
 						ListOffsetData offsetData = fetchedOffset.getValue();
@@ -835,16 +870,18 @@ public class Fetcher<K, V> implements Closeable {
 	}
 
 	/**
-	 * For each partition which needs validation, make an asynchronous request to get the end-offsets for the partition
-	 * with the epoch less than or equal to the epoch the partition last saw.
-	 * <p>
-	 * Requests are grouped by Node for efficiency.
+	 * 对于每一个需要校验的partition，创建一个异步请求，来获得每个partition的尾端点的offset
+	 * 只有在leader epoch小于等于上一次更新的epoch的情况下，才会请求
+	 *
+	 * 以节点的方式进行请求，可以提高效率
 	 */
 	private void validateOffsetsAsync(Map<TopicPartition, SubscriptionState.FetchPosition> partitionsToValidate) {
+		// 将以partition为维度的更新信息，转换成以node为维度的更新信息
 		final Map<Node, Map<TopicPartition, SubscriptionState.FetchPosition>> regrouped =
 				regroupFetchPositionsByLeader(partitionsToValidate);
 
 		regrouped.forEach((node, fetchPostitions) -> {
+			// 遍历每个节点，构建请求
 			if (node.isEmpty()) {
 				metadata.requestUpdate();
 				return;
@@ -855,49 +892,61 @@ public class Fetcher<K, V> implements Closeable {
 				client.tryConnect(node);
 				return;
 			}
-
+			// 如果在当前的leader epoch版本下，没有可用的offset，不请求更新
 			if (!hasUsableOffsetForLeaderEpochVersion(nodeApiVersions)) {
 				log.debug("Skipping validation of fetch offsets for partitions {} since the broker does not " +
 								"support the required protocol version (introduced in Kafka 2.3)",
 						fetchPostitions.keySet());
 				for (TopicPartition partition : fetchPostitions.keySet()) {
+					// 修改拉取状态
 					subscriptions.completeValidation(partition);
 				}
 				return;
 			}
-
+			// 设置下一次可进行重试的时间戳
 			subscriptions.setNextAllowedRetry(fetchPostitions.keySet(), time.milliseconds() + requestTimeoutMs);
-
+			// 发送异步请求，并添加响应事件的listener
 			RequestFuture<OffsetsForLeaderEpochClient.OffsetForEpochResult> future = offsetsForLeaderEpochClient.sendAsyncRequest(node, partitionsToValidate);
 			future.addListener(new RequestFutureListener<OffsetsForLeaderEpochClient.OffsetForEpochResult>() {
+				/**
+				 * 异步获取更新的offset成功
+				 * @param offsetsResult 更新offset结果
+				 */
 				@Override
 				public void onSuccess(OffsetsForLeaderEpochClient.OffsetForEpochResult offsetsResult) {
 					Map<TopicPartition, OffsetAndMetadata> truncationWithoutResetPolicy = new HashMap<>();
+					// 处理需要重试的partition
 					if (!offsetsResult.partitionsToRetry().isEmpty()) {
 						subscriptions.setNextAllowedRetry(offsetsResult.partitionsToRetry(), time.milliseconds() + retryBackoffMs);
 						metadata.requestUpdate();
 					}
 
-					// For each OffsetsForLeader response, check if the end-offset is lower than our current offset
-					// for the partition. If so, it means we have experienced log truncation and need to reposition
-					// that partition's offset.
+					// 对于每一个OffsetsForLeader响应，首先校验传回来的末尾offset是否小于当前consumer存储的offset
+					// 如果小于，意味着broker经历了日志文件截断，我们需要重新定位offset
 					offsetsResult.endOffsets().forEach((respTopicPartition, respEndOffset) -> {
 						SubscriptionState.FetchPosition requestPosition = fetchPostitions.get(respTopicPartition);
 						Optional<OffsetAndMetadata> divergentOffsetOpt = subscriptions.maybeCompleteValidation(
 								respTopicPartition, requestPosition, respEndOffset);
+						// 需要重新处理的offset
 						divergentOffsetOpt.ifPresent(divergentOffset -> {
 							truncationWithoutResetPolicy.put(respTopicPartition, divergentOffset);
 						});
 					});
-
+					// 如果存在需要继续处理的offset，则抛出异常
 					if (!truncationWithoutResetPolicy.isEmpty()) {
 						throw new LogTruncationException(truncationWithoutResetPolicy);
 					}
 				}
 
+				/**
+				 * 异步获取更新的offset失败
+				 * @param e
+				 */
 				@Override
 				public void onFailure(RuntimeException e) {
+					// 更新失败，计算下一次重试的时间
 					subscriptions.requestFailed(fetchPostitions.keySet(), time.milliseconds() + retryBackoffMs);
+					// 更新拉取器的metadata
 					metadata.requestUpdate();
 
 					if (!(e instanceof RetriableException) && !cachedOffsetForLeaderException.compareAndSet(null, e)) {
@@ -957,35 +1006,37 @@ public class Fetcher<K, V> implements Closeable {
 	}
 
 	/**
-	 * Groups timestamps to search by node for topic partitions in `timestampsToSearch` that have
-	 * leaders available. Topic partitions from `timestampsToSearch` that do not have their leader
-	 * available are added to `partitionsToRetry`
-	 * @param timestampsToSearch The mapping from partitions ot the target timestamps
-	 * @param partitionsToRetry  A set of topic partitions that will be extended with partitions
-	 *                           that need metadata update or re-connect to the leader.
+	 * 以node维度，聚合需要重置策略的partition的时间戳，前提是leader节点可用
+	 * 如果partition所在的集群的没有leader节点，将添加到partitionsToRetry集合中，等待重试
+	 * @param timestampsToSearch 需要进新转换的时间戳集合
+	 * @param partitionsToRetry  需要进行更新metadata或者重新连接leader节点的partition集合
 	 */
 	private Map<Node, Map<TopicPartition, ListOffsetRequest.PartitionData>> groupListOffsetRequests(
 			Map<TopicPartition, Long> timestampsToSearch,
 			Set<TopicPartition> partitionsToRetry) {
 		final Map<TopicPartition, ListOffsetRequest.PartitionData> partitionDataMap = new HashMap<>();
+		// 以下遍历主要进行了状态校验判断
 		for (Map.Entry<TopicPartition, Long> entry : timestampsToSearch.entrySet()) {
 			TopicPartition tp = entry.getKey();
 			Long offset = entry.getValue();
+			// 获取当前partition的metadata
 			Optional<MetadataCache.PartitionInfoAndEpoch> currentInfo = metadata.partitionInfoIfCurrent(tp);
 			if (!currentInfo.isPresent()) {
 				log.debug("Leader for partition {} is unknown for fetching offset {}", tp, offset);
+				// 不存在当前partition的metadata，申请进行更新，并等待重试
 				metadata.requestUpdate();
 				partitionsToRetry.add(tp);
 			} else if (currentInfo.get().partitionInfo().leader() == null) {
+				// 如果当前partition所在集群的leader节点为null
 				log.debug("Leader for partition {} is unavailable for fetching offset {}", tp, offset);
+				// 也申请更新metadata，并等待重试
 				metadata.requestUpdate();
 				partitionsToRetry.add(tp);
 			} else if (client.isUnavailable(currentInfo.get().partitionInfo().leader())) {
 				client.maybeThrowAuthFailure(currentInfo.get().partitionInfo().leader());
 
-				// The connection has failed and we need to await the blackout period before we can
-				// try again. No need to request a metadata update since the disconnect will have
-				// done so already.
+				// 连接是失败了，我们需要等待一段真空期，知道我们我们可以重试，
+				// 我们不需申请更新metadata，因为断连时会更新metadata
 				log.debug("Leader {} for partition {} is unavailable for fetching offset until reconnect backoff expires",
 						currentInfo.get().partitionInfo().leader(), tp);
 				partitionsToRetry.add(tp);
@@ -994,23 +1045,25 @@ public class Fetcher<K, V> implements Closeable {
 						new ListOffsetRequest.PartitionData(offset, Optional.of(currentInfo.get().epoch())));
 			}
 		}
+		// 以node为维度，重新聚合
 		return regroupPartitionMapByNode(partitionDataMap);
 	}
 
 	/**
-	 * Send the ListOffsetRequest to a specific broker for the partitions and target timestamps.
-	 * @param node               The node to send the ListOffsetRequest to.
-	 * @param timestampsToSearch The mapping from partitions to the target timestamps.
+	 * 向指定broker发送重置offset请求
+	 * @param node               需要请求到的broker
+	 * @param timestampsToSearch 需要发送的请求partition信息集合
 	 * @param requireTimestamp   True if we require a timestamp in the response.
 	 * @return A response which can be polled to obtain the corresponding timestamps and offsets.
 	 */
 	private RequestFuture<ListOffsetResult> sendListOffsetRequest(final Node node,
 																  final Map<TopicPartition, ListOffsetRequest.PartitionData> timestampsToSearch,
 																  boolean requireTimestamp) {
+		// 构建请求
 		ListOffsetRequest.Builder builder = ListOffsetRequest.Builder
 				.forConsumer(requireTimestamp, isolationLevel)
 				.setTargetTimes(timestampsToSearch);
-
+		// 发送请求
 		log.debug("Sending ListOffsetRequest {} to broker {}", builder, node);
 		return client.send(node, builder)
 				.compose(new RequestFutureAdapter<ClientResponse, ListOffsetResult>() {
@@ -1018,21 +1071,21 @@ public class Fetcher<K, V> implements Closeable {
 					public void onSuccess(ClientResponse response, RequestFuture<ListOffsetResult> future) {
 						ListOffsetResponse lor = (ListOffsetResponse) response.responseBody();
 						log.trace("Received ListOffsetResponse {} from broker {}", lor, node);
+						// 处理重置offset响应
 						handleListOffsetResponse(timestampsToSearch, lor, future);
 					}
 				});
 	}
 
 	/**
-	 * Callback for the response of the list offset call above.
-	 * @param timestampsToSearch The mapping from partitions to target timestamps
-	 * @param listOffsetResponse The response from the server.
-	 * @param future             The future to be completed when the response returns. Note that any partition-level errors will
-	 *                           generally fail the entire future result. The one exception is UNSUPPORTED_FOR_MESSAGE_FORMAT,
-	 *                           which indicates that the broker does not support the v1 message format. Partitions with this
-	 *                           particular error are simply left out of the future map. Note that the corresponding timestamp
-	 *                           value of each partition may be null only for v0. In v1 and later the ListOffset API would not
-	 *                           return a null timestamp (-1 is returned instead when necessary).
+	 * 重置offset响应的回调任务
+	 * @param timestampsToSearch partition-目标时间戳的映射集合，请求时的partition-目标时间戳集合
+	 * @param listOffsetResponse broker返回的重置offset响应
+	 * @param future             响应返回时，需要完成的异步任务
+	 *                           需要注意的是，任何partition级别的错误都会失败掉整个异步任务结果
+	 *                           一个异常是UNSUPPORTED_FOR_MESSAGE_FORMAT，证明broker不支持v1版本的消息格式
+	 *                           如果分区有此特定的错误，需要离开异步任务映射集合
+	 *                           还需要注意的是，每个partition对应的时间戳在v0版本的消息格式中可能为null，在v1及以后的版本中，ListOffset API不会返回null时间戳（可能会返回-1）
 	 */
 	@SuppressWarnings("deprecation")
 	private void handleListOffsetResponse(Map<TopicPartition, ListOffsetRequest.PartitionData> timestampsToSearch,
@@ -1044,41 +1097,52 @@ public class Fetcher<K, V> implements Closeable {
 
 		for (Map.Entry<TopicPartition, ListOffsetRequest.PartitionData> entry : timestampsToSearch.entrySet()) {
 			TopicPartition topicPartition = entry.getKey();
+			// 获取指定partition的partition数据
 			ListOffsetResponse.PartitionData partitionData = listOffsetResponse.responseData().get(topicPartition);
 			Errors error = partitionData.error;
+			// 排除异常情况
 			if (error == Errors.NONE) {
+				// 如果partition数据中包含了offset数据
 				if (partitionData.offsets != null) {
-					// Handle v0 response
+					// 处理v0版本消息格式的响应内容
 					long offset;
+					// 不允许存在一个partition有多个offset的情况
 					if (partitionData.offsets.size() > 1) {
 						future.raise(new IllegalStateException("Unexpected partitionData response of length " +
 								partitionData.offsets.size()));
 						return;
+						// 没有offset，返回的是一个emptyList
 					} else if (partitionData.offsets.isEmpty()) {
+						// 返回未知的offset结果
 						offset = ListOffsetResponse.UNKNOWN_OFFSET;
 					} else {
+						// 获取这个唯一的offset
 						offset = partitionData.offsets.get(0);
 					}
 					log.debug("Handling v0 ListOffsetResponse response for {}. Fetched offset {}",
 							topicPartition, offset);
+					// 在非位置offset的情况下
 					if (offset != ListOffsetResponse.UNKNOWN_OFFSET) {
+						// 构建offset数据，放入到缓存已拉取的partition-offset数据映射集合中
 						ListOffsetData offsetData = new ListOffsetData(offset, null, Optional.empty());
 						fetchedOffsets.put(topicPartition, offsetData);
 					}
 				} else {
-					// Handle v1 and later response
+					// 处理v1版本及以后的响应内容
 					log.debug("Handling ListOffsetResponse response for {}. Fetched offset {}, timestamp {}",
 							topicPartition, partitionData.offset, partitionData.timestamp);
 					if (partitionData.offset != ListOffsetResponse.UNKNOWN_OFFSET) {
+						// 此时是从ListOffsetResponse.PartitionData的offset中获取offset，是一个基本类型成员变量
 						ListOffsetData offsetData = new ListOffsetData(partitionData.offset, partitionData.timestamp,
 								partitionData.leaderEpoch);
+						// 也构建offset数据，放入到缓存已拉取的partition-offset数据映射集合中
 						fetchedOffsets.put(topicPartition, offsetData);
 					}
 				}
 			} else if (error == Errors.UNSUPPORTED_FOR_MESSAGE_FORMAT) {
-				// The message format on the broker side is before 0.10.0, which means it does not
-				// support timestamps. We treat this case the same as if we weren't able to find an
-				// offset corresponding to the requested timestamp and leave it out of the result.
+				// 如果响应返回了UNSUPPORTED_FOR_MESSAGE_FORMAT异常
+				// broker端的消息格式版本小于0.10.0，意味着不能支持时间戳格式
+				// 我们把这种情况视为没有找到offset，不计入最终结果
 				log.debug("Cannot search by timestamp for partition {} because the message format version " +
 						"is before 0.10.0", topicPartition);
 			} else if (error == Errors.NOT_LEADER_FOR_PARTITION ||
@@ -1086,28 +1150,34 @@ public class Fetcher<K, V> implements Closeable {
 					error == Errors.KAFKA_STORAGE_ERROR ||
 					error == Errors.OFFSET_NOT_AVAILABLE ||
 					error == Errors.LEADER_NOT_AVAILABLE) {
+				// 出现NOT_LEADER_FOR_PARTITION、REPLICA_NOT_AVAILABLE、KAFKA_STORAGE_ERROR、OFFSET_NOT_AVAILABLE、LEADER_NOT_AVAILABLE异常，需要进行重试
 				log.debug("Attempt to fetch offsets for partition {} failed due to {}, retrying.",
 						topicPartition, error);
 				partitionsToRetry.add(topicPartition);
 			} else if (error == Errors.FENCED_LEADER_EPOCH ||
 					error == Errors.UNKNOWN_LEADER_EPOCH) {
+				// 出现FENCED_LEADER_EPOCH、UNKNOWN_LEADER_EPOCH，也需要进行重试
 				log.debug("Attempt to fetch offsets for partition {} failed due to {}, retrying.",
 						topicPartition, error);
 				partitionsToRetry.add(topicPartition);
 			} else if (error == Errors.UNKNOWN_TOPIC_OR_PARTITION) {
+				// 出现UNKNOWN_TOPIC_OR_PARTITION，也需要进行重试
 				log.warn("Received unknown topic or partition error in ListOffset request for partition {}", topicPartition);
 				partitionsToRetry.add(topicPartition);
 			} else if (error == Errors.TOPIC_AUTHORIZATION_FAILED) {
+				// 出现TOPIC_AUTHORIZATION_FAILED，视为校验失败
 				unauthorizedTopics.add(topicPartition.topic());
 			} else {
 				log.warn("Attempt to fetch offsets for partition {} failed due to: {}, retrying.", topicPartition, error.message());
+				// 出现了未知异常，也需要进行重试
 				partitionsToRetry.add(topicPartition);
 			}
 		}
-
+		// 如果存在身份验证问题，抛出身份验证异常
 		if (!unauthorizedTopics.isEmpty())
 			future.raise(new TopicAuthorizationException(unauthorizedTopics));
 		else
+			// 否则包装重置offset成功结果
 			future.complete(new ListOffsetResult(fetchedOffsets, partitionsToRetry));
 	}
 
@@ -1229,6 +1299,12 @@ public class Fetcher<K, V> implements Closeable {
 						Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)));
 	}
 
+	/**
+	 * 使用lambda进行重新聚合，partition->node维度
+	 * @param partitionMap 重新聚合的partition-时间戳集合
+	 * @param <T>          聚合泛型
+	 * @return node维度的时间戳集合
+	 */
 	private <T> Map<Node, Map<TopicPartition, T>> regroupPartitionMapByNode(Map<TopicPartition, T> partitionMap) {
 		return partitionMap.entrySet()
 				.stream()

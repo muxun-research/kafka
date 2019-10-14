@@ -18,11 +18,11 @@ package org.apache.kafka.common.config;
 
 import org.apache.kafka.common.Configurable;
 import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.config.provider.ConfigProvider;
 import org.apache.kafka.common.config.types.Password;
 import org.apache.kafka.common.utils.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.kafka.common.config.provider.ConfigProvider;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -45,8 +45,10 @@ public class AbstractConfig {
     /* configs for which values have been requested, used to detect unused configs */
     private final Set<String> used;
 
-    /* the original values passed in by the user */
-    private final Map<String, ?> originals;
+	/**
+	 * 用户传递的原始值
+	 */
+	private final Map<String, ?> originals;
 
     /* the parsed values */
     private final Map<String, Object> values;

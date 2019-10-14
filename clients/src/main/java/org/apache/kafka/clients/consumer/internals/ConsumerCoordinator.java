@@ -224,13 +224,20 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         return protocolSet;
     }
 
-    public void updatePatternSubscription(Cluster cluster) {
-        final Set<String> topicsToSubscribe = cluster.topics().stream()
-                .filter(subscriptions::matchesSubscribedPattern)
-                .collect(Collectors.toSet());
-        if (subscriptions.subscribeFromPattern(topicsToSubscribe))
-            metadata.requestUpdateForNewTopics();
-    }
+	/**
+	 * 更新正则表达式订阅模式下的订阅信息
+	 * @param cluster
+	 */
+	public void updatePatternSubscription(Cluster cluster) {
+		// 获取根据正在表达式筛选的需要订阅的topic列表
+		final Set<String> topicsToSubscribe = cluster.topics().stream()
+				.filter(subscriptions::matchesSubscribedPattern)
+				.collect(Collectors.toSet());
+		// 更新订阅信息，相当于直接替换当前订阅的topic列表
+		if (subscriptions.subscribeFromPattern(topicsToSubscribe))
+			// 请求更新新的topic的metadata
+			metadata.requestUpdateForNewTopics();
+	}
 
     private ConsumerPartitionAssignor lookupAssignor(String name) {
         for (ConsumerPartitionAssignor assignor : this.assignors) {
@@ -407,32 +414,36 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
         if (firstException.get() != null)
             throw new KafkaException("User rebalance callback throws an error", firstException.get());
-    }
+	}
 
-    void maybeUpdateSubscriptionMetadata() {
-        int version = metadata.updateVersion();
-        if (version > metadataSnapshot.version) {
-            Cluster cluster = metadata.fetch();
+	/**
+	 * 更新定于的元数据
+	 */
+	void maybeUpdateSubscriptionMetadata() {
+		// 获取更新版本
+		int version = metadata.updateVersion();
+		// 版本控制，避免回退
+		if (version > metadataSnapshot.version) {
+			// 拉拉取集群信息
+			Cluster cluster = metadata.fetch();
+			// 如果开启的订阅模式是根据正则表达式分配分区
+			if (subscriptions.hasPatternSubscription())
+				// 更新正则表达式的订阅内容
+				updatePatternSubscription(cluster);
 
-            if (subscriptions.hasPatternSubscription())
-                updatePatternSubscription(cluster);
+			// 更新当前的快照
+			// 快照用于检查需要再平衡的订阅变更（比如出现了新分区）
+			metadataSnapshot = new MetadataSnapshot(subscriptions, cluster, version);
+		}
+	}
 
-            // Update the current snapshot, which will be used to check for subscription
-            // changes that would require a rebalance (e.g. new partitions).
-            metadataSnapshot = new MetadataSnapshot(subscriptions, cluster, version);
-        }
-    }
-
-    /**
-     * Poll for coordinator events. This ensures that the coordinator is known and that the consumer
-     * has joined the group (if it is using group management). This also handles periodic offset commits
-     * if they are enabled.
-     * <p>
-     * Returns early if the timeout expires
-     *
-     * @param timer Timer bounding how long this method can block
-     * @throws KafkaException if the rebalance callback throws an exception
-     * @return true iff the operation succeeded
+	/**
+	 * 拉取协调者的事件，它确认了协调者是被集群知道的，consumer已经加入到了消费组中（如果开启了消费组管理）
+	 * 它同时也处理了定期的offset提交
+	 * 如果超过了超时时间，则提早返回
+	 * @param timer poll()方法的等待时间
+	 * @throws KafkaException 如果再平衡器的回调任务出现了异常
+	 * @return polkl()结果
      */
     public boolean poll(Timer timer) {
         maybeUpdateSubscriptionMetadata();

@@ -197,6 +197,11 @@ public class SubscriptionState {
 		this.subscribedPattern = pattern;
 	}
 
+	/**
+	 * 同步更新topic
+	 * @param topics
+	 * @return
+	 */
 	public synchronized boolean subscribeFromPattern(Set<String> topics) {
 		if (subscriptionType != SubscriptionType.AUTO_PATTERN)
 			throw new IllegalArgumentException("Attempt to subscribe from pattern while subscription type set to " +
@@ -394,17 +399,23 @@ public class SubscriptionState {
 		assignedState(tp).seekUnvalidated(position);
 	}
 
-    synchronized void maybeSeekUnvalidated(TopicPartition tp, long offset, OffsetResetStrategy requestedResetStrategy) {
-        TopicPartitionState state = assignedStateOrNull(tp);
-        if (state == null) {
-            log.debug("Skipping reset of partition {} since it is no longer assigned", tp);
-        } else if (!state.awaitingReset()) {
-            log.debug("Skipping reset of partition {} since reset is no longer needed", tp);
-        } else if (requestedResetStrategy != state.resetStrategy) {
-            log.debug("Skipping reset of partition {} since an alternative reset has been requested", tp);
-        } else {
-            log.info("Resetting offset for partition {} to offset {}.", tp, offset);
-            state.seekUnvalidated(new FetchPosition(offset));
+	/**
+	 * 同步不使用校验，手动更新offset
+	 * @param tp
+	 * @param offset
+	 * @param requestedResetStrategy
+	 */
+	synchronized void maybeSeekUnvalidated(TopicPartition tp, long offset, OffsetResetStrategy requestedResetStrategy) {
+		TopicPartitionState state = assignedStateOrNull(tp);
+		if (state == null) {
+			log.debug("Skipping reset of partition {} since it is no longer assigned", tp);
+		} else if (!state.awaitingReset()) {
+			log.debug("Skipping reset of partition {} since reset is no longer needed", tp);
+		} else if (requestedResetStrategy != state.resetStrategy) {
+			log.debug("Skipping reset of partition {} since an alternative reset has been requested", tp);
+		} else {
+			log.info("Resetting offset for partition {} to offset {}.", tp, offset);
+			state.seekUnvalidated(new FetchPosition(offset));
 		}
 	}
 
@@ -452,19 +463,26 @@ public class SubscriptionState {
 
     public synchronized void position(TopicPartition tp, FetchPosition position) {
         assignedState(tp).position(position);
-    }
+	}
 
-    public synchronized boolean maybeValidatePositionForCurrentLeader(TopicPartition tp, Metadata.LeaderAndEpoch leaderAndEpoch) {
-        return assignedState(tp).maybeValidatePosition(leaderAndEpoch);
-    }
+	/**
+	 * 根据当前的leader节点，校验当前分区的拉取位置
+	 * @param tp             当前分区
+	 * @param leaderAndEpoch leader epoch
+	 * @return 校验结果
+	 */
+	public synchronized boolean maybeValidatePositionForCurrentLeader(TopicPartition tp, Metadata.LeaderAndEpoch leaderAndEpoch) {
+		return assignedState(tp).maybeValidatePosition(leaderAndEpoch);
+	}
 
-    /**
-     * Attempt to complete validation with the end offset returned from the OffsetForLeaderEpoch request.
-     * @return The diverging offset if truncation was detected and no reset policy is defined.
+	/**
+	 * 根据OffsetForLeaderEpoch请求的结果，尝试完成末尾offset的校验
+	 * @return 检测到的存在出现截断，且没有声明任何重置策略的offset
      */
     public synchronized Optional<OffsetAndMetadata> maybeCompleteValidation(TopicPartition tp,
-                                                                            FetchPosition requestPosition,
-                                                                            EpochEndOffset epochEndOffset) {
+																			FetchPosition requestPosition,
+																			EpochEndOffset epochEndOffset) {
+		// 获取当前partition的订阅状态
         TopicPartitionState state = assignedStateOrNull(tp);
         if (state == null) {
             log.debug("Skipping completed validation for partition {} which is not currently assigned.", tp);
@@ -472,26 +490,32 @@ public class SubscriptionState {
             log.debug("Skipping completed validation for partition {} which is no longer expecting validation.", tp);
         } else {
             SubscriptionState.FetchPosition currentPosition = state.position;
+			// 请求时的position不等于当前consumer存储的position，证明发生了多次请求，不进行处理
             if (!currentPosition.equals(requestPosition)) {
                 log.debug("Skipping completed validation for partition {} since the current position {} " +
                                 "no longer matches the position {} when the request was sent",
                         tp, currentPosition, requestPosition);
             } else if (epochEndOffset.endOffset() < currentPosition.offset) {
-                if (hasDefaultOffsetResetPolicy()) {
+				// 如果OffsetForLeaderEpoch的offset小于当前consumer存储的offset
+				if (hasDefaultOffsetResetPolicy()) {
+					// 在有默认重置offset的策略下
                     SubscriptionState.FetchPosition newPosition = new SubscriptionState.FetchPosition(
                             epochEndOffset.endOffset(), Optional.of(epochEndOffset.leaderEpoch()),
                             currentPosition.currentLeader);
                     log.info("Truncation detected for partition {} at offset {}, resetting offset to " +
                             "the first offset known to diverge {}", tp, currentPosition, newPosition);
+					// 重新发起校验请求
                     state.seekValidated(newPosition);
                 } else {
                     log.warn("Truncation detected for partition {} at offset {} (the end offset from the " +
                                     "broker is {}), but no reset policy is set",
-                            tp, currentPosition, epochEndOffset);
+							tp, currentPosition, epochEndOffset);
+					// 否则返回需要继续处理的offset metadata
                     return Optional.of(new OffsetAndMetadata(epochEndOffset.endOffset(),
                             Optional.of(epochEndOffset.leaderEpoch()), null));
-                }
-            } else {
+				}
+			} else {
+				// 此时已过滤掉异常情况，完成校验
                 state.completeValidation();
             }
         }
@@ -609,20 +633,29 @@ public class SubscriptionState {
 		return allConsumed;
 	}
 
-    public synchronized void requestOffsetReset(TopicPartition partition, OffsetResetStrategy offsetResetStrategy) {
-        assignedState(partition).reset(offsetResetStrategy);
-    }
+	/**
+	 * 请求重置指定分区的offset
+	 * @param partition           需要重置offset的分区
+	 * @param offsetResetStrategy 重置partition的策略
+	 */
+	public synchronized void requestOffsetReset(TopicPartition partition, OffsetResetStrategy offsetResetStrategy) {
+		assignedState(partition).reset(offsetResetStrategy);
+	}
 
     public synchronized void requestOffsetReset(Collection<TopicPartition> partitions, OffsetResetStrategy offsetResetStrategy) {
         partitions.forEach(tp -> {
             log.info("Seeking to {} offset of partition {}", offsetResetStrategy, tp);
-            assignedState(tp).reset(offsetResetStrategy);
-        });
-    }
+			assignedState(tp).reset(offsetResetStrategy);
+		});
+	}
 
-    public void requestOffsetReset(TopicPartition partition) {
-        requestOffsetReset(partition, defaultResetStrategy);
-    }
+	/**
+	 * 请求重置指定分区的offset
+	 * @param partition 需要重置offset的分区
+	 */
+	public void requestOffsetReset(TopicPartition partition) {
+		requestOffsetReset(partition, defaultResetStrategy);
+	}
 
     synchronized void setNextAllowedRetry(Set<TopicPartition> partitions, long nextAllowResetTimeMs) {
         for (TopicPartition partition : partitions) {
@@ -654,24 +687,30 @@ public class SubscriptionState {
         return assignment.stream()
                 .filter(state -> filter.test(state.value()))
                 .map(PartitionStates.PartitionState::topicPartition)
-                .collect(collector);
-    }
+				.collect(collector);
+	}
 
-
+	/**
+	 * 重置缺失的partition position
+	 */
     public synchronized void resetMissingPositions() {
         final Set<TopicPartition> partitionsWithNoOffsets = new HashSet<>();
+		// 遍历已分配的partition状态
         assignment.stream().forEach(state -> {
             TopicPartition tp = state.topicPartition();
             TopicPartitionState partitionState = state.value();
             if (!partitionState.hasPosition()) {
-                if (defaultResetStrategy == OffsetResetStrategy.NONE)
-                    partitionsWithNoOffsets.add(tp);
-                else
-                    requestOffsetReset(tp);
+				if (defaultResetStrategy == OffsetResetStrategy.NONE)
+					// 添加没有offset，且没有重置策略的partition
+					partitionsWithNoOffsets.add(tp);
+				else
+					// 有重置策略，直接请求重置offset
+					requestOffsetReset(tp);
             }
-        });
-
+		});
+		// 如果存在有offset，且没有重置策略的partition
         if (!partitionsWithNoOffsets.isEmpty())
+			// 抛出异常
             throw new NoOffsetForPartitionException(partitionsWithNoOffsets);
     }
 
@@ -846,11 +885,11 @@ public class SubscriptionState {
 		 * highWaterMark则是这几个日志文件末尾offset的最小值
 		 * 消费者只能拉取到highWaterMark之前的消息
 		 */
-        private Long highWatermark; // the high watermark from last fetch
+		private Long highWatermark;
 		/**
 		 * 记录的起始offset
 		 */
-		private Long logStartOffset; // the log start offset
+		private Long logStartOffset;
 		/**
 		 * 最后一次提交的offset
 		 */
@@ -882,7 +921,7 @@ public class SubscriptionState {
 		/**
 		 * 传输fetch状态
 		 * @param newState          新的fetch状态
-		 * @param runIfTransitioned
+		 * @param runIfTransitioned 开启事务需要处理的任务
 		 */
 		private void transitionState(FetchState newState, Runnable runIfTransitioned) {
 			FetchState nextState = this.fetchState.transitionTo(newState);
@@ -923,30 +962,41 @@ public class SubscriptionState {
         private void reset(OffsetResetStrategy strategy) {
             transitionState(FetchStates.AWAIT_RESET, () -> {
                 this.resetStrategy = strategy;
-                this.nextRetryTimeMs = null;
-            });
-        }
+				this.nextRetryTimeMs = null;
+			});
+		}
 
-        private boolean maybeValidatePosition(Metadata.LeaderAndEpoch currentLeaderAndEpoch) {
-            if (this.fetchState.equals(FetchStates.AWAIT_RESET)) {
-                return false;
-            }
+		/**
+		 * 校验当前分区的拉取置为
+		 * @param currentLeaderAndEpoch consumer存储的当前分区的leader epoch
+		 * @return 是否进行校验
+		 */
+		private boolean maybeValidatePosition(Metadata.LeaderAndEpoch currentLeaderAndEpoch) {
+			// 如果当前的拉取状态为等待重置，则无需进行更新
+			if (this.fetchState.equals(FetchStates.AWAIT_RESET)) {
+				return false;
+			}
 
-            if (currentLeaderAndEpoch.equals(Metadata.LeaderAndEpoch.noLeaderOrEpoch())) {
-                // Ignore empty LeaderAndEpochs
-                return false;
-            }
+			if (currentLeaderAndEpoch.equals(Metadata.LeaderAndEpoch.noLeaderOrEpoch())) {
+				// 没有leader epoch的情况，不进行更新，更新很可能会出错
+				return false;
+			}
 
-            if (position != null && !position.currentLeader.equals(currentLeaderAndEpoch)) {
-                FetchPosition newPosition = new FetchPosition(position.offset, position.offsetEpoch, currentLeaderAndEpoch);
-                validatePosition(newPosition);
-                preferredReadReplica = null;
-            }
+			if (position != null && !position.currentLeader.equals(currentLeaderAndEpoch)) {
+				// 如果拉取的position的当前leader epoch，不等于consumer存储的leader epoch，证明发生了节点的更新换代
+				// 需要校验当前最新的位置
+				FetchPosition newPosition = new FetchPosition(position.offset, position.offsetEpoch, currentLeaderAndEpoch);
+				// 校验新fetch的位置
+				validatePosition(newPosition);
+				// 由于leader节点发生了变化，那么需要重置首选的读节点
+				preferredReadReplica = null;
+			}
+			// 通过拉取状态来最终决定是否需要进行校验
 			return this.fetchState.equals(FetchStates.AWAIT_VALIDATION);
 		}
 
 		/**
-		 * 校验fetch时的位置
+		 * 校验fetch的位置
 		 * @param position
 		 */
 		private void validatePosition(FetchPosition position) {
@@ -958,7 +1008,7 @@ public class SubscriptionState {
 					this.nextRetryTimeMs = null;
 				});
 			} else {
-				// If we have no epoch information for the current position, then we can skip validation
+				// 我们没有当前position的epoch信息，我们可以跳过验证
 				transitionState(FetchStates.FETCHING, () -> {
 					this.position = position;
 					this.nextRetryTimeMs = null;

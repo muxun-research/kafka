@@ -48,7 +48,7 @@ public class ConsumerConfig extends AbstractConfig {
      */
 
     /**
-     * <code>group.id</code>
+	 * group.id
      */
     public static final String GROUP_ID_CONFIG = CommonClientConfigs.GROUP_ID_CONFIG;
     private static final String GROUP_ID_DOC = CommonClientConfigs.GROUP_ID_DOC;
@@ -79,7 +79,7 @@ public class ConsumerConfig extends AbstractConfig {
     private static final String HEARTBEAT_INTERVAL_MS_DOC = CommonClientConfigs.HEARTBEAT_INTERVAL_MS_DOC;
 
     /**
-     * <code>bootstrap.servers</code>
+	 * 和Kafka集群进行连接的host:pairs对
      */
     public static final String BOOTSTRAP_SERVERS_CONFIG = CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG;
 
@@ -87,7 +87,7 @@ public class ConsumerConfig extends AbstractConfig {
     public static final String CLIENT_DNS_LOOKUP_CONFIG = CommonClientConfigs.CLIENT_DNS_LOOKUP_CONFIG;
 
     /**
-     * <code>enable.auto.commit</code>
+	 * 开启自动提交
      */
     public static final String ENABLE_AUTO_COMMIT_CONFIG = "enable.auto.commit";
     private static final String ENABLE_AUTO_COMMIT_DOC = "If true the consumer's offset will be periodically committed in the background.";
@@ -99,7 +99,7 @@ public class ConsumerConfig extends AbstractConfig {
     private static final String AUTO_COMMIT_INTERVAL_MS_DOC = "The frequency in milliseconds that the consumer offsets are auto-committed to Kafka if <code>enable.auto.commit</code> is set to <code>true</code>.";
 
     /**
-     * <code>partition.assignment.strategy</code>
+	 * 自定义的partition分配策略
      */
     public static final String PARTITION_ASSIGNMENT_STRATEGY_CONFIG = "partition.assignment.strategy";
     private static final String PARTITION_ASSIGNMENT_STRATEGY_DOC = "A list of class names or class types, ordered by preference, of supported assignors responsible for the partition assignment strategy that the client will use to distribute partition ownership amongst consumer instances when group management is used. Implementing the <code>org.apache.kafka.clients.consumer.ConsumerPartitionAssignor</code> interface allows you to plug in a custom assignment strategy.";
@@ -216,12 +216,19 @@ public class ConsumerConfig extends AbstractConfig {
     /** <code>connections.max.idle.ms</code> */
     public static final String CONNECTIONS_MAX_IDLE_MS_CONFIG = CommonClientConfigs.CONNECTIONS_MAX_IDLE_MS_CONFIG;
 
-    /** <code>request.timeout.ms</code> */
-    public static final String REQUEST_TIMEOUT_MS_CONFIG = CommonClientConfigs.REQUEST_TIMEOUT_MS_CONFIG;
-    private static final String REQUEST_TIMEOUT_MS_DOC = CommonClientConfigs.REQUEST_TIMEOUT_MS_DOC;
-
-    /** <code>default.api.timeout.ms</code> */
-    public static final String DEFAULT_API_TIMEOUT_MS_CONFIG = "default.api.timeout.ms";
+	/**
+	 * 请求超时时间属性
+	 * request.timeout.ms
+	 */
+	public static final String REQUEST_TIMEOUT_MS_CONFIG = CommonClientConfigs.REQUEST_TIMEOUT_MS_CONFIG;
+	/**
+	 * 消费者API的默认超时时间
+	 */
+	public static final String DEFAULT_API_TIMEOUT_MS_CONFIG = "default.api.timeout.ms";
+	/**
+	 * 请求超时时间属性的描述
+	 */
+	private static final String REQUEST_TIMEOUT_MS_DOC = CommonClientConfigs.REQUEST_TIMEOUT_MS_DOC;
     public static final String DEFAULT_API_TIMEOUT_MS_DOC = "Specifies the timeout (in milliseconds) for consumer APIs that could block. This configuration is used as the default timeout for all consumer operations that do not explicitly accept a <code>timeout</code> parameter.";
 
     /** <code>interceptor.classes</code> */

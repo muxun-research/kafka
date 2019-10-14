@@ -72,7 +72,10 @@ public class CommonClientConfigs {
     public static final String RETRIES_CONFIG = "retries";
     public static final String RETRIES_DOC = "Setting a value greater than zero will cause the client to resend any request that fails with a potentially transient error.";
 
-    public static final String RETRY_BACKOFF_MS_CONFIG = "retry.backoff.ms";
+	/**
+	 * 尝试重试对给定主题分区的失败请求之前等待的时间量
+	 */
+	public static final String RETRY_BACKOFF_MS_CONFIG = "retry.backoff.ms";
     public static final String RETRY_BACKOFF_MS_DOC = "The amount of time to wait before attempting to retry a failed request to a given topic partition. This avoids repeatedly sending requests in a tight loop under some failure scenarios.";
 
     public static final String METRICS_SAMPLE_WINDOW_MS_CONFIG = "metrics.sample.window.ms";
