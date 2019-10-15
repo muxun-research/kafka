@@ -1658,136 +1658,115 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         }
     }
 
-    /**
-     * Get the offset of the <i>next record</i> that will be fetched (if a record with that offset exists).
-     * This method may issue a remote call to the server if there is no current position for the given partition.
-     * <p>
-     * This call will block until either the position could be determined or an unrecoverable error is
-     * encountered (in which case it is thrown to the caller), or the timeout specified by {@code default.api.timeout.ms} expires
-     * (in which case a {@link org.apache.kafka.common.errors.TimeoutException} is thrown to the caller).
-     *
-     * @param partition The partition to get the position for
-     * @return The current position of the consumer (that is, the offset of the next record to be fetched)
-     * @throws IllegalStateException if the provided TopicPartition is not assigned to this consumer
-     * @throws org.apache.kafka.clients.consumer.InvalidOffsetException if no offset is currently defined for
-     *             the partition
-     * @throws org.apache.kafka.common.errors.WakeupException if {@link #wakeup()} is called before or while this
-     *             function is called
-     * @throws org.apache.kafka.common.errors.InterruptException if the calling thread is interrupted before or while
-     *             this function is called
-     * @throws org.apache.kafka.common.errors.AuthenticationException if authentication fails. See the exception for more details
-     * @throws org.apache.kafka.common.errors.AuthorizationException if not authorized to the topic or to the
-     *             configured groupId. See the exception for more details
-     * @throws org.apache.kafka.common.KafkaException for any other unrecoverable errors
-     * @throws org.apache.kafka.common.errors.TimeoutException if the position cannot be determined before the
-     *             timeout specified by {@code default.api.timeout.ms} expires
-     */
+	/**
+	 * 获取下一个需要拉取的record的offset
+	 * <p>
+	 * 当前方法会允许发出一个远程调用给broker，如果没有指定分区的当前position
+	 * 这个调用会一直阻塞，直到一个position被确认或者一个发生了一个不能恢复的错误，或者超出了等待时间
+	 * @param partition 需要获取position的partition
+	 * @return consumer消费的的当前position
+	 * @throws IllegalStateException                                    如果提供的partition没有分配给当前的consumer
+	 * @throws org.apache.kafka.clients.consumer.InvalidOffsetException 当前partition没有声明的offset
+	 * @throws org.apache.kafka.common.errors.WakeupException           调用{@link #wakeup()}
+	 * @throws org.apache.kafka.common.errors.InterruptException        调用的线程被中断
+	 * @throws org.apache.kafka.common.errors.AuthenticationException   身份验证失败
+	 * @throws org.apache.kafka.common.errors.AuthorizationException    没有通过对topic和已配置的消费组的验证
+	 * @throws org.apache.kafka.common.KafkaException                   对于一些其他的不可恢复的错误
+	 * @throws org.apache.kafka.common.errors.TimeoutException          超出等待时间错误
+	 */
     @Override
     public long position(TopicPartition partition) {
         return position(partition, Duration.ofMillis(defaultApiTimeoutMs));
-    }
+	}
 
-    /**
-     * Get the offset of the <i>next record</i> that will be fetched (if a record with that offset exists).
-     * This method may issue a remote call to the server if there is no current position
-     * for the given partition.
-     * <p>
-     * This call will block until the position can be determined, an unrecoverable error is
-     * encountered (in which case it is thrown to the caller), or the timeout expires.
-     *
-     * @param partition The partition to get the position for
-     * @param timeout The maximum amount of time to await determination of the current position
-     * @return The current position of the consumer (that is, the offset of the next record to be fetched)
-     * @throws IllegalStateException if the provided TopicPartition is not assigned to this consumer
-     * @throws org.apache.kafka.clients.consumer.InvalidOffsetException if no offset is currently defined for
-     *             the partition
-     * @throws org.apache.kafka.common.errors.WakeupException if {@link #wakeup()} is called before or while this
-     *             function is called
-     * @throws org.apache.kafka.common.errors.InterruptException if the calling thread is interrupted before or while
-     *             this function is called
-     * @throws org.apache.kafka.common.errors.TimeoutException if the position cannot be determined before the
-     *             passed timeout expires
-     * @throws org.apache.kafka.common.errors.AuthenticationException if authentication fails. See the exception for more details
-     * @throws org.apache.kafka.common.errors.AuthorizationException if not authorized to the topic or to the
-     *             configured groupId. See the exception for more details
-     * @throws org.apache.kafka.common.KafkaException for any other unrecoverable errors
+	/**
+	 * 获取下一个需要拉取的record的offset
+	 * <p>
+	 * 当前方法会允许发出一个远程调用给broker，如果没有指定分区的当前position
+	 * 这个调用会一直阻塞，直到一个position被确认或者一个发生了一个不能恢复的错误，或者超出了等待时间
+	 * @param partition 需要获取position的partition
+	 * @param timeout   等待阻塞的时间
+	 * @return consumer消费的的当前position
+	 * @throws IllegalStateException                                    如果提供的partition没有分配给当前的consumer
+	 * @throws org.apache.kafka.clients.consumer.InvalidOffsetException 当前partition没有声明的offset
+	 * @throws org.apache.kafka.common.errors.WakeupException           调用{@link #wakeup()}
+	 * @throws org.apache.kafka.common.errors.InterruptException        调用的线程被中断
+	 * @throws org.apache.kafka.common.errors.AuthenticationException   身份验证失败
+	 * @throws org.apache.kafka.common.errors.AuthorizationException    没有通过对topic和已配置的消费组的验证
+	 * @throws org.apache.kafka.common.KafkaException                   对于一些其他的不可恢复的错误
      */
     @Override
     public long position(TopicPartition partition, final Duration timeout) {
-        acquireAndEnsureOpen();
-        try {
+		// 获取轻量级锁
+		acquireAndEnsureOpen();
+		try {
+			// 当前consumer是否订阅了此partition
             if (!this.subscriptions.isAssigned(partition))
                 throw new IllegalStateException("You can only check the position for partitions assigned to this consumer.");
-
-            Timer timer = time.timer(timeout);
-            do {
+			// 设置等待时间的计数器
+			Timer timer = time.timer(timeout);
+			// 在没有超出等待时间的情况下，轮询拉取指定partition的position
+			do {
+				// 如果当前partition有合法的position，返回当前position的offset
                 SubscriptionState.FetchPosition position = this.subscriptions.validPosition(partition);
                 if (position != null)
-                    return position.offset;
-
-                updateFetchPositions(timer);
+					return position.offset;
+				// 在剩余等待时间内构建拉取position的请求
+				updateFetchPositions(timer);
+				// 轮询拉取到的结果，如果拉取到了合法的结果，再下一次循环中，会将返回最新拉取的position的offset
                 client.poll(timer);
             } while (timer.notExpired());
 
             throw new TimeoutException("Timeout of " + timeout.toMillis() + "ms expired before the position " +
                     "for partition " + partition + " could be determined");
         } finally {
-            release();
-        }
-    }
+			// 释放轻量级锁
+			release();
+		}
+	}
 
-    /**
-     * Get the last committed offset for the given partition (whether the commit happened by this process or
-     * another). This offset will be used as the position for the consumer in the event of a failure.
-     * <p>
-     * This call will do a remote call to get the latest committed offset from the server, and will block until the
-     * committed offset is gotten successfully, an unrecoverable error is encountered (in which case it is thrown to
-     * the caller), or the timeout specified by {@code default.api.timeout.ms} expires (in which case a
-     * {@link org.apache.kafka.common.errors.TimeoutException} is thrown to the caller).
-     *
-     * @param partition The partition to check
-     * @return The last committed offset and metadata or null if there was no prior commit
-     * @throws org.apache.kafka.common.errors.WakeupException if {@link #wakeup()} is called before or while this
-     *             function is called
-     * @throws org.apache.kafka.common.errors.InterruptException if the calling thread is interrupted before or while
-     *             this function is called
-     * @throws org.apache.kafka.common.errors.AuthenticationException if authentication fails. See the exception for more details
-     * @throws org.apache.kafka.common.errors.AuthorizationException if not authorized to the topic or to the
-     *             configured groupId. See the exception for more details
-     * @throws org.apache.kafka.common.KafkaException for any other unrecoverable errors
-     * @throws org.apache.kafka.common.errors.TimeoutException if the committed offset cannot be found before
-     *             the timeout specified by {@code default.api.timeout.ms} expires.
-     */
+	/**
+	 * 获取指定分区最后一次提交的offset（不管提交是由当前进程发起的，还是其他进程发起的）
+	 * <p>
+	 * 当钱调用会执行一个远程调用来从broker获取最近一次提交的offset
+	 * 并会一直阻塞直到成功获取提交的offset，或者发生了一个不可恢复的错误，或者超出了指定的等待时间
+	 * @param partition 需要检查的partition
+	 * @return 最近一次提交的offset和metadata，如果没有前置提交，则返回null
+	 * @throws org.apache.kafka.common.errors.WakeupException         调用{@link #wakeup()}
+	 * @throws org.apache.kafka.common.errors.InterruptException      调用的线程被中断
+	 * @throws org.apache.kafka.common.errors.AuthenticationException 身份验证失败
+	 * @throws org.apache.kafka.common.errors.AuthorizationException  没有通过对topic和已配置的消费组的验证
+	 * @throws org.apache.kafka.common.KafkaException                 对于一些其他的不可恢复的错误
+	 * @throws org.apache.kafka.common.errors.TimeoutException        超出指定的等待时间
+	 */
     @Override
     public OffsetAndMetadata committed(TopicPartition partition) {
         return committed(partition, Duration.ofMillis(defaultApiTimeoutMs));
-    }
+	}
 
-    /**
-     * Get the last committed offset for the given partition (whether the commit happened by this process or
-     * another). This offset will be used as the position for the consumer in the event of a failure.
-     * <p>
-     * This call will block to do a remote call to get the latest committed offsets from the server.
-     *
-     * @param partition The partition to check
-     * @param timeout  The maximum amount of time to await the current committed offset
-     * @return The last committed offset and metadata or null if there was no prior commit
-     * @throws org.apache.kafka.common.errors.WakeupException if {@link #wakeup()} is called before or while this
-     *             function is called
-     * @throws org.apache.kafka.common.errors.InterruptException if the calling thread is interrupted before or while
-     *             this function is called
-     * @throws org.apache.kafka.common.errors.AuthenticationException if authentication fails. See the exception for more details
-     * @throws org.apache.kafka.common.errors.AuthorizationException if not authorized to the topic or to the
-     *             configured groupId. See the exception for more details
-     * @throws org.apache.kafka.common.KafkaException for any other unrecoverable errors
-     * @throws org.apache.kafka.common.errors.TimeoutException if the committed offset cannot be found before
-     *             expiration of the timeout
+	/**
+	 * 获取指定分区最后一次提交的offset（不管提交是由当前进程发起的，还是其他进程发起的）
+	 * <p>
+	 * 当钱调用会执行一个远程调用来从broker获取最近一次提交的offset
+	 * 并会一直阻塞直到成功获取提交的offset，或者发生了一个不可恢复的错误，或者超出了指定的等待时间
+	 * @param partition 需要检查的partition
+	 * @param timeout   指定的等待时间
+	 * @return 最近一次提交的offset和metadata，如果没有前置提交，则返回null
+	 * @throws org.apache.kafka.common.errors.WakeupException         调用{@link #wakeup()}
+	 * @throws org.apache.kafka.common.errors.InterruptException      调用的线程被中断
+	 * @throws org.apache.kafka.common.errors.AuthenticationException 身份验证失败
+	 * @throws org.apache.kafka.common.errors.AuthorizationException  没有通过对topic和已配置的消费组的验证
+	 * @throws org.apache.kafka.common.KafkaException                 对于一些其他的不可恢复的错误
+	 * @throws org.apache.kafka.common.errors.TimeoutException        超出指定的等待时间
      */
     @Override
     public OffsetAndMetadata committed(TopicPartition partition, final Duration timeout) {
-        acquireAndEnsureOpen();
+		// 获取轻量级锁
+		acquireAndEnsureOpen();
         try {
-            maybeThrowInvalidGroupIdException();
+			// 校验group.id，实际上就是判空
+			maybeThrowInvalidGroupIdException();
+			// 调用协调者拉取已提交的offset
             Map<TopicPartition, OffsetAndMetadata> offsets = coordinator.fetchCommittedOffsets(
                     Collections.singleton(partition), time.timer(timeout));
             if (offsets == null) {
@@ -1797,8 +1776,9 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             } else {
                 offsets.forEach(this::updateLastSeenEpochIfNewer);
                 return offsets.get(partition);
-            }
+			}
         } finally {
+			// 释放轻量级锁
             release();
         }
     }

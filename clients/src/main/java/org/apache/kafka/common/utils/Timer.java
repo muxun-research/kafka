@@ -167,14 +167,15 @@ public class Timer {
     }
 
     /**
-     * Sleep for the requested duration and update the timer. Return when either the duration has
-     * elapsed or the timer has expired.
-     *
-     * @param durationMs The duration in milliseconds to sleep
+	 * 等待请求的时间范围，并更新计数器
+	 * 不论是sleep了指定的时间范围，还是计数器已经超时，都会正常返回
+	 * @param durationMs 需要sleep的时间
      */
     public void sleep(long durationMs) {
         long sleepDurationMs = Math.min(durationMs, remainingMs());
+		// 阻塞等待
         time.sleep(sleepDurationMs);
+		// 更新计时器时间戳
         update();
     }
 }

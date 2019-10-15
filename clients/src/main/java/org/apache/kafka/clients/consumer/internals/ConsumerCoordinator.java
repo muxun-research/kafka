@@ -773,43 +773,50 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     }
 
     /**
-     * Fetch the current committed offsets from the coordinator for a set of partitions.
-     *
-     * @param partitions The partitions to fetch offsets for
-     * @return A map from partition to the committed offset or null if the operation timed out
+	 * 使用协调者拉取指定partition集合提交的offset
+	 * @param partitions 需要拉取的partition集合
+	 * @return partition和提交的offset和metadata映射集合，如果超过了指定的等待时间，返回null
      */
     public Map<TopicPartition, OffsetAndMetadata> fetchCommittedOffsets(final Set<TopicPartition> partitions,
                                                                         final Timer timer) {
+		// 如果需要拉取的partition集合为空，不进行拉取
         if (partitions.isEmpty()) return Collections.emptyMap();
-
+		// 获取当前拉取的版本
         final Generation generation = generation();
         if (pendingCommittedOffsetRequest != null && !pendingCommittedOffsetRequest.sameRequest(partitions, generation)) {
             // if we were waiting for a different request, then just clear it.
             pendingCommittedOffsetRequest = null;
         }
 
+		// 在未超时的情况下，进行轮询
         do {
+			// 确认协调者处于就绪状态
             if (!ensureCoordinatorReady(timer)) return null;
 
-            // contact coordinator to fetch committed offsets
+			// 构建拉取offset请求，并向协调者发起请求
             final RequestFuture<Map<TopicPartition, OffsetAndMetadata>> future;
+			// 如果已经发起了一次拉取offset请求，直接等待此请求的响应即可
             if (pendingCommittedOffsetRequest != null) {
                 future = pendingCommittedOffsetRequest.response;
             } else {
+				// 之前没有发起请求，直接发起请求
                 future = sendOffsetFetchRequest(partitions);
                 pendingCommittedOffsetRequest = new PendingCommittedOffsetRequest(partitions, generation, future);
-
             }
+			// 轮询拉取offset响应
             client.poll(future, timer);
-
+			// 如果响应完成
             if (future.isDone()) {
+				// 重置挂起等待拉取offset响应的请求
                 pendingCommittedOffsetRequest = null;
-
+				// 如果响应是成功的结果，返回拉取的内容
                 if (future.succeeded()) {
                     return future.value();
                 } else if (!future.isRetriable()) {
+					// 如果响应是失败的结果，并且不可以进行重试，抛出响应返回的异常
                     throw future.exception();
                 } else {
+					// 如果响应时失败的结果，并且可以进行重试，计时器等待到下一次进行重试的时间
                     timer.sleep(rebalanceConfig.retryBackoffMs);
                 }
             } else {

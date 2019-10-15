@@ -210,40 +210,44 @@ public abstract class AbstractCoordinator implements Closeable {
     protected void onLeavePrepare() {}
 
     /**
-     * Visible for testing.
-     *
-     * Ensure that the coordinator is ready to receive requests.
-     *
-     * @param timer Timer bounding how long this method can block
-     * @return true If coordinator discovery and initial connection succeeded, false otherwise
+	 * 确认协调者已经处于就绪状态，准备好接收请求
+	 * @param timer 指定的等待时间计时器
+	 * @return 如果协调者处于可发现状态，并且初始化连接已经成功，返回true，其他情况返回false
      */
     protected synchronized boolean ensureCoordinatorReady(final Timer timer) {
+		// 如果协调者没有处于未知状态，返回true
         if (!coordinatorUnknown())
             return true;
 
+		// 在协调者处于未知状态，并且在剩余等待时间内进行轮询
         do {
+			// 查找当前consumer的协调者信息
             final RequestFuture<Void> future = lookupCoordinator();
             client.poll(future, timer);
-
+			// 没有查找完成，跳出轮旋，根据当前的协调者状态进行判断
             if (!future.isDone()) {
-                // ran out of time
+				// 可能是超出等待时间了
                 break;
             }
-
+			// 查找失败
             if (future.failed()) {
+				// 如果出现的是可重试错误
                 if (future.isRetriable()) {
                     log.debug("Coordinator discovery failed, refreshing metadata");
+					// 证明协调者发现失败，刷新metadata
                     client.awaitMetadataUpdate(timer);
                 } else
+					// 非重试性错误，直接抛出异常
                     throw future.exception();
             } else if (coordinator != null && client.isUnavailable(coordinator)) {
-                // we found the coordinator, but the connection has failed, so mark
-                // it dead and backoff before retrying discovery
+				// 如果当前的协调者不为null，但是consumer client和协调者之间是不可用的
+				// 证明我们已经找到了协调者，但是连接失败了，所以标记这个协调者状态为未知，然后重试进行发现
                 markCoordinatorUnknown();
+				// 计时器sleep到下一次进行重试的时间
                 timer.sleep(rebalanceConfig.retryBackoffMs);
             }
         } while (coordinatorUnknown() && timer.notExpired());
-
+		// 返回协调者状态是否处于就绪状态
         return !coordinatorUnknown();
     }
 
@@ -761,24 +765,28 @@ public abstract class AbstractCoordinator implements Closeable {
         return this.coordinator;
     }
 
-    protected synchronized void markCoordinatorUnknown() {
-        markCoordinatorUnknown(false);
-    }
+	/**
+	 * 在不断开连接的情况下，标记协调者的状态为未知状态
+	 */
+	protected synchronized void markCoordinatorUnknown() {
+		markCoordinatorUnknown(false);
+	}
 
-    protected synchronized void markCoordinatorUnknown(boolean isDisconnected) {
-        if (this.coordinator != null) {
-            log.info("Group coordinator {} is unavailable or invalid, will attempt rediscovery", this.coordinator);
-            Node oldCoordinator = this.coordinator;
+	/**
+	 * 标记协调者的状态为未知状态
+	 * @param isDisconnected 是否已经断开连接
+	 */
+	protected synchronized void markCoordinatorUnknown(boolean isDisconnected) {
+		if (this.coordinator != null) {
+			log.info("Group coordinator {} is unavailable or invalid, will attempt rediscovery", this.coordinator);
+			Node oldCoordinator = this.coordinator;
 
-            // Mark the coordinator dead before disconnecting requests since the callbacks for any pending
-            // requests may attempt to do likewise. This also prevents new requests from being sent to the
-            // coordinator while the disconnect is in progress.
-            this.coordinator = null;
+			// 先转移协调者，以便执行后续的回调任务，同时也阻止了新的请求仍然继续发送到协调者
+			this.coordinator = null;
 
-            // Disconnect from the coordinator to ensure that there are no in-flight requests remaining.
-            // Pending callbacks will be invoked with a DisconnectException on the next call to poll.
-            if (!isDisconnected)
-                client.disconnectAsync(oldCoordinator);
+			// 没有断开连接，执行异步断开连接操作
+			if (!isDisconnected)
+				client.disconnectAsync(oldCoordinator);
 		}
 	}
 

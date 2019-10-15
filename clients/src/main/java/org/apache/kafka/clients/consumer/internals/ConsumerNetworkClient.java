@@ -431,10 +431,16 @@ public class ConsumerNetworkClient implements Closeable {
         }
     }
 
-    public void disconnectAsync(Node node) {
-        pendingDisconnects.offer(node);
-        client.wakeup();
-    }
+	/**
+	 * 异步断开指定节点的连接
+	 * @param node 指定节点
+	 */
+	public void disconnectAsync(Node node) {
+		// 向需要挂起断开连接队列中，添加此节点
+		pendingDisconnects.offer(node);
+		// 唤起client，进行客户端请求
+		client.wakeup();
+	}
 
     private void failExpiredRequests(long now) {
         // clear all expired unsent requests and fail their corresponding futures
