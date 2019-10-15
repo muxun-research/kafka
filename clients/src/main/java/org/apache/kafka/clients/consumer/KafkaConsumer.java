@@ -1271,7 +1271,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
 	 * 在需要的情况下，更新分配的元数据
      */
     boolean updateAssignmentMetadataIfNeeded(final Timer timer) {
-		// 如果当前consumer存在协调者，但是协调者在指定的等待时间内没有
+		// 如果当前consumer存在协调者，但是协调者在指定的等待时间内没有完成metadata的轮询
         if (coordinator != null && !coordinator.poll(timer)) {
             return false;
         }

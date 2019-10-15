@@ -231,7 +231,7 @@ public class SubscriptionState {
     }
 
     /**
-     * Reset the group's subscription to only contain topics subscribed by this consumer.
+	 * 将消费组订阅信息更新为只有当前consumer包含的topic订阅信息
      */
     synchronized void resetGroupSubscription() {
         groupSubscription = subscription;

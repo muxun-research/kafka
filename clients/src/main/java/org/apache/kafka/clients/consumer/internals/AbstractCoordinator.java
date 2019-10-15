@@ -124,7 +124,10 @@ public abstract class AbstractCoordinator implements Closeable {
 
     private HeartbeatThread heartbeatThread = null;
     private boolean rejoinNeeded = true;
-    private boolean needsJoinPrepare = true;
+	/**
+	 * 默认情况下，需要加入前准备
+	 */
+	private boolean needsJoinPrepare = true;
     private MemberState state = MemberState.UNJOINED;
     private RequestFuture<ByteBuffer> joinFuture = null;
     private Node coordinator = null;
@@ -276,14 +279,12 @@ public abstract class AbstractCoordinator implements Closeable {
         findCoordinatorFuture = null;
     }
 
-    /**
-     * Check whether the group should be rejoined (e.g. if metadata changes) or whether a
-     * rejoin request is already in flight and needs to be completed.
-     *
-     * @return true if it should, false otherwise
+	/**
+	 * 判断是否需要重新加入到消费组中（比如metadata发生变化）或者一个重新加入请求已经在运行中，正等待响应
+	 * @return 需要重新加入，返回true，其他情况，返回false
      */
     protected synchronized boolean rejoinNeededOrPending() {
-        // if there's a pending joinFuture, we should try to complete handling it.
+		// 如果有一个正在挂起的加入异步任务，我们需要尝试完成处理它
         return rejoinNeeded || joinFuture != null;
     }
 
@@ -330,30 +331,32 @@ public abstract class AbstractCoordinator implements Closeable {
         }
     }
 
-    /**
-     * Ensure the group is active (i.e., joined and synced)
-     *
-     * @param timer Timer bounding how long this method can block
-     * @throws KafkaException if the callback throws exception
-     * @return true iff the group is active
+	/**
+	 * 确认消费组是不是处于活跃状态，比如已经加入并同步
+	 * @param timer 等待的计时器
+	 * @throws KafkaException 回调任务出现了异常
+	 * @return 消费组处于活跃状态
      */
     boolean ensureActiveGroup(final Timer timer) {
-        // always ensure that the coordinator is ready because we may have been disconnected
-        // when sending heartbeats and does not necessarily require us to rejoin the group.
+		// 必须要确认协调器是否处于就绪状态，因为我们可能会在发送心跳时断开连接，并且不需要我们重新加入消费组
         if (!ensureCoordinatorReady(timer)) {
             return false;
-        }
-
+		}
+		// 开启心跳线程
         startHeartbeatThreadIfNeeded();
+		// 在协调器处于就绪状态下，加入消费组
         return joinGroupIfNeeded(timer);
-    }
+	}
 
-    private synchronized void startHeartbeatThreadIfNeeded() {
-        if (heartbeatThread == null) {
-            heartbeatThread = new HeartbeatThread();
-            heartbeatThread.start();
-        }
-    }
+	/**
+	 * 当当前没有心跳线程的情况下，创建并启动一个新的心跳线程
+	 */
+	private synchronized void startHeartbeatThreadIfNeeded() {
+		if (heartbeatThread == null) {
+			heartbeatThread = new HeartbeatThread();
+			heartbeatThread.start();
+		}
+	}
 
     private synchronized void disableHeartbeatThread() {
         if (heartbeatThread != null)
@@ -377,109 +380,118 @@ public abstract class AbstractCoordinator implements Closeable {
         }
     }
 
-    /**
-     * Joins the group without starting the heartbeat thread.
-     *
-     * Visible for testing.
-     *
-     * @param timer Timer bounding how long this method can block
-     * @throws KafkaException if the callback throws exception
-     * @return true iff the operation succeeded
+	/**
+	 * 加入消费组
+	 * @param timer 等待时间计数器
+	 * @throws KafkaException 如果回调任务出现了异常
+	 * @return 加入消费组结果
      */
     boolean joinGroupIfNeeded(final Timer timer) {
+		// 在需要重新加入或者挂起的情况下
         while (rejoinNeededOrPending()) {
+			// 如果协调者没有处于就绪状态，直接返回false
             if (!ensureCoordinatorReady(timer)) {
                 return false;
-            }
+			}
 
-            // call onJoinPrepare if needed. We set a flag to make sure that we do not call it a second
-            // time if the client is woken up before a pending rebalance completes. This must be called
-            // on each iteration of the loop because an event requiring a rebalance (such as a metadata
-            // refresh which changes the matched subscription set) can occur while another rebalance is
-            // still in progress.
+			// 是否需要加入前准备，我们设置了一个标识位，来确认我们不会进行二次调用，如果client在一个挂起的再平衡完成之前被唤醒
+			// 必须在当前轮询的每次迭代中调用，因为每个事件都需要一个再平衡（比如一个改变了匹配的订阅信息集合的metadata刷新）会触发
+			// 当另一个再平衡才做仍然在处理中
+			// 需要加入前准备
             if (needsJoinPrepare) {
-                // need to set the flag before calling onJoinPrepare since the user callback may throw
-                // exception, in which case upon retry we should not retry onJoinPrepare either.
+				// 有需要准备的线程，先将标识位设为false
+				// 因为开发者的回调任务可能会抛出异常，在这种情况下，重试时我们也不应该在onJoinPrepare上重试
                 needsJoinPrepare = false;
                 onJoinPrepare(generation.generationId, generation.memberId);
-            }
-
+			}
+			// 初始化加入消费组，并轮训加入结果
             final RequestFuture<ByteBuffer> future = initiateJoinGroup();
             client.poll(future, timer);
+			// 加入任务没有完成，返回false
             if (!future.isDone()) {
-                // we ran out of time
+				// 没有完成的原因可能是超时
                 return false;
-            }
-
+			}
+			// 加入成功
             if (future.succeeded()) {
-                // Duplicate the buffer in case `onJoinComplete` does not complete and needs to be retried.
+				// 复制一份buffer，防止onJoinComplete()没有完成，进行重试
                 ByteBuffer memberAssignment = future.value().duplicate();
+				// 执行加入完成操作
                 onJoinComplete(generation.generationId, generation.memberId, generation.protocol, memberAssignment);
 
-                // We reset the join group future only after the completion callback returns. This ensures
-                // that if the callback is woken up, we will retry it on the next joinGroupIfNeeded.
+				// 只有在回调任务完成之后，才会重置加入的消费组，它确认了如果回调任务被唤醒，我们将会在下一次需要加入时进行重试
                 resetJoinGroupFuture();
                 needsJoinPrepare = true;
             } else {
+				// 加入失败
+				// 重置回调加入回调任务
                 resetJoinGroupFuture();
+				// 获取失败异常，针对类型进行不同的判断
                 final RuntimeException exception = future.exception();
                 if (exception instanceof UnknownMemberIdException ||
                         exception instanceof RebalanceInProgressException ||
                         exception instanceof IllegalGenerationException ||
                         exception instanceof MemberIdRequiredException)
+					// 在UnknownMemberIdException、RebalanceInProgressException、IllegalGenerationException、MemberIdRequiredException异常情况下，继续下一次轮询
                     continue;
+					// 如果在失败的情况下，不允许重试，直接抛出指定异常
                 else if (!future.isRetriable())
                     throw exception;
-
+				// 在失败情况下，允许重试，等待进行下一次重试
                 timer.sleep(rebalanceConfig.retryBackoffMs);
             }
-        }
+		}
+		// 加入成功，返回true
         return true;
     }
 
     private synchronized void resetJoinGroupFuture() {
         this.joinFuture = null;
-    }
+	}
 
-    private synchronized RequestFuture<ByteBuffer> initiateJoinGroup() {
-        // we store the join future in case we are woken up by the user after beginning the
-        // rebalance in the call to poll below. This ensures that we do not mistakenly attempt
-        // to rejoin before the pending rebalance has completed.
-        if (joinFuture == null) {
-            // fence off the heartbeat thread explicitly so that it cannot interfere with the join group.
-            // Note that this must come after the call to onJoinPrepare since we must be able to continue
-            // sending heartbeats if that callback takes some time.
-            disableHeartbeatThread();
+	/**
+	 * 初始化消费组
+	 * @return 初始化消费组的异步结果
+	 */
+	private synchronized RequestFuture<ByteBuffer> initiateJoinGroup() {
+		// 我们需要存储一份加入异步任务备份，以防开发者唤醒，然后执行
+		// 它将确保我们不会在未完成再平衡之前错误地尝试重新加入
+		if (joinFuture == null) {
+			// fence off the heartbeat thread explicitly so that it cannot interfere with the join group.
+			// Note that this must come after the call to onJoinPrepare since we must be able to continue
+			// sending heartbeats if that callback takes some time.
 
-            state = MemberState.REBALANCING;
-            joinFuture = sendJoinGroupRequest();
-            joinFuture.addListener(new RequestFutureListener<ByteBuffer>() {
-                @Override
-                public void onSuccess(ByteBuffer value) {
-                    // handle join completion in the callback so that the callback will be invoked
-                    // even if the consumer is woken up before finishing the rebalance
-                    synchronized (AbstractCoordinator.this) {
-                        log.info("Successfully joined group with generation {}", generation.generationId);
-                        state = MemberState.STABLE;
-                        rejoinNeeded = false;
+			disableHeartbeatThread();
 
-                        if (heartbeatThread != null)
-                            heartbeatThread.enable();
-                    }
-                }
+			state = MemberState.REBALANCING;
+			joinFuture = sendJoinGroupRequest();
+			joinFuture.addListener(new RequestFutureListener<ByteBuffer>() {
+				@Override
+				public void onSuccess(ByteBuffer value) {
+					// handle join completion in the callback so that the callback will be invoked
+					// even if the consumer is woken up before finishing the rebalance
+					synchronized (AbstractCoordinator.this) {
+						log.info("Successfully joined group with generation {}", generation.generationId);
+						state = MemberState.STABLE;
+						rejoinNeeded = false;
 
-                @Override
-                public void onFailure(RuntimeException e) {
-                    // we handle failures below after the request finishes. if the join completes
-                    // after having been woken up, the exception is ignored and we will rejoin
-                    synchronized (AbstractCoordinator.this) {
-                        state = MemberState.UNJOINED;
-                    }
-                }
-            });
-        }
-        return joinFuture;
-    }
+						if (heartbeatThread != null)
+							heartbeatThread.enable();
+					}
+				}
+
+				@Override
+				public void onFailure(RuntimeException e) {
+					// we handle failures below after the request finishes. if the join completes
+					// after having been woken up, the exception is ignored and we will rejoin
+					synchronized (AbstractCoordinator.this) {
+						state = MemberState.UNJOINED;
+					}
+				}
+			});
+		}
+		return joinFuture;
+	}
 
     /**
      * Join the group and return the assignment for the next generation. This function handles both

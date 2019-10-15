@@ -16,14 +16,15 @@
  */
 package org.apache.kafka.clients.consumer;
 
+import org.apache.kafka.common.Cluster;
+import org.apache.kafka.common.TopicPartition;
+
 import java.nio.ByteBuffer;
-import java.util.Optional;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
-import org.apache.kafka.common.Cluster;
-import org.apache.kafka.common.TopicPartition;
 
 /**
  * This interface is used to define custom partition assignment for use in
@@ -181,24 +182,24 @@ public interface ConsumerPartitionAssignor {
     }
 
     /**
-     * The rebalance protocol defines partition assignment and revocation semantics. The purpose is to establish a
-     * consistent set of rules that all consumers in a group follow in order to transfer ownership of a partition.
-     * {@link ConsumerPartitionAssignor} implementors can claim supporting one or more rebalance protocols via the
-     * {@link ConsumerPartitionAssignor#supportedProtocols()}, and it is their responsibility to respect the rules
-     * of those protocols in their {@link ConsumerPartitionAssignor#assign(Cluster, GroupSubscription)} implementations.
-     * Failures to follow the rules of the supported protocols would lead to runtime error or undefined behavior.
-     *
-     * The {@link RebalanceProtocol#EAGER} rebalance protocol requires a consumer to always revoke all its owned
-     * partitions before participating in a rebalance event. It therefore allows a complete reshuffling of the assignment.
-     *
-     * {@link RebalanceProtocol#COOPERATIVE} rebalance protocol allows a consumer to retain its currently owned
-     * partitions before participating in a rebalance event. The assignor should not reassign any owned partitions
-     * immediately, but instead may indicate consumers the need for partition revocation so that the revoked
-     * partitions can be reassigned to other consumers in the next rebalance event. This is designed for sticky assignment
-     * logic which attempts to minimize partition reassignment with cooperative adjustments.
+	 * 再平衡协议声明了partition分配方式和撤销语义，宗旨是建立一个一致性的规则集合，所有的consumer都会在一个组中，按照顺序来在partition中传递关系
+	 * {@link ConsumerPartitionAssignor}实现，可以声明支持一个或者多个再平衡协议和{@link ConsumerPartitionAssignor#supportedProtocols()}
+	 * 并且在{@link ConsumerPartitionAssignor#assign(Cluster, GroupSubscription)}实现中尊重协议规则是它们的责任
+	 * 没有遵循支持协议的规则将会产生运行时错误和未定义的表现
+	 *
+	 * {@link RebalanceProtocol#EAGER}再平衡协议需要一个consumer在参与平衡事件之前，来撤销所有已拥有的partition信息，因此，它允许进行重新分配
+	 * {@link RebalanceProtocol#COOPERATIVE}再平衡协议允许consumer在参与平衡事件之前，保留当前拥有的partition，分配器不会立即重新分配已拥有的partition
+	 * 但是相反，这可能表明了consumer需要撤销partition，以便于在下一次再平衡事件中能将已撤销的partition重新非配给其他使用者
      */
     enum RebalanceProtocol {
-        EAGER((byte) 0), COOPERATIVE((byte) 1);
+		/**
+		 * 独占
+		 */
+		EAGER((byte) 0),
+		/**
+		 * 协作
+		 */
+		COOPERATIVE((byte) 1);
 
         private final byte id;
 
