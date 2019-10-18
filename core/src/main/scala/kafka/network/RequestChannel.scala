@@ -32,8 +32,8 @@ import org.apache.kafka.common.requests._
 import org.apache.kafka.common.security.auth.KafkaPrincipal
 import org.apache.kafka.common.utils.{Sanitizer, Time}
 
-import scala.collection.mutable
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 import scala.reflect.ClassTag
 
 object RequestChannel extends Logging {
@@ -312,7 +312,10 @@ class RequestChannel(val queueSize: Int, val metricNamePrefix : String) extends 
     requestQueue.put(request)
   }
 
-  /** Send a response back to the socket server to be sent over the network */
+  /**
+   * 发送一个响应到Socket Server中
+   * @param response 需要发送的响应
+   */
   def sendResponse(response: RequestChannel.Response): Unit = {
     if (isTraceEnabled) {
       val requestHeader = response.request.header

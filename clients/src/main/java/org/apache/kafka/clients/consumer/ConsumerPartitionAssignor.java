@@ -135,51 +135,70 @@ public interface ConsumerPartitionAssignor {
         }
     }
 
-    final class Assignment {
-        private List<TopicPartition> partitions;
-        private ByteBuffer userData;
+	/**
+	 * 分配
+	 */
+	final class Assignment {
+		/**
+		 * 分配的partition
+		 */
+		private List<TopicPartition> partitions;
 
-        public Assignment(List<TopicPartition> partitions, ByteBuffer userData) {
-            this.partitions = partitions;
-            this.userData = userData;
-        }
+		private ByteBuffer userData;
 
-        public Assignment(List<TopicPartition> partitions) {
-            this(partitions, null);
-        }
+		public Assignment(List<TopicPartition> partitions, ByteBuffer userData) {
+			this.partitions = partitions;
+			this.userData = userData;
+		}
 
-        public List<TopicPartition> partitions() {
-            return partitions;
-        }
+		public Assignment(List<TopicPartition> partitions) {
+			this(partitions, null);
+		}
 
-        public ByteBuffer userData() {
-            return userData;
-        }
-    }
+		public List<TopicPartition> partitions() {
+			return partitions;
+		}
 
-    final class GroupSubscription {
-        private final Map<String, Subscription> subscriptions;
+		public ByteBuffer userData() {
+			return userData;
+		}
+	}
 
-        public GroupSubscription(Map<String, Subscription> subscriptions) {
-            this.subscriptions = subscriptions;
-        }
+	/**
+	 * 当前消费组的订阅信息
+	 */
+	final class GroupSubscription {
+		private final Map<String, Subscription> subscriptions;
 
-        public Map<String, Subscription> groupSubscription() {
-            return subscriptions;
-        }
-    }
+		/**
+		 * memberId-订阅信息
+		 */
+		public GroupSubscription(Map<String, Subscription> subscriptions) {
+			this.subscriptions = subscriptions;
+		}
 
-    final class GroupAssignment {
-        private final Map<String, Assignment> assignments;
+		public Map<String, Subscription> groupSubscription() {
+			return subscriptions;
+		}
+	}
 
-        public GroupAssignment(Map<String, Assignment> assignments) {
-            this.assignments = assignments;
-        }
+	/**
+	 * 集群的管理信息
+	 */
+	final class GroupAssignment {
+		/**
+		 * memberId-分配partition信息
+		 */
+		private final Map<String, Assignment> assignments;
 
-        public Map<String, Assignment> groupAssignment() {
-            return assignments;
-        }
-    }
+		public GroupAssignment(Map<String, Assignment> assignments) {
+			this.assignments = assignments;
+		}
+
+		public Map<String, Assignment> groupAssignment() {
+			return assignments;
+		}
+	}
 
     /**
 	 * 再平衡协议声明了partition分配方式和撤销语义，宗旨是建立一个一致性的规则集合，所有的consumer都会在一个组中，按照顺序来在partition中传递关系

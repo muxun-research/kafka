@@ -281,19 +281,20 @@ final class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: Stri
   }
 
   /**
-   * Check if some delayed operations can be completed with the given watch key,
-   * and if yes complete them.
-   *
-   * @return the number of completed operations during this process
+   * 指定的key是否有一些延迟的操作需要完成，如果有，完成它们
+   * @return 完成的项目数量
    */
   def checkAndComplete(key: Any): Int = {
     val wl = watcherList(key)
+    // 需要完成在同步状态下获取watcher
     val watchers = inLock(wl.watchersLock) { wl.watchersByKey.get(key) }
     val numCompleted = if (watchers == null)
       0
     else
+    // 完成watcher任务
       watchers.tryCompleteWatched()
     debug(s"Request key $key unblocked $numCompleted $purgatoryName operations")
+    // 返回完成的任务数量
     numCompleted
   }
 

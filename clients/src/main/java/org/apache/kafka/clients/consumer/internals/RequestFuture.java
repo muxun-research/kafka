@@ -18,9 +18,10 @@ package org.apache.kafka.clients.consumer.internals;
 
 import org.apache.kafka.common.errors.RetriableException;
 import org.apache.kafka.common.protocol.Errors;
+
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -111,11 +112,10 @@ public class RequestFuture<T> implements ConsumerNetworkClient.PollCondition {
     }
 
     /**
-     * Complete the request successfully. After this call, {@link #succeeded()} will return true
-     * and the value can be obtained through {@link #value()}.
-     * @param value corresponding value (or null if there is none)
-     * @throws IllegalStateException if the future has already been completed
-     * @throws IllegalArgumentException if the argument is an instance of {@link RuntimeException}
+	 * 成功完成请求，经过这次调用，{@link #succeeded()}会返回true，{@link #value()}返回处理的值
+	 * @param value 相应的value
+	 * @throws IllegalStateException 如果异步任务已经完成
+	 * @throws IllegalArgumentException 入参是RuntimeException类型
      */
     public void complete(T value) {
         try {

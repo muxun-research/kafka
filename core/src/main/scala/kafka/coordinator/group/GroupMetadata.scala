@@ -34,14 +34,14 @@ private[group] sealed trait GroupState
  * Group is preparing to rebalance
  *
  * action: respond to heartbeats with REBALANCE_IN_PROGRESS
- *         respond to sync group with REBALANCE_IN_PROGRESS
- *         remove member on leave group request
- *         park join group requests from new or existing members until all expected members have joined
- *         allow offset commits from previous generation
- *         allow offset fetch requests
+ * respond to sync group with REBALANCE_IN_PROGRESS
+ * remove member on leave group request
+ * park join group requests from new or existing members until all expected members have joined
+ * allow offset commits from previous generation
+ * allow offset fetch requests
  * transition: some members have joined by the timeout => CompletingRebalance
- *             all members have left the group => Empty
- *             group is removed by partition emigration => Dead
+ * all members have left the group => Empty
+ * group is removed by partition emigration => Dead
  */
 private[group] case object PreparingRebalance extends GroupState
 
@@ -49,14 +49,14 @@ private[group] case object PreparingRebalance extends GroupState
  * Group is awaiting state assignment from the leader
  *
  * action: respond to heartbeats with REBALANCE_IN_PROGRESS
- *         respond to offset commits with REBALANCE_IN_PROGRESS
- *         park sync group requests from followers until transition to Stable
- *         allow offset fetch requests
+ * respond to offset commits with REBALANCE_IN_PROGRESS
+ * park sync group requests from followers until transition to Stable
+ * allow offset fetch requests
  * transition: sync group with state assignment received from leader => Stable
- *             join group from new member or existing member with updated metadata => PreparingRebalance
- *             leave group from existing member => PreparingRebalance
- *             member failure detected => PreparingRebalance
- *             group is removed by partition emigration => Dead
+ * join group from new member or existing member with updated metadata => PreparingRebalance
+ * leave group from existing member => PreparingRebalance
+ * member failure detected => PreparingRebalance
+ * group is removed by partition emigration => Dead
  */
 private[group] case object CompletingRebalance extends GroupState
 
@@ -64,15 +64,15 @@ private[group] case object CompletingRebalance extends GroupState
  * Group is stable
  *
  * action: respond to member heartbeats normally
- *         respond to sync group from any member with current assignment
- *         respond to join group from followers with matching metadata with current group metadata
- *         allow offset commits from member of current generation
- *         allow offset fetch requests
+ * respond to sync group from any member with current assignment
+ * respond to join group from followers with matching metadata with current group metadata
+ * allow offset commits from member of current generation
+ * allow offset fetch requests
  * transition: member failure detected via heartbeat => PreparingRebalance
- *             leave group from existing member => PreparingRebalance
- *             leader join-group received => PreparingRebalance
- *             follower join-group with new metadata => PreparingRebalance
- *             group is removed by partition emigration => Dead
+ * leave group from existing member => PreparingRebalance
+ * leader join-group received => PreparingRebalance
+ * follower join-group with new metadata => PreparingRebalance
+ * group is removed by partition emigration => Dead
  */
 private[group] case object Stable extends GroupState
 
@@ -80,30 +80,30 @@ private[group] case object Stable extends GroupState
  * Group has no more members and its metadata is being removed
  *
  * action: respond to join group with UNKNOWN_MEMBER_ID
- *         respond to sync group with UNKNOWN_MEMBER_ID
- *         respond to heartbeat with UNKNOWN_MEMBER_ID
- *         respond to leave group with UNKNOWN_MEMBER_ID
- *         respond to offset commit with UNKNOWN_MEMBER_ID
- *         allow offset fetch requests
+ * respond to sync group with UNKNOWN_MEMBER_ID
+ * respond to heartbeat with UNKNOWN_MEMBER_ID
+ * respond to leave group with UNKNOWN_MEMBER_ID
+ * respond to offset commit with UNKNOWN_MEMBER_ID
+ * allow offset fetch requests
  * transition: Dead is a final state before group metadata is cleaned up, so there are no transitions
  */
 private[group] case object Dead extends GroupState
 
 /**
-  * Group has no more members, but lingers until all offsets have expired. This state
-  * also represents groups which use Kafka only for offset commits and have no members.
-  *
-  * action: respond normally to join group from new members
-  *         respond to sync group with UNKNOWN_MEMBER_ID
-  *         respond to heartbeat with UNKNOWN_MEMBER_ID
-  *         respond to leave group with UNKNOWN_MEMBER_ID
-  *         respond to offset commit with UNKNOWN_MEMBER_ID
-  *         allow offset fetch requests
-  * transition: last offsets removed in periodic expiration task => Dead
-  *             join group from a new member => PreparingRebalance
-  *             group is removed by partition emigration => Dead
-  *             group is removed by expiration => Dead
-  */
+ * Group has no more members, but lingers until all offsets have expired. This state
+ * also represents groups which use Kafka only for offset commits and have no members.
+ *
+ * action: respond normally to join group from new members
+ * respond to sync group with UNKNOWN_MEMBER_ID
+ * respond to heartbeat with UNKNOWN_MEMBER_ID
+ * respond to leave group with UNKNOWN_MEMBER_ID
+ * respond to offset commit with UNKNOWN_MEMBER_ID
+ * allow offset fetch requests
+ * transition: last offsets removed in periodic expiration task => Dead
+ * join group from a new member => PreparingRebalance
+ * group is removed by partition emigration => Dead
+ * group is removed by expiration => Dead
+ */
 private[group] case object Empty extends GroupState
 
 
@@ -157,11 +157,11 @@ case class GroupSummary(state: String,
                         members: List[MemberSummary])
 
 /**
-  * We cache offset commits along with their commit record offset. This enables us to ensure that the latest offset
-  * commit is always materialized when we have a mix of transactional and regular offset commits. Without preserving
-  * information of the commit record offset, compaction of the offsets topic it self may result in the wrong offset commit
-  * being materialized.
-  */
+ * We cache offset commits along with their commit record offset. This enables us to ensure that the latest offset
+ * commit is always materialized when we have a mix of transactional and regular offset commits. Without preserving
+ * information of the commit record offset, compaction of the offsets topic it self may result in the wrong offset commit
+ * being materialized.
+ */
 case class CommitRecordMetadataAndOffset(appendedBatchOffset: Option[Long], offsetAndMetadata: OffsetAndMetadata) {
   def olderThan(that: CommitRecordMetadataAndOffset): Boolean = appendedBatchOffset.get < that.appendedBatchOffset.get
 }
@@ -169,12 +169,12 @@ case class CommitRecordMetadataAndOffset(appendedBatchOffset: Option[Long], offs
 /**
  * Group contains the following metadata:
  *
- *  Membership metadata:
+ * Membership metadata:
  *  1. Members registered in this group
  *  2. Current protocol assigned to the group (e.g. partition assignment strategy for consumers)
  *  3. Protocol metadata associated with group members
  *
- *  State metadata:
+ * State metadata:
  *  1. group state
  *  2. generation id
  *  3. leader id
@@ -193,7 +193,11 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   private var protocol: Option[String] = None
 
   private val members = new mutable.HashMap[String, MemberMetadata]
-  // Static membership mapping [key: group.instance.id, value: member.id]
+  /**
+   * Kafka 2.3的新特性，静态成员
+   * key: group.instance.id
+   * value: member.id
+   */
   private val staticMembers = new mutable.HashMap[String, String]
   private val pendingMembers = new mutable.HashSet[String]
   private var numMembersAwaitingJoin = 0
@@ -209,16 +213,28 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   def inLock[T](fun: => T): T = CoreUtils.inLock(lock)(fun)
 
   def is(groupState: GroupState) = state == groupState
+
   def not(groupState: GroupState) = state != groupState
+
   def has(memberId: String) = members.contains(memberId)
+
   def get(memberId: String) = members(memberId)
+
   def size = members.size
 
   def isLeader(memberId: String): Boolean = leaderId.contains(memberId)
+
   def leaderOrNull: String = leaderId.orNull
+
   def protocolOrNull: String = protocol.orNull
+
   def currentStateTimestampOrDefault: Long = currentStateTimestamp.getOrElse(-1)
 
+  /**
+   * 添加成员到消费组中
+   * @param member   需要添加的成员
+   * @param callback 回调任务
+   */
   def add(member: MemberMetadata, callback: JoinCallback = null): Unit = {
     if (members.isEmpty)
       this.protocolType = Some(member.protocolType)
@@ -226,19 +242,24 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
     assert(groupId == member.groupId)
     assert(this.protocolType.orNull == member.protocolType)
     assert(supportsProtocols(member.protocolType, MemberMetadata.plainProtocolSet(member.supportedProtocols)))
-
+    // 如果当前成员是第一个加入消费组的成员
     if (leaderId.isEmpty)
+    // 设置当前成员为leader consumer
       leaderId = Some(member.memberId)
+    // 添加当前成员
     members.put(member.memberId, member)
-    member.supportedProtocols.foreach{ case (protocol, _) => supportedProtocols(protocol) += 1 }
+    // 添加需要支持的协议
+    member.supportedProtocols.foreach { case (protocol, _) => supportedProtocols(protocol) += 1 }
+    // 设置添加成功的回调任务
     member.awaitingJoinCallback = callback
+    // 等待加入的成员数量+1
     if (member.isAwaitingJoin)
       numMembersAwaitingJoin += 1
   }
 
   def remove(memberId: String): Unit = {
     members.remove(memberId).foreach { member =>
-      member.supportedProtocols.foreach{ case (protocol, _) => supportedProtocols(protocol) -= 1 }
+      member.supportedProtocols.foreach { case (protocol, _) => supportedProtocols(protocol) -= 1 }
       if (member.isAwaitingJoin)
         numMembersAwaitingJoin -= 1
     }
@@ -248,11 +269,11 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   }
 
   /**
-    * Check whether current leader is rejoined. If not, try to find another joined member to be
-    * new leader. Return false if
-    *   1. the group is currently empty (has no designated leader)
-    *   2. no member rejoined
-    */
+   * Check whether current leader is rejoined. If not, try to find another joined member to be
+   * new leader. Return false if
+   *   1. the group is currently empty (has no designated leader)
+   *   2. no member rejoined
+   */
   def maybeElectNewJoinedLeader(): Boolean = {
     leaderId.exists { currentLeaderId =>
       val currentLeader = get(currentLeaderId)
@@ -279,19 +300,21 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   }
 
   /**
-    * [For static members only]: Replace the old member id with the new one,
-    * keep everything else unchanged and return the updated member.
-    */
+   * 仅针对静态成员部分
+   * 使用新member.id代替老的member.id
+   * 保持其他的事情不变，返回更新的成员信息
+   */
   def replaceGroupInstance(oldMemberId: String,
                            newMemberId: String,
                            groupInstanceId: Option[String]): MemberMetadata = {
-    if(groupInstanceId.isEmpty) {
+    if (groupInstanceId.isEmpty) {
       throw new IllegalArgumentException(s"unexpected null group.instance.id in replaceGroupInstance")
     }
     val oldMember = members.remove(oldMemberId)
       .getOrElse(throw new IllegalArgumentException(s"Cannot replace non-existing member id $oldMemberId"))
 
-    // Fence potential duplicate member immediately if someone awaits join/sync callback.
+    // 马上屏蔽潜在的重复成员，如果其他成员在等待加入/同步的回调任务
+    // 根据等待的不同状态，添加不同的任务
     maybeInvokeJoinCallback(oldMember, JoinGroupResult(
       members = List.empty,
       memberId = oldMemberId,
@@ -303,13 +326,15 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
     maybeInvokeSyncCallback(oldMember, SyncGroupResult(
       Array.empty, Errors.FENCED_INSTANCE_ID
     ))
-
+    // 更新member.id
     oldMember.memberId = newMemberId
     members.put(newMemberId, oldMember)
-
+    // 当前节点是否是leader consumer
     if (isLeader(oldMemberId))
       leaderId = Some(newMemberId)
+    // 添加静态成员
     addStaticMember(groupInstanceId, newMemberId)
+    // 返回更新的成员信息
     oldMember
   }
 
@@ -321,18 +346,31 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
 
   def hasStaticMember(groupInstanceId: Option[String]) = groupInstanceId.isDefined && staticMembers.contains(groupInstanceId.get)
 
-  def getStaticMemberId(groupInstanceId: Option[String]) = {
-    if(groupInstanceId.isEmpty) {
-      throw new IllegalArgumentException(s"unexpected null group.instance.id in getStaticMemberId")
-    }
-    staticMembers(groupInstanceId.get)
-  }
-
+  /**
+   * 添加静态成员对象
+   * @param groupInstanceId group.instance.id 静态成员对象唯一标识
+   * @param newMemberId     新生成的member.id
+   * @return
+   */
   def addStaticMember(groupInstanceId: Option[String], newMemberId: String) = {
-    if(groupInstanceId.isEmpty) {
+    if (groupInstanceId.isEmpty) {
       throw new IllegalArgumentException(s"unexpected null group.instance.id in addStaticMember")
     }
     staticMembers.put(groupInstanceId.get, newMemberId)
+  }
+
+  /**
+   * @return true if a sync callback actually performs.
+   */
+  def maybeInvokeSyncCallback(member: MemberMetadata,
+                              syncGroupResult: SyncGroupResult): Boolean = {
+    if (member.isAwaitingSync) {
+      member.awaitingSyncCallback(syncGroupResult)
+      member.awaitingSyncCallback = null
+      true
+    } else {
+      false
+    }
   }
 
   def removeStaticMember(groupInstanceId: Option[String]) = {
@@ -359,28 +397,36 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
     timeout.max(member.rebalanceTimeoutMs)
   }
 
+  /**
+   * 生成消费组中的member.id
+   * @param clientId        客户端ID
+   * @param groupInstanceId group.instance.id
+   * @return 生成的成员member.id
+   */
   def generateMemberId(clientId: String,
                        groupInstanceId: Option[String]): String = {
     groupInstanceId match {
       case None =>
+        // 没有指定group.instance.id的情况下，默认是"client.id-uuid"
         clientId + GroupMetadata.MemberIdDelimiter + UUID.randomUUID().toString
       case Some(instanceId) =>
+        // 在有指定group.instance.id的情况下，默认是"group.instance.id-uuid"
         instanceId + GroupMetadata.MemberIdDelimiter + UUID.randomUUID().toString
     }
   }
 
   /**
-    * Verify the member.id is up to date for static members. Return true if both conditions met:
-    *   1. given member is a known static member to group
-    *   2. group stored member.id doesn't match with given member.id
-    */
+   * Verify the member.id is up to date for static members. Return true if both conditions met:
+   *   1. given member is a known static member to group
+   *   2. group stored member.id doesn't match with given member.id
+   */
   def isStaticMemberFenced(memberId: String,
                            groupInstanceId: Option[String]): Boolean = {
     if (hasStaticMember(groupInstanceId)
       && getStaticMemberId(groupInstanceId) != memberId) {
-        error(s"given member.id $memberId is identified as a known static member ${groupInstanceId.get}," +
-          s"but not matching the expected member.id ${getStaticMemberId(groupInstanceId)}")
-        true
+      error(s"given member.id $memberId is identified as a known static member ${groupInstanceId.get}," +
+        s"but not matching the expected member.id ${getStaticMemberId(groupInstanceId)}")
+      true
     } else
       false
   }
@@ -423,19 +469,11 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
       protocolType.contains(memberProtocolType) && memberProtocols.exists(supportedProtocols(_) == members.size)
   }
 
-  def updateMember(member: MemberMetadata,
-                   protocols: List[(String, Array[Byte])],
-                   callback: JoinCallback) = {
-    member.supportedProtocols.foreach{ case (protocol, _) => supportedProtocols(protocol) -= 1 }
-    protocols.foreach{ case (protocol, _) => supportedProtocols(protocol) += 1 }
-    member.supportedProtocols = protocols
-
-    if (callback != null && !member.isAwaitingJoin) {
-      numMembersAwaitingJoin += 1
-    } else if (callback == null && member.isAwaitingJoin) {
-      numMembersAwaitingJoin -= 1
+  def getStaticMemberId(groupInstanceId: Option[String]) = {
+    if (groupInstanceId.isEmpty) {
+      throw new IllegalArgumentException(s"unexpected null group.instance.id in getStaticMemberId")
     }
-    member.awaitingJoinCallback = callback
+    staticMembers(groupInstanceId.get)
   }
 
   def maybeInvokeJoinCallback(member: MemberMetadata,
@@ -448,17 +486,24 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   }
 
   /**
-    * @return true if a sync callback actually performs.
-    */
-  def maybeInvokeSyncCallback(member: MemberMetadata,
-                              syncGroupResult: SyncGroupResult): Boolean = {
-    if (member.isAwaitingSync) {
-      member.awaitingSyncCallback(syncGroupResult)
-      member.awaitingSyncCallback = null
-      true
-    } else {
-      false
+   * 更新消费组中的成员信息
+   * @param member
+   * @param protocols
+   * @param callback
+   */
+  def updateMember(member: MemberMetadata,
+                   protocols: List[(String, Array[Byte])],
+                   callback: JoinCallback) = {
+    member.supportedProtocols.foreach { case (protocol, _) => supportedProtocols(protocol) -= 1 }
+    protocols.foreach { case (protocol, _) => supportedProtocols(protocol) += 1 }
+    member.supportedProtocols = protocols
+
+    if (callback != null && !member.isAwaitingJoin) {
+      numMembersAwaitingJoin += 1
+    } else if (callback == null && member.isAwaitingJoin) {
+      numMembersAwaitingJoin -= 1
     }
+    member.awaitingJoinCallback = callback
   }
 
   def initNextGeneration() = {
@@ -478,10 +523,10 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   def currentMemberMetadata: List[JoinGroupResponseMember] = {
     if (is(Dead) || is(PreparingRebalance))
       throw new IllegalStateException("Cannot obtain member metadata for group in state %s".format(state))
-    members.map{ case (memberId, memberMetadata) => new JoinGroupResponseMember()
-        .setMemberId(memberId)
-        .setGroupInstanceId(memberMetadata.groupInstanceId.orNull)
-        .setMetadata(memberMetadata.metadata(protocol.get))
+    members.map { case (memberId, memberMetadata) => new JoinGroupResponseMember()
+      .setMemberId(memberId)
+      .setGroupInstanceId(memberMetadata.groupInstanceId.orNull)
+      .setMetadata(memberMetadata.metadata(protocol.get))
     }.toList
   }
 
@@ -494,7 +539,7 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
       val members = this.members.values.map { member => member.summary(protocol) }
       GroupSummary(state.toString, protocolType.getOrElse(""), protocol, members.toList)
     } else {
-      val members = this.members.values.map{ member => member.summaryNoMetadata() }
+      val members = this.members.values.map { member => member.summaryNoMetadata() }
       GroupSummary(state.toString, protocolType.getOrElse(""), GroupCoordinator.NoProtocol, members.toList)
     }
   }
@@ -522,8 +567,8 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
       case Some(stagedOffset) if offsetWithCommitRecordMetadata.offsetAndMetadata == stagedOffset =>
         pendingOffsetCommits.remove(topicPartition)
       case _ =>
-        // The pendingOffsetCommits for this partition could be empty if the topic was deleted, in which case
-        // its entries would be removed from the cache by the `removeOffsets` method.
+      // The pendingOffsetCommits for this partition could be empty if the topic was deleted, in which case
+      // its entries would be removed from the cache by the `removeOffsets` method.
     }
   }
 
@@ -550,7 +595,7 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
     }
   }
 
-  def hasReceivedConsistentOffsetCommits : Boolean = {
+  def hasReceivedConsistentOffsetCommits: Boolean = {
     !receivedConsumerOffsetCommits || !receivedTransactionalOffsetCommits
   }
 
@@ -566,7 +611,7 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
         if (pendingOffsets.isEmpty)
           pendingTransactionalOffsetCommits.remove(producerId)
       case _ =>
-        // We may hit this case if the partition in question has emigrated already.
+      // We may hit this case if the partition in question has emigrated already.
     }
   }
 
@@ -578,7 +623,7 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
           && pendingOffset(topicPartition).offsetAndMetadata == commitRecordMetadataAndOffset.offsetAndMetadata)
           pendingOffset.update(topicPartition, commitRecordMetadataAndOffset)
       case _ =>
-        // We may hit this case if the partition in question has emigrated.
+      // We may hit this case if the partition in question has emigrated.
     }
   }
 

@@ -80,6 +80,7 @@ import java.util.stream.Collectors;
 
 /**
  * 这个类负载管理consumer的协调进程
+ * 简单来说就是负责单个consumer的协调器
  */
 public final class ConsumerCoordinator extends AbstractCoordinator {
 	/**
@@ -290,13 +291,18 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 			metadata.requestUpdateForNewTopics();
 	}
 
-    private ConsumerPartitionAssignor lookupAssignor(String name) {
-        for (ConsumerPartitionAssignor assignor : this.assignors) {
-            if (assignor.name().equals(name))
-                return assignor;
-        }
-        return null;
-    }
+	/**
+	 * 寻找partition分配策略
+	 * @param name partition分配策略名称
+	 * @return 查找的partition分配策略
+	 */
+	private ConsumerPartitionAssignor lookupAssignor(String name) {
+		for (ConsumerPartitionAssignor assignor : this.assignors) {
+			if (assignor.name().equals(name))
+				return assignor;
+		}
+		return null;
+	}
 
     private void maybeUpdateJoinedSubscription(Set<TopicPartition> assignedPartitions) {
         if (subscriptions.hasPatternSubscription()) {
@@ -382,96 +388,103 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 		return null;
 	}
 
-    @Override
-    protected void onJoinComplete(int generation,
-                                  String memberId,
-                                  String assignmentStrategy,
-                                  ByteBuffer assignmentBuffer) {
-        log.debug("Executing onJoinComplete with generation {} and memberId {}", generation, memberId);
+	/**
+	 * 处理加入消费组成功的异步任务，主要是设置拉取的分区，让poll()方法开始拉取消息
+	 * @param generation         加入消费组的generation
+	 * @param memberId           本地consumer在消费组中的唯一标识
+	 * @param assignmentStrategy 分配的策略
+	 * @param assignmentBuffer   分配的数据
+	 */
+	@Override
+	protected void onJoinComplete(int generation,
+								  String memberId,
+								  String assignmentStrategy,
+								  ByteBuffer assignmentBuffer) {
+		log.debug("Executing onJoinComplete with generation {} and memberId {}", generation, memberId);
 
-        // only the leader is responsible for monitoring for metadata changes (i.e. partition changes)
-        if (!isLeader)
-            assignmentSnapshot = null;
+		// 只有leader节点才会负责监控metadata的变化（比如partition的变化）
+		if (!isLeader)
+			assignmentSnapshot = null;
+		// 找到对应的分配策略
+		ConsumerPartitionAssignor assignor = lookupAssignor(assignmentStrategy);
+		if (assignor == null)
+			throw new IllegalStateException("Coordinator selected invalid assignment protocol: " + assignmentStrategy);
+		// 获取之前已经分配的partition信息
+		Set<TopicPartition> ownedPartitions = new HashSet<>(subscriptions.assignedPartitions());
+		// 反序列化同步过来的partition ByteBuffer
+		Assignment assignment = ConsumerProtocol.deserializeAssignment(assignmentBuffer);
+		// 获取分配给当前consumer的partition信息
+		Set<TopicPartition> assignedPartitions = new HashSet<>(assignment.partitions());
+		// 如果
+		if (!subscriptions.checkAssignmentMatchedSubscription(assignedPartitions)) {
+			log.warn("We received an assignment {} that doesn't match our current subscription {}; it is likely " +
+							"that the subscription has changed since we joined the group. Will try re-join the group with current subscription",
+					assignment.partitions(), subscriptions.prettyString());
 
-        ConsumerPartitionAssignor assignor = lookupAssignor(assignmentStrategy);
-        if (assignor == null)
-            throw new IllegalStateException("Coordinator selected invalid assignment protocol: " + assignmentStrategy);
+			requestRejoin();
 
-        Set<TopicPartition> ownedPartitions = new HashSet<>(subscriptions.assignedPartitions());
+			return;
+		}
 
-        Assignment assignment = ConsumerProtocol.deserializeAssignment(assignmentBuffer);
+		// The leader may have assigned partitions which match our subscription pattern, but which
+		// were not explicitly requested, so we update the joined subscription here.
+		maybeUpdateJoinedSubscription(assignedPartitions);
 
-        Set<TopicPartition> assignedPartitions = new HashSet<>(assignment.partitions());
+		// give the assignor a chance to update internal state based on the received assignment
+		ConsumerGroupMetadata metadata = new ConsumerGroupMetadata(rebalanceConfig.groupId, generation, memberId, rebalanceConfig.groupInstanceId);
+		assignor.onAssignment(assignment, metadata);
 
-        if (!subscriptions.checkAssignmentMatchedSubscription(assignedPartitions)) {
-            log.warn("We received an assignment {} that doesn't match our current subscription {}; it is likely " +
-                "that the subscription has changed since we joined the group. Will try re-join the group with current subscription",
-                assignment.partitions(), subscriptions.prettyString());
+		// reschedule the auto commit starting from now
+		if (autoCommitEnabled)
+			this.nextAutoCommitTimer.updateAndReset(autoCommitIntervalMs);
 
-            requestRejoin();
+		// execute the user's callback after rebalance
+		final AtomicReference<Exception> firstException = new AtomicReference<>(null);
+		Set<TopicPartition> addedPartitions = new HashSet<>(assignedPartitions);
+		addedPartitions.removeAll(ownedPartitions);
 
-            return;
-        }
+		switch (protocol) {
+			case EAGER:
+				// assign partitions that are not yet owned
+				subscriptions.assignFromSubscribed(assignedPartitions);
 
-        // The leader may have assigned partitions which match our subscription pattern, but which
-        // were not explicitly requested, so we update the joined subscription here.
-        maybeUpdateJoinedSubscription(assignedPartitions);
+				firstException.compareAndSet(null, invokePartitionsAssigned(addedPartitions));
 
-        // give the assignor a chance to update internal state based on the received assignment
-        ConsumerGroupMetadata metadata = new ConsumerGroupMetadata(rebalanceConfig.groupId, generation, memberId, rebalanceConfig.groupInstanceId);
-        assignor.onAssignment(assignment, metadata);
+				break;
 
-        // reschedule the auto commit starting from now
-        if (autoCommitEnabled)
-            this.nextAutoCommitTimer.updateAndReset(autoCommitIntervalMs);
+			case COOPERATIVE:
+				Set<TopicPartition> revokedPartitions = new HashSet<>(ownedPartitions);
+				revokedPartitions.removeAll(assignedPartitions);
 
-        // execute the user's callback after rebalance
-        final AtomicReference<Exception> firstException = new AtomicReference<>(null);
-        Set<TopicPartition> addedPartitions = new HashSet<>(assignedPartitions);
-        addedPartitions.removeAll(ownedPartitions);
+				log.info("Updating with newly assigned partitions: {}, compare with already owned partitions: {}, " +
+								"newly added partitions: {}, revoking partitions: {}",
+						Utils.join(assignedPartitions, ", "),
+						Utils.join(ownedPartitions, ", "),
+						Utils.join(addedPartitions, ", "),
+						Utils.join(revokedPartitions, ", "));
 
-        switch (protocol) {
-            case EAGER:
-                // assign partitions that are not yet owned
-                subscriptions.assignFromSubscribed(assignedPartitions);
+				// revoke partitions that was previously owned but no longer assigned;
+				// note that we should only change the assignment AFTER we've triggered
+				// the revoke callback
+				if (!revokedPartitions.isEmpty()) {
+					firstException.compareAndSet(null, invokePartitionsRevoked(revokedPartitions));
+				}
 
-                firstException.compareAndSet(null, invokePartitionsAssigned(addedPartitions));
+				subscriptions.assignFromSubscribed(assignedPartitions);
 
-                break;
+				// add partitions that were not previously owned but are now assigned
+				firstException.compareAndSet(null, invokePartitionsAssigned(addedPartitions));
 
-            case COOPERATIVE:
-                Set<TopicPartition> revokedPartitions = new HashSet<>(ownedPartitions);
-                revokedPartitions.removeAll(assignedPartitions);
+				// if revoked any partitions, need to re-join the group afterwards
+				if (!revokedPartitions.isEmpty()) {
+					requestRejoin();
+				}
 
-                log.info("Updating with newly assigned partitions: {}, compare with already owned partitions: {}, " +
-                        "newly added partitions: {}, revoking partitions: {}",
-                    Utils.join(assignedPartitions, ", "),
-                    Utils.join(ownedPartitions, ", "),
-                    Utils.join(addedPartitions, ", "),
-                    Utils.join(revokedPartitions, ", "));
+				break;
+		}
 
-                // revoke partitions that was previously owned but no longer assigned;
-                // note that we should only change the assignment AFTER we've triggered
-                // the revoke callback
-                if (!revokedPartitions.isEmpty()) {
-                    firstException.compareAndSet(null, invokePartitionsRevoked(revokedPartitions));
-                }
-
-                subscriptions.assignFromSubscribed(assignedPartitions);
-
-                // add partitions that were not previously owned but are now assigned
-                firstException.compareAndSet(null, invokePartitionsAssigned(addedPartitions));
-
-                // if revoked any partitions, need to re-join the group afterwards
-                if (!revokedPartitions.isEmpty()) {
-                    requestRejoin();
-                }
-
-                break;
-        }
-
-        if (firstException.get() != null)
-            throw new KafkaException("User rebalance callback throws an error", firstException.get());
+		if (firstException.get() != null)
+			throw new KafkaException("User rebalance callback throws an error", firstException.get());
 	}
 
 	/**
@@ -573,77 +586,94 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             return timeToNextHeartbeat(now);
 
         return Math.min(nextAutoCommitTimer.remainingMs(), timeToNextHeartbeat(now));
-    }
+	}
 
-    private void updateGroupSubscription(Set<String> topics) {
-        // the leader will begin watching for changes to any of the topics the group is interested in,
-        // which ensures that all metadata changes will eventually be seen
-        if (this.subscriptions.groupSubscribe(topics))
-            metadata.requestUpdateForNewTopics();
+	/**
+	 * 更新消费组的订阅信息
+	 * @param topics 需要更新的topic
+	 */
+	private void updateGroupSubscription(Set<String> topics) {
+		// leader节点将会关注消费组关注的topic变化，将会确认所有metadata的最终的变化
+		if (this.subscriptions.groupSubscribe(topics))
+			metadata.requestUpdateForNewTopics();
 
-        // update metadata (if needed) and keep track of the metadata used for assignment so that
-        // we can check after rebalance completion whether anything has changed
-        if (!client.ensureFreshMetadata(time.timer(Long.MAX_VALUE)))
-            throw new TimeoutException();
+		// update metadata (if needed) and keep track of the metadata used for assignment so that
+		// we can check after rebalance completion whether anything has changed
+		if (!client.ensureFreshMetadata(time.timer(Long.MAX_VALUE)))
+			throw new TimeoutException();
 
-        maybeUpdateSubscriptionMetadata();
-    }
+		maybeUpdateSubscriptionMetadata();
+	}
 
-    @Override
+	/**
+	 * 执行对单个消费组的partition操作
+	 * @param leaderId           leader节点的node id
+	 * @param assignmentStrategy partition分配策略
+	 * @param allSubscriptions   消费组的全局信息
+	 * @return
+	 */
+	@Override
     protected Map<String, ByteBuffer> performAssignment(String leaderId,
                                                         String assignmentStrategy,
                                                         List<JoinGroupResponseData.JoinGroupResponseMember> allSubscriptions) {
+		// 寻找partition分配器
         ConsumerPartitionAssignor assignor = lookupAssignor(assignmentStrategy);
+		// partition分配必须要有分配策略
         if (assignor == null)
             throw new IllegalStateException("Coordinator selected invalid assignment protocol: " + assignmentStrategy);
 
         Set<String> allSubscribedTopics = new HashSet<>();
         Map<String, Subscription> subscriptions = new HashMap<>();
 
-        // collect all the owned partitions
+		// 聚合所有已拥有的partition
         Map<String, List<TopicPartition>> ownedPartitions = new HashMap<>();
-
+		// 其实就是遍历加入消费组后，协调器返回的消费组的数据
         for (JoinGroupResponseData.JoinGroupResponseMember memberSubscription : allSubscriptions) {
+			// 反序列化每个consumer的订阅信息
             Subscription subscription = ConsumerProtocol.deserializeSubscription(ByteBuffer.wrap(memberSubscription.metadata()));
+			// 设置每个group.instance.id
             subscription.setGroupInstanceId(Optional.ofNullable(memberSubscription.groupInstanceId()));
+			// 添加当前consumer的member.id，构建后的订阅信息
             subscriptions.put(memberSubscription.memberId(), subscription);
+			// 添加当前consumer订阅的topic
             allSubscribedTopics.addAll(subscription.topics());
+			// 当前已拥有的consumer的订阅信息
             ownedPartitions.put(memberSubscription.memberId(), subscription.ownedPartitions());
-        }
+		}
 
-        // the leader will begin watching for changes to any of the topics the group is interested in,
-        // which ensures that all metadata changes will eventually be seen
+		// leader节点会关注消费组关注的topic
+		// 比如，metadata的变化会直接被看到
         updateGroupSubscription(allSubscribedTopics);
-
+		// 当前consumer是消费组的leader节点
         isLeader = true;
 
         log.debug("Performing assignment using strategy {} with subscriptions {}", assignor.name(), subscriptions);
-
+		// 执行分配
         Map<String, Assignment> assignments = assignor.assign(metadata.fetch(), new GroupSubscription(subscriptions)).groupAssignment();
-
+		// 如果当前再平衡协议是协作协议
         if (protocol == RebalanceProtocol.COOPERATIVE) {
+			// 校验协议分配
             validateCooperativeAssignment(ownedPartitions, assignments);
-        }
+		}
 
-        // user-customized assignor may have created some topics that are not in the subscription list
-        // and assign their partitions to the members; in this case we would like to update the leader's
-        // own metadata with the newly added topics so that it will not trigger a subsequent rebalance
-        // when these topics gets updated from metadata refresh.
-        //
-        // TODO: this is a hack and not something we want to support long-term unless we push regex into the protocol
-        //       we may need to modify the PartitionAssignor API to better support this case.
+		// 用户自定义的分配策略可能会创建一些在订阅列表中的topic，然后将一些partition分配给memeber
+		// 在这种情况下，我们可以用新添加topic来更新leader节点的metadata，以便从metadata刷新中，更新topic时，它不会触发后续的再平衡操作
+		//
+		// TODO: 除非我们需要将regex推送到协议中，否则我们需要长期支持，这是一个hack的方式
+		//  我们可能需要修改PartitionAssignor的API来更好的支持这个case
         Set<String> assignedTopics = new HashSet<>();
         for (Assignment assigned : assignments.values()) {
             for (TopicPartition tp : assigned.partitions())
                 assignedTopics.add(tp.topic());
-        }
-
+		}
+		// 如果根据分配策略的topic和已订阅的topic不是子集的关系，而是交集的关系
         if (!assignedTopics.containsAll(allSubscribedTopics)) {
+			// 过滤出没有分配的topic
             Set<String> notAssignedTopics = new HashSet<>(allSubscribedTopics);
             notAssignedTopics.removeAll(assignedTopics);
             log.warn("The following subscribed topics are not assigned to any members: {} ", notAssignedTopics);
-        }
-
+		}
+		// 在所有已订阅的topic和已分配的topic也不是子集的关系，过滤新添加的topic，并重新更新订阅的信息
         if (!allSubscribedTopics.containsAll(assignedTopics)) {
             Set<String> newlyAddedTopics = new HashSet<>(assignedTopics);
             newlyAddedTopics.removeAll(allSubscribedTopics);
@@ -660,38 +690,43 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
         Map<String, ByteBuffer> groupAssignment = new HashMap<>();
         for (Map.Entry<String, Assignment> assignmentEntry : assignments.entrySet()) {
+			// 将List<Partition>序列化为ByteBuffer
             ByteBuffer buffer = ConsumerProtocol.serializeAssignment(assignmentEntry.getValue());
+			// 构建需要回传的订阅信息，memberId-ByteBuffer<List<Partition>>
             groupAssignment.put(assignmentEntry.getKey(), buffer);
         }
-
         return groupAssignment;
-    }
+	}
 
-    /**
-     * Used by COOPERATIVE rebalance protocol only.
-     *
-     * Validate the assignments returned by the assignor such that no owned partitions are going to
-     * be reassigned to a different consumer directly: if the assignor wants to reassign an owned partition,
-     * it must first remove it from the new assignment of the current owner so that it is not assigned to any
-     * member, and then in the next rebalance it can finally reassign those partitions not owned by anyone to consumers.
-     */
+	/**
+	 * 仅用于协作再评协议
+	 * 校验通过分配策略分配的partition信息，以便没有已有的partition会继续被直接地分配到其他不同的consumer
+	 * 如果分配策略想要重新分配一个已拥有的partition，它必须先从已分配的结果中移除，以便于将其分配给其他的consumer
+	 * 然后再下一次再平衡重，它可以最终会被重新分配这些的partition到consumer
+	 * @param ownedPartitions 已经拥有的partition信息
+	 * @param assignments     分配的partition信息
+	 */
     private void validateCooperativeAssignment(final Map<String, List<TopicPartition>> ownedPartitions,
                                                final Map<String, Assignment> assignments) {
+		// 需要撤销的partition
         Set<TopicPartition> totalRevokedPartitions = new HashSet<>();
+		// 需要添加的partition
         Set<TopicPartition> totalAddedPartitions = new HashSet<>();
+		// 遍历当前分配的每个分配信息topic-partition+consumer
         for (final Map.Entry<String, Assignment> entry : assignments.entrySet()) {
+			// 分配的分区策略（List<Partition>）
             final Assignment assignment = entry.getValue();
             final Set<TopicPartition> addedPartitions = new HashSet<>(assignment.partitions());
             addedPartitions.removeAll(ownedPartitions.get(entry.getKey()));
+			// 构建已分配的partition，根据removeAll()来去除已分配的partition中有的，新分配partitions中没有的
             final Set<TopicPartition> revokedPartitions = new HashSet<>(ownedPartitions.get(entry.getKey()));
             revokedPartitions.removeAll(assignment.partitions());
 
             totalAddedPartitions.addAll(addedPartitions);
             totalRevokedPartitions.addAll(revokedPartitions);
-        }
+		}
 
-        // if there are overlap between revoked partitions and added partitions, it means some partitions
-        // immediately gets re-assigned to another member while it is still claimed by some member
+		// 如果需要撤销的partition和添加的partition中有重叠的部分，意味着一些partition在立即重分配给其他member时，仍然被一些member所声明占有
         totalAddedPartitions.retainAll(totalRevokedPartitions);
         if (!totalAddedPartitions.isEmpty()) {
             log.error("With the COOPERATIVE protocol, owned partitions cannot be " +
@@ -761,6 +796,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 						ownedPartitions.removeAll(revokedPartitions);
 						subscriptions.assignFromSubscribed(ownedPartitions);
 					}
+
 
 					break;
 			}

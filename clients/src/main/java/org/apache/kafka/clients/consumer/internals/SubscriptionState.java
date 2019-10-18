@@ -219,13 +219,14 @@ public class SubscriptionState {
 	}
 
     /**
-     * Add topics to the current group subscription. This is used by the group leader to ensure
-     * that it receives metadata updates for all topics that the group is interested in.
-     * @param topics The topics to add to the group subscription
+	 * 添加topic到当前消费组的订阅信息，消费组leader节点用来确认它接收到了消费组关注的所有topic的元数据更新
+	 * @param topics 添加到消费组订阅信息的topic
      */
     synchronized boolean groupSubscribe(Collection<String> topics) {
+		// 非自动分配partition模式下，抛出异常
         if (!partitionsAutoAssigned())
             throw new IllegalStateException(SUBSCRIPTION_EXCEPTION_MESSAGE);
+		// 构建新的HashSet进行替换
         groupSubscription = new HashSet<>(groupSubscription);
         return groupSubscription.addAll(topics);
     }
@@ -264,10 +265,12 @@ public class SubscriptionState {
     }
 
     /**
-     * @return true if assignments matches subscription, otherwise false
+	 * 校验是否订阅以外的partition信息分配
+	 * @return 完全符合，返回true，否则，返回false
      */
     public synchronized boolean checkAssignmentMatchedSubscription(Collection<TopicPartition> assignments) {
         for (TopicPartition topicPartition : assignments) {
+			// 根据不同的订阅模式
             if (this.subscribedPattern != null) {
                 if (!this.subscribedPattern.matcher(topicPartition.topic()).matches()) {
                     log.info("Assigned partition {} for non-subscribed topic regex pattern; subscription pattern is {}",
@@ -457,9 +460,15 @@ public class SubscriptionState {
                 .collect(Collectors.toList());
     }
 
-    synchronized boolean partitionsAutoAssigned() {
-        return this.subscriptionType == SubscriptionType.AUTO_TOPICS || this.subscriptionType == SubscriptionType.AUTO_PATTERN;
-    }
+	/**
+	 * partition是否是自动分配的
+	 * @return AUTO_TOPICS和AUTO_PATTERN情况下是自动分配的
+	 */
+	synchronized boolean partitionsAutoAssigned() {
+		// 自动分配topic
+		// 自动根据正则表达式分配topic
+		return this.subscriptionType == SubscriptionType.AUTO_TOPICS || this.subscriptionType == SubscriptionType.AUTO_PATTERN;
+	}
 
     public synchronized void position(TopicPartition tp, FetchPosition position) {
         assignedState(tp).position(position);

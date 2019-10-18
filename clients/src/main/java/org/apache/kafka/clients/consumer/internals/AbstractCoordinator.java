@@ -109,11 +109,10 @@ import java.util.concurrent.atomic.AtomicReference;
 public abstract class AbstractCoordinator implements Closeable {
     public static final String HEARTBEAT_THREAD_PREFIX = "kafka-coordinator-heartbeat-thread";
 
-    private enum MemberState {
-        UNJOINED,    // the client is not part of a group
-        REBALANCING, // the client has begun rebalancing
-        STABLE,      // the client has joined and is sending heartbeats
-    }
+	/**
+	 * 当前consumer的状态
+	 */
+	private MemberState state = MemberState.UNJOINED;
 
     private final Logger log;
     private final GroupCoordinatorMetrics sensors;
@@ -128,7 +127,14 @@ public abstract class AbstractCoordinator implements Closeable {
 	 * 默认情况下，需要加入前准备
 	 */
 	private boolean needsJoinPrepare = true;
-    private MemberState state = MemberState.UNJOINED;
+
+	/**
+	 * 将心跳线程置为无效
+	 */
+	private synchronized void disableHeartbeatThread() {
+		if (heartbeatThread != null)
+			heartbeatThread.disable();
+    }
     private RequestFuture<ByteBuffer> joinFuture = null;
     private Node coordinator = null;
     private Generation generation = Generation.NO_GENERATION;
@@ -358,28 +364,6 @@ public abstract class AbstractCoordinator implements Closeable {
 		}
 	}
 
-    private synchronized void disableHeartbeatThread() {
-        if (heartbeatThread != null)
-            heartbeatThread.disable();
-    }
-
-    private void closeHeartbeatThread() {
-        HeartbeatThread thread = null;
-        synchronized (this) {
-            if (heartbeatThread == null)
-                return;
-            heartbeatThread.close();
-            thread = heartbeatThread;
-            heartbeatThread = null;
-        }
-        try {
-            thread.join();
-        } catch (InterruptedException e) {
-            log.warn("Interrupted while waiting for consumer heartbeat thread to close");
-            throw new InterruptException(e);
-        }
-    }
-
 	/**
 	 * 加入消费组
 	 * @param timer 等待时间计数器
@@ -412,7 +396,7 @@ public abstract class AbstractCoordinator implements Closeable {
 				// 没有完成的原因可能是超时
                 return false;
 			}
-			// 加入成功
+			// 请求加入消费组成功
             if (future.succeeded()) {
 				// 复制一份buffer，防止onJoinComplete()没有完成，进行重试
                 ByteBuffer memberAssignment = future.value().duplicate();
@@ -443,11 +427,24 @@ public abstract class AbstractCoordinator implements Closeable {
 		}
 		// 加入成功，返回true
         return true;
-    }
-
-    private synchronized void resetJoinGroupFuture() {
-        this.joinFuture = null;
 	}
+
+	private void closeHeartbeatThread() {
+		HeartbeatThread thread = null;
+		synchronized (this) {
+			if (heartbeatThread == null)
+				return;
+			heartbeatThread.close();
+			thread = heartbeatThread;
+			heartbeatThread = null;
+		}
+		try {
+			thread.join();
+		} catch (InterruptedException e) {
+			log.warn("Interrupted while waiting for consumer heartbeat thread to close");
+			throw new InterruptException(e);
+		}
+    }
 
 	/**
 	 * 初始化消费组
@@ -457,19 +454,18 @@ public abstract class AbstractCoordinator implements Closeable {
 		// 我们需要存储一份加入异步任务备份，以防开发者唤醒，然后执行
 		// 它将确保我们不会在未完成再平衡之前错误地尝试重新加入
 		if (joinFuture == null) {
-			// fence off the heartbeat thread explicitly so that it cannot interfere with the join group.
-			// Note that this must come after the call to onJoinPrepare since we must be able to continue
-			// sending heartbeats if that callback takes some time.
-
+			// 如果没有需要完成的加入异步回调任务，就暂时屏蔽掉心跳检测线程，以便它不会干扰加入消费组
+			// 需要住的是，必须发生在onJoinPrepare方法之后调用，因为如果回调任务的处理需要一些时间，我们必须还能持续发送心跳
+			// 将心跳线程置为无效
 			disableHeartbeatThread();
-
+			// 状态置为正在进行再平衡
 			state = MemberState.REBALANCING;
+			// 发送加入消费组请求
 			joinFuture = sendJoinGroupRequest();
 			joinFuture.addListener(new RequestFutureListener<ByteBuffer>() {
 				@Override
 				public void onSuccess(ByteBuffer value) {
-					// handle join completion in the callback so that the callback will be invoked
-					// even if the consumer is woken up before finishing the rebalance
+					// 处理加入完成任务，
 					synchronized (AbstractCoordinator.this) {
 						log.info("Successfully joined group with generation {}", generation.generationId);
 						state = MemberState.STABLE;
@@ -493,20 +489,21 @@ public abstract class AbstractCoordinator implements Closeable {
 		return joinFuture;
 	}
 
-    /**
-     * Join the group and return the assignment for the next generation. This function handles both
-     * JoinGroup and SyncGroup, delegating to {@link #performAssignment(String, String, List)} if
-     * elected leader by the coordinator.
-     *
-     * NOTE: This is visible only for testing
-     *
-     * @return A request future which wraps the assignment returned from the group leader
+	private synchronized void resetJoinGroupFuture() {
+		this.joinFuture = null;
+	}
+
+	/**
+	 * 加入消费组并返回下一generation的分配模式
+	 * 这个函数处理了加入消费组和同步消费组两项工作，由协调器选举leader时委托给{@link #performAssignment(String, String, List)}方法
+	 * @return 主消费者返回的包装了分配模式的请求回调异步任务
      */
     RequestFuture<ByteBuffer> sendJoinGroupRequest() {
+		// 如果协调器处于未知状态，返回协调器不可用的异步任务
         if (coordinatorUnknown())
             return RequestFuture.coordinatorNotAvailable();
 
-        // send a join group request to the coordinator
+		// 构建加入消费组的请求
         log.info("(Re-)joining group");
         JoinGroupRequest.Builder requestBuilder = new JoinGroupRequest.Builder(
                 new JoinGroupRequestData()
@@ -521,179 +518,184 @@ public abstract class AbstractCoordinator implements Closeable {
 
         log.debug("Sending JoinGroup ({}) to coordinator {}", requestBuilder, this.coordinator);
 
-        // Note that we override the request timeout using the rebalance timeout since that is the
-        // maximum time that it may block on the coordinator. We add an extra 5 seconds for small delays.
-
+		// 获取请求的等待时间
+		// 取设置的再平衡的超时时间，和再平衡超时时间+5s之间的最大值
+		// 需要注意的是，使用设置的再平衡的超时时间重写了请求的超时时间，因为可能需要在协调器上阻塞一会
+		// 我们又添加了5s的小等待
         int joinGroupTimeoutMs = Math.max(rebalanceConfig.rebalanceTimeoutMs, rebalanceConfig.rebalanceTimeoutMs + 5000);
+		// 发送加入消费组请求，并等待回调异步任务
         return client.send(coordinator, requestBuilder, joinGroupTimeoutMs)
                 .compose(new JoinGroupResponseHandler());
-    }
+	}
 
-    private class JoinGroupResponseHandler extends CoordinatorResponseHandler<JoinGroupResponse, ByteBuffer> {
-        @Override
-        public void handle(JoinGroupResponse joinResponse, RequestFuture<ByteBuffer> future) {
-            Errors error = joinResponse.error();
-            if (error == Errors.NONE) {
-                log.debug("Received successful JoinGroup response: {}", joinResponse);
-                sensors.joinLatency.record(response.requestLatencyMs());
+	/**
+	 * Follower节点发送同步消费组订阅信息请求
+	 * @return 返回节点加入结果
+	 */
+	private RequestFuture<ByteBuffer> onJoinFollower() {
+		// 如果是follower节点的情况，那么不进行分配策略，发送空的分配策略
+		SyncGroupRequest.Builder requestBuilder =
+				new SyncGroupRequest.Builder(
+						new SyncGroupRequestData()
+								.setGroupId(rebalanceConfig.groupId)
+								.setMemberId(generation.memberId)
+								.setGroupInstanceId(this.rebalanceConfig.groupInstanceId.orElse(null))
+								.setGenerationId(generation.generationId)
+								// 空的分配策略
+								.setAssignments(Collections.emptyList())
+				);
+		log.debug("Sending follower SyncGroup to coordinator {}: {}", this.coordinator, requestBuilder);
+		return sendSyncGroupRequest(requestBuilder);
+	}
 
-                synchronized (AbstractCoordinator.this) {
-                    if (state != MemberState.REBALANCING) {
-                        // if the consumer was woken up before a rebalance completes, we may have already left
-                        // the group. In this case, we do not want to continue with the sync group.
-                        future.raise(new UnjoinedGroupException());
-                    } else {
-                        AbstractCoordinator.this.generation = new Generation(joinResponse.data().generationId(),
-                                joinResponse.data().memberId(), joinResponse.data().protocolName());
-                        if (joinResponse.isLeader()) {
-                            onJoinLeader(joinResponse).chain(future);
-                        } else {
-                            onJoinFollower().chain(future);
-                        }
-                    }
-                }
-            } else if (error == Errors.COORDINATOR_LOAD_IN_PROGRESS) {
-                log.debug("Attempt to join group rejected since coordinator {} is loading the group.", coordinator());
-                // backoff and retry
-                future.raise(error);
-            } else if (error == Errors.UNKNOWN_MEMBER_ID) {
-                // reset the member id and retry immediately
-                resetGenerationOnResponseError(ApiKeys.JOIN_GROUP, error);
-                log.debug("Attempt to join group failed due to unknown member id.");
-                future.raise(error);
-            } else if (error == Errors.COORDINATOR_NOT_AVAILABLE
-                    || error == Errors.NOT_COORDINATOR) {
-                // re-discover the coordinator and retry with backoff
-                markCoordinatorUnknown();
-                log.debug("Attempt to join group failed due to obsolete coordinator information: {}", error.message());
-                future.raise(error);
-            } else if (error == Errors.FENCED_INSTANCE_ID) {
-                log.error("Received fatal exception: group.instance.id gets fenced");
-                future.raise(error);
-            } else if (error == Errors.INCONSISTENT_GROUP_PROTOCOL
-                    || error == Errors.INVALID_SESSION_TIMEOUT
-                    || error == Errors.INVALID_GROUP_ID
-                    || error == Errors.GROUP_AUTHORIZATION_FAILED
-                    || error == Errors.GROUP_MAX_SIZE_REACHED) {
-                // log the error and re-throw the exception
-                log.error("Attempt to join group failed due to fatal error: {}", error.message());
-                if (error == Errors.GROUP_MAX_SIZE_REACHED) {
-                    future.raise(new GroupMaxSizeReachedException("Consumer group " + rebalanceConfig.groupId +
-                            " already has the configured maximum number of members."));
-                } else if (error == Errors.GROUP_AUTHORIZATION_FAILED) {
-                    future.raise(GroupAuthorizationException.forGroupId(rebalanceConfig.groupId));
-                } else {
-                    future.raise(error);
-                }
-            } else if (error == Errors.UNSUPPORTED_VERSION) {
-                log.error("Attempt to join group failed due to unsupported version error. Please unset field group.instance.id and retry" +
-                        "to see if the problem resolves");
-                future.raise(error);
-            } else if (error == Errors.MEMBER_ID_REQUIRED) {
-                // Broker requires a concrete member id to be allowed to join the group. Update member id
-                // and send another join group request in next cycle.
-                synchronized (AbstractCoordinator.this) {
-                    AbstractCoordinator.this.generation = new Generation(OffsetCommitRequest.DEFAULT_GENERATION_ID,
-                            joinResponse.data().memberId(), null);
-                    AbstractCoordinator.this.rejoinNeeded = true;
-                    AbstractCoordinator.this.state = MemberState.UNJOINED;
-                }
-                future.raise(error);
-            } else {
-                // unexpected error, throw the exception
-                log.error("Attempt to join group failed due to unexpected error: {}", error.message());
-                future.raise(new KafkaException("Unexpected error in join group response: " + error.message()));
-            }
-        }
-    }
+	/**
+	 * 主消费者在收到加入消费组响应后，执行完分区分配工作，才会发送同步组请求
+	 * @param joinResponse 收到的加入消费组响应
+	 * @return
+	 */
+	private RequestFuture<ByteBuffer> onJoinLeader(JoinGroupResponse joinResponse) {
+		try {
+			// 执行消费组级别的任务分配工作，响应结果中有分配的协议、所有consumer的全局信息
+			Map<String, ByteBuffer> groupAssignment = performAssignment(joinResponse.data().leader(),
+					joinResponse.data().protocolName(),
+					joinResponse.data().members());
+			// 遍历包装成同步消费组请求分配中
+			List<SyncGroupRequestData.SyncGroupRequestAssignment> groupAssignmentList = new ArrayList<>();
+			for (Map.Entry<String, ByteBuffer> assignment : groupAssignment.entrySet()) {
+				groupAssignmentList.add(new SyncGroupRequestData.SyncGroupRequestAssignment()
+						.setMemberId(assignment.getKey())
+						.setAssignment(Utils.toArray(assignment.getValue()))
+				);
+			}
+			// 构建同步请求
+			SyncGroupRequest.Builder requestBuilder =
+					new SyncGroupRequest.Builder(
+							new SyncGroupRequestData()
+									.setGroupId(rebalanceConfig.groupId)
+									.setMemberId(generation.memberId)
+									.setGroupInstanceId(this.rebalanceConfig.groupInstanceId.orElse(null))
+									.setGenerationId(generation.generationId)
+									.setAssignments(groupAssignmentList)
+					);
+			log.debug("Sending leader SyncGroup to coordinator {}: {}", this.coordinator, requestBuilder);
+			// 发送同步请出去
+			return sendSyncGroupRequest(requestBuilder);
+		} catch (RuntimeException e) {
+			return RequestFuture.failure(e);
+		}
+	}
 
-    private RequestFuture<ByteBuffer> onJoinFollower() {
-        // send follower's sync group with an empty assignment
-        SyncGroupRequest.Builder requestBuilder =
-                new SyncGroupRequest.Builder(
-                        new SyncGroupRequestData()
-                                .setGroupId(rebalanceConfig.groupId)
-                                .setMemberId(generation.memberId)
-                                .setGroupInstanceId(this.rebalanceConfig.groupInstanceId.orElse(null))
-                                .setGenerationId(generation.generationId)
-                                .setAssignments(Collections.emptyList())
-                );
-        log.debug("Sending follower SyncGroup to coordinator {}: {}", this.coordinator, requestBuilder);
-        return sendSyncGroupRequest(requestBuilder);
-    }
+	/**
+	 * 发送集群同步请求给协调器
+	 * @param requestBuilder 同步请求构造器
+	 * @return 发送请求的回调任务
+	 */
+	private RequestFuture<ByteBuffer> sendSyncGroupRequest(SyncGroupRequest.Builder requestBuilder) {
+		if (coordinatorUnknown())
+			return RequestFuture.coordinatorNotAvailable();
+		return client.send(coordinator, requestBuilder)
+				.compose(new SyncGroupResponseHandler());
+	}
 
-    private RequestFuture<ByteBuffer> onJoinLeader(JoinGroupResponse joinResponse) {
-        try {
-            // perform the leader synchronization and send back the assignment for the group
-            Map<String, ByteBuffer> groupAssignment = performAssignment(joinResponse.data().leader(), joinResponse.data().protocolName(),
-                    joinResponse.data().members());
+	/**
+	 * 设置需要重新加入消费组的需求为true
+	 */
+	protected synchronized void requestRejoin() {
+		this.rejoinNeeded = true;
+	}
 
-            List<SyncGroupRequestData.SyncGroupRequestAssignment> groupAssignmentList = new ArrayList<>();
-            for (Map.Entry<String, ByteBuffer> assignment : groupAssignment.entrySet()) {
-                groupAssignmentList.add(new SyncGroupRequestData.SyncGroupRequestAssignment()
-                        .setMemberId(assignment.getKey())
-                        .setAssignment(Utils.toArray(assignment.getValue()))
-                );
-            }
+	private enum MemberState {
+		UNJOINED,    // client还没有在消费组中
+		REBALANCING, // client开始进行再平衡
+		STABLE,      // client已经加入消费组，并且开始发送心跳
+	}
 
-            SyncGroupRequest.Builder requestBuilder =
-                    new SyncGroupRequest.Builder(
-                            new SyncGroupRequestData()
-                                    .setGroupId(rebalanceConfig.groupId)
-                                    .setMemberId(generation.memberId)
-                                    .setGroupInstanceId(this.rebalanceConfig.groupInstanceId.orElse(null))
-                                    .setGenerationId(generation.generationId)
-                                    .setAssignments(groupAssignmentList)
-                    );
-            log.debug("Sending leader SyncGroup to coordinator {}: {}", this.coordinator, requestBuilder);
-            return sendSyncGroupRequest(requestBuilder);
-        } catch (RuntimeException e) {
-            return RequestFuture.failure(e);
-        }
-    }
+	/**
+	 * 加入消费组响应处理器
+	 */
+	private class JoinGroupResponseHandler extends CoordinatorResponseHandler<JoinGroupResponse, ByteBuffer> {
+		@Override
+		public void handle(JoinGroupResponse joinResponse, RequestFuture<ByteBuffer> future) {
+			Errors error = joinResponse.error();
+			if (error == Errors.NONE) {
+				log.debug("Received successful JoinGroup response: {}", joinResponse);
+				sensors.joinLatency.record(response.requestLatencyMs());
 
-    private RequestFuture<ByteBuffer> sendSyncGroupRequest(SyncGroupRequest.Builder requestBuilder) {
-        if (coordinatorUnknown())
-            return RequestFuture.coordinatorNotAvailable();
-        return client.send(coordinator, requestBuilder)
-                .compose(new SyncGroupResponseHandler());
-    }
-
-    private class SyncGroupResponseHandler extends CoordinatorResponseHandler<SyncGroupResponse, ByteBuffer> {
-        @Override
-        public void handle(SyncGroupResponse syncResponse,
-                           RequestFuture<ByteBuffer> future) {
-            Errors error = syncResponse.error();
-            if (error == Errors.NONE) {
-                sensors.syncLatency.record(response.requestLatencyMs());
-                future.complete(ByteBuffer.wrap(syncResponse.data.assignment()));
-            } else {
-                requestRejoin();
-
-                if (error == Errors.GROUP_AUTHORIZATION_FAILED) {
-                    future.raise(GroupAuthorizationException.forGroupId(rebalanceConfig.groupId));
-                } else if (error == Errors.REBALANCE_IN_PROGRESS) {
-                    log.debug("SyncGroup failed because the group began another rebalance");
-                    future.raise(error);
-                } else if (error == Errors.FENCED_INSTANCE_ID) {
-                    log.error("Received fatal exception: group.instance.id gets fenced");
-                    future.raise(error);
-                } else if (error == Errors.UNKNOWN_MEMBER_ID
-                        || error == Errors.ILLEGAL_GENERATION) {
-                    log.debug("SyncGroup failed: {}", error.message());
-                    resetGenerationOnResponseError(ApiKeys.SYNC_GROUP, error);
-                    future.raise(error);
-                } else if (error == Errors.COORDINATOR_NOT_AVAILABLE
-                        || error == Errors.NOT_COORDINATOR) {
-                    log.debug("SyncGroup failed: {}", error.message());
-                    markCoordinatorUnknown();
-                    future.raise(error);
-                } else {
-                    future.raise(new KafkaException("Unexpected error from SyncGroup: " + error.message()));
-                }
-            }
-        }
-    }
+				synchronized (AbstractCoordinator.this) {
+					// 如果当前consumer的状态不是再平衡
+					if (state != MemberState.REBALANCING) {
+						// 如果consumer在再平衡完成之前被唤醒，代表可能已经离开消费组
+						// 代表可能不需要继续同步数据，直接铲产生没有加入到消费组异常
+						future.raise(new UnjoinedGroupException());
+					} else {
+						// 在consumer处于再平衡状态下
+						// 根据响应信息构建当前的generation信息
+						AbstractCoordinator.this.generation = new Generation(joinResponse.data().generationId(),
+								joinResponse.data().memberId(), joinResponse.data().protocolName());
+						// 如果当前consumer被选为leader
+						if (joinResponse.isLeader()) {
+							// 构建leader节点调用链，再添加同步的listener
+							onJoinLeader(joinResponse).chain(future);
+						} else {
+							// 否则构建follower节点调用链，再添加的同步的listener
+							onJoinFollower().chain(future);
+						}
+					}
+				}
+				// 出现异常，产生错误
+			} else if (error == Errors.COORDINATOR_LOAD_IN_PROGRESS) {
+				log.debug("Attempt to join group rejected since coordinator {} is loading the group.", coordinator());
+				// backoff and retry
+				future.raise(error);
+			} else if (error == Errors.UNKNOWN_MEMBER_ID) {
+				// reset the member id and retry immediately
+				resetGenerationOnResponseError(ApiKeys.JOIN_GROUP, error);
+				log.debug("Attempt to join group failed due to unknown member id.");
+				future.raise(error);
+			} else if (error == Errors.COORDINATOR_NOT_AVAILABLE
+					|| error == Errors.NOT_COORDINATOR) {
+				// re-discover the coordinator and retry with backoff
+				markCoordinatorUnknown();
+				log.debug("Attempt to join group failed due to obsolete coordinator information: {}", error.message());
+				future.raise(error);
+			} else if (error == Errors.FENCED_INSTANCE_ID) {
+				log.error("Received fatal exception: group.instance.id gets fenced");
+				future.raise(error);
+			} else if (error == Errors.INCONSISTENT_GROUP_PROTOCOL
+					|| error == Errors.INVALID_SESSION_TIMEOUT
+					|| error == Errors.INVALID_GROUP_ID
+					|| error == Errors.GROUP_AUTHORIZATION_FAILED
+					|| error == Errors.GROUP_MAX_SIZE_REACHED) {
+				// log the error and re-throw the exception
+				log.error("Attempt to join group failed due to fatal error: {}", error.message());
+				if (error == Errors.GROUP_MAX_SIZE_REACHED) {
+					future.raise(new GroupMaxSizeReachedException("Consumer group " + rebalanceConfig.groupId +
+							" already has the configured maximum number of members."));
+				} else if (error == Errors.GROUP_AUTHORIZATION_FAILED) {
+					future.raise(GroupAuthorizationException.forGroupId(rebalanceConfig.groupId));
+				} else {
+					future.raise(error);
+				}
+			} else if (error == Errors.UNSUPPORTED_VERSION) {
+				log.error("Attempt to join group failed due to unsupported version error. Please unset field group.instance.id and retry" +
+						"to see if the problem resolves");
+				future.raise(error);
+			} else if (error == Errors.MEMBER_ID_REQUIRED) {
+				// 错误是没有传memberId，但是broker需要memberId，更新memberId，然后再下一次循环中发送下一个加入消费组的请求
+				synchronized (AbstractCoordinator.this) {
+					AbstractCoordinator.this.generation = new Generation(OffsetCommitRequest.DEFAULT_GENERATION_ID,
+							joinResponse.data().memberId(), null);
+					AbstractCoordinator.this.rejoinNeeded = true;
+					AbstractCoordinator.this.state = MemberState.UNJOINED;
+				}
+				future.raise(error);
+			} else {
+				// 未知错误，包装成KafkaException异常
+				log.error("Attempt to join group failed due to unexpected error: {}", error.message());
+				future.raise(new KafkaException("Unexpected error in join group response: " + error.message()));
+			}
+		}
+	}
 
     /**
      * Discover the current coordinator for the group. Sends a GroupMetadata request to
@@ -848,11 +850,49 @@ public abstract class AbstractCoordinator implements Closeable {
 
     synchronized void resetGenerationOnLeaveGroup() {
         log.debug("Resetting generation due to consumer pro-actively leaving the group");
-        resetGeneration();
-    }
+		resetGeneration();
+	}
 
-    protected synchronized void requestRejoin() {
-        this.rejoinNeeded = true;
+	/**
+	 * 同步消费组信息响应处理器
+	 */
+	private class SyncGroupResponseHandler extends CoordinatorResponseHandler<SyncGroupResponse, ByteBuffer> {
+		@Override
+		public void handle(SyncGroupResponse syncResponse,
+						   RequestFuture<ByteBuffer> future) {
+			Errors error = syncResponse.error();
+			if (error == Errors.NONE) {
+				// 记录的请求时间
+				sensors.syncLatency.record(response.requestLatencyMs());
+				// 包装分配的任务，将分配partition的数据加入到future中
+				future.complete(ByteBuffer.wrap(syncResponse.data.assignment()));
+			} else {
+				// 出现异常，首先再次发送加入消费组请求
+				requestRejoin();
+				// 然后接着处理异常
+				if (error == Errors.GROUP_AUTHORIZATION_FAILED) {
+					future.raise(GroupAuthorizationException.forGroupId(rebalanceConfig.groupId));
+				} else if (error == Errors.REBALANCE_IN_PROGRESS) {
+					log.debug("SyncGroup failed because the group began another rebalance");
+					future.raise(error);
+				} else if (error == Errors.FENCED_INSTANCE_ID) {
+					log.error("Received fatal exception: group.instance.id gets fenced");
+					future.raise(error);
+				} else if (error == Errors.UNKNOWN_MEMBER_ID
+						|| error == Errors.ILLEGAL_GENERATION) {
+					log.debug("SyncGroup failed: {}", error.message());
+					resetGenerationOnResponseError(ApiKeys.SYNC_GROUP, error);
+					future.raise(error);
+				} else if (error == Errors.COORDINATOR_NOT_AVAILABLE
+						|| error == Errors.NOT_COORDINATOR) {
+					log.debug("SyncGroup failed: {}", error.message());
+					markCoordinatorUnknown();
+					future.raise(error);
+				} else {
+					future.raise(new KafkaException("Unexpected error from SyncGroup: " + error.message()));
+                }
+            }
+        }
     }
 
     /**

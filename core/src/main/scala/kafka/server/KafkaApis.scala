@@ -17,8 +17,7 @@
 
 package kafka.server
 
-import java.lang.{Byte => JByte}
-import java.lang.{Long => JLong}
+import java.lang.{Byte => JByte, Long => JLong}
 import java.nio.ByteBuffer
 import java.util
 import java.util.Optional
@@ -26,8 +25,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 import kafka.admin.{AdminUtils, RackAwareMode}
-import kafka.api.ElectLeadersRequestOps
-import kafka.api.{ApiVersion, KAFKA_0_11_0_IV0, KAFKA_2_3_IV0}
+import kafka.api.{ApiVersion, ElectLeadersRequestOps, KAFKA_0_11_0_IV0, KAFKA_2_3_IV0}
 import kafka.cluster.Partition
 import kafka.common.OffsetAndMetadata
 import kafka.controller.KafkaController
@@ -40,39 +38,20 @@ import kafka.security.auth.{Resource, _}
 import kafka.server.QuotaFactory.{QuotaManagers, UnboundedQuota}
 import kafka.utils.{CoreUtils, Logging}
 import kafka.zk.{AdminZkClient, KafkaZkClient}
-import org.apache.kafka.clients.admin.{AlterConfigOp, ConfigEntry}
 import org.apache.kafka.clients.admin.AlterConfigOp.OpType
+import org.apache.kafka.clients.admin.{AlterConfigOp, ConfigEntry}
 import org.apache.kafka.common.acl.{AccessControlEntry, AclBinding}
 import org.apache.kafka.common.config.ConfigResource
 import org.apache.kafka.common.errors._
 import org.apache.kafka.common.internals.FatalExitError
 import org.apache.kafka.common.internals.Topic.{GROUP_METADATA_TOPIC_NAME, TRANSACTION_STATE_TOPIC_NAME, isInternal}
 import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopic
-import org.apache.kafka.common.message.CreateTopicsResponseData
 import org.apache.kafka.common.message.CreateTopicsResponseData.{CreatableTopicResult, CreatableTopicResultCollection}
-import org.apache.kafka.common.message.DeleteGroupsResponseData
 import org.apache.kafka.common.message.DeleteGroupsResponseData.{DeletableGroupResult, DeletableGroupResultCollection}
-import org.apache.kafka.common.message.AlterPartitionReassignmentsResponseData
-import org.apache.kafka.common.message.ListPartitionReassignmentsResponseData
-import org.apache.kafka.common.message.DeleteTopicsResponseData
 import org.apache.kafka.common.message.DeleteTopicsResponseData.{DeletableTopicResult, DeletableTopicResultCollection}
-import org.apache.kafka.common.message.DescribeGroupsResponseData
-import org.apache.kafka.common.message.ElectLeadersResponseData.PartitionResult
-import org.apache.kafka.common.message.ElectLeadersResponseData.ReplicaElectionResult
-import org.apache.kafka.common.message.ExpireDelegationTokenResponseData
-import org.apache.kafka.common.message.FindCoordinatorResponseData
-import org.apache.kafka.common.message.HeartbeatResponseData
-import org.apache.kafka.common.message.InitProducerIdResponseData
-import org.apache.kafka.common.message.JoinGroupResponseData
-import org.apache.kafka.common.message.LeaveGroupResponseData
+import org.apache.kafka.common.message.ElectLeadersResponseData.{PartitionResult, ReplicaElectionResult}
 import org.apache.kafka.common.message.LeaveGroupResponseData.MemberResponse
-import org.apache.kafka.common.message.ListGroupsResponseData
-import org.apache.kafka.common.message.OffsetCommitRequestData
-import org.apache.kafka.common.message.OffsetCommitResponseData
-import org.apache.kafka.common.message.RenewDelegationTokenResponseData
-import org.apache.kafka.common.message.SaslAuthenticateResponseData
-import org.apache.kafka.common.message.SaslHandshakeResponseData
-import org.apache.kafka.common.message.SyncGroupResponseData
+import org.apache.kafka.common.message._
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.network.{ListenerName, Send}
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
@@ -92,15 +71,16 @@ import org.apache.kafka.common.security.token.delegation.{DelegationToken, Token
 import org.apache.kafka.common.utils.{Time, Utils}
 import org.apache.kafka.common.{Node, TopicPartition}
 
-import scala.compat.java8.OptionConverters._
 import scala.collection.JavaConverters._
-import scala.collection.{Map, Seq, Set, immutable, mutable}
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.{Map, Seq, Set, immutable, mutable}
+import scala.compat.java8.OptionConverters._
 import scala.util.{Failure, Success, Try}
 
 
 /**
  * Logic to handle the various Kafka requests
+ * KafkaApis用于处理各种Kafka请求
  */
 class KafkaApis(val requestChannel: RequestChannel,
                 val replicaManager: ReplicaManager,
@@ -130,7 +110,7 @@ class KafkaApis(val requestChannel: RequestChannel,
   }
 
   /**
-   * Top-level method that handles all requests and multiplexes to the right api
+   * 处理所有请求和多路传输的顶层方法
    */
   def handle(request: RequestChannel.Request): Unit = {
     try {
@@ -1376,20 +1356,33 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
   }
 
+  /**
+   * 处理加入消费组请求
+   * @param request 加入消费组请求
+   */
   def handleJoinGroupRequest(request: RequestChannel.Request): Unit = {
+    // 获取请求的body部分
     val joinGroupRequest = request.body[JoinGroupRequest]
 
-    // the callback for sending a join-group response
+    // 构建一个用于发送给consumer的加入消费组响应的回调任务
     def sendResponseCallback(joinResult: JoinGroupResult): Unit = {
+      // 创建响应
       def createResponse(requestThrottleMs: Int): AbstractResponse = {
         val responseBody = new JoinGroupResponse(
           new JoinGroupResponseData()
+            // 请求时间阈值
             .setThrottleTimeMs(requestThrottleMs)
+            // 是否在分配过程中出现错误
             .setErrorCode(joinResult.error.code())
+            // 当前的generation版本
             .setGenerationId(joinResult.generationId)
+            // 设置分配策略协议
             .setProtocolName(joinResult.subProtocol)
+            // 这是leaderId，consumer接收到加入消费者响应后，会根据身份进行不同的处理
             .setLeader(joinResult.leaderId)
+            // 设置consumer在消费组中的唯一ID，简称memberId
             .setMemberId(joinResult.memberId)
+            // 设置consumer的成员信息，
             .setMembers(joinResult.members.asJava)
         )
 
@@ -1397,13 +1390,13 @@ class KafkaApis(val requestChannel: RequestChannel,
           .format(responseBody, request.header.correlationId, request.header.clientId))
         responseBody
       }
+      // 在给定的时间阈值内，发送响应
       sendResponseMaybeThrottle(request, createResponse)
     }
-
+    // 如果存在group.instance.id并且当前broker的协议版本小于kafka 2.3版本
     if (joinGroupRequest.data.groupInstanceId != null && config.interBrokerProtocolVersion < KAFKA_2_3_IV0) {
-      // Only enable static membership when IBP >= 2.3, because it is not safe for the broker to use the static member logic
-      // until we are sure that all brokers support it. If static group being loaded by an older coordinator, it will discard
-      // the group.instance.id field, so static members could accidentally become "dynamic", which leads to wrong states.
+      // 只有在内部版本号≥2.3的情况下，开启静态成员身份，因为如果我们在确认broker是否支持静态成员身份时开启，它对broker是不安全的
+      // 如果一个静态的group由一个旧版本的协调器，它会丢弃这个group.instance.id字段，所以静态成员可能突然之间变为动态成员，会导致错误的状态问题
       sendResponseCallback(JoinGroupResult(
         List.empty,
         JoinGroupResponse.UNKNOWN_MEMBER_ID,
@@ -1413,6 +1406,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         Errors.UNSUPPORTED_VERSION
       ))
     } else if (!authorize(request.session, Read, Resource(Group, joinGroupRequest.data().groupId(), LITERAL))) {
+      // 没有通过校验，返回校验错误
       sendResponseMaybeThrottle(request, requestThrottleMs =>
         new JoinGroupResponse(
           new JoinGroupResponseData()
@@ -1426,13 +1420,14 @@ class KafkaApis(val requestChannel: RequestChannel,
         )
       )
     }  else {
+      // 正常情况下
+      // 获取当前加入消费组请求的group.instance.id
       val groupInstanceId = Option(joinGroupRequest.data.groupInstanceId)
 
-      // Only return MEMBER_ID_REQUIRED error if joinGroupRequest version is >= 4
-      // and groupInstanceId is configured to unknown.
+      // 如果joinGroupRequest版本号≥4，并且没有group.instance.id，仅返回MEMBER_ID_REQUIRED错误
       val requireKnownMemberId = joinGroupRequest.version >= 4 && groupInstanceId.isEmpty
 
-      // let the coordinator handle join-group
+      // 让消费组协调器处理加入消费组请求
       val protocols = joinGroupRequest.data.protocols.valuesList.asScala.map(protocol =>
         (protocol.name, protocol.metadata)).toList
       groupCoordinator.handleJoinGroup(
@@ -2677,13 +2672,19 @@ class KafkaApis(val requestChannel: RequestChannel,
       sendErrorResponseExemptThrottle(request, e)
   }
 
-  // Throttle the channel if the request quota is enabled but has been violated. Regardless of throttling, send the
-  // response immediately.
+  /**
+   * 如果已经申请了请求配额，但是又违反了规定，无论是否限流，需要立即发送响应
+   * @param request        请求内容
+   * @param createResponse 构造的响应信息
+   * @param onComplete     发送完成后的异步处理任务
+   */
   private def sendResponseMaybeThrottle(request: RequestChannel.Request,
                                         createResponse: Int => AbstractResponse,
                                         onComplete: Option[Send => Unit] = None): Unit = {
+    // 获取当前请求的请求时间阈值
     val throttleTimeMs = quotas.request.maybeRecordAndGetThrottleTimeMs(request)
     quotas.request.throttle(request, throttleTimeMs, sendResponse)
+    // 发送响应
     sendResponse(request, Some(createResponse(throttleTimeMs)), onComplete)
   }
 
@@ -2726,22 +2727,32 @@ class KafkaApis(val requestChannel: RequestChannel,
     requestChannel.sendResponse(new RequestChannel.CloseConnectionResponse(request))
   }
 
+  /**
+   * 发送响应
+   * @param request     请求时对象
+   * @param responseOpt 需要发送的响应内容
+   * @param onComplete  响应发送完成后的处理
+   */
   private def sendResponse(request: RequestChannel.Request,
                            responseOpt: Option[AbstractResponse],
                            onComplete: Option[Send => Unit]): Unit = {
-    // Update error metrics for each error code in the response including Errors.NONE
+    // 更新错误计数器
     responseOpt.foreach(response => requestChannel.updateErrorMetrics(request.header.apiKey, response.errorCounts.asScala))
 
     val response = responseOpt match {
       case Some(response) =>
+        // 根据Channel信息，构建响应的请求头部信息
         val responseSend = request.context.buildResponse(response)
+        // 根据需要传输的信息，构建响应的body部分
         val responseString =
           if (RequestChannel.isRequestLoggingEnabled) Some(response.toString(request.context.apiVersion))
           else None
         new RequestChannel.SendResponse(request, responseSend, responseString, onComplete)
       case None =>
+        // response为None，构建无操作响应
         new RequestChannel.NoOpResponse(request)
     }
+    // 发送响应
     sendResponse(response)
   }
 
