@@ -31,17 +31,15 @@ import scala.collection._
 import scala.collection.mutable.ListBuffer
 
 /**
- * An operation whose processing needs to be delayed for at most the given delayMs. For example
- * a delayed produce operation could be waiting for specified number of acks; or
- * a delayed fetch operation could be waiting for a given number of bytes to accumulate.
+ * 延迟操作
+ * 一个操作需要进行延迟处理
  *
- * The logic upon completing a delayed operation is defined in onComplete() and will be called exactly once.
- * Once an operation is completed, isCompleted() will return true. onComplete() can be triggered by either
- * forceComplete(), which forces calling onComplete() after delayMs if the operation is not yet completed,
- * or tryComplete(), which first checks if the operation can be completed or not now, and if yes calls
- * forceComplete().
+ * 在逻辑上，一个延迟操作完成的任务生命在onComplete()方法中，而且只会被调用一次
+ * 如果一个操作完成了，isCompleted()会返回true
+ * onComplete()可以被forceComplete()在等待时间后但是操作还没有完成的情况下强制触发
+ * 或者通过tryComplete()方法，首先校验当前操作是否可以完成，然后再调用forceComplete()方法
  *
- * A subclass of DelayedOperation needs to provide an implementation of both onComplete() and tryComplete().
+ * DelayedOperation子类需要同时提供onComplete()或者tryComplete()的实现
  */
 abstract class DelayedOperation(override val delayMs: Long,
                                 lockOpt: Option[Lock] = None)
@@ -52,22 +50,44 @@ abstract class DelayedOperation(override val delayMs: Long,
   // Visible for testing
   private[server] val lock: Lock = lockOpt.getOrElse(new ReentrantLock)
 
+  /**
+   * 当延迟的操作到期并因此被强制完成时执行回调
+   */
+  def onExpiration(): Unit
+
+  /**
+   * 一个完成任务的进程，需要在子类中实现，并且只会在forceComplete()中调用一次
+   */
+  def onComplete(): Unit
+
+  /**
+   * 尝试完成延迟操作，首先需要检查当前是否可完成
+   * 如果可完成，则调用forceComplete()完成任务，并返回true
+   * 其他情况，返回false
+   * 需要在子类中实现
+   */
+  def tryComplete(): Boolean
+
   /*
-   * Force completing the delayed operation, if not already completed.
-   * This function can be triggered when
-   *
-   * 1. The operation has been verified to be completable inside tryComplete()
-   * 2. The operation has expired and hence needs to be completed right now
-   *
-   * Return true iff the operation is completed by the caller: note that
-   * concurrent threads can try to complete the same operation, but only
-   * the first thread will succeed in completing the operation and return
-   * true, others will still return false
+   * run()方法声明了一个用于执行等待的任务
+   */
+  override def run(): Unit = {
+    if (forceComplete())
+      onExpiration()
+  }
+
+  /*
+   * 强制完成延迟的操作，如果还没有完成，函数可以在以下情况下被触发
+   * 1. 操作已经在tryComplete()方法中被验证可以完成
+   * 2. 操作已经失效，需要立即完成
+   * 如果调用者完成了任务，返回true
+   * 需要注意的是，存在并发下完成任务的情况，但是仅有第一个线程可以完成任务，并返回true，其他线程将会返回false
    */
   def forceComplete(): Boolean = {
     if (completed.compareAndSet(false, true)) {
-      // cancel the timeout timer
+      // 取消等待计时器
       cancel()
+      // 完成任务
       onComplete()
       true
     } else {
@@ -76,41 +96,8 @@ abstract class DelayedOperation(override val delayMs: Long,
   }
 
   /**
-   * Check if the delayed operation is already completed
-   */
-  def isCompleted: Boolean = completed.get()
-
-  /**
-   * Call-back to execute when a delayed operation gets expired and hence forced to complete.
-   */
-  def onExpiration(): Unit
-
-  /**
-   * Process for completing an operation; This function needs to be defined
-   * in subclasses and will be called exactly once in forceComplete()
-   */
-  def onComplete(): Unit
-
-  /**
-   * Try to complete the delayed operation by first checking if the operation
-   * can be completed by now. If yes execute the completion logic by calling
-   * forceComplete() and return true iff forceComplete returns true; otherwise return false
-   *
-   * This function needs to be defined in subclasses
-   */
-  def tryComplete(): Boolean
-
-  /**
-   * Thread-safe variant of tryComplete() that attempts completion only if the lock can be acquired
-   * without blocking.
-   *
-   * If threadA acquires the lock and performs the check for completion before completion criteria is met
-   * and threadB satisfies the completion criteria, but fails to acquire the lock because threadA has not
-   * yet released the lock, we need to ensure that completion is attempted again without blocking threadA
-   * or threadB. `tryCompletePending` is set by threadB when it fails to acquire the lock and at least one
-   * of threadA or threadB will attempt completion of the operation if this flag is set. This ensures that
-   * every invocation of `maybeTryComplete` is followed by at least one invocation of `tryComplete` until
-   * the operation is actually completed.
+   * tryComplete()的线程安全的变体，用于仅在可以占有锁的情况下，尝试完成，不会进行阻塞
+   * 确保每次maybeTryComplete()都会在至少一次tryComplete()调用之后调用，知道操作真正完成
    */
   private[server] def maybeTryComplete(): Boolean = {
     var retry = false
@@ -123,27 +110,21 @@ abstract class DelayedOperation(override val delayMs: Long,
         } finally {
           lock.unlock()
         }
-        // While we were holding the lock, another thread may have invoked `maybeTryComplete` and set
-        // `tryCompletePending`. In this case we should retry.
+        // 当前已经占有了锁，另一个线程调用了maybeTryComplete()并设置了tryCompletePending，就需要进行重试
         retry = tryCompletePending.get()
       } else {
-        // Another thread is holding the lock. If `tryCompletePending` is already set and this thread failed to
-        // acquire the lock, then the thread that is holding the lock is guaranteed to see the flag and retry.
-        // Otherwise, we should set the flag and retry on this thread since the thread holding the lock may have
-        // released the lock and returned by the time the flag is set.
+        // 另一线程占有了锁，如果已经设置了tryCompletePending并且当前线程尝试获取锁失败了，那么持有锁的线程就会保证看到标识，并进行重试
+        // 否则，应该设置标识并在当前线程上重试，因为持有锁的线程可能已经释放了锁，并返回设置标识的时间
         retry = !tryCompletePending.getAndSet(true)
       }
     } while (!isCompleted && retry)
     done
   }
 
-  /*
-   * run() method defines a task that is executed on timeout
+  /**
+   * 检查当前任务是否已完成
    */
-  override def run(): Unit = {
-    if (forceComplete())
-      onExpiration()
-  }
+  def isCompleted: Boolean = completed.get()
 }
 
 object DelayedOperationPurgatory {

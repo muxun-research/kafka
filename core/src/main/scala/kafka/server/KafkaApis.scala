@@ -131,6 +131,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         case ApiKeys.JOIN_GROUP => handleJoinGroupRequest(request)
         case ApiKeys.HEARTBEAT => handleHeartbeatRequest(request)
         case ApiKeys.LEAVE_GROUP => handleLeaveGroupRequest(request)
+        // 同步消费组信息请求
         case ApiKeys.SYNC_GROUP => handleSyncGroupRequest(request)
         case ApiKeys.DESCRIBE_GROUPS => handleDescribeGroupRequest(request)
         case ApiKeys.LIST_GROUPS => handleListGroupsRequest(request)
@@ -473,7 +474,10 @@ class KafkaApis(val requestChannel: RequestChannel,
         }
     }
 
-    // the callback for sending a produce response
+    /**
+     * 用于发送produce的响应
+     * @param responseStatus 响应状态
+     */
     def sendResponseCallback(responseStatus: Map[TopicPartition, PartitionResponse]): Unit = {
       val mergedResponseStatus = responseStatus ++ unauthorizedTopicResponses ++ nonExistingTopicResponses ++ invalidRequestResponses
       var errorInResponse = false
@@ -1445,9 +1449,17 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
   }
 
+  /**
+   * 处理同步消费组信息请求
+   * 发生于加入消费组请求之后，用于返回当前member需要的拉上分区的元数据
+   * @param request 同步消费组请求信息
+   */
   def handleSyncGroupRequest(request: RequestChannel.Request): Unit = {
+    // 获取同步消费组请求的body内容
     val syncGroupRequest = request.body[SyncGroupRequest]
 
+    // 首先确认同步消费组请求的响应回调任务
+    // 目的是使用请求和响应共用一个channel
     def sendResponseCallback(syncGroupResult: SyncGroupResult): Unit = {
       sendResponseMaybeThrottle(request, requestThrottleMs =>
         new SyncGroupResponse(
@@ -1459,13 +1471,15 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
 
     if (syncGroupRequest.data.groupInstanceId != null && config.interBrokerProtocolVersion < KAFKA_2_3_IV0) {
-      // Only enable static membership when IBP >= 2.3, because it is not safe for the broker to use the static member logic
-      // until we are sure that all brokers support it. If static group being loaded by an older coordinator, it will discard
-      // the group.instance.id field, so static members could accidentally become "dynamic", which leads to wrong states.
+      // 只有在Kafka 2.3版本及以后开启了静态成员身份，需要确认所有broker都可以支持静态成员身份
+      // 如果静态消费组是使用一个老版本的协调器加载的，它会丢弃group.instance.id字段，所以静态成员会突然变成动态身份，导致错误的状态
+      // 静态会员版本校验未通过，返回不支持的版本错误
       sendResponseCallback(SyncGroupResult(Array[Byte](), Errors.UNSUPPORTED_VERSION))
     } else if (!authorize(request.session, Read, Resource(Group, syncGroupRequest.data.groupId, LITERAL))) {
+      // 返回版本校验失败错误
       sendResponseCallback(SyncGroupResult(Array[Byte](), Errors.GROUP_AUTHORIZATION_FAILED))
     } else {
+
       val assignmentMap = immutable.Map.newBuilder[String, Array[Byte]]
       syncGroupRequest.data.assignments.asScala.foreach { assignment =>
         assignmentMap += (assignment.memberId -> assignment.assignment)

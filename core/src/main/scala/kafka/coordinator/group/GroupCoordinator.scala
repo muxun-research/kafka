@@ -157,20 +157,28 @@ class GroupCoordinator(val brokerId: Int,
           }
         case Some(group) =>
           group.inLock {
+            // 已经超过消费组的成员上限，并且消费组已经拥有该成员，并且该成员并不是处于等待加入状态
+            // 或者是一个位置的成员，并且已经超过消费组成员上限
             if ((groupIsOverCapacity(group)
               && group.has(memberId) && !group.get(memberId).isAwaitingJoin) // oversized group, need to shed members that haven't joined yet
               || (isUnknownMember && group.size >= groupConfig.groupMaxSize)) {
+              // 删除指定成员及静态成员信息
               group.remove(memberId)
               group.removeStaticMember(groupInstanceId)
+              // 响应回调任务
               responseCallback(joinError(JoinGroupRequest.UNKNOWN_MEMBER_ID, Errors.GROUP_MAX_SIZE_REACHED))
             } else if (isUnknownMember) {
+              // 如果是一个未知的成员身份，执行添加新成员到消费组
+              // 第一次加入消费组的member，一般都是未知成员身份
               doUnknownJoinGroup(group, groupInstanceId, requireKnownMemberId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs, protocolType, protocols, responseCallback)
             } else {
+              // 添加到消费组中
               doJoinGroup(group, memberId, groupInstanceId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs, protocolType, protocols, responseCallback)
             }
 
-            // attempt to complete JoinGroup
+            // 完成加入消费组请求
             if (group.is(PreparingRebalance)) {
+              // 完成当前member.id的所有观察者任务
               joinPurgatory.checkAndComplete(GroupKey(group.groupId))
             }
           }
@@ -297,17 +305,18 @@ class GroupCoordinator(val brokerId: Int,
                       groupInstanceId: Option[String],
                       groupAssignment: Map[String, Array[Byte]],
                       responseCallback: SyncCallback): Unit = {
+    // 校验消费组的状态
     validateGroupStatus(groupId, ApiKeys.SYNC_GROUP) match {
       case Some(error) if error == Errors.COORDINATOR_LOAD_IN_PROGRESS =>
-        // The coordinator is loading, which means we've lost the state of the active rebalance and the
-        // group will need to start over at JoinGroup. By returning rebalance in progress, the consumer
-        // will attempt to rejoin without needing to rediscover the coordinator. Note that we cannot
-        // return COORDINATOR_LOAD_IN_PROGRESS since older clients do not expect the error.
+        // 如果协调者正在加载，证明我们已经失效了活跃的再平衡的状态，并且消费组需要从加入消费组的地方重新开始
+        // 返回正在再平衡的状态，consumer会尝试重新加入，但是不需要去重新发现协调器
+        // 需要注意的是在旧版本客户端中不能返回COORDINATOR_LOAD_IN_PROGRESS状态
         responseCallback(SyncGroupResult(Array.empty, Errors.REBALANCE_IN_PROGRESS))
 
       case Some(error) => responseCallback(SyncGroupResult(Array.empty, error))
 
       case None =>
+        // 当前消费组存在给定member.id的情况下，才会返回正常的同步消费组响应
         groupManager.getGroup(groupId) match {
           case None => responseCallback(SyncGroupResult(Array.empty, Errors.UNKNOWN_MEMBER_ID))
           case Some(group) => doSyncGroup(group, generation, memberId, groupInstanceId, groupAssignment, responseCallback)
@@ -315,6 +324,15 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
+  /**
+   * 执行消费组同步
+   * @param group            消费组
+   * @param generationId     generationId
+   * @param memberId         需要进行同步的member.id
+   * @param groupInstanceId  member的group.instance.id
+   * @param groupAssignment  消费组的分配策略
+   * @param responseCallback 同步消费组请求的响应回调任务
+   */
   private def doSyncGroup(group: GroupMetadata,
                           generationId: Int,
                           memberId: String,
@@ -323,47 +341,57 @@ class GroupCoordinator(val brokerId: Int,
                           responseCallback: SyncCallback): Unit = {
     group.inLock {
       if (group.is(Dead)) {
-        // if the group is marked as dead, it means some other thread has just removed the group
-        // from the coordinator metadata; this is likely that the group has migrated to some other
-        // coordinator OR the group is in a transient unstable phase. Let the member retry
-        // finding the correct coordinator and rejoin.
+        // 消费组处于失效状态，返回协调器不可用状态
+        // 如果消费组处于失效状态，意味着其他线程已经将消费组从协调器metadata中移除
+        // 就相当于消费组迁移至其他的协调器或者消费组在一个瞬时不稳定的状态
+        // 让member重新获取正确的协调者并进行重新加入
         responseCallback(SyncGroupResult(Array.empty, Errors.COORDINATOR_NOT_AVAILABLE))
       } else if (group.isStaticMemberFenced(memberId, groupInstanceId)) {
+
         responseCallback(SyncGroupResult(Array.empty, Errors.FENCED_INSTANCE_ID))
       } else if (!group.has(memberId)) {
+        // 给定消费组中没有给定的member id
         responseCallback(SyncGroupResult(Array.empty, Errors.UNKNOWN_MEMBER_ID))
       } else if (generationId != group.generationId) {
+        // 请求时的generationId不等于消费组当前的generationId
         responseCallback(SyncGroupResult(Array.empty, Errors.ILLEGAL_GENERATION))
       } else {
         group.currentState match {
           case Empty =>
+            // 返回未知member.id
             responseCallback(SyncGroupResult(Array.empty, Errors.UNKNOWN_MEMBER_ID))
-
           case PreparingRebalance =>
+            // 返回正在进行再平衡
             responseCallback(SyncGroupResult(Array.empty, Errors.REBALANCE_IN_PROGRESS))
 
           case CompletingRebalance =>
+            // 正在等待再平衡的完成
+            // 协调器也在等待leader consumer完成partition分配操作
             group.get(memberId).awaitingSyncCallback = responseCallback
 
-            // if this is the leader, then we can attempt to persist state and transition to stable
+            // 如果请求同步消费组请求的是leader consumer，我们可以尝试保持当前的正在等待再平衡的状态，并且向稳定状态进行过渡
             if (group.isLeader(memberId)) {
               info(s"Assignment received from leader for group ${group.groupId} for generation ${group.generationId}")
 
-              // fill any missing members with an empty assignment
+              // 筛选出没有分配的member.id，并加入到分配结果中
               val missing = group.allMembers -- groupAssignment.keySet
               val assignment = groupAssignment ++ missing.map(_ -> Array.empty[Byte]).toMap
-
+              // 更新消费组信息
+              // 第三个参数传递了一个函数，类似于"发送响应的回调任务"传给值对象
               groupManager.storeGroup(group, assignment, (error: Errors) => {
                 group.inLock {
-                  // another member may have joined the group while we were awaiting this callback,
-                  // so we must ensure we are still in the CompletingRebalance state and the same generation
-                  // when it gets invoked. if we have transitioned to another state, then do nothing
+                  // 当等待再平衡结果时，其他member可能已经加入到消费组中，所以必须确认当前消费组仍处于正在等待完成再平衡的状态，并且消费组的generation也没有发生变化
+                  // 如果消费组状态发生了变化，就不进行任何操作
                   if (group.is(CompletingRebalance) && generationId == group.generationId) {
                     if (error != Errors.NONE) {
+                      // 出现异常
                       resetAndPropagateAssignmentError(group, error)
                       maybePrepareRebalance(group, s"error when storing group assignment during SyncGroup (member: $memberId)")
                     } else {
+                      // 没有出现异常
+                      // 设置并传递分配信息
                       setAndPropagateAssignment(group, assignment)
+                      // 并将状态转换为稳定状态
                       group.transitionTo(Stable)
                     }
                   }
@@ -372,12 +400,15 @@ class GroupCoordinator(val brokerId: Int,
             }
 
           case Stable =>
-            // if the group is stable, we just return the current assignment
+            // 如果消费组当前处于稳定状态，返回当前的分配信息即可
             val memberMetadata = group.get(memberId)
+            // 直接使用当前的分配信息，直接调用回调任务
             responseCallback(SyncGroupResult(memberMetadata.assignment, Errors.NONE))
+            // 计划下一次进行心跳的时间
             completeAndScheduleNextHeartbeatExpiration(group, group.get(memberId))
 
           case Dead =>
+            // 消费组处于无效状态，直接抛出非法状态异常
             throw new IllegalStateException(s"Reached unexpected condition for Dead group ${group.groupId}")
         }
       }
@@ -446,7 +477,7 @@ class GroupCoordinator(val brokerId: Int,
   }
 
   /**
-   * 执行加入未知消费组
+   * 执行未知成员身份加入消费组
    * @param group
    * @param groupInstanceId
    * @param requireKnownMemberId
@@ -694,6 +725,20 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
+  /**
+   * 加入消费组
+   * member.id不是未知编号，则必须保证member已经在members中
+   * @param group              group metadata
+   * @param memberId           需要加入的member.id
+   * @param groupInstanceId    需要加入的group.instance.id
+   * @param clientId           需要加入的client.id
+   * @param clientHost         需要加入的client地址
+   * @param rebalanceTimeoutMs 再平衡等待时间
+   * @param sessionTimeoutMs   会话等待时间
+   * @param protocolType       协议类型
+   * @param protocols          协议
+   * @param responseCallback   响应回调任务
+   */
   private def doJoinGroup(group: GroupMetadata,
                           memberId: String,
                           groupInstanceId: Option[String],
@@ -705,45 +750,50 @@ class GroupCoordinator(val brokerId: Int,
                           protocols: List[(String, Array[Byte])],
                           responseCallback: JoinCallback): Unit = {
     group.inLock {
+      // 消费组已经关闭，返回协调器不可用状态
       if (group.is(Dead)) {
-        // if the group is marked as dead, it means some other thread has just removed the group
-        // from the coordinator metadata; this is likely that the group has migrated to some other
-        // coordinator OR the group is in a transient unstable phase. Let the member retry
-        // finding the correct coordinator and rejoin.
+        // 证明其他线程刚刚已经将消费组从协调器metadata中移除去，可能消费组已经迁移到其他的协调器中或者消费组处于不稳定状态
+        // 成员会通过重试来获取正确的协调器并重新加入消费组
         responseCallback(joinError(memberId, Errors.COORDINATOR_NOT_AVAILABLE))
       } else if (!group.supportsProtocols(protocolType, MemberMetadata.plainProtocolSet(protocols))) {
+        // 当前消费组不支持此分配协议，返回不支持此分配协议错误
         responseCallback(joinError(memberId, Errors.INCONSISTENT_GROUP_PROTOCOL))
       } else if (group.isPendingMember(memberId)) {
-        // A rejoining pending member will be accepted. Note that pending member will never be a static member.
+        // 当前成员正在此消费组内挂起
+        // 如果新的请求指定了group.instance.id
+        // 也就是成员从请求动态成员，到请求静态成员
+        // 证明可以挂起的成员，不可能变为一个静态成员
         if (groupInstanceId.isDefined) {
           throw new IllegalStateException(s"the static member $groupInstanceId was not expected to be assigned " +
             s"into pending member bucket with member id $memberId")
         } else {
+          // 在没有group.instance.is的情况下，添加成员并进行再平衡
           addMemberAndRebalance(rebalanceTimeoutMs, sessionTimeoutMs, memberId, groupInstanceId,
             clientId, clientHost, protocolType, protocols, group, responseCallback)
         }
       } else {
         val groupInstanceIdNotFound = groupInstanceId.isDefined && !group.hasStaticMember(groupInstanceId)
+        // 验证member.id是否是最新的静态成员
         if (group.isStaticMemberFenced(memberId, groupInstanceId)) {
-          // given member id doesn't match with the groupInstanceId. Inform duplicate instance to shut down immediately.
+          // 指定的member.id没有匹配到group.instance.id，证明出现了重复的实例需要立即关闭
           responseCallback(joinError(memberId, Errors.FENCED_INSTANCE_ID))
         } else if (!group.has(memberId) || groupInstanceIdNotFound) {
-          // If the dynamic member trying to register with an unrecognized id, or
-          // the static member joins with unknown group instance id, send the response to let
-          // it reset its member id and retry.
+          // 消费组中没有当前member.id，或者没有找到group.instance.id
+          // 如果动态成员尝试注册一个未识别的id，或者静态成员使用未知的group.instance.id加入消费组
+          // 发送响应让客户端重置它的member.id并重试加入消费组
           responseCallback(joinError(memberId, Errors.UNKNOWN_MEMBER_ID))
         } else {
+          // 走到这里证明消费组已经拥有当前member.id
           val member = group.get(memberId)
-
+          // 根据消费组的状态，进行不同的操作
           group.currentState match {
             case PreparingRebalance =>
+              // 如果消费组处于准备进行再平衡状态，更新成员信息并进行再平衡
               updateMemberAndRebalance(group, member, protocols, responseCallback)
-
             case CompletingRebalance =>
+              // 如果消费组处于完成再平衡状态，如果当前成员和协议匹配，返回加入消费组成功
               if (member.matches(protocols)) {
-                // member is joining with the same metadata (which could be because it failed to
-                // receive the initial JoinGroup response), so just return current group information
-                // for the current generation.
+                // 消费组使用相同的metadata加入到消费组，所以只会返回当前generation的消费组信息即可
                 responseCallback(JoinGroupResult(
                   members = if (group.isLeader(memberId)) {
                     group.currentMemberMetadata
@@ -756,20 +806,21 @@ class GroupCoordinator(val brokerId: Int,
                   leaderId = group.leaderOrNull,
                   error = Errors.NONE))
               } else {
-                // member has changed metadata, so force a rebalance
+                // 消费组的metadata发生了变化，强制进行一次再平衡
                 updateMemberAndRebalance(group, member, protocols, responseCallback)
               }
 
             case Stable =>
+              // 消费组处于稳定状态
               val member = group.get(memberId)
               if (group.isLeader(memberId) || !member.matches(protocols)) {
-                // force a rebalance if a member has changed metadata or if the leader sends JoinGroup.
-                // The latter allows the leader to trigger rebalances for changes affecting assignment
-                // which do not affect the member metadata (such as topic metadata changes for the consumer)
+                // 如果当前消费组的leader consumer是指定成员，并且指定成员修改了metadata信息
+                // 更新metadata并强制进行一次再平衡
+                // 后者允许leader consumer为影响分配修改的触发再平衡，这些更新不影响成员元数据（例如，消费者的主题元数据更改）
                 updateMemberAndRebalance(group, member, protocols, responseCallback)
               } else {
-                // for followers with no actual change to their metadata, just return group information
-                // for the current generation which will allow them to issue SyncGroup
+                // 此时加入消费组的成员身份必定是follower，并且metadata也没有什么实质上的修改
+                // 直接返回当前generation的消费组的信息
                 responseCallback(JoinGroupResult(
                   members = List.empty,
                   memberId = memberId,
@@ -780,7 +831,8 @@ class GroupCoordinator(val brokerId: Int,
               }
 
             case Empty | Dead =>
-              // Group reaches unexpected state. Let the joining member reset their generation and rejoin.
+              // 消费组已经处于无效状态
+              // 让添加到消费组的member重置它们的generation并进行重新加入请求
               warn(s"Attempt to add rejoining member $memberId of group ${group.groupId} in " +
                 s"unexpected group state ${group.currentState}")
               responseCallback(joinError(memberId, Errors.UNKNOWN_MEMBER_ID))
@@ -814,6 +866,10 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
+  /**
+   * 加载消费组信息
+   * @param group 需要进行加载的消费组metadata
+   */
   private def onGroupLoaded(group: GroupMetadata): Unit = {
     group.inLock {
       info(s"Loading group metadata for ${group.groupId} with generation ${group.generationId}")
@@ -834,6 +890,11 @@ class GroupCoordinator(val brokerId: Int,
     groupManager.removeGroupsForPartition(offsetTopicPartitionId, onGroupUnloaded)
   }
 
+  /**
+   * 设置并传递分配信息
+   * @param group      消费组metadata
+   * @param assignment 消费组分配信息
+   */
   private def setAndPropagateAssignment(group: GroupMetadata, assignment: Map[String, Array[Byte]]): Unit = {
     assert(group.is(CompletingRebalance))
     group.allMemberMetadata.foreach(member => member.assignment = assignment(member.memberId))
@@ -846,20 +907,25 @@ class GroupCoordinator(val brokerId: Int,
     propagateAssignment(group, error)
   }
 
+  /**
+   * 传递消费组分配信息
+   * @param group 消费组metadata
+   * @param error 错误
+   */
   private def propagateAssignment(group: GroupMetadata, error: Errors): Unit = {
     for (member <- group.allMemberMetadata) {
+      // 回调同步消费组响应回调任务
       if (group.maybeInvokeSyncCallback(member, SyncGroupResult(member.assignment, error))) {
-        // reset the session timeout for members after propagating the member's assignment.
-        // This is because if any member's session expired while we were still awaiting either
-        // the leader sync group or the storage callback, its expiration will be ignored and no
-        // future heartbeat expectations will not be scheduled.
+        // 完成并计划下一次进行心跳的时间
+        // 在传递完member的分配信息后，重置members的会话等待时间
+        // 因为如果一直等待leader的同步消费组请求或者存储回调任务中任何一个会话失效了，它的失效会被忽略，并且未来的hearbeat不会计划
         completeAndScheduleNextHeartbeatExpiration(group, member)
       }
     }
   }
 
   /**
-   * Complete existing DelayedHeartbeats for the given member and schedule the next one
+   * 完成当前DelayedHeartbeats任务，并且计划下一次任务
    */
   private def completeAndScheduleNextHeartbeatExpiration(group: GroupMetadata, member: MemberMetadata): Unit = {
     completeAndScheduleNextExpiration(group, member, member.sessionTimeoutMs)
@@ -1042,32 +1108,39 @@ class GroupCoordinator(val brokerId: Int,
     // TODO: add metrics for restabilize timeouts
   }
 
+  /**
+   * 完成加入消费组请求
+   * @param group 消费组metadata
+   */
   def onCompleteJoin(group: GroupMetadata): Unit = {
     group.inLock {
-      // remove dynamic members who haven't joined the group yet
+      // 移除还没有加入消费组的动态成员
       group.notYetRejoinedMembers.filterNot(_.isStaticMember) foreach { failedMember =>
         removeHeartbeatForLeavingMember(group, failedMember)
         group.remove(failedMember.memberId)
         group.removeStaticMember(failedMember.groupInstanceId)
-        // TODO: cut the socket connection to the client
+        // TODO: 切断和client的socket连接
       }
 
       if (group.is(Dead)) {
+        // 如果消费组已经处于无效状态，越过再平衡阶段
         info(s"Group ${group.groupId} is dead, skipping rebalance stage")
       } else if (!group.maybeElectNewJoinedLeader() && group.allMembers.nonEmpty) {
-        // If all members are not rejoining, we will postpone the completion
-        // of rebalance preparing stage, and send out another delayed operation
-        // until session timeout removes all the non-responsive members.
+        // 如果group不会选举新的leader consumer，并且消费组中没有consumer
+        // 如果所有成员没有处于重新加入状态，会延期再平衡准备阶段的完成，并发出另一个延迟操作直到会话超时，来移除所有无响应的member
         error(s"Group ${group.groupId} could not complete rebalance because no members rejoined")
         joinPurgatory.tryCompleteElseWatch(
           new DelayedJoin(this, group, group.rebalanceTimeoutMs),
           Seq(GroupKey(group.groupId)))
       } else {
+        // 如果处于正常状态
+        // 初始化下一个版本的generation
         group.initNextGeneration()
+        // 如果group处于空置状态
         if (group.is(Empty)) {
           info(s"Group ${group.groupId} with generation ${group.generationId} is now empty " +
             s"(${Topic.GROUP_METADATA_TOPIC_NAME}-${partitionFor(group.groupId)})")
-
+          // 存储空值消费组
           groupManager.storeGroup(group, Map.empty, error => {
             if (error != Errors.NONE) {
               // we failed to write the empty group metadata. If the broker fails before another rebalance,
@@ -1077,10 +1150,11 @@ class GroupCoordinator(val brokerId: Int,
             }
           })
         } else {
+          // 非空值状态，即为正常消费组，记录消费组的信息
           info(s"Stabilized group ${group.groupId} generation ${group.generationId} " +
             s"(${Topic.GROUP_METADATA_TOPIC_NAME}-${partitionFor(group.groupId)})")
 
-          // trigger the awaiting join group response callback for all the members after rebalancing
+          // 在再平衡之后，触发多有member等待加入消费组的响应回调任务
           for (member <- group.allMemberMetadata) {
             val joinResult = JoinGroupResult(
               members = if (group.isLeader(member.memberId)) {

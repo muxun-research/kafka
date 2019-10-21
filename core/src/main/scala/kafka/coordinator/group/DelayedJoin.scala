@@ -22,14 +22,13 @@ import kafka.server.{DelayedOperation, DelayedOperationPurgatory, GroupKey}
 import scala.math.{max, min}
 
 /**
- * Delayed rebalance operations that are added to the purgatory when group is preparing for rebalance
+ * 延迟在平衡操作
  *
- * Whenever a join-group request is received, check if all known group members have requested
- * to re-join the group; if yes, complete this operation to proceed rebalance.
+ * 当前消费组准备进行再平衡时，延迟操作会被添加到集合中
+ * 每当收到一个加入消费组的请求是，检查是否所有一直的消费组member已经请求了重新加入消费组的请求
+ * 如果已经进行了重新请求，完成这个操作并执行再平衡
  *
- * When the operation has expired, any known members that have not requested to re-join
- * the group are marked as failed, and complete this operation to proceed rebalance with
- * the rest of the group.
+ * 当操作失效时，任何没有请求重新加入消费组的已知member将会标记为失败，并完成当前操作来进行剩余member的再平衡操作
  */
 private[group] class DelayedJoin(coordinator: GroupCoordinator,
                                  group: GroupMetadata,

@@ -61,11 +61,23 @@ private[group] class MemberMetadata(var memberId: String,
                                     val rebalanceTimeoutMs: Int,
                                     val sessionTimeoutMs: Int,
                                     val protocolType: String,
+                                    // 支持的协议集合
                                     var supportedProtocols: List[(String, Array[Byte])]) {
-
+  /**
+   * 消费者的partition分配结果
+   */
   var assignment: Array[Byte] = Array.empty[Byte]
+  /**
+   * 加入消费组的回调方法
+   */
   var awaitingJoinCallback: JoinGroupResult => Unit = null
+  /**
+   * 同步消费组的回调方法
+   */
   var awaitingSyncCallback: SyncGroupResult => Unit = null
+  /**
+   * 最近一次心跳的时间
+   */
   var latestHeartbeat: Long = -1
   var isLeaving: Boolean = false
   var isNew: Boolean = false

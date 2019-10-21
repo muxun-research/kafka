@@ -31,8 +31,7 @@ import scala.collection.{Seq, immutable, mutable}
 private[group] sealed trait GroupState
 
 /**
- * Group is preparing to rebalance
- *
+ * 准备再平衡状态
  * action: respond to heartbeats with REBALANCE_IN_PROGRESS
  * respond to sync group with REBALANCE_IN_PROGRESS
  * remove member on leave group request
@@ -46,8 +45,8 @@ private[group] sealed trait GroupState
 private[group] case object PreparingRebalance extends GroupState
 
 /**
- * Group is awaiting state assignment from the leader
- *
+ * 等待完成再平衡状态
+ * 消费组正在等待leader consumer分配状态
  * action: respond to heartbeats with REBALANCE_IN_PROGRESS
  * respond to offset commits with REBALANCE_IN_PROGRESS
  * park sync group requests from followers until transition to Stable
@@ -62,7 +61,7 @@ private[group] case object CompletingRebalance extends GroupState
 
 /**
  * Group is stable
- *
+ * 稳定状态
  * action: respond to member heartbeats normally
  * respond to sync group from any member with current assignment
  * respond to join group from followers with matching metadata with current group metadata
@@ -78,7 +77,8 @@ private[group] case object Stable extends GroupState
 
 /**
  * Group has no more members and its metadata is being removed
- *
+ * 失效状态
+ * 消费组没有member，并且消费组metadata正在被移除
  * action: respond to join group with UNKNOWN_MEMBER_ID
  * respond to sync group with UNKNOWN_MEMBER_ID
  * respond to heartbeat with UNKNOWN_MEMBER_ID
@@ -90,9 +90,8 @@ private[group] case object Stable extends GroupState
 private[group] case object Dead extends GroupState
 
 /**
- * Group has no more members, but lingers until all offsets have expired. This state
- * also represents groups which use Kafka only for offset commits and have no members.
- *
+ * 空置状态
+ * 消费组没有更多的member，但是等待所有offset都失效之后才消失，这个状态也代表了仅仅使用Kafka作为一个offset提交的来使用
  * action: respond normally to join group from new members
  * respond to sync group with UNKNOWN_MEMBER_ID
  * respond to heartbeat with UNKNOWN_MEMBER_ID
@@ -185,14 +184,34 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
 
   private[group] val lock = new ReentrantLock
 
-  private var state: GroupState = initialState
+  /**
+   * 成员信息
+   * key:
+   */
+  private val members = new mutable.HashMap[String, MemberMetadata]
+  /**
+   *
+   */
   var currentStateTimestamp: Option[Long] = Some(time.milliseconds())
   var protocolType: Option[String] = None
+  /**
+   * generation编号
+   */
   var generationId = 0
+  /**
+   * 消费组的状态，初始时为稳定状态
+   */
+  private var state: GroupState = initialState
+  /**
+   * leader node id
+   * 每个消费组有且仅有一个leader consumer
+   */
   private var leaderId: Option[String] = None
+  /**
+   * 协议名称
+   * 每个消费组有且仅有一个protocol
+   */
   private var protocol: Option[String] = None
-
-  private val members = new mutable.HashMap[String, MemberMetadata]
   /**
    * Kafka 2.3的新特性，静态成员
    * key: group.instance.id
@@ -381,6 +400,10 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
 
   def currentState = state
 
+  /**
+   * 还没发送"重新加入消费组"的member，已经在members中，但是还没有回调对象
+   * @return 没发送"重新加入消费组"的member
+   */
   def notYetRejoinedMembers = members.values.filter(!_.isAwaitingJoin).toList
 
   def hasAllMembersJoined = members.size == numMembersAwaitingJoin && pendingMembers.isEmpty
@@ -393,6 +416,10 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
 
   def allMemberMetadata = members.values.toList
 
+  /**
+   * 消费组进行再平衡的超时时间
+   * @return
+   */
   def rebalanceTimeoutMs = members.values.foldLeft(0) { (timeout, member) =>
     timeout.max(member.rebalanceTimeoutMs)
   }
@@ -416,9 +443,9 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   }
 
   /**
-   * Verify the member.id is up to date for static members. Return true if both conditions met:
-   *   1. given member is a known static member to group
-   *   2. group stored member.id doesn't match with given member.id
+   * 验证member.id是最新的静态成员，下面两个条件全部满足，则返回true：
+   * 1. 指定的member.id是消费组已知的静态成员
+   * 2. 消费组已存储的member.id没有匹配到指定的member.id
    */
   def isStaticMemberFenced(memberId: String,
                            groupInstanceId: Option[String]): Boolean = {

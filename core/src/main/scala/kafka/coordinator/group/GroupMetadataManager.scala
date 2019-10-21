@@ -34,17 +34,17 @@ import kafka.utils.CoreUtils.inLock
 import kafka.utils._
 import kafka.zk.KafkaZkClient
 import org.apache.kafka.clients.consumer.ConsumerRecord
-import org.apache.kafka.common.{KafkaException, TopicPartition}
 import org.apache.kafka.common.internals.Topic
+import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.metrics.stats.{Avg, Max}
-import org.apache.kafka.common.metrics.{MetricConfig, Metrics}
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.protocol.types.Type._
 import org.apache.kafka.common.protocol.types._
 import org.apache.kafka.common.record._
-import org.apache.kafka.common.requests.{OffsetCommitRequest, OffsetFetchResponse}
 import org.apache.kafka.common.requests.ProduceResponse.PartitionResponse
+import org.apache.kafka.common.requests.{OffsetCommitRequest, OffsetFetchResponse}
 import org.apache.kafka.common.utils.{Time, Utils}
+import org.apache.kafka.common.{KafkaException, TopicPartition}
 
 import scala.collection.JavaConverters._
 import scala.collection._
@@ -206,9 +206,17 @@ class GroupMetadataManager(brokerId: Int,
     }
   }
 
+  /**
+   * 持久化存储消费组信息
+   * @param group            消费组metadata
+   * @param groupAssignment  消费组的分配信息
+   * @param responseCallback 响应回调任务
+   */
   def storeGroup(group: GroupMetadata,
                  groupAssignment: Map[String, Array[Byte]],
                  responseCallback: Errors => Unit): Unit = {
+    // 获取给定消费组的partition数量
+
     getMagic(partitionFor(group.groupId)) match {
       case Some(magicValue) =>
         // We always use CREATE_TIME, like the producer. The conversion to LOG_APPEND_TIME (if necessary) happens automatically.
@@ -216,7 +224,7 @@ class GroupMetadataManager(brokerId: Int,
         val timestamp = time.milliseconds()
         val key = GroupMetadataManager.groupMetadataKey(group.groupId)
         val value = GroupMetadataManager.groupMetadataValue(group, groupAssignment, interBrokerProtocolVersion)
-
+        // 构建存储的信息
         val records = {
           val buffer = ByteBuffer.allocate(AbstractRecords.estimateSizeInBytes(magicValue, compressionType,
             Seq(new SimpleRecord(timestamp, key, value)).asJava))
@@ -224,21 +232,23 @@ class GroupMetadataManager(brokerId: Int,
           builder.append(timestamp, key, value)
           builder.build()
         }
-
+        // 构建的消息所属的分区编号
         val groupMetadataPartition = new TopicPartition(Topic.GROUP_METADATA_TOPIC_NAME, partitionFor(group.groupId))
+        // 构建需要存储的消息内容
         val groupMetadataRecords = Map(groupMetadataPartition -> records)
         val generationId = group.generationId
 
-        // set the callback function to insert the created group into cache after log append completed
+        // 回调方法传入putCacheCallback()方法中，调用该方法时，才会真正调用responseCallback
+        // 用于appendForGroup()的回调任务
         def putCacheCallback(responseStatus: Map[TopicPartition, PartitionResponse]): Unit = {
-          // the append response should only contain the topics partition
+          // 追加的相应只能包含topic partition信息
           if (responseStatus.size != 1 || !responseStatus.contains(groupMetadataPartition))
             throw new IllegalStateException("Append status %s should only have one partition %s"
               .format(responseStatus, groupMetadataPartition))
 
-          // construct the error status in the propagated assignment response in the cache
+          // 在缓存中传递的分配响应中的构造错误状态
           val status = responseStatus(groupMetadataPartition)
-
+          // 根据不同的错误构建不同的错误内容
           val responseError = if (status.error == Errors.NONE) {
             Errors.NONE
           } else {
@@ -275,7 +285,7 @@ class GroupMetadataManager(brokerId: Int,
                 other
             }
           }
-
+          // 调用回调任务，也就是刚才设定的高阶函数
           responseCallback(responseError)
         }
         appendForGroup(group, groupMetadataRecords, putCacheCallback)
@@ -286,10 +296,16 @@ class GroupMetadataManager(brokerId: Int,
     }
   }
 
+  /**
+   * 调用副本节点管理器来追加消费组的消息
+   * @param group    消费组metadata
+   * @param records  每个partition的信息
+   * @param callback 需要进行的回调任务
+   */
   private def appendForGroup(group: GroupMetadata,
                              records: Map[TopicPartition, MemoryRecords],
                              callback: Map[TopicPartition, PartitionResponse] => Unit): Unit = {
-    // call replica manager to append the group message
+    // 调用副本节点管理器来追加消费组的消息
     replicaManager.appendRecords(
       timeout = config.offsetCommitTimeoutMs.toLong,
       requiredAcks = config.offsetCommitRequiredAcks,
@@ -898,10 +914,9 @@ class GroupMetadataManager(brokerId: Int,
   }
 
   /**
-   * Check if the replica is local and return the message format version and timestamp
-   *
-   * @param   partition  Partition of GroupMetadataTopic
-   * @return  Some(MessageFormatVersion) if replica is local, None otherwise
+   * 校验副本节点是否是本地副本节点，并返回version和timestamp的消息格式
+   * @param   partition partition索引
+   * @return 如果是本地副本节点，返回version和timestamp对象
    */
   private def getMagic(partition: Int): Option[Byte] =
     replicaManager.getMagic(new TopicPartition(Topic.GROUP_METADATA_TOPIC_NAME, partition))
