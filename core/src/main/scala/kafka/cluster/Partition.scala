@@ -16,9 +16,10 @@
  */
 package kafka.cluster
 
-import com.yammer.metrics.core.Gauge
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import java.util.{Optional, Properties}
+
+import com.yammer.metrics.core.Gauge
 import kafka.api.{ApiVersion, LeaderAndIsr, Request}
 import kafka.common.UnexpectedAppendOffsetException
 import kafka.controller.KafkaController
@@ -38,6 +39,7 @@ import org.apache.kafka.common.record.{MemoryRecords, RecordBatch}
 import org.apache.kafka.common.requests.EpochEndOffset._
 import org.apache.kafka.common.requests._
 import org.apache.kafka.common.utils.Time
+
 import scala.collection.JavaConverters._
 import scala.collection.{Map, Seq}
 
@@ -153,33 +155,48 @@ object Partition extends KafkaMetricsGroup {
 }
 
 /**
- * Data structure that represents a topic partition. The leader maintains the AR, ISR, CUR, RAR
+ * topic partition数据结构，leader partition拥有AR ISR CUR RAR等状态
  */
-class Partition(val topicPartition: TopicPartition,
+class Partition(val topicPartition: TopicPartition, // topic partition信息，分区索引及topic名称
                 replicaLagTimeMaxMs: Long,
                 interBrokerProtocolVersion: ApiVersion,
                 localBrokerId: Int,
                 time: Time,
+                // 存储的partition状态
                 stateStore: PartitionStateStore,
+                // 延迟操作
                 delayedOperations: DelayedOperations,
+                // metadata缓存
                 metadataCache: MetadataCache,
+                // 日志管理器
                 logManager: LogManager) extends Logging with KafkaMetricsGroup {
 
   def topic: String = topicPartition.topic
   def partitionId: Int = topicPartition.partition
 
   private val remoteReplicasMap = new Pool[Int, Replica]
-  // The read lock is only required when multiple reads are executed and needs to be in a consistent manner
   private val leaderIsrUpdateLock = new ReentrantReadWriteLock
   private var zkVersion: Int = LeaderAndIsr.initialZKVersion
   @volatile private var leaderEpoch: Int = LeaderAndIsr.initialLeaderEpoch - 1
   // start offset for 'leaderEpoch' above (leader epoch of the current leader for this partition),
   // defined when this broker is leader for partition
-  @volatile private var leaderEpochStartOffsetOpt: Option[Long] = None
+  /**
+   * leader broker
+   */
   @volatile var leaderReplicaIdOpt: Option[Int] = None
+  /**
+   * 和leader replica进行同步的副本broker id集合
+   */
   @volatile var inSyncReplicaIds = Set.empty[Int]
-  // An ordered sequence of all the valid broker ids that were assigned to this topic partition
+  /**
+   * 所有合法的broker id集合，按照顺序排列
+   * 简称AR
+   */
   @volatile var allReplicaIds = Seq.empty[Int]
+  /**
+   *
+   */
+  @volatile private var leaderEpochStartOffsetOpt: Option[Long] = None
 
   // Logs belonging to this partition. Majority of time it will be only one log, but if log directory
   // is getting changed (as a result of ReplicaAlterLogDirs command), we may have two logs until copy
