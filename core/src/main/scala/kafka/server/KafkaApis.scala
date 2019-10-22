@@ -128,8 +128,11 @@ class KafkaApis(val requestChannel: RequestChannel,
         case ApiKeys.OFFSET_COMMIT => handleOffsetCommitRequest(request)
         case ApiKeys.OFFSET_FETCH => handleOffsetFetchRequest(request)
         case ApiKeys.FIND_COORDINATOR => handleFindCoordinatorRequest(request)
+        // 加入消费组请求
         case ApiKeys.JOIN_GROUP => handleJoinGroupRequest(request)
+        // 处理心跳任务
         case ApiKeys.HEARTBEAT => handleHeartbeatRequest(request)
+        // 离开消费组请求
         case ApiKeys.LEAVE_GROUP => handleLeaveGroupRequest(request)
         // 同步消费组信息请求
         case ApiKeys.SYNC_GROUP => handleSyncGroupRequest(request)
@@ -1523,11 +1526,17 @@ class KafkaApis(val requestChannel: RequestChannel,
     })
   }
 
+  /**
+   * 处理心跳请求
+   * @param request 心跳请求实体
+   */
   def handleHeartbeatRequest(request: RequestChannel.Request): Unit = {
+    // 获取心跳请求body
     val heartbeatRequest = request.body[HeartbeatRequest]
 
-    // the callback for sending a heartbeat response
+    // 心跳请求的响应回调任务
     def sendResponseCallback(error: Errors): Unit = {
+      // 创建心跳响应
       def createResponse(requestThrottleMs: Int): AbstractResponse = {
         val response = new HeartbeatResponse(
           new HeartbeatResponseData()
@@ -1537,22 +1546,23 @@ class KafkaApis(val requestChannel: RequestChannel,
           .format(response, request.header.correlationId, request.header.clientId))
         response
       }
+      // 发送心跳响应
       sendResponseMaybeThrottle(request, createResponse)
     }
-
+    // 正常处理的业务逻辑
     if (heartbeatRequest.data.groupInstanceId != null && config.interBrokerProtocolVersion < KAFKA_2_3_IV0) {
-      // Only enable static membership when IBP >= 2.3, because it is not safe for the broker to use the static member logic
-      // until we are sure that all brokers support it. If static group being loaded by an older coordinator, it will discard
-      // the group.instance.id field, so static members could accidentally become "dynamic", which leads to wrong states.
+      // 只有在内部版本号≥2.3的情况下，开启静态成员身份，因为如果我们在确认broker是否支持静态成员身份时开启，它对broker是不安全的
+      // 如果一个静态的group由一个旧版本的协调器，它会丢弃这个group.instance.id字段，所以静态成员可能突然之间变为动态成员，会导致错误的状态问题
       sendResponseCallback(Errors.UNSUPPORTED_VERSION)
     } else if (!authorize(request.session, Read, Resource(Group, heartbeatRequest.data.groupId, LITERAL))) {
+      // 验证未通过，返回验证失败错误
       sendResponseMaybeThrottle(request, requestThrottleMs =>
         new HeartbeatResponse(
             new HeartbeatResponseData()
               .setThrottleTimeMs(requestThrottleMs)
               .setErrorCode(Errors.GROUP_AUTHORIZATION_FAILED.code)))
     } else {
-      // let the coordinator to handle heartbeat
+      // 消费组协调器处理心跳
       groupCoordinator.handleHeartbeat(
         heartbeatRequest.data.groupId,
         heartbeatRequest.data.memberId,
@@ -1562,12 +1572,18 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
   }
 
+  /**
+   * 离开消费组请求
+   * @param request 离开消费组请求实体
+   */
   def handleLeaveGroupRequest(request: RequestChannel.Request): Unit = {
+    // 获取离开消费组请求body内容
     val leaveGroupRequest = request.body[LeaveGroupRequest]
-
+    // 获取需要离开消费组的member集合
     val members = leaveGroupRequest.members().asScala.toList
-
+    // 验证信息
     if (!authorize(request.session, Read, Resource(Group, leaveGroupRequest.data.groupId, LITERAL))) {
+      // 验证信息失败，返回验证失败错误
       sendResponseMaybeThrottle(request, requestThrottleMs => {
         new LeaveGroupResponse(new LeaveGroupResponseData()
           .setThrottleTimeMs(requestThrottleMs)
@@ -1575,7 +1591,9 @@ class KafkaApis(val requestChannel: RequestChannel,
         )
       })
     } else {
+      // 验证通过，首先设置响应回调任务
       def sendResponseCallback(leaveGroupResult : LeaveGroupResult): Unit = {
+        // 构建member响应内容
         val memberResponses = leaveGroupResult.memberResponses.map(
           leaveGroupResult =>
             new MemberResponse()
@@ -1583,6 +1601,8 @@ class KafkaApis(val requestChannel: RequestChannel,
               .setMemberId(leaveGroupResult.memberId)
               .setGroupInstanceId(leaveGroupResult.groupInstanceId.orNull)
         )
+
+        // 创建响应
         def createResponse(requestThrottleMs: Int): AbstractResponse = {
           new LeaveGroupResponse(
             memberResponses.asJava,
@@ -1590,9 +1610,10 @@ class KafkaApis(val requestChannel: RequestChannel,
             requestThrottleMs,
             leaveGroupRequest.version)
         }
+        // 发送响应，在限制配额下
         sendResponseMaybeThrottle(request, createResponse)
       }
-
+      // 处理离开消费组请求
       groupCoordinator.handleLeaveGroup(
         leaveGroupRequest.data.groupId,
         members,

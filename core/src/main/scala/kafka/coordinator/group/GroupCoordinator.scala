@@ -186,55 +186,83 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
+  /**
+   * 处理离开消费组逻辑
+   * @param groupId          需要离开的消费组ID
+   * @param leavingMembers   离开的member信息
+   * @param responseCallback 响应回调任务
+   */
   def handleLeaveGroup(groupId: String,
                        leavingMembers: List[MemberIdentity],
                        responseCallback: LeaveGroupResult => Unit): Unit = {
+    // 校验消费组状态
     validateGroupStatus(groupId, ApiKeys.LEAVE_GROUP) match {
+      // 出现异常，返回错误信息
       case Some(error) =>
         responseCallback(leaveError(error, List.empty))
       case None =>
+        // 没有异常，获取对应的消费组
         groupManager.getGroup(groupId) match {
           case None =>
+            // 没有找到对应的消费组，返回未知member.id错误
             responseCallback(leaveError(Errors.NONE, leavingMembers.map { leavingMember =>
               memberLeaveError(leavingMember, Errors.UNKNOWN_MEMBER_ID)
             }))
           case Some(group) =>
+            // 找到对应的消费组，进行同步操作
             group.inLock {
               if (group.is(Dead)) {
+                // 如果消费组处于失效状态，返回协调器不可用错误
                 responseCallback(leaveError(Errors.COORDINATOR_NOT_AVAILABLE, List.empty))
               } else {
+                // 其他状态下都可以进入
+                // 过滤每个需要离开消费组的member
                 val memberErrors = leavingMembers.map { leavingMember =>
                   val memberId = leavingMember.memberId
                   val groupInstanceId = Option(leavingMember.groupInstanceId)
+                  // 如果离开的member是已知成员，但是member是静态成员
                   if (memberId != JoinGroupRequest.UNKNOWN_MEMBER_ID
                     && group.isStaticMemberFenced(memberId, groupInstanceId)) {
+                    // 返回使用相同group.instance.id加入消费组产生了两个不同的member.id
                     memberLeaveError(leavingMember, Errors.FENCED_INSTANCE_ID)
                   } else if (group.isPendingMember(memberId)) {
+                    // 如果member处于挂起状态
                     if (groupInstanceId.isDefined) {
+                      // 如果是静态成员身份
+                      // 当前静态成员还不允许离开消费组，抛出非法状态异常
                       throw new IllegalStateException(s"the static member $groupInstanceId was not expected to be leaving " +
                         s"from pending member bucket with member id $memberId")
                     } else {
-                      // if a pending member is leaving, it needs to be removed from the pending list, heartbeat cancelled
-                      // and if necessary, prompt a JoinGroup completion.
+                      // 如果一个挂起的动态成员需要离开消费组，它需要从挂起列表中移除，取消心跳机制，提示加入消费组请求已经完成
                       info(s"Pending member $memberId is leaving group ${group.groupId}.")
+                      // 从消费组挂起member集合中移除当前member
                       removePendingMemberAndUpdateGroup(group, memberId)
+                      // 处理完成心跳任务
                       heartbeatPurgatory.checkAndComplete(MemberKey(group.groupId, memberId))
+                      // 消费组移除，返回响应
                       memberLeaveError(leavingMember, Errors.NONE)
                     }
                   } else if (!group.has(memberId) && !group.hasStaticMember(groupInstanceId)) {
+                    // 如果消费组中没有当前member，并且也没有此静态member
+                    // 返回没有未知member错误
                     memberLeaveError(leavingMember, Errors.UNKNOWN_MEMBER_ID)
                   } else {
+                    // 获取member信息，从静态或者动态中判断获取
                     val member = if (group.hasStaticMember(groupInstanceId))
                       group.get(group.getStaticMemberId(groupInstanceId))
                     else
                       group.get(memberId)
+                    // 移除member的心跳任务
                     removeHeartbeatForLeavingMember(group, member)
                     info(s"Member[group.instance.id ${member.groupInstanceId}, member.id ${member.memberId}] " +
                       s"in group ${group.groupId} has left, removing it from the group")
+                    // 移除member并更新消费组
                     removeMemberAndUpdateGroup(group, member, s"removing member $memberId on LeaveGroup")
+                    // 设置移除member正常响应
                     memberLeaveError(leavingMember, Errors.NONE)
                   }
                 }
+                // 触发回调任务
                 responseCallback(leaveError(Errors.NONE, memberErrors))
               }
             }
@@ -242,56 +270,73 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
+  /**
+   * 处理心跳请求
+   * @param groupId          客户端请求心跳的消费组
+   * @param memberId         客户端member.id
+   * @param groupInstanceId  客户端group.instance.id
+   * @param generationId     generation.id
+   * @param responseCallback 响应回调任务
+   */
   def handleHeartbeat(groupId: String,
                       memberId: String,
                       groupInstanceId: Option[String],
                       generationId: Int,
                       responseCallback: Errors => Unit): Unit = {
+    // 校验消费组状态
     validateGroupStatus(groupId, ApiKeys.HEARTBEAT).foreach { error =>
       if (error == Errors.COORDINATOR_LOAD_IN_PROGRESS)
-      // the group is still loading, so respond just blindly
+      // 消费组处于加载中，完成消费
         responseCallback(Errors.NONE)
       else
         responseCallback(error)
       return
     }
 
+    // 获取消费组
     groupManager.getGroup(groupId) match {
       case None =>
         responseCallback(Errors.UNKNOWN_MEMBER_ID)
 
       case Some(group) => group.inLock {
         if (group.is(Dead)) {
-          // if the group is marked as dead, it means some other thread has just removed the group
-          // from the coordinator metadata; this is likely that the group has migrated to some other
-          // coordinator OR the group is in a transient unstable phase. Let the member retry
-          // finding the correct coordinator and rejoin.
+          // 如果消费组处于失效状态，返回协调器不可用错误
+          // 直接返回失败，让consumer去寻找正确的协调器，并重新发送请求
           responseCallback(Errors.COORDINATOR_NOT_AVAILABLE)
         } else if (group.isStaticMemberFenced(memberId, groupInstanceId)) {
+          // 如果静态成员的member.id发生了变化，
           responseCallback(Errors.FENCED_INSTANCE_ID)
         } else if (!group.has(memberId)) {
+          // 没有包含当前的member.id返回未知成员身份
           responseCallback(Errors.UNKNOWN_MEMBER_ID)
         } else if (generationId != group.generationId) {
           responseCallback(Errors.ILLEGAL_GENERATION)
         } else {
           group.currentState match {
             case Empty =>
+              // 当前消费组没有任何消费者
               responseCallback(Errors.UNKNOWN_MEMBER_ID)
 
             case CompletingRebalance =>
+              // 处于准备完成再平衡状态，返回进行再平衡错误
               responseCallback(Errors.REBALANCE_IN_PROGRESS)
 
             case PreparingRebalance =>
+              // 准备进行再平衡
               val member = group.get(memberId)
+              // 完成当次心跳，并开启下一次心跳任务
               completeAndScheduleNextHeartbeatExpiration(group, member)
               responseCallback(Errors.REBALANCE_IN_PROGRESS)
 
             case Stable =>
+              // 稳定状态
               val member = group.get(memberId)
+              // 完成当次心跳，并开启下一次心跳任务
               completeAndScheduleNextHeartbeatExpiration(group, member)
               responseCallback(Errors.NONE)
 
             case Dead =>
+              // 消费者已经关闭，抛出非法状态异常
               throw new IllegalStateException(s"Reached unexpected condition for Dead group $groupId")
           }
         }
@@ -947,7 +992,9 @@ class GroupCoordinator(val brokerId: Int,
 
     // 重新计划进行下一次心跳的deadline时间节点
     val deadline = member.latestHeartbeat + timeoutMs
+    // 创建一个新的心跳延迟操作
     val delayedHeartbeat = new DelayedHeartbeat(this, group, member.memberId, isPending = false, deadline, timeoutMs)
+    // 尝试完成心跳缓存中处于延迟的操作
     heartbeatPurgatory.tryCompleteElseWatch(delayedHeartbeat, Seq(memberKey))
   }
 
@@ -961,9 +1008,15 @@ class GroupCoordinator(val brokerId: Int,
     heartbeatPurgatory.tryCompleteElseWatch(delayedHeartbeat, Seq(pendingMemberKey))
   }
 
+  /**
+   * 移除给定member的心跳任务
+   * @param group  消费组metadata
+   * @param member 需要移除心跳任务的member
+   */
   private def removeHeartbeatForLeavingMember(group: GroupMetadata, member: MemberMetadata): Unit = {
     member.isLeaving = true
     val memberKey = MemberKey(member.groupId, member.memberId)
+    // 完成心跳任务
     heartbeatPurgatory.checkAndComplete(memberKey)
   }
 
@@ -1072,25 +1125,40 @@ class GroupCoordinator(val brokerId: Int,
     joinPurgatory.tryCompleteElseWatch(delayedRebalance, Seq(groupKey))
   }
 
+  /**
+   * 移除member并更新消费组
+   * @param group  消费组metadata
+   * @param member 移除的member
+   * @param reason 移除的原因
+   */
   private def removeMemberAndUpdateGroup(group: GroupMetadata, member: MemberMetadata, reason: String): Unit = {
-    // New members may timeout with a pending JoinGroup while the group is still rebalancing, so we have
-    // to invoke the callback before removing the member. We return UNKNOWN_MEMBER_ID so that the consumer
-    // will retry the JoinGroup request if is still active.
+    // 需要在移除member之前调用回调任务，因为新的member可能因为挂起的加入消费组请求而超时
+    // 返回UNKNOWN_MEMBER_IDd的错误信息，以便活跃的consumer可以重新发送加入消费组请求
     group.maybeInvokeJoinCallback(member, joinError(NoMemberId, Errors.UNKNOWN_MEMBER_ID))
-
+    // 双重移除身份
     group.remove(member.memberId)
     group.removeStaticMember(member.groupInstanceId)
 
     group.currentState match {
       case Dead | Empty =>
+      // 由于处于稳定（已经分配完毕），等待完成再平衡（等待leader consumer的同步消费组请求）
+      // 移除member很可能需要重新进行一次再平衡
       case Stable | CompletingRebalance => maybePrepareRebalance(group, reason)
+      // 无法自动完成延迟任务的情况，手动调用完成延迟任务
+      // 由于此时还在处理加入消费组请求，leader consumer等其他consumer也需要重新请求加入消费组
       case PreparingRebalance => joinPurgatory.checkAndComplete(GroupKey(group.groupId))
     }
   }
 
+  /**
+   * 移除挂起的成员，并更新消费组
+   * @param group    消费组metadata
+   * @param memberId 需要移除的挂起member.id
+   */
   private def removePendingMemberAndUpdateGroup(group: GroupMetadata, memberId: String): Unit = {
     group.removePendingMember(memberId)
 
+    // 如果当前消费组处于准备再平衡状态，证明延迟任务不可能完成，校验延迟任务缓存中对应的任务，并尝试完成
     if (group.is(PreparingRebalance)) {
       joinPurgatory.checkAndComplete(GroupKey(group.groupId))
     }
@@ -1177,18 +1245,32 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
+  /**
+   * 尝试完成心跳延迟任务
+   * @param group             消费组metadata
+   * @param memberId          进行心跳的member.id
+   * @param isPending         当前member是否处于挂起状态
+   * @param heartbeatDeadline 心跳截止时间
+   * @param forceComplete     是否进行强制更新
+   * @return 是否完成任务
+   */
   def tryCompleteHeartbeat(group: GroupMetadata, memberId: String, isPending: Boolean, heartbeatDeadline: Long, forceComplete: () => Boolean) = {
     group.inLock {
       if (isPending) {
-        // complete the heartbeat if the member has joined the group
+        // 如果判断consumer处于挂起状态，但是已经加入到了消费组中，可以进行强制完成
+        // 其他情况下，返回false
         if (group.has(memberId)) {
           forceComplete()
         } else false
       }
       else {
+        // 没有挂起，代表已经在消费组中了
         val member = group.get(memberId)
+        // 如果认为consumer是存活的，或者member准备离开消费组
         if (member.shouldKeepAlive(heartbeatDeadline) || member.isLeaving) {
+          // 强制完成心跳任务
           forceComplete()
+          // 其他情况尝试完成心跳任务失败
         } else false
       }
     }

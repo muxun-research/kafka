@@ -200,14 +200,10 @@ final class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: Stri
     expirationReaper.start()
 
   /**
-   * Check if the operation can be completed, if not watch it based on the given watch keys
-   *
-   * Note that a delayed operation can be watched on multiple keys. It is possible that
-   * an operation is completed after it has been added to the watch list for some, but
-   * not all of the keys. In this case, the operation is considered completed and won't
-   * be added to the watch list of the remaining keys. The expiration reaper thread will
-   * remove this operation from any watcher list in which the operation exists.
-   *
+   * 检查延迟操作是否可以完成，如果还不能完成，继续基于给定观察key继续观察
+   * 需要注意的是，一个延迟操作可以同时被多个key观察，当延迟任务添加到等待集合中后，可能会完成该操作，但并不是所有的key。
+   * 这种情况下，延迟操作，延迟操作会被认为已经完成，并且不会添加到观察者列表
+   * 过期处理线程将会从该延迟操作的任何观察者列表中删除此操作
    * @param operation the delayed operation to be checked
    * @param watchKeys keys for bookkeeping the operation
    * @return true iff the delayed operations can be completed by the caller
@@ -215,45 +211,41 @@ final class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: Stri
   def tryCompleteElseWatch(operation: T, watchKeys: Seq[Any]): Boolean = {
     assert(watchKeys.nonEmpty, "The watch key list can't be empty")
 
-    // The cost of tryComplete() is typically proportional to the number of keys. Calling
-    // tryComplete() for each key is going to be expensive if there are many keys. Instead,
-    // we do the check in the following way. Call tryComplete(). If the operation is not completed,
-    // we just add the operation to all keys. Then we call tryComplete() again. At this time, if
-    // the operation is still not completed, we are guaranteed that it won't miss any future triggering
-    // event since the operation is already on the watcher list for all keys. This does mean that
-    // if the operation is completed (by another thread) between the two tryComplete() calls, the
-    // operation is unnecessarily added for watch. However, this is a less severe issue since the
-    // expire reaper will clean it up periodically.
+    // tryComplete()的消耗和key的数量有关系，为每个key调用tryComplete()在很多key的情况下是非常耗费资源的
+    // 相反，可以这样检查，调用tryComplete()，如果延迟操作还没有完成，我们仅把延迟操作添加到所有的key中
+    // 接着再次调用tryComplete()，这一次，如果延迟操作还没有完成，延迟操作已经在所有的key的观察者列表中，并且保证不会错过未来任何的触发事件
+    // 如果延迟操作在两次tryComplete()调用之间完成，并不代表不需要添加观察，然而，这并不是一个严重的问题，因为失效检查线程会定期扫描清理
 
-    // At this point the only thread that can attempt this operation is this current thread
-    // Hence it is safe to tryComplete() without a lock
+    // 当前线程是可以执行延迟操作的唯一线程，因此，不带锁的tryComplete()是线程安全的
     var isCompletedByMe = operation.tryComplete()
     if (isCompletedByMe)
       return true
 
     var watchCreated = false
     for(key <- watchKeys) {
-      // If the operation is already completed, stop adding it to the rest of the watcher list.
+      // 如果延迟操作已经完成，停止添加到剩余的观察者列表中
       if (operation.isCompleted)
         return false
+      // 否则继续添加到观察者列表中
       watchForOperation(key, operation)
-
+      // 修改创建观察标识
       if (!watchCreated) {
         watchCreated = true
+        // 延迟操作计数器+1
         estimatedTotalOperations.incrementAndGet()
       }
     }
-
+    // 尝试当前线程是否可以完成延迟操作
     isCompletedByMe = operation.maybeTryComplete()
     if (isCompletedByMe)
       return true
 
-    // if it cannot be completed by now and hence is watched, add to the expire queue also
+    // 如果现在还不能完成，并且添加到了观察列表中，同时也添加到失效队列中
     if (!operation.isCompleted) {
       if (timerEnabled)
         timeoutTimer.add(operation)
       if (operation.isCompleted) {
-        // cancel the timer task
+        // 如果延迟操作已经完成，取消计时器
         operation.cancel()
       }
     }
@@ -308,8 +300,8 @@ final class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: Stri
   }
 
   /*
-   * Return the watch list of the given key, note that we need to
-   * grab the removeWatchersLock to avoid the operation being added to a removed watcher list
+   * 将延迟操作添加到观察者列表中
+   * 需要注意的是，需要使用占有removeWatchersLock锁来避免延迟操作添加到已经移除的观察者列表中
    */
   private def watchForOperation(key: Any, operation: T): Unit = {
     val wl = watcherList(key)

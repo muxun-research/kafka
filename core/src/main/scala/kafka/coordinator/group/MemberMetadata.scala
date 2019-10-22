@@ -97,10 +97,18 @@ private[group] class MemberMetadata(var memberId: String,
     }
   }
 
+  /**
+   * 是否认为consumer是存活的
+   * @param deadlineMs 截止时间戳
+   * @return
+   */
   def shouldKeepAlive(deadlineMs: Long): Boolean = {
     if (isAwaitingJoin)
+    // 在等待加入的情况下，
+    // 如果并非是加入的member，或者上一次进行心跳的时间+新member加入消费组的等待时间>截止进行心跳的时间戳，满足一个条件返回true
       !isNew || latestHeartbeat + GroupCoordinator.NewMemberJoinTimeoutMs > deadlineMs
     else awaitingSyncCallback != null ||
+      // 如果有等待同步消费组请求的回调任务，或者上一次进行心跳的时间+会话超时时间>截止进行心跳的时间戳，满足一个条件即返回true
       latestHeartbeat + sessionTimeoutMs > deadlineMs
   }
 
