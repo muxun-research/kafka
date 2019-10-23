@@ -27,9 +27,9 @@ import kafka.server.checkpoints.OffsetCheckpointFile
 import kafka.server.{BrokerState, RecoveringFromUncleanShutdown, _}
 import kafka.utils._
 import kafka.zk.KafkaZkClient
-import org.apache.kafka.common.{KafkaException, TopicPartition}
-import org.apache.kafka.common.utils.Time
 import org.apache.kafka.common.errors.{KafkaStorageException, LogDirNotFoundException}
+import org.apache.kafka.common.utils.Time
+import org.apache.kafka.common.{KafkaException, TopicPartition}
 
 import scala.collection.JavaConverters._
 import scala.collection._
@@ -37,14 +37,12 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.{Failure, Success, Try}
 
 /**
- * The entry point to the kafka log management subsystem. The log manager is responsible for log creation, retrieval, and cleaning.
- * All read and write operations are delegated to the individual log instances.
+ * LogManager类负责创建log，检索log，清理log
+ * 所有的读写操作均会代理给各个log实例
  *
- * The log manager maintains logs in one or more directories. New logs are created in the data directory
- * with the fewest logs. No attempt is made to move partitions after the fact or balance based on
- * size or I/O rate.
+ * LogManager在一个或多个目录中保存了log，新log将会在存储最少的log数据目录下创建，在实际或者平衡之后，不会基于log大小或者IO速率来迁移
  *
- * A background thread handles log retention by periodically truncating excess log segments.
+ * 后台线程通过定期截断log段，来处理日志保留
  */
 @threadsafe
 class LogManager(logDirs: Seq[File],

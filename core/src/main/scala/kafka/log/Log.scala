@@ -34,7 +34,7 @@ import kafka.message.{BrokerCompressionCodec, CompressionCodec, NoCompressionCod
 import kafka.metrics.KafkaMetricsGroup
 import kafka.server.checkpoints.LeaderEpochCheckpointFile
 import kafka.server.epoch.LeaderEpochFileCache
-import kafka.server.{BrokerTopicStats, FetchDataInfo, FetchHighWatermark, FetchIsolation, FetchLogEnd, FetchTxnCommitted, LogDirFailureChannel, LogOffsetMetadata, OffsetAndEpoch}
+import kafka.server._
 import kafka.utils._
 import org.apache.kafka.common.errors._
 import org.apache.kafka.common.record.FileRecords.TimestampAndOffset
@@ -58,21 +58,19 @@ object LogAppendInfo {
 }
 
 /**
- * Struct to hold various quantities we compute about each message set before appending to the log
- *
- * @param firstOffset The first offset in the message set unless the message format is less than V2 and we are appending
- *                    to the follower.
- * @param lastOffset The last offset in the message set
- * @param maxTimestamp The maximum timestamp of the message set.
- * @param offsetOfMaxTimestamp The offset of the message with the maximum timestamp.
- * @param logAppendTime The log append time (if used) of the message set, otherwise Message.NoTimestamp
- * @param logStartOffset The start offset of the log at the time of this append.
- * @param recordConversionStats Statistics collected during record processing, `null` if `assignOffsets` is `false`
- * @param sourceCodec The source codec used in the message set (send by the producer)
- * @param targetCodec The target codec of the message set(after applying the broker compression configuration if any)
- * @param shallowCount The number of shallow messages
- * @param validBytes The number of valid bytes
- * @param offsetsMonotonic Are the offsets in this message set monotonically increasing
+ * 在追加到log之前，计算每个消息集的存储结构
+ * @param firstOffset            消息集中第一条消息的offset
+ * @param lastOffset             消息集最后一条消息的offset
+ * @param maxTimestamp           消息集的最大时间戳
+ * @param offsetOfMaxTimestamp   拥有最大时间戳的消息的offset
+ * @param logAppendTime          消息集的log追加时间
+ * @param logStartOffset         追加时的起始offset
+ * @param recordConversionStats  Statistics collected during record processing, `null` if `assignOffsets` is `false`
+ * @param sourceCodec            The source codec used in the message set (send by the producer)
+ * @param targetCodec            The target codec of the message set(after applying the broker compression configuration if any)
+ * @param shallowCount           The number of shallow messages
+ * @param validBytes             合法的字节数量The number of valid bytes
+ * @param offsetsMonotonic       Are the offsets in this message set monotonically increasing
  * @param lastOffsetOfFirstBatch The last offset of the first batch
  */
 case class LogAppendInfo(var firstOffset: Option[Long],

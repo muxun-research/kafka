@@ -150,11 +150,10 @@ public class FileRecords extends AbstractRecords implements Closeable {
     }
 
     /**
-     * Append a set of records to the file. This method is not thread-safe and must be
-     * protected with a lock.
-     *
-     * @param records The records to append
-     * @return the number of bytes written to the underlying file
+	 * 追加消息集到文件中
+	 * 此方法并非线程安全，所以需要在锁的保护下执行
+	 * @param records 追加的消息集
+	 * @return 持久化到文件的字节数
      */
     public int append(MemoryRecords records) throws IOException {
         if (records.sizeInBytes() > Integer.MAX_VALUE - size.get())
@@ -162,6 +161,7 @@ public class FileRecords extends AbstractRecords implements Closeable {
                     " bytes is too large for segment with current file position at " + size.get());
 
         int written = records.writeFullyTo(channel);
+		// 累加写入的字节数
         size.getAndAdd(written);
         return written;
     }

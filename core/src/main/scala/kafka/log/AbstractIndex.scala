@@ -47,80 +47,25 @@ abstract class AbstractIndex[K, V](@volatile var file: File, val baseOffset: Lon
   private var _length: Long = _
   protected def entrySize: Int
 
-  /*
-   Kafka mmaps index files into memory, and all the read / write operations of the index is through OS page cache. This
-   avoids blocked disk I/O in most cases.
-
-   To the extent of our knowledge, all the modern operating systems use LRU policy or its variants to manage page
-   cache. Kafka always appends to the end of the index file, and almost all the index lookups (typically from in-sync
-   followers or consumers) are very close to the end of the index. So, the LRU cache replacement policy should work very
-   well with Kafka's index access pattern.
-
-   However, when looking up index, the standard binary search algorithm is not cache friendly, and can cause unnecessary
-   page faults (the thread is blocked to wait for reading some index entries from hard disk, as those entries are not
-   cached in the page cache).
-
-   For example, in an index with 13 pages, to lookup an entry in the last page (page #12), the standard binary search
-   algorithm will read index entries in page #0, 6, 9, 11, and 12.
-   page number: |0|1|2|3|4|5|6|7|8|9|10|11|12 |
-   steps:       |1| | | | | |3| | |4|  |5 |2/6|
-   In each page, there are hundreds log entries, corresponding to hundreds to thousands of kafka messages. When the
-   index gradually growing from the 1st entry in page #12 to the last entry in page #12, all the write (append)
-   operations are in page #12, and all the in-sync follower / consumer lookups read page #0,6,9,11,12. As these pages
-   are always used in each in-sync lookup, we can assume these pages are fairly recently used, and are very likely to be
-   in the page cache. When the index grows to page #13, the pages needed in a in-sync lookup change to #0, 7, 10, 12,
-   and 13:
-   page number: |0|1|2|3|4|5|6|7|8|9|10|11|12|13 |
-   steps:       |1| | | | | | |3| | | 4|5 | 6|2/7|
-   Page #7 and page #10 have not been used for a very long time. They are much less likely to be in the page cache, than
-   the other pages. The 1st lookup, after the 1st index entry in page #13 is appended, is likely to have to read page #7
-   and page #10 from disk (page fault), which can take up to more than a second. In our test, this can cause the
-   at-least-once produce latency to jump to about 1 second from a few ms.
-
-   Here, we use a more cache-friendly lookup algorithm:
-   if (target > indexEntry[end - N]) // if the target is in the last N entries of the index
-      binarySearch(end - N, end)
-   else
-      binarySearch(begin, end - N)
-
-   If possible, we only look up in the last N entries of the index. By choosing a proper constant N, all the in-sync
-   lookups should go to the 1st branch. We call the last N entries the "warm" section. As we frequently look up in this
-   relatively small section, the pages containing this section are more likely to be in the page cache.
-
-   We set N (_warmEntries) to 8192, because
-   1. This number is small enough to guarantee all the pages of the "warm" section is touched in every warm-section
-      lookup. So that, the entire warm section is really "warm".
-      When doing warm-section lookup, following 3 entries are always touched: indexEntry(end), indexEntry(end-N),
-      and indexEntry((end*2 -N)/2). If page size >= 4096, all the warm-section pages (3 or fewer) are touched, when we
-      touch those 3 entries. As of 2018, 4096 is the smallest page size for all the processors (x86-32, x86-64, MIPS,
-      SPARC, Power, ARM etc.).
-   2. This number is large enough to guarantee most of the in-sync lookups are in the warm-section. With default Kafka
-      settings, 8KB index corresponds to about 4MB (offset index) or 2.7MB (time index) log messages.
-
-   We can't set make N (_warmEntries) to be larger than 8192, as there is no simple way to guarantee all the "warm"
-   section pages are really warm (touched in every lookup) on a typical 4KB-page host.
-
-   In there future, we may use a backend thread to periodically touch the entire warm section. So that, we can
-   1) support larger warm section
-   2) make sure the warm section of low QPS topic-partitions are really warm.
- */
-  protected def _warmEntries: Int = 8192 / entrySize
-
-  protected val lock = new ReentrantLock
-
+  /**
+   * 映射的byteBuffer，返回下一个索引写入的位置
+   */
   @volatile
   protected var mmap: MappedByteBuffer = {
+    // 创建新的文件
     val newlyCreated = file.createNewFile()
+    // 根据读写要求，创建不同的随机读写对象
     val raf = if (writable) new RandomAccessFile(file, "rw") else new RandomAccessFile(file, "r")
     try {
-      /* pre-allocate the file if necessary */
+      // 预分配文件大小
       if(newlyCreated) {
         if(maxIndexSize < entrySize)
           throw new IllegalArgumentException("Invalid max index size: " + maxIndexSize)
+        // 求出指定entrySize的最大精确倍数，也就是把maxIndexSize化为精准的entrySize大小
         raf.setLength(roundDownToExactMultiple(maxIndexSize, entrySize))
       }
 
-      /* memory-map the file */
+      // 进行内存文件映射
       _length = raf.length()
       val idx = {
         if (writable)
@@ -128,16 +73,27 @@ abstract class AbstractIndex[K, V](@volatile var file: File, val baseOffset: Lon
         else
           raf.getChannel.map(FileChannel.MapMode.READ_ONLY, 0, _length)
       }
-      /* set the position in the index for the next entry */
+      // 设置下一个需要写入的元素位置
       if(newlyCreated)
         idx.position(0)
       else
-        // if this is a pre-existing index, assume it is valid and set position to last entry
+      // 如果这是一个预先存在的索引，假设它是有效的，并将其位置设置为最后一个元素
         idx.position(roundDownToExactMultiple(idx.limit(), entrySize))
       idx
     } finally {
       CoreUtils.swallow(raf.close(), AbstractIndex)
     }
+  }
+
+  protected val lock = new ReentrantLock
+
+  /**
+   * 判断特定的offset是否可以追加到索引中
+   * @param offset 需要检查的offset
+   * @return offset是否可追加到索引中
+   */
+  def canAppendOffset(offset: Long): Boolean = {
+    toRelative(offset).isDefined
   }
 
   /**
@@ -300,12 +256,19 @@ abstract class AbstractIndex[K, V](@volatile var file: File, val baseOffset: Lon
   }
 
   /**
-   * Check if a particular offset is valid to be appended to this index.
-   * @param offset The offset to check
-   * @return true if this offset is valid to be appended to this index; false otherwise
+   * 转换为相对的offset
+   * @param offset
+   * @return
    */
-  def canAppendOffset(offset: Long): Boolean = {
-    toRelative(offset).isDefined
+  private def toRelative(offset: Long): Option[Int] = {
+    // 当前offset-基准offset=相对offset
+    val relativeOffset = offset - baseOffset
+    // 如果offset的值不是正整数int，返回None
+    if (relativeOffset < 0 || relativeOffset > Int.MaxValue)
+      None
+    else
+    // 在正整数int范围内，返回计算出的相对offset
+      Some(relativeOffset.toInt)
   }
 
   protected def safeForceUnmap(): Unit = {
@@ -410,19 +373,70 @@ abstract class AbstractIndex[K, V](@volatile var file: File, val baseOffset: Lon
     }
   }
 
+  /*
+   Kafka将索引文件映射在内存中，所有关于索引的读写操作都会通过OS的页缓存，避免阻塞磁盘IO
+
+   就我们所知，所有的现代操作系统使用LRU策略或者LRU策略的辩题来管理页缓存
+   Kafka总是将元素追加到索引文件的尾部，而且绝大部分的索引查找（通常来自正在同步的follower或者consumer）都会非常接近索引的尾端，所以LRC缓存替代策略将会很好的配合Kafka的索引请求模式
+
+   然而，在查找索引的过程中，标准的二分查找
+   However, when looking up index, the standard binary search algorithm is not cache friendly, and can cause unnecessary
+   page faults (the thread is blocked to wait for reading some index entries from hard disk, as those entries are not
+   cached in the page cache).
+
+   For example, in an index with 13 pages, to lookup an entry in the last page (page #12), the standard binary search
+   algorithm will read index entries in page #0, 6, 9, 11, and 12.
+   page number: |0|1|2|3|4|5|6|7|8|9|10|11|12 |
+   steps:       |1| | | | | |3| | |4|  |5 |2/6|
+   In each page, there are hundreds log entries, corresponding to hundreds to thousands of kafka messages. When the
+   index gradually growing from the 1st entry in page #12 to the last entry in page #12, all the write (append)
+   operations are in page #12, and all the in-sync follower / consumer lookups read page #0,6,9,11,12. As these pages
+   are always used in each in-sync lookup, we can assume these pages are fairly recently used, and are very likely to be
+   in the page cache. When the index grows to page #13, the pages needed in a in-sync lookup change to #0, 7, 10, 12,
+   and 13:
+   page number: |0|1|2|3|4|5|6|7|8|9|10|11|12|13 |
+   steps:       |1| | | | | | |3| | | 4|5 | 6|2/7|
+   Page #7 and page #10 have not been used for a very long time. They are much less likely to be in the page cache, than
+   the other pages. The 1st lookup, after the 1st index entry in page #13 is appended, is likely to have to read page #7
+   and page #10 from disk (page fault), which can take up to more than a second. In our test, this can cause the
+   at-least-once produce latency to jump to about 1 second from a few ms.
+
+   Here, we use a more cache-friendly lookup algorithm:
+   if (target > indexEntry[end - N]) // if the target is in the last N entries of the index
+      binarySearch(end - N, end)
+   else
+      binarySearch(begin, end - N)
+
+   If possible, we only look up in the last N entries of the index. By choosing a proper constant N, all the in-sync
+   lookups should go to the 1st branch. We call the last N entries the "warm" section. As we frequently look up in this
+   relatively small section, the pages containing this section are more likely to be in the page cache.
+
+   We set N (_warmEntries) to 8192, because
+   1. This number is small enough to guarantee all the pages of the "warm" section is touched in every warm-section
+      lookup. So that, the entire warm section is really "warm".
+      When doing warm-section lookup, following 3 entries are always touched: indexEntry(end), indexEntry(end-N),
+      and indexEntry((end*2 -N)/2). If page size >= 4096, all the warm-section pages (3 or fewer) are touched, when we
+      touch those 3 entries. As of 2018, 4096 is the smallest page size for all the processors (x86-32, x86-64, MIPS,
+      SPARC, Power, ARM etc.).
+   2. This number is large enough to guarantee most of the in-sync lookups are in the warm-section. With default Kafka
+      settings, 8KB index corresponds to about 4MB (offset index) or 2.7MB (time index) log messages.
+
+   We can't set make N (_warmEntries) to be larger than 8192, as there is no simple way to guarantee all the "warm"
+   section pages are really warm (touched in every lookup) on a typical 4KB-page host.
+
+   In there future, we may use a backend thread to periodically touch the entire warm section. So that, we can
+   1) support larger warm section
+   2) make sure the warm section of low QPS topic-partitions are really warm.
+ */
+  protected def _warmEntries: Int = 8192 / entrySize
+
   /**
-   * Round a number to the greatest exact multiple of the given factor less than the given number.
-   * E.g. roundDownToExactMultiple(67, 8) == 64
+   * 计算出给定数字的最大的精确倍数
+   * 比如number=67, factor=8，8*8=64<67, 返回64
+   * @param number 倍数的限制范围
+   * @param factor 给定的数字
    */
   private def roundDownToExactMultiple(number: Int, factor: Int) = factor * (number / factor)
-
-  private def toRelative(offset: Long): Option[Int] = {
-    val relativeOffset = offset - baseOffset
-    if (relativeOffset < 0 || relativeOffset > Int.MaxValue)
-      None
-    else
-      Some(relativeOffset.toInt)
-  }
 
 }
 

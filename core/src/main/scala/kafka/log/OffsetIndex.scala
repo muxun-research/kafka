@@ -25,31 +25,25 @@ import kafka.utils.Logging
 import org.apache.kafka.common.errors.InvalidOffsetException
 
 /**
- * An index that maps offsets to physical file locations for a particular log segment. This index may be sparse:
- * that is it may not hold an entry for all messages in the log.
+ * 索引，用于映射物理文件位置和log段
+ * 索引可能是稀疏的，因为它并没有包含所有log中所有消息
  *
- * The index is stored in a file that is pre-allocated to hold a fixed maximum number of 8-byte entries.
+ * 索引存储在文件中，已预先分配以容纳固定的最大8字节条目数
  *
- * The index supports lookups against a memory-map of this file. These lookups are done using a simple binary search variant
- * to locate the offset/location pair for the greatest offset less than or equal to the target offset.
+ * 索引支持文件内存映射查找，这些查找用了简单的二分查找，来确定最大偏移量小于等于目标偏移量的offset/location对
  *
- * Index files can be opened in two ways: either as an empty, mutable index that allows appends or
- * an immutable read-only index file that has previously been populated. The makeReadOnly method will turn a mutable file into an
- * immutable one and truncate off any extra bytes. This is done when the index file is rolled over.
+ * 索引文件可以通过两种方式打开：
+ * 空的、可变的索引，允许追加
+ * 先前已经填充的不可变的只读索引文件
  *
- * No attempt is made to checksum the contents of this file, in the event of a crash it is rebuilt.
+ * 在崩溃的情况下，不会去校验此文件的内容，而是对其进行重建
  *
- * The file format is a series of entries. The physical format is a 4 byte "relative" offset and a 4 byte file location for the
- * message with that offset. The offset stored is relative to the base offset of the index file. So, for example,
- * if the base offset was 50, then the offset 55 would be stored as 5. Using relative offsets in this way let's us use
- * only 4 bytes for the offset.
+ * 文件格式是一系列的元素，物理格式是一个4字节的相对offset和一个4字节的消息文件地址
+ * offset存储了相对于基准offset的offset，比如：如果基准offset是50，如果offset是55，那么将会被存储为5
+ * 使用相对offset可以让我们只使用4字节来存储offset
  *
- * The frequency of entries is up to the user of this class.
- *
- * All external APIs translate from relative offsets to full offsets, so users of this class do not interact with the internal
- * storage format.
+ * 会有外部API来支持相对offset到绝对offset的转换，因此开发者无需和内部存储格式进行交互
  */
-// Avoid shadowing mutable `file` in AbstractIndex
 class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writable: Boolean = true)
     extends AbstractIndex[Long, Int](_file, baseOffset, maxIndexSize, writable) {
   import OffsetIndex._
@@ -63,7 +57,7 @@ class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writabl
     s"maxIndexSize = $maxIndexSize, entries = ${_entries}, lastOffset = ${_lastOffset}, file position = ${mmap.position()}")
 
   /**
-   * The last entry in the index
+   * 索引中当前最后一个元素
    */
   private def lastEntry: OffsetPosition = {
     inLock(lock) {
