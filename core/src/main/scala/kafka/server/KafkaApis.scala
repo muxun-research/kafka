@@ -437,54 +437,68 @@ class KafkaApis(val requestChannel: RequestChannel,
     authorizer.forall(_.authorize(session, operation, resource))
 
   /**
-   * Handle a produce request
+   * 处理prodcuer请求
+   * prodcuer请求正常情况下都是带有batch
    */
   def handleProduceRequest(request: RequestChannel.Request): Unit = {
+    // 获取prodcuer的请求body
     val produceRequest = request.body[ProduceRequest]
+    // 获取需要追加的字节数量
     val numBytesAppended = request.header.toStruct.sizeOf + request.sizeOfBodyInBytes
-
+    // 如果需要进行事务处理
     if (produceRequest.hasTransactionalRecords) {
+      // 校验transaction.id和验证session
       val isAuthorizedTransactional = produceRequest.transactionalId != null &&
         authorize(request.session, Write, Resource(TransactionalId, produceRequest.transactionalId, LITERAL))
+      // 没有通过事务验证，直接返回错误信息响应
       if (!isAuthorizedTransactional) {
         sendErrorResponseMaybeThrottle(request, Errors.TRANSACTIONAL_ID_AUTHORIZATION_FAILED.exception)
         return
       }
-      // Note that authorization to a transactionalId implies ProducerId authorization
-
+      // 需要注意的是，对transaction.id的验证，也涵盖了producer.id的验证
+      // 如果有需要Kafka保证的幂等性record，但是没有通过校验，也返回错误信息响应
     } else if (produceRequest.hasIdempotentRecords && !authorize(request.session, IdempotentWrite, Resource.ClusterResource)) {
       sendErrorResponseMaybeThrottle(request, Errors.CLUSTER_AUTHORIZATION_FAILED.exception)
       return
     }
-
+    // 没有通过验证的topic集合
     val unauthorizedTopicResponses = mutable.Map[TopicPartition, PartitionResponse]()
+    // 不存在的topic集合
     val nonExistingTopicResponses = mutable.Map[TopicPartition, PartitionResponse]()
+    // 非法请求响应集合
     val invalidRequestResponses = mutable.Map[TopicPartition, PartitionResponse]()
+    // 通过验证的partition-records集合
     val authorizedRequestInfo = mutable.Map[TopicPartition, MemoryRecords]()
 
+    // 将请求中携带的records转换为本地变量，在不会出现并发的情况下，对每个partiton的records进行遍历
     for ((topicPartition, memoryRecords) <- produceRequest.partitionRecordsOrFail.asScala) {
+      // 首先进行校验，没有通过校验的records，会通过PartitionResponse包装起来，放入unauthorizedTopicResponses集合中
       if (!authorize(request.session, Write, Resource(Topic, topicPartition.topic, LITERAL)))
         unauthorizedTopicResponses += topicPartition -> new PartitionResponse(Errors.TOPIC_AUTHORIZATION_FAILED)
+      // 如果当前集群没有分配需要存储当前topic的数据，包装起来后放入nonExistingTopicResponses集合中
       else if (!metadataCache.contains(topicPartition))
         nonExistingTopicResponses += topicPartition -> new PartitionResponse(Errors.UNKNOWN_TOPIC_OR_PARTITION)
       else
         try {
+          // 校验records，并添加进已经通过验证集合中
           ProduceRequest.validateRecords(request.header.apiVersion(), memoryRecords)
           authorizedRequestInfo += (topicPartition -> memoryRecords)
         } catch {
+          // 如果校验过程中出现异常，均视为非法的请求，放入到invalidRequestResponses集合中
           case e: ApiException =>
             invalidRequestResponses += topicPartition -> new PartitionResponse(Errors.forException(e))
         }
     }
 
     /**
-     * 用于发送produce的响应
+     * 用于返回给produce的响应
      * @param responseStatus 响应状态
      */
     def sendResponseCallback(responseStatus: Map[TopicPartition, PartitionResponse]): Unit = {
+      // 上面的初次遍历会将异常的records、topic筛选出来，在此合并成一个
       val mergedResponseStatus = responseStatus ++ unauthorizedTopicResponses ++ nonExistingTopicResponses ++ invalidRequestResponses
       var errorInResponse = false
-
+      // 根据异常记录异常信息
       mergedResponseStatus.foreach { case (topicPartition, status) =>
         if (status.error != Errors.NONE) {
           errorInResponse = true
@@ -496,7 +510,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         }
       }
 
-      // When this callback is triggered, the remote API call has completed
+      // 如果此方法被调用，证明远程调用已经完成，下面就是返回了，记录一下请求完成时间
       request.apiRemoteCompleteTimeNanos = time.nanoseconds
 
       // Record both bandwidth and request quota-specific values and throttle by muting the channel if any of the quotas
@@ -549,14 +563,20 @@ class KafkaApis(val requestChannel: RequestChannel,
     else {
       val internalTopicsAllowed = request.header.clientId == AdminUtils.AdminClientId
 
-      // call the replica manager to append messages to the replicas
+      // 使用ReplicaManager来追加消息到副本节点中
       replicaManager.appendRecords(
+        // 请求的超时时间
         timeout = produceRequest.timeout.toLong,
+        // ACK
         requiredAcks = produceRequest.acks,
         internalTopicsAllowed = internalTopicsAllowed,
+        // 是否来自于producer的写入请求
         isFromClient = true,
+        // 每个partition存储的records
         entriesPerPartition = authorizedRequestInfo,
+        // 响应回调任务
         responseCallback = sendResponseCallback,
+
         recordConversionStatsCallback = processingStatsCallback)
 
       // if the request is put into the purgatory, it will have a held reference and hence cannot be garbage collected;

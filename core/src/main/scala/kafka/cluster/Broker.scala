@@ -25,9 +25,9 @@ import org.apache.kafka.common.security.auth.SecurityProtocol
 import scala.collection.Seq
 
 /**
- * A Kafka broker.
- * A broker has an id, a collection of end-points, an optional rack and a listener to security protocol map.
- * Each end-point is (host, port, listenerName).
+ * Kafka Broker
+ * broker拥有ID，端点集合，可选的机架，和安全协议集合的listener
+ * 每个端点是(host, port, listenerName)
  */
 case class Broker(id: Int, endPoints: Seq[EndPoint], rack: Option[String]) {
 

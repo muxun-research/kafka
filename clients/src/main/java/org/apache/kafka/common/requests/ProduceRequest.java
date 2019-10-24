@@ -215,7 +215,10 @@ public class ProduceRequest extends AbstractRequest {
     // Care should be taken in methods that use this field.
     private volatile Map<TopicPartition, MemoryRecords> partitionRecords;
     private boolean hasTransactionalRecords = false;
-    private boolean hasIdempotentRecords = false;
+	/**
+	 *
+	 */
+	private boolean hasIdempotentRecords = false;
 
     private ProduceRequest(short version, short acks, int timeout, Map<TopicPartition, MemoryRecords> partitionRecords, String transactionalId) {
         super(ApiKeys.PRODUCE, version);
@@ -375,10 +378,11 @@ public class ProduceRequest extends AbstractRequest {
     }
 
     /**
-     * Returns the partition records or throws IllegalStateException if clearPartitionRecords() has been invoked.
+	 * 返回每个分区的records
+	 * 如果已经调用了clearPartitionRecords()，抛出非法状态异常
      */
     public Map<TopicPartition, MemoryRecords> partitionRecordsOrFail() {
-        // Store it in a local variable to protect against concurrent updates
+		// 使用本地变量存储，避免并发问题
         Map<TopicPartition, MemoryRecords> partitionRecords = this.partitionRecords;
         if (partitionRecords == null)
             throw new IllegalStateException("The partition records are no longer available because " +

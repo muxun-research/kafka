@@ -32,9 +32,9 @@ import kafka.api.{ApiVersion, KAFKA_0_10_0_IV0}
 import kafka.common.{LogSegmentOffsetOverflowException, LongRef, OffsetsOutOfOrderException, UnexpectedAppendOffsetException}
 import kafka.message.{BrokerCompressionCodec, CompressionCodec, NoCompressionCodec}
 import kafka.metrics.KafkaMetricsGroup
+import kafka.server._
 import kafka.server.checkpoints.LeaderEpochCheckpointFile
 import kafka.server.epoch.LeaderEpochFileCache
-import kafka.server._
 import kafka.utils._
 import org.apache.kafka.common.errors._
 import org.apache.kafka.common.record.FileRecords.TimestampAndOffset
@@ -971,13 +971,12 @@ class Log(@volatile var dir: File,
   }
 
   /**
-   * Append this message set to the active segment of the log, assigning offsets and Partition Leader Epochs
-   *
-   * @param records The records to append
-   * @param isFromClient Whether or not this append is from a producer
-   * @param interBrokerProtocolVersion Inter-broker message protocol version
-   * @throws KafkaStorageException If the append fails due to an I/O error.
-   * @return Information about the appended messages including the first and last offset.
+   * 追加消息集到活跃的log段中，分配offset和partition leader epoch
+   * @param records                    需要追加的records
+   * @param isFromClient               追加是否来自producer
+   * @param interBrokerProtocolVersion 内部broker消息协议版本
+   * @throws KafkaStorageException IO异常
+   * @return 追加的信息，包括第一个和最后一个的offset
    */
   def appendAsLeader(records: MemoryRecords, leaderEpoch: Int, isFromClient: Boolean = true,
                      interBrokerProtocolVersion: ApiVersion = ApiVersion.latestVersion): LogAppendInfo = {
@@ -996,34 +995,35 @@ class Log(@volatile var dir: File,
   }
 
   /**
-   * Append this message set to the active segment of the log, rolling over to a fresh segment if necessary.
+   * 追加消息集到活跃的log段中，必要时创建新的log段
    *
-   * This method will generally be responsible for assigning offsets to the messages,
-   * however if the assignOffsets=false flag is passed we will only check that the existing offsets are valid.
-   *
-   * @param records The log records to append
-   * @param isFromClient Whether or not this append is from a producer
-   * @param interBrokerProtocolVersion Inter-broker message protocol version
-   * @param assignOffsets Should the log assign offsets to this message set or blindly apply what it is given
-   * @param leaderEpoch The partition's leader epoch which will be applied to messages when offsets are assigned on the leader
-   * @throws KafkaStorageException If the append fails due to an I/O error.
-   * @throws OffsetsOutOfOrderException If out of order offsets found in 'records'
-   * @throws UnexpectedAppendOffsetException If the first or last offset in append is less than next offset
-   * @return Information about the appended messages including the first and last offset.
+   * 此方法会负责分配消息的offset
+   * 然而，如果设置了assignOffsets=false，只会检查存在的offset是否合法
+   * @param records                    需要追加的records
+   * @param isFromClient               追加动作是否来自于producer
+   * @param interBrokerProtocolVersion 内部broker消息协议版本
+   * @param assignOffsets              是否使用Log进行offset的分配，还是使用应用程序给出的offset
+   * @param leaderEpoch                leader epoch
+   * @throws KafkaStorageException           IO异常
+   * @throws OffsetsOutOfOrderException      records中offset顺序错乱
+   * @throws UnexpectedAppendOffsetException offset范围出现异常
+   * @return 追加的信息，包括第一个和最后一个的offset
    */
   private def append(records: MemoryRecords, isFromClient: Boolean, interBrokerProtocolVersion: ApiVersion, assignOffsets: Boolean, leaderEpoch: Int): LogAppendInfo = {
     maybeHandleIOException(s"Error while appending records to $topicPartition in dir ${dir.getParent}") {
+      // 校验batch信息
       val appendInfo = analyzeAndValidateRecords(records, isFromClient = isFromClient)
 
-      // return if we have no valid messages or if this is a duplicate of the last appended entry
+      // 如果没有合法的消息，或者是上一次追加的重复元素，直接返回校验结果
       if (appendInfo.shallowCount == 0)
         return appendInfo
 
       // trim any invalid bytes or partial messages before appending it to the on-disk log
       var validRecords = trimInvalidBytes(records, appendInfo)
 
-      // they are valid, insert them in the log
+      // 同步操作，进行追加
       lock synchronized {
+        // 校验NIO写入文件通道是否关闭
         checkIfMemoryMappedBufferClosed()
         if (assignOffsets) {
           // assign offsets to the message set
@@ -1283,22 +1283,18 @@ class Log(@volatile var dir: File,
   }
 
   /**
-   * Validate the following:
-   * <ol>
-   * <li> each message matches its CRC
-   * <li> each message size is valid
-   * <li> that the sequence numbers of the incoming record batches are consistent with the existing state and with each other.
-   * </ol>
+   * 校验一下事情：
+   * 每条消息是否匹配CRC
+   * 每条消息的大小是否合法
+   * 传入的batch序列号和现有状态是否彼此一致
    *
-   * Also compute the following quantities:
-   * <ol>
-   * <li> First offset in the message set
-   * <li> Last offset in the message set
-   * <li> Number of messages
-   * <li> Number of valid bytes
-   * <li> Whether the offsets are monotonically increasing
-   * <li> Whether any compression codec is used (if many are used, then the last one is given)
-   * </ol>
+   * 也计算下面的数值：
+   * 消息集中的第一个offset
+   * 消息集中的最后一个offset
+   * 消息的总个数
+   * 合法的字节数
+   * offset是否是单调递增的
+   * 是否使用了压缩策略（如果使用多了个，则以最后一个为准）
    */
   private def analyzeAndValidateRecords(records: MemoryRecords, isFromClient: Boolean): LogAppendInfo = {
     var shallowMessageCount = 0
@@ -1313,17 +1309,16 @@ class Log(@volatile var dir: File,
     var lastOffsetOfFirstBatch = -1L
 
     for (batch <- records.batches.asScala) {
-      // we only validate V2 and higher to avoid potential compatibility issues with older clients
+      // // 我们只会校验V2及更高的版本避免老客户端的兼容性
       if (batch.magic >= RecordBatch.MAGIC_VALUE_V2 && isFromClient && batch.baseOffset != 0)
         throw new InvalidRecordException(s"The baseOffset of the record batch in the append to $topicPartition should " +
           s"be 0, but it is ${batch.baseOffset}")
 
-      // update the first offset if on the first message. For magic versions older than 2, we use the last offset
-      // to avoid the need to decompress the data (the last offset can be obtained directly from the wrapper message).
-      // For magic version 2, we can get the first offset directly from the batch header.
-      // When appending to the leader, we will update LogAppendInfo.baseOffset with the correct value. In the follower
-      // case, validation will be more lenient.
-      // Also indicate whether we have the accurate first offset or not
+      // 如果在第一条消息索引位置，更新第一个offset，对于那些版本号小于V2的，使用最后一个offset来避免需要解压数据（最后的offset可以从包装的消息中获取）
+      // 对于V2版本，可以直接batch的头部直接获取offset
+      // 当追加到leader节点时，会使用正确的值来更新LogAppendInfo.baseOffset
+      // 对于追加到follower节点时，验证则会更宽松
+      // 同时指出我们是否有准确的第一个offset
       if (!readFirstMessage) {
         if (batch.magic >= RecordBatch.MAGIC_VALUE_V2)
           firstOffset = Some(batch.baseOffset)
@@ -1331,14 +1326,14 @@ class Log(@volatile var dir: File,
         readFirstMessage = true
       }
 
-      // check that offsets are monotonically increasing
+      // 判断是否是单调递增的
       if (lastOffset >= batch.lastOffset)
         monotonic = false
 
-      // update the last offset seen
+      // 更新最后的offset
       lastOffset = batch.lastOffset
 
-      // Check if the message sizes are valid.
+      // 校验batch大小是否超过设定的每个batch的最大值
       val batchSize = batch.sizeInBytes
       if (batchSize > config.maxMessageSize) {
         brokerTopicStats.topicStats(topicPartition.topic).bytesRejectedRate.mark(records.sizeInBytes)
@@ -1347,7 +1342,7 @@ class Log(@volatile var dir: File,
           s"which exceeds the maximum configured value of ${config.maxMessageSize}.")
       }
 
-      // check the validity of the message by checking CRC
+      // 通过验证CRC，来验证消息的合法性
       batch.ensureValid()
 
       if (batch.maxTimestamp > maxTimestamp) {
@@ -1357,13 +1352,12 @@ class Log(@volatile var dir: File,
 
       shallowMessageCount += 1
       validBytesCount += batchSize
-
+      // 压缩协议
       val messageCodec = CompressionCodec.getCompressionCodec(batch.compressionType.id)
       if (messageCodec != NoCompressionCodec)
         sourceCodec = messageCodec
     }
 
-    // Apply broker-side compression if any
     val targetCodec = BrokerCompressionCodec.getTargetCompressionCodec(config.compressionType, sourceCodec)
     LogAppendInfo(firstOffset, lastOffset, maxTimestamp, offsetOfMaxTimestamp, RecordBatch.NO_TIMESTAMP, logStartOffset,
       RecordConversionStats.EMPTY, sourceCodec, targetCodec, shallowMessageCount, validBytesCount, monotonic, lastOffsetOfFirstBatch)
