@@ -38,17 +38,16 @@ case class ProducePartitionStatus(requiredOffset: Long, responseStatus: Partitio
 }
 
 /**
- * The produce metadata maintained by the delayed produce operation
+ * 创建延迟生产操作metadata
  */
 case class ProduceMetadata(produceRequiredAcks: Short,
                            produceStatus: Map[TopicPartition, ProducePartitionStatus]) {
-
   override def toString = s"[requiredAcks: $produceRequiredAcks, partitionStatus: $produceStatus]"
 }
 
 /**
- * A delayed produce operation that can be created by the replica manager and watched
- * in the produce operation purgatory
+ * 有副本管理器创建的延迟生产请求，并生产操作缓存中进行观察
+ * 其实也是一个延迟操作
  */
 class DelayedProduce(delayMs: Long,
                      produceMetadata: ProduceMetadata,
@@ -57,10 +56,10 @@ class DelayedProduce(delayMs: Long,
                      lockOpt: Option[Lock] = None)
   extends DelayedOperation(delayMs, lockOpt) {
 
-  // first update the acks pending variable according to the error code
+  // 首先，根据error code更新acks待定变量
   produceMetadata.produceStatus.foreach { case (topicPartition, status) =>
     if (status.responseStatus.error == Errors.NONE) {
-      // Timeout error state will be cleared when required acks are received
+      // 超时错误状态将会在收到需要的acks后清除
       status.acksPending = true
       status.responseStatus.error = Errors.REQUEST_TIMED_OUT
     } else {
@@ -71,20 +70,17 @@ class DelayedProduce(delayMs: Long,
   }
 
   /**
-   * The delayed produce operation can be completed if every partition
-   * it produces to is satisfied by one of the following:
-   *
-   * Case A: This broker is no longer the leader: set an error in response
-   * Case B: This broker is the leader:
-   *   B.1 - If there was a local error thrown while checking if at least requiredAcks
-   *         replicas have caught up to this operation: set an error in response
-   *   B.2 - Otherwise, set the response with no error.
+   * 延迟生产操作可以在每个partition在满足下列条件后后完成：
+   * Case A: broker不再是leader节点，在响应中设置错误信息
+   * Case B: broker仍然是leader节点:
+   *   B.1 - 如果在检查是否需要required时抛出了本地错误，则ACK副本已经赶上此操作，在响应中设置错误
+   *   B.2 - 其他情况，不在响应中设置错误
    */
   override def tryComplete(): Boolean = {
-    // check for each partition if it still has pending acks
+    // 检查每个partition是否还有待定的acks
     produceMetadata.produceStatus.foreach { case (topicPartition, status) =>
       trace(s"Checking produce satisfaction for $topicPartition, current status $status")
-      // skip those partitions that have already been satisfied
+      // 忽略那些已经完成的partition
       if (status.acksPending) {
         val (hasEnough, error) = replicaManager.getPartition(topicPartition) match {
           case HostedPartition.Online(partition) =>
@@ -105,8 +101,9 @@ class DelayedProduce(delayMs: Long,
       }
     }
 
-    // check if every partition has satisfied at least one of case A or B
+    // 在case A或者case B的情况下，每个partition是否已经满足条件
     if (!produceMetadata.produceStatus.values.exists(_.acksPending))
+    // 强制执行
       forceComplete()
     else
       false

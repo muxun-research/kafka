@@ -71,13 +71,10 @@ class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writabl
   def lastOffset: Long = _lastOffset
 
   /**
-   * Find the largest offset less than or equal to the given targetOffset
-   * and return a pair holding this offset and its corresponding physical file position.
-   *
-   * @param targetOffset The offset to look up.
-   * @return The offset found and the corresponding file position for this offset
-   *         If the target offset is smaller than the least entry in the index (or the index is empty),
-   *         the pair (baseOffset, 0) is returned.
+   * 找到≤给定offset的最大offset，并返回一个持有当前offset和相关物理文件位置的offset对象
+   * @param targetOffset 需要进行查找的offset
+   * @return 找到了对应的offset和相关的物理文件位置
+   *         如果给定的offset小于索引文件中最小的offset，或者索引文件为空，将会返回(baseOffset, 0)键值对
    */
   def lookup(targetOffset: Long): OffsetPosition = {
     maybeLock(lock) {

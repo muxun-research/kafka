@@ -1059,17 +1059,20 @@ class Partition(val topicPartition: TopicPartition, // topic partition信息，�
   }
 
   /**
-   * Update logStartOffset and low watermark if 1) offset <= highWatermark and 2) it is the leader replica.
-   * This function can trigger log segment deletion and log rolling.
-   *
-   * Return low watermark of the partition.
+   * 在以下情况下更新logStartOffset、low water mark：
+   * 1. 如果offset <= highWatermark
+   * 2. 此节点是leader副本节点
+   * 此方法会触发log端删除，以及log回滚
+   * 返回partition的low watermark
    */
   def deleteRecordsOnLeader(offset: Long): LogDeleteRecordsResult = inReadLock(leaderIsrUpdateLock) {
     leaderLogIfLocal match {
+      // 如果是leaderLog
       case Some(leaderLog) =>
+        // 如果leaderLog不可删除，直接抛出异常
         if (!leaderLog.config.delete)
           throw new PolicyViolationException(s"Records of partition $topicPartition can not be deleted due to the configured policy")
-
+        // 计算删除的offset游标
         val convertedOffset = if (offset == DeleteRecordsRequest.HIGH_WATERMARK)
           leaderLog.highWatermark
         else
@@ -1077,7 +1080,7 @@ class Partition(val topicPartition: TopicPartition, // topic partition信息，�
 
         if (convertedOffset < 0)
           throw new OffsetOutOfRangeException(s"The offset $convertedOffset for partition $topicPartition is not valid")
-
+        //
         leaderLog.maybeIncrementLogStartOffset(convertedOffset)
         LogDeleteRecordsResult(
           requestedOffset = convertedOffset,

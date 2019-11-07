@@ -256,6 +256,7 @@ class Log(@volatile var dir: File,
    * of each ongoing transaction in order to compute a new first unstable offset. It is possible, however,
    * that this could result in disagreement between replicas depending on when they began replicating the log.
    * In the worst case, the LSO could be seen by a consumer to go backwards.
+   *
    */
   @volatile private var firstUnstableOffsetMetadata: Option[LogOffsetMetadata] = None
 
@@ -267,6 +268,10 @@ class Log(@volatile var dir: File,
   @volatile private var highWatermarkMetadata: LogOffsetMetadata = LogOffsetMetadata(logStartOffset)
 
   /* the actual segments of the log */
+  /**
+   * 日志管理了分区的所有日志分段
+   * key：日志分段的基准偏移量
+   */
   private val segments: ConcurrentNavigableMap[java.lang.Long, LogSegment] = new ConcurrentSkipListMap[java.lang.Long, LogSegment]
 
   // Visible for testing
@@ -371,13 +376,21 @@ class Log(@volatile var dir: File,
     }
   }
 
+  /**
+   * 更新highWatermark metadata
+   * @param newHighWatermark 新的highWatermark
+   */
   private def updateHighWatermarkMetadata(newHighWatermark: LogOffsetMetadata): Unit = {
+    // 检查非法的message offset
     if (newHighWatermark.messageOffset < 0)
       throw new IllegalArgumentException("High watermark offset should be non-negative")
 
     lock synchronized {
+      // 更新highWatermark
       highWatermarkMetadata = newHighWatermark
+      // 更新producer state的highWatermark
       producerStateManager.onHighWatermarkUpdated(newHighWatermark.messageOffset)
+      // 是否需要增量第一个不稳定的offset
       maybeIncrementFirstUnstableOffset()
     }
     trace(s"Setting high watermark $newHighWatermark")
@@ -724,11 +737,15 @@ class Log(@volatile var dir: File,
     }
   }
 
+  /**
+   * 更新logEndOffset
+   * @param messageOffset 下一条消息的offset
+   */
   private def updateLogEndOffset(messageOffset: Long): Unit = {
+    // 构建下一条消息的新的offset metadata
     nextOffsetMetadata = LogOffsetMetadata(messageOffset, activeSegment.baseOffset, activeSegment.size)
 
-    // Update the high watermark in case it has gotten ahead of the log end offset
-    // following a truncation.
+    // 阶段后更新highWatermark，以防它超出logEndOffset
     if (highWatermark > messageOffset) {
       updateHighWatermarkMetadata(nextOffsetMetadata)
     }
@@ -1201,11 +1218,17 @@ class Log(@volatile var dir: File,
     }
   }
 
+  /**
+   * 增量首个不稳定的offset
+   */
   private def maybeIncrementFirstUnstableOffset(): Unit = lock synchronized {
+    // 检查写入通道是否已关闭
     checkIfMemoryMappedBufferClosed()
-
+    // 获取producerStateManager中的firstUnstableOffset，可能是unreplicatedFirstOffset，也可能是undecidedFirstOffset
     val updatedFirstStableOffset = producerStateManager.firstUnstableOffset match {
       case Some(logOffsetMetadata) if logOffsetMetadata.messageOffsetOnly || logOffsetMetadata.messageOffset < logStartOffset =>
+        // 如果offset只是message的offset信息或者messageOffset＜logStartOffset
+        // 命中条件，offset将更新为logOffset.messageOffset和logStartOffset二者之间的最大值
         val offset = math.max(logOffsetMetadata.messageOffset, logStartOffset)
         Some(convertToOffsetMetadataOrThrow(offset))
       case other => other
@@ -1218,24 +1241,31 @@ class Log(@volatile var dir: File,
   }
 
   /**
-   * Increment the log start offset if the provided offset is larger.
+   * 如果提供的offset比较大，增量移动logStartOffset
    */
   def maybeIncrementLogStartOffset(newLogStartOffset: Long): Unit = {
+    // 如果新的logStartOffset比当前的highWatermark大，抛出超出范围异常
     if (newLogStartOffset > highWatermark)
       throw new OffsetOutOfRangeException(s"Cannot increment the log start offset to $newLogStartOffset of partition $topicPartition " +
         s"since it is larger than the high watermark $highWatermark")
 
-    // We don't have to write the log start offset to log-start-offset-checkpoint immediately.
-    // The deleteRecordsOffset may be lost only if all in-sync replicas of this broker are shutdown
-    // in an unclean manner within log.flush.start.offset.checkpoint.interval.ms. The chance of this happening is low.
+    // 不必立即将logStartOffset写入到log-start-offset-checkpoint中
+    // 删除的offset可能在所有ISR都关闭之后丢失
+    // 在log.flush.start.offset.checkpoint.interval.ms以不整洁的方式，但是发生这样的几率很小
     maybeHandleIOException(s"Exception while increasing log start offset for $topicPartition to $newLogStartOffset in dir ${dir.getParent}") {
       lock synchronized {
+        // 检查文件写入是否已经关闭了
         checkIfMemoryMappedBufferClosed()
+        // 如果新的offset比原有的logStartOffset大
         if (newLogStartOffset > logStartOffset) {
           info(s"Incrementing log start offset to $newLogStartOffset")
+          // 更新logStartOffset
           logStartOffset = newLogStartOffset
+          // 同时也更新leader epoch
           leaderEpochCache.foreach(_.truncateFromStart(logStartOffset))
+          // 根据logStartOffset去除日志头
           producerStateManager.truncateHead(logStartOffset)
+          // 增量首个不稳定的offset
           maybeIncrementFirstUnstableOffset()
         }
       }
@@ -1715,10 +1745,8 @@ class Log(@volatile var dir: File,
   }
 
   /**
-   * If topic deletion is enabled, delete any log segments that have either expired due to time based retention
-   * or because the log size is > retentionSize.
-   *
-   * Whether or not deletion is enabled, delete any log segments that are before the log start offset
+   * 如果允许删除topic，删除任何log段可以根据基于保留的过期时间，或者log的大小超过了保留大小
+   * 无论是否开启删除，都可以删除任何在logStartOffset之前的log段
    */
   def deleteOldSegments(): Int = {
     if (config.delete) {
@@ -1765,36 +1793,36 @@ class Log(@volatile var dir: File,
   def size: Long = Log.sizeInBytes(logSegments)
 
   /**
-   * The offset metadata of the next message that will be appended to the log
+   * 结束offset的metadata，一般用于client端读取操作
+   * 值与下一个offset相同
    */
   def logEndOffsetMetadata: LogOffsetMetadata = nextOffsetMetadata
 
   /**
-   * The offset of the next message that will be appended to the log
+   * 下一条消息的offset
    */
   def logEndOffset: Long = nextOffsetMetadata.messageOffset
 
   /**
-   * Roll the log over to a new empty log segment if necessary.
-   *
-   * @param messagesSize The messages set size in bytes.
-   * @param appendInfo log append information
-   * logSegment will be rolled if one of the following conditions met
-   * <ol>
-   * <li> The logSegment is full
-   * <li> The maxTime has elapsed since the timestamp of first message in the segment (or since the create time if
-   * the first message does not have a timestamp)
-   * <li> The index is full
-   * </ol>
-   * @return The currently active segment after (perhaps) rolling to a new segment
+   * 滚动log到一个新的空的log段
+   * @param messagesSize 消息集大小
+   * @param appendInfo   log追加的信息
+   *                     下列条件满足的情况下，log段才会发生滚动
+   *                     log段已满
+   *                     此log段中第一条消息插入的时间已经超过最大时间限制
+   *                     索引已满
+   * @return 当前活跃的log段
    */
   private def maybeRoll(messagesSize: Int, appendInfo: LogAppendInfo): LogSegment = {
+    // 获取当前活跃的log段
     val segment = activeSegment
+    // 获取当前的时间戳
     val now = time.milliseconds
-
+    // 获取追加消息中最大消息的时间戳
     val maxTimestampInMessages = appendInfo.maxTimestamp
+    // 获取追加消息中最大的offset
     val maxOffsetInMessages = appendInfo.lastOffset
-
+    // 判断此log段是否需要滚动
     if (segment.shouldRoll(RollParams(config, appendInfo, messagesSize, now))) {
       debug(s"Rolling new log segment (log_size = ${segment.size}/${config.segmentSize}}, " +
         s"offset_index_size = ${segment.offsetIndex.entries}/${segment.offsetIndex.maxEntries}, " +
@@ -1802,96 +1830,118 @@ class Log(@volatile var dir: File,
         s"inactive_time_ms = ${segment.timeWaitedForRoll(now, maxTimestampInMessages)}/${config.segmentMs - segment.rollJitterMs}).")
 
       /*
-        maxOffsetInMessages - Integer.MAX_VALUE is a heuristic value for the first offset in the set of messages.
-        Since the offset in messages will not differ by more than Integer.MAX_VALUE, this is guaranteed <= the real
-        first offset in the set. Determining the true first offset in the set requires decompression, which the follower
-        is trying to avoid during log append. Prior behavior assigned new baseOffset = logEndOffset from old segment.
-        This was problematic in the case that two consecutive messages differed in offset by
-        Integer.MAX_VALUE.toLong + 2 or more.  In this case, the prior behavior would roll a new log segment whose
-        base offset was too low to contain the next message.  This edge case is possible when a replica is recovering a
-        highly compacted topic from scratch.
-        Note that this is only required for pre-V2 message formats because these do not store the first message offset
-        in the header.
+        maxOffsetInMessages，当前log段中最大的消息offset，对于消息集中的第一个offset，是一个启发式的值
+        因为消息中的offset之差不会超过Integer.MAX_VALUE，它保证≤小于消息集中第一个offset
+        确定消息中真正的第一个offset需要解压缩，接下来的offset会尝试避免在log追加过程中避免解压缩
+        前面的行为分配了 新的基准offset = 旧的log段的logEndOffset
+        但是在这种情况下是有问题的，因为两个连续消息的offset相差Integer.MAX_VALUE.toLong + 2或更大
+        在这种情况下，前面的行为将会滚动到一个新的log端中，这个log段的基准offset将会足够想来容纳接下来的消息集
+        这种便捷场景发生于一个副本节点在进行从头到尾的恢复压缩topic
+        需要注意的是，仅适用于V2之前的消息格式，因为这些格式不会在标头中存储第一个消息的offset
       */
+      // 如果需要进行日志滚动
+      // 获取追加信息的第一个offset
       appendInfo.firstOffset match {
+        // 如果存在，则进行滚动
         case Some(firstOffset) => roll(Some(firstOffset))
+        // 否则将使用Integer.MAX_VALUE作为滚动的起始位置计算差值
         case None => roll(Some(maxOffsetInMessages - Integer.MAX_VALUE))
       }
     } else {
+      // 不需要追加，返回当前的log端
       segment
     }
   }
 
   /**
-   * Roll the log over to a new active segment starting with the current logEndOffset.
-   * This will trim the index to the exact size of the number of entries it currently contains.
-   *
-   * @return The newly rolled segment
+   * 滚动log到一个新的活跃的log段，起始的基准offset是当前的logEndOffset
+   * 这会将索引修正到其当前包含条目数的确切大小
+   * @return 新创建的log段
    */
   def roll(expectedNextOffset: Option[Long] = None): LogSegment = {
     maybeHandleIOException(s"Error while rolling log segment for $topicPartition in dir ${dir.getParent}") {
       val start = time.hiResClockMs()
       lock synchronized {
+        // 校验写入通道是否关闭
         checkIfMemoryMappedBufferClosed()
+        // 计算新的offset，可能是producer生产时指定的
         val newOffset = math.max(expectedNextOffset.getOrElse(0L), logEndOffset)
+        // 创建新的日志文件
         val logFile = Log.logFile(dir, newOffset)
-
+        // 如果当前已存在的log端已经包含了新的基准offset
         if (segments.containsKey(newOffset)) {
-          // segment with the same base offset already exists and loaded
+          // 如果相同的基准offset已经存在，并且已经加载
           if (activeSegment.baseOffset == newOffset && activeSegment.size == 0) {
-            // We have seen this happen (see KAFKA-6388) after shouldRoll() returns true for an
-            // active segment of size zero because of one of the indexes is "full" (due to _maxEntries == 0).
+            // 如果这的段就是当前活跃的log段，并且这个log段的大小为0
+            // issue: KAFKA-6388
+            // 在调用shouldRoll()对大小为0的log段返回true，由于其中一个索引是是满的（由于_maxEntries=0）
             warn(s"Trying to roll a new log segment with start offset $newOffset " +
                  s"=max(provided offset = $expectedNextOffset, LEO = $logEndOffset) while it already " +
                  s"exists and is active with size 0. Size of time index: ${activeSegment.timeIndex.entries}," +
                  s" size of offset index: ${activeSegment.offsetIndex.entries}.")
+            // 删除当前的log段
             removeAndDeleteSegments(Seq(activeSegment), asyncDelete = true)
           } else {
+            // 否则无法添加一个已创建的log段
             throw new KafkaException(s"Trying to roll a new log segment for topic partition $topicPartition with start offset $newOffset" +
                                      s" =max(provided offset = $expectedNextOffset, LEO = $logEndOffset) while it already exists. Existing " +
                                      s"segment is ${segments.get(newOffset)}.")
           }
         } else if (!segments.isEmpty && newOffset < activeSegment.baseOffset) {
+          // 当前情况不包含已存在的offset log段
+          // 如果存在已有的log段，并且新的log段的offset小于当前活跃log段的基准offset，也抛出异常
           throw new KafkaException(
             s"Trying to roll a new log segment for topic partition $topicPartition with " +
             s"start offset $newOffset =max(provided offset = $expectedNextOffset, LEO = $logEndOffset) lower than start offset of the active segment $activeSegment")
         } else {
+          // 此时，新的基准offset≥当前活跃的基准offset
+          // 创建offset的索引文件
           val offsetIdxFile = offsetIndexFile(dir, newOffset)
+          // 创建时间索引文件
           val timeIdxFile = timeIndexFile(dir, newOffset)
+          // 创建事务索引文件
           val txnIdxFile = transactionIndexFile(dir, newOffset)
-
+          // 如果已存在文件，将会覆盖
           for (file <- List(logFile, offsetIdxFile, timeIdxFile, txnIdxFile) if file.exists) {
             warn(s"Newly rolled segment file ${file.getAbsolutePath} already exists; deleting it first")
             Files.delete(file.toPath)
           }
-
+          // 将当前活跃的log段置为非活跃
           Option(segments.lastEntry).foreach(_.getValue.onBecomeInactiveSegment())
         }
 
-        // take a snapshot of the producer state to facilitate recovery. It is useful to have the snapshot
-        // offset align with the new segment offset since this ensures we can recover the segment by beginning
-        // with the corresponding snapshot file and scanning the segment data. Because the segment base offset
-        // may actually be ahead of the current producer state end offset (which corresponds to the log end offset),
-        // we manually override the state offset here prior to taking the snapshot.
+        // 对producer的状态进行一个快照，用于快速恢复
+        // 拥有一个快照offset与新的log段offset对齐是很有用的，因为这将确保我们可以通过从相应的快照文件开始并扫描端数据数量来恢复log段
+        // 因为log段的基准offset可能实际上领先于当前的producer state的offset（对应logEndOffset）
+        // 在创建快照之前，我们在此手动覆盖producer state的offset
         producerStateManager.updateMapEndOffset(newOffset)
         producerStateManager.takeSnapshot()
 
-        val segment = LogSegment.open(dir,
+        // 创建新的log段
+        val segment = LogSegment.open(
+          // 目录
+          dir,
+          // 基准offset
           baseOffset = newOffset,
+          // 日志配置
           config,
+          // 创建时间戳
           time = time,
           fileAlreadyExists = false,
+          // 日志文件大小
           initFileSize = initFileSize,
+          // 是否开启预分配
           preallocate = config.preallocate)
+        // 添加创建好的log段
         addSegment(segment)
-        // We need to update the segment base offset and append position data of the metadata when log rolls.
-        // The next offset should not change.
+        // 我们需要更新段的基准offset，并将位置信息数据追加到metadata中
+        // 下一个message的offset不会发生变化
         updateLogEndOffset(nextOffsetMetadata.messageOffset)
-        // schedule an asynchronous flush of the old segment
+        // 调度一次针对旧log段的异步刷新任务
         scheduler.schedule("flush-log", () => flush(newOffset), delay = 0L)
 
         info(s"Rolled new log segment at offset $newOffset in ${time.hiResClockMs() - start} ms.")
-
+        // 返回当前的log段
         segment
       }
     }
@@ -2077,18 +2127,20 @@ class Log(@volatile var dir: File,
   def lastFlushTime: Long = lastFlushedTime.get
 
   /**
-   * The active segment that is currently taking appends
+   * 活跃的的log段
+   * 任何时刻仅有一个活跃的log段
    */
   def activeSegment = segments.lastEntry.getValue
 
   /**
-   * All the log segments in this log ordered from oldest to newest
+   * 从最老到最新排列的log段
    */
   def logSegments: Iterable[LogSegment] = segments.values.asScala
 
   /**
    * Get all segments beginning with the segment that includes "from" and ending with the segment
    * that includes up to "to-1" or the end of the log (if to > logEndOffset)
+   *
    */
   def logSegments(from: Long, to: Long): Iterable[LogSegment] = {
     lock synchronized {
@@ -2262,8 +2314,8 @@ class Log(@volatile var dir: File,
   }
 
   /**
-   * Add the given segment to the segments in this log. If this segment replaces an existing segment, delete it.
-   * @param segment The segment to add
+   * 在当前日志文件内部，添加给定的log段到log段集合中
+   * @param segment 需要添加的log段
    */
   @threadsafe
   def addSegment(segment: LogSegment): LogSegment = this.segments.put(segment.baseOffset, segment)
@@ -2383,11 +2435,11 @@ object Log {
   /** A temporary file used when swapping files into the log */
   val SwapFileSuffix = ".swap"
 
-  /** Clean shutdown file that indicates the broker was cleanly shutdown in 0.8 and higher.
-   * This is used to avoid unnecessary recovery after a clean shutdown. In theory this could be
-   * avoided by passing in the recovery point, however finding the correct position to do this
-   * requires accessing the offset index which may not be safe in an unclean shutdown.
-   * For more information see the discussion in PR#2104
+  /**
+   * cleanshutdown文件证明broker在0.8或者更高的版本非常干净的关闭
+   * 这个用于避免在一次干净的关闭后进行一次不必要的恢复，理论上，这可能会通过传递恢复节点来避免，然而查找正确的位置需要获取访问offset索引文件
+   * 但是在非干净关闭过程中，这又是线程不安全的
+   * 请看PR#2104
    */
   val CleanShutdownFile = ".kafka_cleanshutdown"
 
@@ -2478,11 +2530,10 @@ object Log {
   }
 
   /**
-   * Construct an index file name in the given dir using the given base offset and the given suffix
-   *
-   * @param dir The directory in which the log will reside
-   * @param offset The base offset of the log file
-   * @param suffix The suffix to be appended to the file name ("", ".deleted", ".cleaned", ".swap", etc.)
+   * 使用给定的dir、基准offset、前缀来构建一个索引文件名称
+   * @param dir    log将会存储的文件目录
+   * @param offset log的基准offset
+   * @param suffix log的文件名称的前缀
    */
   def offsetIndexFile(dir: File, offset: Long, suffix: String = ""): File =
     new File(dir, filenamePrefixFromOffset(offset) + IndexFileSuffix + suffix)

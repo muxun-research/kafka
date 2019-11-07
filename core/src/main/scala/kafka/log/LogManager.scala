@@ -43,6 +43,9 @@ import scala.util.{Failure, Success, Try}
  * LogManager在一个或多个目录中保存了log，新log将会在存储最少的log数据目录下创建，在实际或者平衡之后，不会基于log大小或者IO速率来迁移
  *
  * 后台线程通过定期截断log段，来处理日志保留
+ *
+ * log.dirs：数据目录
+ * logDir：日志目录
  */
 @threadsafe
 class LogManager(logDirs: Seq[File],
@@ -68,16 +71,25 @@ class LogManager(logDirs: Seq[File],
   val InitialTaskDelayMs = 30 * 1000
 
   private val logCreationOrDeletionLock = new Object
+  /**
+   * 当前所有的log
+   * key: topic-partition
+   * value: Log
+   */
   private val currentLogs = new Pool[TopicPartition, Log]()
-  // Future logs are put in the directory with "-future" suffix. Future log is created when user wants to move replica
-  // from one log directory to another log directory on the same broker. The directory of the future log will be renamed
-  // to replace the current log of the partition after the future log catches up with the current log
+  /**
+   * future log在数据目录中以"-future"为前缀，Future Log因用户需要迁移同一个副本节点的数据目录而创建
+   * Future Log的数据目录将会在代替当前partition的log之后更名，这将会在Furture Log追赶上当前log之后
+   */
   private val futureLogs = new Pool[TopicPartition, Log]()
   // Each element in the queue contains the log object to be deleted and the time it is scheduled for deletion.
   private val logsToBeDeleted = new LinkedBlockingQueue[(Log, Long)]()
 
   private val _liveLogDirs: ConcurrentLinkedQueue[File] = createAndValidateLogDirs(logDirs, initialOfflineDirs)
   @volatile private var _currentDefaultConfig = initialDefaultConfig
+  /**
+   * 每个数据目录进行恢复的线程数
+   */
   @volatile private var numRecoveryThreadsPerDataDir = recoveryThreadsPerDataDir
 
   def reconfigureDefaultLogConfig(logConfig: LogConfig): Unit = {
@@ -295,101 +307,13 @@ class LogManager(logDirs: Seq[File],
   }
 
   /**
-   * Recover and load all logs in the given data directories
-   */
-  private def loadLogs(): Unit = {
-    info("Loading logs.")
-    val startMs = time.milliseconds
-    val threadPools = ArrayBuffer.empty[ExecutorService]
-    val offlineDirs = mutable.Set.empty[(String, IOException)]
-    val jobs = mutable.Map.empty[File, Seq[Future[_]]]
-
-    for (dir <- liveLogDirs) {
-      try {
-        val pool = Executors.newFixedThreadPool(numRecoveryThreadsPerDataDir)
-        threadPools.append(pool)
-
-        val cleanShutdownFile = new File(dir, Log.CleanShutdownFile)
-
-        if (cleanShutdownFile.exists) {
-          debug(s"Found clean shutdown file. Skipping recovery for all logs in data directory: ${dir.getAbsolutePath}")
-        } else {
-          // log recovery itself is being performed by `Log` class during initialization
-          brokerState.newState(RecoveringFromUncleanShutdown)
-        }
-
-        var recoveryPoints = Map[TopicPartition, Long]()
-        try {
-          recoveryPoints = this.recoveryPointCheckpoints(dir).read
-        } catch {
-          case e: Exception =>
-            warn(s"Error occurred while reading recovery-point-offset-checkpoint file of directory $dir", e)
-            warn("Resetting the recovery checkpoint to 0")
-        }
-
-        var logStartOffsets = Map[TopicPartition, Long]()
-        try {
-          logStartOffsets = this.logStartOffsetCheckpoints(dir).read
-        } catch {
-          case e: Exception =>
-            warn(s"Error occurred while reading log-start-offset-checkpoint file of directory $dir", e)
-        }
-
-        val jobsForDir = for {
-          dirContent <- Option(dir.listFiles).toList
-          logDir <- dirContent if logDir.isDirectory
-        } yield {
-          CoreUtils.runnable {
-            try {
-              loadLog(logDir, recoveryPoints, logStartOffsets)
-            } catch {
-              case e: IOException =>
-                offlineDirs.add((dir.getAbsolutePath, e))
-                error(s"Error while loading log dir ${dir.getAbsolutePath}", e)
-            }
-          }
-        }
-        jobs(cleanShutdownFile) = jobsForDir.map(pool.submit)
-      } catch {
-        case e: IOException =>
-          offlineDirs.add((dir.getAbsolutePath, e))
-          error(s"Error while loading log dir ${dir.getAbsolutePath}", e)
-      }
-    }
-
-    try {
-      for ((cleanShutdownFile, dirJobs) <- jobs) {
-        dirJobs.foreach(_.get)
-        try {
-          cleanShutdownFile.delete()
-        } catch {
-          case e: IOException =>
-            offlineDirs.add((cleanShutdownFile.getParent, e))
-            error(s"Error while deleting the clean shutdown file $cleanShutdownFile", e)
-        }
-      }
-
-      offlineDirs.foreach { case (dir, e) =>
-        logDirFailureChannel.maybeAddOfflineLogDir(dir, s"Error while deleting the clean shutdown file in dir $dir", e)
-      }
-    } catch {
-      case e: ExecutionException =>
-        error(s"There was an error in one of the threads during logs loading: ${e.getCause}")
-        throw e.getCause
-    } finally {
-      threadPools.foreach(_.shutdown())
-    }
-
-    info(s"Logs loading complete in ${time.milliseconds - startMs} ms.")
-  }
-
-  /**
-   *  Start the background threads to flush logs and do log cleanup
+   * 启动后台线程用于刷新、清理日志
    */
   def startup(): Unit = {
-    /* Schedule the cleanup task to delete old logs */
+    // 调度清理任务来删除旧的日志
     if (scheduler != null) {
       info("Starting log cleanup with a period of %d ms.".format(retentionCheckMs))
+
       scheduler.schedule("kafka-log-retention",
                          cleanupLogs _,
                          delay = InitialTaskDelayMs,
@@ -418,6 +342,56 @@ class LogManager(logDirs: Seq[File],
     }
     if (cleanerConfig.enableCleaner)
       cleaner.startup()
+  }
+
+  /**
+   * 清理符合要求的log
+   * 返回删除的log段数量
+   * 仅考虑没有进行压缩的log
+   */
+  def cleanupLogs(): Unit = {
+    debug("Beginning log cleanup...")
+    var total = 0
+    val startMs = time.milliseconds
+
+    // 清理当前的log
+    val deletableLogs = {
+      if (cleaner != null) {
+        // 保护在更改清理策略时，cleaner工作在相同的partition上，暂停清理
+        cleaner.pauseCleaningForNonCompactedPartitions()
+      } else {
+        // 过滤没有进行压缩的log
+        currentLogs.filter {
+          case (_, log) => !log.config.compact
+        }
+      }
+    }
+
+    try {
+      // 遍历可删除的log
+      deletableLogs.foreach {
+        // 非null的情况下
+        case (topicPartition, log) =>
+          debug(s"Garbage collecting '${log.name}'")
+          // 统计删除的log段
+          total += log.deleteOldSegments()
+          // 获取当前partition是否正在迁移
+          val futureLog = futureLogs.get(topicPartition)
+          if (futureLog != null) {
+            // 清理future log，并更新统计
+            debug(s"Garbage collecting future log '${futureLog.name}'")
+            total += futureLog.deleteOldSegments()
+          }
+      }
+    } finally {
+      if (cleaner != null) {
+        // 上面暂停了清理，此处继续清理
+        cleaner.resumeCleaning(deletableLogs.map(_._1))
+      }
+    }
+
+    debug(s"Log cleanup completed. $total files deleted in " +
+      (time.milliseconds - startMs) / 1000 + " seconds")
   }
 
   /**
@@ -904,47 +878,106 @@ class LogManager(logDirs: Seq[File],
   }
 
   /**
-   * Delete any eligible logs. Return the number of segments deleted.
-   * Only consider logs that are not compacted.
+   * 服务恢复时，需要加载所有的日志
    */
-  def cleanupLogs(): Unit = {
-    debug("Beginning log cleanup...")
-    var total = 0
+  private def loadLogs(): Unit = {
+    info("Loading logs.")
+    // 后去开始加载的时间戳
     val startMs = time.milliseconds
+    // 用于加载日志、log段的线程池
+    val threadPools = ArrayBuffer.empty[ExecutorService]
+    // 已经下线的日志目录
+    val offlineDirs = mutable.Set.empty[(String, IOException)]
+    // 加载日志的任务
+    val jobs = mutable.Map.empty[File, Seq[Future[_]]]
 
-    // clean current logs.
-    val deletableLogs = {
-      if (cleaner != null) {
-        // prevent cleaner from working on same partitions when changing cleanup policy
-        cleaner.pauseCleaningForNonCompactedPartitions()
-      } else {
-        currentLogs.filter {
-          case (_, log) => !log.config.compact
+    // 遍历所有存活的数据目录
+    for (dir <- liveLogDirs) {
+      try {
+        // 创建处理每个数据目录恢复的线程池，并追加到线程池集合中
+        val pool = Executors.newFixedThreadPool(numRecoveryThreadsPerDataDir)
+        threadPools.append(pool)
+        // 创建cleanShutDown文件
+        val cleanShutdownFile = new File(dir, Log.CleanShutdownFile)
+        // 如果已经存在cleanShutdown文件，将不会进行恢复
+        if (cleanShutdownFile.exists) {
+          debug(s"Found clean shutdown file. Skipping recovery for all logs in data directory: ${dir.getAbsolutePath}")
+        } else {
+          // log恢复将有Log类负责
+          brokerState.newState(RecoveringFromUncleanShutdown)
+        }
+        // 恢复点字典表
+        var recoveryPoints = Map[TopicPartition, Long]()
+        try {
+          // 读取文件中的存储的恢复点
+          recoveryPoints = this.recoveryPointCheckpoints(dir).read
+        } catch {
+          case e: Exception =>
+            warn(s"Error occurred while reading recovery-point-offset-checkpoint file of directory $dir", e)
+            warn("Resetting the recovery checkpoint to 0")
+        }
+        // logStartOffset字典表
+        var logStartOffsets = Map[TopicPartition, Long]()
+        try {
+          // 读取存储的logStartOffset字典表
+          logStartOffsets = this.logStartOffsetCheckpoints(dir).read
+        } catch {
+          case e: Exception =>
+            warn(s"Error occurred while reading log-start-offset-checkpoint file of directory $dir", e)
+        }
+        // dir是数据目录，dirContent是数据目录下所有的日志目录
+        val jobsForDir = for {
+          dirContent <- Option(dir.listFiles).toList
+          logDir <- dirContent if logDir.isDirectory
+        } yield {
+          CoreUtils.runnable {
+            try {
+              // 加载每个日志目录的日志
+              loadLog(logDir, recoveryPoints, logStartOffsets)
+            } catch {
+              case e: IOException =>
+                offlineDirs.add((dir.getAbsolutePath, e))
+                error(s"Error while loading log dir ${dir.getAbsolutePath}", e)
+            }
+          }
+        }
+        // 提交任务
+        jobs(cleanShutdownFile) = jobsForDir.map(pool.submit)
+      } catch {
+        case e: IOException =>
+          // 如果出现异常，添加到下线数据目录中
+          offlineDirs.add((dir.getAbsolutePath, e))
+          error(s"Error while loading log dir ${dir.getAbsolutePath}", e)
+      }
+    }
+    // 接下来遍历所有提交的任务集合
+    try {
+      for ((cleanShutdownFile, dirJobs) <- jobs) {
+        dirJobs.foreach(_.get)
+        try {
+          // 每执行完一个任务，将对应数据目录的cleanShutdown文件删除
+          cleanShutdownFile.delete()
+        } catch {
+          case e: IOException =>
+            // 如果出现异常，添加到下线数据目录中
+            offlineDirs.add((cleanShutdownFile.getParent, e))
+            error(s"Error while deleting the clean shutdown file $cleanShutdownFile", e)
         }
       }
-    }
-
-    try {
-      deletableLogs.foreach {
-        case (topicPartition, log) =>
-          debug(s"Garbage collecting '${log.name}'")
-          total += log.deleteOldSegments()
-
-          val futureLog = futureLogs.get(topicPartition)
-          if (futureLog != null) {
-            // clean future logs
-            debug(s"Garbage collecting future log '${futureLog.name}'")
-            total += futureLog.deleteOldSegments()
-          }
+      // 接着遍历所有的下线数据目录，进行日志记录
+      offlineDirs.foreach { case (dir, e) =>
+        logDirFailureChannel.maybeAddOfflineLogDir(dir, s"Error while deleting the clean shutdown file in dir $dir", e)
       }
+    } catch {
+      case e: ExecutionException =>
+        error(s"There was an error in one of the threads during logs loading: ${e.getCause}")
+        throw e.getCause
     } finally {
-      if (cleaner != null) {
-        cleaner.resumeCleaning(deletableLogs.map(_._1))
-      }
+      // 关闭处理任务申请的线程池集合
+      threadPools.foreach(_.shutdown())
     }
 
-    debug(s"Log cleanup completed. $total files deleted in " +
-                  (time.milliseconds - startMs) / 1000 + " seconds")
+    info(s"Logs loading complete in ${time.milliseconds - startMs} ms.")
   }
 
   /**

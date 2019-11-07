@@ -287,17 +287,20 @@ public class FileRecords extends AbstractRecords implements Closeable {
         return bytesTransferred;
     }
 
-    /**
-     * Search forward for the file position of the last offset that is greater than or equal to the target offset
-     * and return its physical position and the size of the message (including log overhead) at the returned offset. If
-     * no such offsets are found, return null.
-     *
-     * @param targetOffset The offset to search for.
-     * @param startingPosition The starting position in the file to begin searching from.
-     */
+	/**
+	 * 直接查询最后一个offset的文件位置，如果这个offset≥给定的offset
+	 * 并返回它的物理位置以及消息的大小
+	 * 如果没有找到，直接返回null
+	 * @param targetOffset     需要进行查找的offset
+	 * @param startingPosition 进行查找的起始位置
+	 */
     public LogOffsetPosition searchForOffsetWithSize(long targetOffset, int startingPosition) {
+
         for (FileChannelRecordBatch batch : batchesFrom(startingPosition)) {
+			// 获取当前batch的最大offset
             long offset = batch.lastOffset();
+			// 如果最大的offset≥的给定的offset，那么就是此batch，返回当前batch的物理文件地址以及batch大小
+			// 相当于结束位置
             if (offset >= targetOffset)
                 return new LogOffsetPosition(offset, batch.position(), batch.sizeInBytes());
         }
@@ -374,14 +377,13 @@ public class FileRecords extends AbstractRecords implements Closeable {
                 ", start=" + start +
                 ", end=" + end +
                 ")";
-    }
+	}
 
-    /**
-     * Get an iterator over the record batches in the file, starting at a specific position. This is similar to
-     * {@link #batches()} except that callers specify a particular position to start reading the batches from. This
-     * method must be used with caution: the start position passed in must be a known start of a batch.
-     * @param start The position to start record iteration from; must be a known position for start of a batch
-     * @return An iterator over batches starting from {@code start}
+	/**
+	 * 提供一个文件中存储的record batch的迭代器，于一个指定的位置开始，和{@link #batches()}方法很类似，但是此方法指定了一个起始位置
+	 * 这个方法必须使用小心：传入的起始位置必须是一个已知的batch的起始位置
+	 * @param start record开始迭代的位置，必须是一个已知的batch的起始位置
+	 * @return 以{@code start}起始的batch迭代器
      */
     public Iterable<FileChannelRecordBatch> batchesFrom(final int start) {
         return () -> batchIterator(start);

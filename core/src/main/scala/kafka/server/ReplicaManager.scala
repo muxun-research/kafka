@@ -32,9 +32,7 @@ import kafka.server.QuotaFactory.QuotaManagers
 import kafka.server.checkpoints.{LazyOffsetCheckpoints, OffsetCheckpointFile, OffsetCheckpoints}
 import kafka.utils._
 import kafka.zk.KafkaZkClient
-import org.apache.kafka.common.ElectionType
-import org.apache.kafka.common.TopicPartition
-import org.apache.kafka.common.Node
+import org.apache.kafka.common.{ElectionType, Node, TopicPartition}
 import org.apache.kafka.common.errors._
 import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.metrics.Metrics
@@ -43,19 +41,19 @@ import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.record.FileRecords.TimestampAndOffset
 import org.apache.kafka.common.record._
 import org.apache.kafka.common.replica.PartitionView.DefaultPartitionView
+import org.apache.kafka.common.replica.ReplicaView.DefaultReplicaView
+import org.apache.kafka.common.replica.{ClientMetadata, _}
 import org.apache.kafka.common.requests.DescribeLogDirsResponse.{LogDirInfo, ReplicaInfo}
 import org.apache.kafka.common.requests.EpochEndOffset._
 import org.apache.kafka.common.requests.FetchRequest.PartitionData
 import org.apache.kafka.common.requests.FetchResponse.AbortedTransaction
 import org.apache.kafka.common.requests.ProduceResponse.PartitionResponse
-import org.apache.kafka.common.requests.{ApiError, DeleteRecordsResponse, DescribeLogDirsResponse, EpochEndOffset, IsolationLevel, LeaderAndIsrRequest, LeaderAndIsrResponse, OffsetsForLeaderEpochRequest, StopReplicaRequest, UpdateMetadataRequest}
+import org.apache.kafka.common.requests._
 import org.apache.kafka.common.utils.Time
-import org.apache.kafka.common.replica.ReplicaView.DefaultReplicaView
-import org.apache.kafka.common.replica.{ClientMetadata, _}
 
-import scala.compat.java8.OptionConverters._
 import scala.collection.JavaConverters._
 import scala.collection.{Map, Seq, Set, mutable}
+import scala.compat.java8.OptionConverters._
 
 /*
  * Result metadata of a log append operation on the log
@@ -474,9 +472,9 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   /**
-   * Append messages to leader replicas of the partition, and wait for them to be replicated to other replicas;
-   * the callback function will be triggered either when timeout or the required acks are satisfied;
-   * if the callback function itself is already synchronized on some object then pass this object to avoid deadlock.
+   * 将消息内容追加到partition的leader副本节点上，并等待复制到其他副本节点上
+   * 回调任务函数会在超时，或者收到ack之后触发
+   * 如果回调函数已经在其他对象上同步，则可以忽略当前对象避免死锁
    */
   def appendRecords(timeout: Long,
                     requiredAcks: Short,
@@ -486,42 +484,47 @@ class ReplicaManager(val config: KafkaConfig,
                     responseCallback: Map[TopicPartition, PartitionResponse] => Unit,
                     delayedProduceLock: Option[Lock] = None,
                     recordConversionStatsCallback: Map[TopicPartition, RecordConversionStats] => Unit = _ => ()): Unit = {
+    // producer需要同步的节点数量校验
     if (isValidRequiredAcks(requiredAcks)) {
       val sTime = time.milliseconds
+      // 追加到本地日志中
       val localProduceResults = appendToLocalLog(internalTopicsAllowed = internalTopicsAllowed,
         isFromClient = isFromClient, entriesPerPartition, requiredAcks)
       debug("Produce to local log in %d ms".format(time.milliseconds - sTime))
-
+      // 构建生产状态
       val produceStatus = localProduceResults.map { case (topicPartition, result) =>
         topicPartition ->
                 ProducePartitionStatus(
                   result.info.lastOffset + 1, // required offset
                   new PartitionResponse(result.error, result.info.firstOffset.getOrElse(-1), result.info.logAppendTime, result.info.logStartOffset)) // response status
       }
-
+      // 触发回调任务
       recordConversionStatsCallback(localProduceResults.map { case (k, v) => k -> v.info.recordConversionStats })
 
+      // 如果需要延迟生产请出去
       if (delayedProduceRequestRequired(requiredAcks, entriesPerPartition, localProduceResults)) {
         // create delayed produce operation
+        // 创建延迟生产操作
         val produceMetadata = ProduceMetadata(requiredAcks, produceStatus)
+        // 创建延迟生产
         val delayedProduce = new DelayedProduce(timeout, produceMetadata, this, responseCallback, delayedProduceLock)
 
-        // create a list of (topic, partition) pairs to use as keys for this delayed produce operation
+        // 为这个延迟操作创建一个topic-partition为key，delayOperation为value的缓存键值对
         val producerRequestKeys = entriesPerPartition.keys.map(TopicPartitionOperationKey(_)).toSeq
 
-        // try to complete the request immediately, otherwise put it into the purgatory
-        // this is because while the delayed produce operation is being created, new
-        // requests may arrive and hence make this operation completable.
+        // 尝试完成请求，否则就放入到缓存中
+        // 因为当delayOperation创建时，新的请求可能已经到达，会导致这个延迟操作完成
         delayedProducePurgatory.tryCompleteElseWatch(delayedProduce, producerRequestKeys)
 
       } else {
-        // we can respond immediately
+        // 如果我们不需要延迟生产，我们可以立即响应
         val produceResponseStatus = produceStatus.map { case (k, status) => k -> status.responseStatus }
+        // 直接调用生产回调任务
         responseCallback(produceResponseStatus)
       }
     } else {
-      // If required.acks is outside accepted range, something is wrong with the client
-      // Just return an error and don't handle the request at all
+      // 如果收到的acks超过了可接受的范围，client可能发生了错误
+      // 直接返回error，并且根本不处理这个请求
       val responseStatus = entriesPerPartition.map { case (topicPartition, _) =>
         topicPartition -> new PartitionResponse(Errors.INVALID_REQUIRED_ACKS,
           LogAppendInfo.UnknownLogAppendInfo.firstOffset.getOrElse(-1), RecordBatch.NO_TIMESTAMP, LogAppendInfo.UnknownLogAppendInfo.logStartOffset)
@@ -531,18 +534,20 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   /**
-   * Delete records on leader replicas of the partition, and wait for delete records operation be propagated to other replicas;
-   * the callback function will be triggered either when timeout or logStartOffset of all live replicas have reached the specified offset
+   * 删除leader partition副本节点上的records，等待删除操作扩散到其他副本节点上
+   * 响应回调任务会在超时，或者所有存活的副本节点的logStartOffset全部到达指定的offset后调用
    */
   private def deleteRecordsOnLocalLog(offsetPerPartition: Map[TopicPartition, Long]): Map[TopicPartition, LogDeleteRecordsResult] = {
     trace("Delete records on local logs to offsets [%s]".format(offsetPerPartition))
     offsetPerPartition.map { case (topicPartition, requestedOffset) =>
-      // reject delete records operation on internal topics
+      // 拒绝在内部topic上的删除record操作
       if (Topic.isInternal(topicPartition.topic)) {
         (topicPartition, LogDeleteRecordsResult(-1L, -1L, Some(new InvalidTopicException(s"Cannot delete records of internal topic ${topicPartition.topic}"))))
       } else {
         try {
+          // 获取partition的leader副本节点信息
           val partition = getPartitionOrException(topicPartition, expectLeader = true)
+          // 对partition leader副本节点执行删除操作
           val logDeleteResult = partition.deleteRecordsOnLeader(requestedOffset)
           (topicPartition, logDeleteResult)
         } catch {
@@ -726,11 +731,10 @@ class ReplicaManager(val config: KafkaConfig,
     }
   }
 
-  // If all the following conditions are true, we need to put a delayed produce request and wait for replication to complete
-  //
+  // 如果下列条件为true，我们需要创建一个延迟生产请求，并等待复制完成
   // 1. required acks = -1
-  // 2. there is data to append
-  // 3. at least one partition append was successful (fewer errors than partitions)
+  // 2. 需要追加数据
+  // 3. 至少一个partition追加成功
   private def delayedProduceRequestRequired(requiredAcks: Short,
                                             entriesPerPartition: Map[TopicPartition, MemoryRecords],
                                             localProduceResults: Map[TopicPartition, LogAppendResult]): Boolean = {

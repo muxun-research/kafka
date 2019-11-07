@@ -24,12 +24,12 @@ import java.nio.file.{Files, StandardOpenOption}
 import kafka.log.Log.offsetFromFile
 import kafka.server.LogOffsetMetadata
 import kafka.utils.{Logging, nonthreadsafe, threadsafe}
-import org.apache.kafka.common.{KafkaException, TopicPartition}
 import org.apache.kafka.common.errors._
 import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.protocol.types._
 import org.apache.kafka.common.record.{ControlRecordType, DefaultRecordBatch, EndTransactionMarker, RecordBatch}
 import org.apache.kafka.common.utils.{ByteUtils, Crc32C}
+import org.apache.kafka.common.{KafkaException, TopicPartition}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ListBuffer
@@ -492,42 +492,58 @@ object ProducerStateManager {
 class ProducerStateManager(val topicPartition: TopicPartition,
                            @volatile var logDir: File,
                            val maxProducerIdExpirationMs: Int = 60 * 60 * 1000) extends Logging {
-  import ProducerStateManager._
   import java.util
+
+  import ProducerStateManager._
 
   this.logIdent = s"[ProducerStateManager partition=$topicPartition] "
 
   private val producers = mutable.Map.empty[Long, ProducerStateEntry]
+  /**
+   * 最后一次映射的offset
+   */
   private var lastMapOffset = 0L
+  /**
+   * 最后一次快照的offset
+   */
   private var lastSnapOffset = 0L
 
-  // ongoing transactions sorted by the first offset of the transaction
+  /**
+   * 进行中的事务，按第一次提交的事务进行排序，是有序的
+   */
   private val ongoingTxns = new util.TreeMap[Long, TxnMetadata]
 
-  // completed transactions whose markers are at offsets above the high watermark
+  /**
+   * 在highWatermark之上，完成的事务，是有序的
+   */
   private val unreplicatedTxns = new util.TreeMap[Long, TxnMetadata]
 
   /**
-   * An unstable offset is one which is either undecided (i.e. its ultimate outcome is not yet known),
-   * or one that is decided, but may not have been replicated (i.e. any transaction which has a COMMIT/ABORT
-   * marker written at a higher offset than the current high watermark).
+   * 一个不稳定的offset是没有决定（比如：它的无限值还没有被可知），或者已经确定，但是还没有被复制（比如任何一个拥有COMMIT/ABORT的事务写入了一个比当前highWatermark还要大的offset）
    */
   def firstUnstableOffset: Option[LogOffsetMetadata] = {
+    // 获取第一个未进行同步的事务metadata
     val unreplicatedFirstOffset = Option(unreplicatedTxns.firstEntry).map(_.getValue.firstOffset)
+    // 获取第一个还未确认的事务的metadata
     val undecidedFirstOffset = Option(ongoingTxns.firstEntry).map(_.getValue.firstOffset)
     if (unreplicatedFirstOffset.isEmpty)
+    // 如果没有未同步的事务metadata，返回未确认的事务metadata
       undecidedFirstOffset
     else if (undecidedFirstOffset.isEmpty)
+    // 如果没有未确认的事务metadata，返回未同步的事务metadata
       unreplicatedFirstOffset
     else if (undecidedFirstOffset.get.messageOffset < unreplicatedFirstOffset.get.messageOffset)
+    // 如果未确认的事务metadata的offset小于未同步的事务metadata的offset，返回未确认的事务metadata
       undecidedFirstOffset
     else
+    // 其他情况下，均返回未同步的事务metadata
       unreplicatedFirstOffset
   }
 
   /**
    * Acknowledge all transactions which have been completed before a given offset. This allows the LSO
    * to advance to the next unstable offset.
+   *
    */
   def onHighWatermarkUpdated(highWatermark: Long): Unit = {
     removeUnreplicatedTransactions(highWatermark)
@@ -692,34 +708,41 @@ class ProducerStateManager(val topicPartition: TopicPartition,
    */
   def oldestSnapshotOffset: Option[Long] = oldestSnapshotFile.map(file => offsetFromFile(file))
 
+  /**
+   * producer是否保留
+   * @param producerStateEntry producer状态
+   * @param logStartOffset     logStartOffset
+   * @return 是否保留producer
+   */
   private def isProducerRetained(producerStateEntry: ProducerStateEntry, logStartOffset: Long): Boolean = {
     producerStateEntry.removeBatchesOlderThan(logStartOffset)
+    // producer的最新offset是否比logStartOffset大
     producerStateEntry.lastDataOffset >= logStartOffset
   }
 
   /**
-   * When we remove the head of the log due to retention, we need to clean up the id map. This method takes
-   * the new start offset and removes all producerIds which have a smaller last written offset. Additionally,
-   * we remove snapshots older than the new log start offset.
-   *
-   * Note that snapshots from offsets greater than the log start offset may have producers included which
-   * should no longer be retained: these producers will be removed if and when we need to load state from
-   * the snapshot.
+   * 当由于保留而移除日志头时，需要清理id的映射集合，这个方法会使用新的logStartOffset，并移除所有的producerIds，这些producerId都具有较小的已写入的offset
+   * 除此之外，我们会移除比新logStartOffset更老的快照版本
+   * 需要注意的是，offset的快照版本如果比LogStartOffset大的情况下，可能会有包含步骤保留的producer：在我们需要从快照中加载状态时，将删除这些producer
    */
   def truncateHead(logStartOffset: Long): Unit = {
     val evictedProducerEntries = producers.filter { case (_, producerState) =>
+      // 过滤没有保留的producer
       !isProducerRetained(producerState, logStartOffset)
     }
+    //
     val evictedProducerIds = evictedProducerEntries.keySet
-
+    // 去除掉这部分producer
     producers --= evictedProducerIds
+    //
     removeEvictedOngoingTransactions(evictedProducerIds)
     removeUnreplicatedTransactions(logStartOffset)
-
+    //
     if (lastMapOffset < logStartOffset)
       lastMapOffset = logStartOffset
-
+    // 删除旧快照
     deleteSnapshotsBefore(logStartOffset)
+
     lastSnapOffset = latestSnapshotOffset.getOrElse(logStartOffset)
   }
 

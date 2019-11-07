@@ -62,8 +62,16 @@ class LogSegment private[log] (val log: FileRecords,
 
   def timeIndex: TimeIndex = lazyTimeIndex.get
 
+  /**
+   * 判断日志段是否需要滚动
+   * @param rollParams 判断参数
+   * @return 是否需要滚动
+   */
   def shouldRoll(rollParams: RollParams): Boolean = {
+    // 判断是否已经到达需要滚动log段的时间
     val reachedRollMs = timeWaitedForRoll(rollParams.now, rollParams.maxTimestampInMessages) > rollParams.maxSegmentMs - rollJitterMs
+    // 如果日志大小已经超出，或者时间时间已经超出，或者index索引已经满了，或者时间索引已经满了，或者不能将转换为相对的offset
+    // 上述情况视为可以进行日志滚动了
     size > rollParams.maxSegmentBytes - rollParams.messagesSize ||
       (size > 0 && reachedRollMs) ||
       offsetIndex.isFull || timeIndex.isFull || !canConvertToRelativeOffset(rollParams.maxOffsetInMessages)
@@ -122,7 +130,7 @@ class LogSegment private[log] (val log: FileRecords,
   def size: Int = log.sizeInBytes()
 
   /**
-   * checks that the argument offset can be represented as an integer offset relative to the baseOffset.
+   * 校验offset是否可以是转换成一个基于基础offset的相对offset
    */
   def canConvertToRelativeOffset(offset: Long): Boolean = {
     offsetIndex.canAppendOffset(offset)
@@ -147,6 +155,7 @@ class LogSegment private[log] (val log: FileRecords,
       // records需要写入
       trace(s"Inserting ${records.sizeInBytes} bytes at end offset $largestOffset at position ${log.sizeInBytes} " +
             s"with largest timestamp $largestTimestamp at shallow offset $shallowOffsetOfMaxTimestamp")
+      // 物理位置，也就是当前log段所在的file的文件大小
       val physicalPosition = log.sizeInBytes()
       if (physicalPosition == 0)
         rollingBasedTimestamp = Some(largestTimestamp)
@@ -262,34 +271,29 @@ class LogSegment private[log] (val log: FileRecords,
   }
 
   /**
-   * Find the physical file position for the first message with offset >= the requested offset.
-   *
-   * The startingFilePosition argument is an optimization that can be used if we already know a valid starting position
-   * in the file higher than the greatest-lower-bound from the index.
-   *
-   * @param offset The offset we want to translate
-   * @param startingFilePosition A lower bound on the file position from which to begin the search. This is purely an optimization and
-   * when omitted, the search will begin at the position in the offset index.
-   * @return The position in the log storing the message with the least offset >= the requested offset and the size of the
-    *        message or null if no message meets this criteria.
+   * 根据第一条消息的offset查找物理文件地址，这个offset要＞请求的offset
+   * 开始文件位置参数是一个正整数，可以让我知道已经有一个合法的起始位置，这个合法的起始位置将要比索引文件中的最低边界要高
+   * @param offset               我们需要转换的offset
+   * @param startingFilePosition 开始进行查找的最低边界文件位置，这纯粹是一种优化，如果省略，搜索将从偏移索引中的位置开始
+   * @return log中的position位置存储了带有最小offset的消息，这个offset将会≥请求的offset，以及消息的大小
    */
   @threadsafe
   private[log] def translateOffset(offset: Long, startingFilePosition: Int = 0): LogOffsetPosition = {
+    // 从索引文件中查找对应的映射关系，返回值包括offset和物理位置，但不一定准确对应到起始offset
     val mapping = offsetIndex.lookup(offset)
+    // 查找物理文件起始位置，返回值包括offset和物理位置，而且一定准确的对应到起始offset
     log.searchForOffsetWithSize(offset, max(mapping.position, startingFilePosition))
   }
 
   /**
-   * Read a message set from this segment beginning with the first offset >= startOffset. The message set will include
-   * no more than maxSize bytes and will end before maxOffset if a maxOffset is specified.
-   *
-   * @param startOffset A lower bound on the first offset to include in the message set we read
-   * @param maxSize The maximum number of bytes to include in the message set we read
-   * @param maxPosition The maximum position in the log segment that should be exposed for read
-   * @param minOneMessage If this is true, the first message will be returned even if it exceeds `maxSize` (if one exists)
-   *
-   * @return The fetched data and the offset metadata of the first message whose offset is >= startOffset,
-   *         or null if the startOffset is larger than the largest offset in this log
+   * 从当前log段中读取消息集，将以first offset开始，而first offset ≥ startOffset
+   * 消息集将会包含不超过maxSize的字节数，如果指定了maxOffset，也不会超过maxOffset
+   * @param startOffset   需要读取的消息集的最低边界
+   * @param maxSize       可以读取的最大字节数
+   * @param maxPosition   log段中公开读取的最大位置
+   * @param minOneMessage 如果是true，代表第一条消息将会返回，即使已经超过了maxSize阈值
+   * @return 拉取的数据，以及第一条消息的offset metadata，这个offset需要＞startOffset
+   *         如果null，代表startOffset要比此log中最大的offset还要大
    */
   @threadsafe
   def read(startOffset: Long,
@@ -298,28 +302,32 @@ class LogSegment private[log] (val log: FileRecords,
            minOneMessage: Boolean = false): FetchDataInfo = {
     if (maxSize < 0)
       throw new IllegalArgumentException(s"Invalid max size $maxSize for log read from segment $log")
-
+    // 确认结束的offset和大小
     val startOffsetAndSize = translateOffset(startOffset)
 
-    // if the start position is already off the end of the log, return null
+    // 如果其实position位置已经超过log的尾部，直接返回null
     if (startOffsetAndSize == null)
       return null
-
+    // 获取读取的起始文件位置
     val startPosition = startOffsetAndSize.position
+    // 构建读取的offset的metadata
     val offsetMetadata = LogOffsetMetadata(startOffset, this.baseOffset, startPosition)
 
     val adjustedMaxSize =
+    // 如果开启了最少一条消息的策略，从给定的读取大小和batch的最大大小中取出一个最大值
       if (minOneMessage) math.max(maxSize, startOffsetAndSize.size)
+      // 否则使用给定的读取最大字节数
       else maxSize
 
-    // return a log segment but with zero size in the case below
     if (adjustedMaxSize == 0)
+    // 如果经过计算后的最大字节读取数是0，则直接返回空数据
       return FetchDataInfo(offsetMetadata, MemoryRecords.EMPTY)
 
-    // calculate the length of the message set to read based on whether or not they gave us a maxOffset
+    // 计算读取消息集的长度，基于是否给定了maxOffset参数
     val fetchSize: Int = min((maxPosition - startPosition).toInt, adjustedMaxSize)
-
+    // 构建拉取的数据
     FetchDataInfo(offsetMetadata, log.slice(startPosition, fetchSize),
+      // 是否从第一个batch中已经拉取到指定大小的数据
       firstEntryIncomplete = adjustedMaxSize < startOffsetAndSize.size)
   }
 
@@ -449,8 +457,8 @@ class LogSegment private[log] (val log: FileRecords,
   }
 
   /**
-   * Calculate the offset that would be used for the next message to be append to this segment.
-   * Note that this is expensive.
+   * 计算下一条追加到此log段中的消息的offset
+   * 需要注意的是，这方法代价很高
    */
   @threadsafe
   def readNextOffset: Long = {

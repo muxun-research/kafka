@@ -74,8 +74,13 @@ case class LogOffsetMetadata(messageOffset: Long,
     this.relativePositionInSegment - that.relativePositionInSegment
   }
 
-  // decide if the offset metadata only contains message offset info
+  /**
+   * 判断offset元数据是否只包含了消息的offset信息
+   * @return
+   */
   def messageOffsetOnly: Boolean = {
+    // log段的基础offset == Log的位置offset
+    // log段中相对的位置 == logOffset中未知的文件位置
     segmentBaseOffset == Log.UnknownOffset && relativePositionInSegment == LogOffsetMetadata.UnknownFilePosition
   }
 
