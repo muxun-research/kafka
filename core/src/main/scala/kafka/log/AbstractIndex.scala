@@ -167,7 +167,7 @@ abstract class AbstractIndex[K, V](@volatile var file: File, val baseOffset: Lon
   }
 
   /**
-   * Flush the data in the index to disk
+   * 将所有的索引数据写入到磁盘上
    */
   def flush(): Unit = {
     inLock(lock) {

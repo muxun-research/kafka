@@ -973,7 +973,6 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         Integer partitionsCount = cluster.partitionCountForTopic(topic);
 		// 返回缓存元数据，如果指定记录的partition既没有声明，或者在已知的partition范围内
 		// 返回集群等待时间为0的ClusterAndWaitTime
->>>>>>>d2b03115f7683352eaef1621489e84ff96f79799
         if (partitionsCount != null && (partition == null || partition < partitionsCount))
 			// 返回新的集群元数据及等待时间
             return new ClusterAndWaitTime(cluster, 0);

@@ -43,7 +43,9 @@ private[log] case class TxnIndexSearchResult(abortedTransactions: List[AbortedTx
  */
 @nonthreadsafe
 class TransactionIndex(val startOffset: Long, @volatile var file: File) extends Logging {
-  // note that the file is not created until we need it
+  /**
+   * 直到需要的时候，这个文件通道才会创建
+   */
   @volatile private var maybeChannel: Option[FileChannel] = None
   private var lastOffset: Option[Long] = None
 

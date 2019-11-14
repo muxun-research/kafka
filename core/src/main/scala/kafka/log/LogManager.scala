@@ -266,13 +266,24 @@ class LogManager(logDirs: Seq[File],
   // Only for testing
   private[log] def hasLogsToBeDeleted: Boolean = !logsToBeDeleted.isEmpty
 
+  /**
+   * 加载数据目录下的日志目录
+   * @param logDir          数据目录
+   * @param recoveryPoints  恢复节点
+   * @param logStartOffsets logStartOffset
+   */
   private def loadLog(logDir: File, recoveryPoints: Map[TopicPartition, Long], logStartOffsets: Map[TopicPartition, Long]): Unit = {
     debug(s"Loading log '${logDir.getName}'")
-    val topicPartition = Log.parseTopicPartitionName(logDir)
-    val config = topicConfigs.getOrElse(topicPartition.topic, currentDefaultConfig)
-    val logRecoveryPoint = recoveryPoints.getOrElse(topicPartition, 0L)
-    val logStartOffset = logStartOffsets.getOrElse(topicPartition, 0L)
 
+    // 解析路径中存储的topic-partition信息
+    val topicPartition = Log.parseTopicPartitionName(logDir)
+    // 获取对应topic-partition的配置
+    val config = topicConfigs.getOrElse(topicPartition.topic, currentDefaultConfig)
+    // 获取对应的topic-partition的恢复节点
+    val logRecoveryPoint = recoveryPoints.getOrElse(topicPartition, 0L)
+    // 获取对应topic-partition的logStartOffset
+    val logStartOffset = logStartOffsets.getOrElse(topicPartition, 0L)
+    // 创建对应的Log
     val log = Log(
       dir = logDir,
       config = config,
@@ -284,16 +295,18 @@ class LogManager(logDirs: Seq[File],
       time = time,
       brokerTopicStats = brokerTopicStats,
       logDirFailureChannel = logDirFailureChannel)
-
+    // 如果Log的文件名称是以-delete为结尾的，添加到待删除的列表中等待删除
     if (logDir.getName.endsWith(Log.DeleteDirSuffix)) {
       addLogToBeDeleted(log)
     } else {
+      // 否则根据log类型判断需要放置的位置
       val previous = {
         if (log.isFuture)
           this.futureLogs.put(topicPartition, log)
         else
           this.currentLogs.put(topicPartition, log)
       }
+      // 添加完成后，但是出现了当前topic-partition重复添加后，直接抛出异常
       if (previous != null) {
         if (log.isFuture)
           throw new IllegalStateException("Duplicate log directories found: %s, %s!".format(log.dir.getAbsolutePath, previous.dir.getAbsolutePath))
@@ -313,29 +326,34 @@ class LogManager(logDirs: Seq[File],
     // 调度清理任务来删除旧的日志
     if (scheduler != null) {
       info("Starting log cleanup with a period of %d ms.".format(retentionCheckMs))
-
+      // 这个任务不是清理失效的片段，并维护日志的大小
       scheduler.schedule("kafka-log-retention",
                          cleanupLogs _,
                          delay = InitialTaskDelayMs,
                          period = retentionCheckMs,
                          TimeUnit.MILLISECONDS)
       info("Starting log flusher with a default period of %d ms.".format(flushCheckMs))
+      // 定时刷新还没有写到磁盘上的日志
       scheduler.schedule("kafka-log-flusher",
                          flushDirtyLogs _,
                          delay = InitialTaskDelayMs,
                          period = flushCheckMs,
                          TimeUnit.MILLISECONDS)
+      // 定时将数据目录的所有日志的检查点写到检查点文件中
       scheduler.schedule("kafka-recovery-point-checkpoint",
                          checkpointLogRecoveryOffsets _,
                          delay = InitialTaskDelayMs,
                          period = flushRecoveryOffsetCheckpointMs,
                          TimeUnit.MILLISECONDS)
+      //
       scheduler.schedule("kafka-log-start-offset-checkpoint",
                          checkpointLogStartOffsets _,
                          delay = InitialTaskDelayMs,
                          period = flushStartOffsetCheckpointMs,
                          TimeUnit.MILLISECONDS)
-      scheduler.schedule("kafka-delete-logs", // will be rescheduled after each delete logs with a dynamic period
+      // 删除日志
+      // 在每次删除日志后，会根据一个动态的时间段，重新进行调度
+      scheduler.schedule("kafka-delete-logs",
                          deleteLogs _,
                          delay = InitialTaskDelayMs,
                          unit = TimeUnit.MILLISECONDS)
@@ -348,6 +366,7 @@ class LogManager(logDirs: Seq[File],
    * 清理符合要求的log
    * 返回删除的log段数量
    * 仅考虑没有进行压缩的log
+   * cleanupLogs()用于清理超过参数设定阈值大小的旧日志
    */
   def cleanupLogs(): Unit = {
     debug("Beginning log cleanup...")
@@ -426,7 +445,7 @@ class LogManager(logDirs: Seq[File],
 
       val jobsForDir = logsInDir map { log =>
         CoreUtils.runnable {
-          // flush the log to ensure latest possible recovery point
+          // 刷新log来确认最新的可用的恢复点
           log.flush()
           log.close()
         }
@@ -550,8 +569,8 @@ class LogManager(logDirs: Seq[File],
   }
 
   /**
-   * Write out the current log start offset for all logs to a text file in the log directory
-   * to avoid exposing data that have been deleted by DeleteRecordsRequest
+   * 将当前的log的logStartOffset写入到一个text文本中，存储在log目录中
+   * 避免暴露由DeleteRecordsRequest请求删除的数据
    */
   def checkpointLogStartOffsets(): Unit = {
     liveLogDirs.foreach(checkpointLogStartOffsetsInDir)
@@ -585,17 +604,21 @@ class LogManager(logDirs: Seq[File],
   }
 
   /**
-   * Checkpoint log start offset for all logs in provided directory.
+   * 给定目录中所有日志的logStartOffset检查点
    */
   private def checkpointLogStartOffsetsInDir(dir: File): Unit = {
     for {
+      // 获取给定的目录的所有partition的log
       partitionToLog <- logsByDir.get(dir.getAbsolutePath)
+      // 获取当前目录的检查点文件
       checkpoint <- logStartOffsetCheckpoints.get(dir)
     } {
       try {
+        // 获取所有的partition log
         val logStartOffsets = partitionToLog.collect {
           case (k, log) if log.logStartOffset > log.logSegments.head.baseOffset => k -> log.logStartOffset
         }
+        // 写入到检查点中
         checkpoint.write(logStartOffsets)
       } catch {
         case e: IOException =>
@@ -981,7 +1004,7 @@ class LogManager(logDirs: Seq[File],
   }
 
   /**
-   * Get all the partition logs
+   * 获取所有的partition的log，包括当前的log和未来的log
    */
   def allLogs: Iterable[Log] = currentLogs.values ++ futureLogs.values
 
@@ -1009,16 +1032,19 @@ class LogManager(logDirs: Seq[File],
   }
 
   /**
-   * Flush any log which has exceeded its flush interval and has unwritten messages.
+   * flush一些已经写入，但是超过flush时间间隔的log
+   * 是将写入到页缓存，但是还没有写入到磁盘上的数据写入到磁盘中
    */
   private def flushDirtyLogs(): Unit = {
     debug("Checking for dirty logs to flush...")
-
+    // 遍历所有的log
     for ((topicPartition, log) <- currentLogs.toList ++ futureLogs.toList) {
       try {
+        // 计算上一次刷新的时间戳
         val timeSinceLastFlush = time.milliseconds - log.lastFlushTime
         debug(s"Checking if flush is needed on ${topicPartition.topic} flush interval ${log.config.flushMs}" +
               s" last flushed ${log.lastFlushTime} time since last flush: $timeSinceLastFlush")
+        // 如果超过了上一次刷新的时间戳，进行刷新
         if(timeSinceLastFlush >= log.config.flushMs)
           log.flush
       } catch {

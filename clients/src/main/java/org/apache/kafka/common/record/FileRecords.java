@@ -167,7 +167,7 @@ public class FileRecords extends AbstractRecords implements Closeable {
     }
 
     /**
-     * Commit all written data to the physical disk
+	 * 提交所有写入数据到磁盘上
      */
     public void flush() throws IOException {
         channel.force(true);
@@ -190,13 +190,13 @@ public class FileRecords extends AbstractRecords implements Closeable {
     }
 
     /**
-     * Delete this message set from the filesystem
-     * @throws IOException if deletion fails due to an I/O error
-     * @return  {@code true} if the file was deleted by this method; {@code false} if the file could not be deleted
-     *          because it did not exist
+	 * 直接从文件系统中删除这个消息集
+	 * @throws IOException 出现IO异常问题，抛出IOException
+	 * @return 通过此方法删除的文件，返回true，如果因为文件不存在导致的删除失败，返回false
      */
     public boolean deleteIfExists() throws IOException {
         Utils.closeQuietly(channel, "FileChannel");
+		// 直接根据文件路径删除文件
         return Files.deleteIfExists(file.toPath());
     }
 

@@ -29,8 +29,8 @@ import kafka.server.checkpoints.OffsetCheckpointFile
 import kafka.utils.CoreUtils._
 import kafka.utils.{Logging, Pool}
 import org.apache.kafka.common.TopicPartition
-import org.apache.kafka.common.utils.Time
 import org.apache.kafka.common.errors.KafkaStorageException
+import org.apache.kafka.common.utils.Time
 
 import scala.collection.{Iterable, Seq, immutable, mutable}
 
@@ -204,23 +204,25 @@ private[log] class LogCleanerManager(val logDirs: Seq[File],
   }
 
   /**
-    * Pause logs cleaning for logs that do not have compaction enabled
-    * and do not have other deletion or compaction in progress.
-    * This is to handle potential race between retention and cleaner threads when users
-    * switch topic configuration between compacted and non-compacted topic.
-    * @return retention logs that have log cleaning successfully paused
-    */
+   * 暂停没有开启压缩的logs清理，也不会有其他的删除或者压缩操作
+   * 当用户切换压缩和不压缩的的topic配置时，用于处理保留线程和清理线程潜在的竞争
+   * @return 需要保留的log是否已经成功暂停log清理
+   */
   def pauseCleaningForNonCompactedPartitions(): Iterable[(TopicPartition, Log)] = {
     inLock(lock) {
+      // 过滤没有开启压缩配置的log
       val deletableLogs = logs.filter {
-        case (_, log) => !log.config.compact // pick non-compacted logs
+        case (_, log) => !log.config.compact
       }.filterNot {
-        case (topicPartition, _) => inProgress.contains(topicPartition) // skip any logs already in-progress
+        // 并从未开启压缩配置的log中筛选去掉已经处于工作中的log
+        case (topicPartition, _) => inProgress.contains(topicPartition)
       }
 
+      // 暂停清理任务
       deletableLogs.foreach {
         case (topicPartition, _) => inProgress.put(topicPartition, LogCleaningPaused(1))
       }
+      // 返回已暂停的log
       deletableLogs
     }
   }
