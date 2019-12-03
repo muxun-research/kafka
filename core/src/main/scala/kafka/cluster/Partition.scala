@@ -659,45 +659,55 @@ class Partition(val topicPartition: TopicPartition, // topic partition信息，�
   }
 
   /**
-   * Check and maybe expand the ISR of the partition.
-   * A replica will be added to ISR if its LEO >= current hw of the partition and it is caught up to
-   * an offset within the current leader epoch. A replica must be caught up to the current leader
-   * epoch before it can join ISR, because otherwise, if there is committed data between current
-   * leader's HW and LEO, the replica may become the leader before it fetches the committed data
-   * and the data will be lost.
+   * 检查或可能扩充partition的ISR
+   * 如果一个副本节点可以添加到ISR中，那么它需要满足以下条件：
+   * 1. 它的logEndOffset ≥ 当前partition的高水位
+   * 2. 它使用当前的leader epoch来追踪offset
+   * 在它加入ISR之前，它必须追上当前的leader epoch
+   * 否则，如果在当前leader节点的高水位和logEndOffset之间有一个commit数据，那么副本节点很有可能在它拉取到提交数据之前成为leader节点，这回导致数据丢失
    *
-   * Technically, a replica shouldn't be in ISR if it hasn't caught up for longer than replicaLagTimeMaxMs,
-   * even if its log end offset is >= HW. However, to be consistent with how the follower determines
-   * whether a replica is in-sync, we only check HW.
+   * 通常，副本节点如果在replicaLagTimeMaxMs时间内没有追上leader节点，那么就不应该成为ISR，即使它的logEndOffset ≥ 高水位
+   * 然而，为了和follower节点如何确定副本节点在同步状态中的一致性，仅检查高水位
    *
-   * This function can be triggered when a replica's LEO has incremented.
-   *
-   * @return true if the high watermark has been updated
+   * 在副本节点的logEndOffset增加时可以触发当前函数
+   * @return 高水位更新，返回true
    */
   private def maybeExpandIsr(followerReplica: Replica, followerFetchTimeMs: Long): Boolean = {
     inWriteLock(leaderIsrUpdateLock) {
-      // check if this replica needs to be added to the ISR
+      // 检查当前副本节点是否需要加入到ISR中
       leaderLogIfLocal match {
+        // 如果是leader节点，是有日志文件的
         case Some(leaderLog) =>
           val leaderHighwatermark = leaderLog.highWatermark
+          // 当前ISR不包含此follower节点，并且follower节点是否处于正常的同步状态
           if (!inSyncReplicaIds.contains(followerReplica.brokerId) && isFollowerInSync(followerReplica, leaderHighwatermark)) {
+            // 构建新的ISR replica id集合
             val newInSyncReplicaIds = inSyncReplicaIds + followerReplica.brokerId
             info(s"Expanding ISR from ${inSyncReplicaIds.mkString(",")} " +
               s"to ${newInSyncReplicaIds.mkString(",")}")
 
-            // update ISR in ZK and cache
+            // 更新ZK和缓存中存储的ISR信息
             expandIsr(newInSyncReplicaIds)
           }
-          // check if the HW of the partition can now be incremented
-          // since the replica may already be in the ISR and its LEO has just incremented
+          // 尝试更新高水位
           maybeIncrementLeaderHW(leaderLog, followerFetchTimeMs)
-        case None => false // nothing to do if no longer leader
+        case None => false
+        // 非leader节点，也就是没有日志文件的情况下，是不考虑的
       }
     }
   }
 
+  /**
+   * follower节点是否处于正常的同步状态
+   * @param followerReplica follower数据同步节点
+   * @param highWatermark   高水位
+   * @return follower节点是否处于正常的同步状态
+   */
   private def isFollowerInSync(followerReplica: Replica, highWatermark: Long): Boolean = {
+    // 获取follower节点的logEndOffset
     val followerEndOffset = followerReplica.logEndOffset
+    // follower节点的logEndOffset ≥ 高水位，并且follower节点的logEndOffset处于leader epoch中
+    // 满足以上条件则follower节点处于正常的同步状态
     followerEndOffset >= highWatermark && leaderEpochStartOffsetOpt.exists(followerEndOffset >= _)
   }
 
@@ -748,22 +758,15 @@ class Partition(val topicPartition: TopicPartition, // topic partition信息，�
   }
 
   /**
-   * Check and maybe increment the high watermark of the partition;
-   * this function can be triggered when
+   * 检查是否需要增加partition的高水位
+   * 可以在以下的情况进行触发：
+   * 1. Partition的ISR触发
+   * 2. 任何一个副本节点的logEndOffset发生了变化
    *
-   * 1. Partition ISR changed
-   * 2. Any replica's LEO changed
-   *
-   * The HW is determined by the smallest log end offset among all replicas that are in sync or are considered caught-up.
-   * This way, if a replica is considered caught-up, but its log end offset is smaller than HW, we will wait for this
-   * replica to catch up to the HW before advancing the HW. This helps the situation when the ISR only includes the
-   * leader replica and a follower tries to catch up. If we don't wait for the follower when advancing the HW, the
-   * follower's log end offset may keep falling behind the HW (determined by the leader's log end offset) and therefore
-   * will never be added to ISR.
-   *
-   * Returns true if the HW was incremented, and false otherwise.
-   * Note There is no need to acquire the leaderIsrUpdate lock here
-   * since all callers of this private API acquire that lock
+   * 高水位用于确认所有副本节点中的最小logEndOffset，副本节点可以处于同步或者被认为追赶上了
+   * 通过这种方式，如果一个副本节点被认为是追赶上了，但是它的logEndOffset＜高水位，会在推进高水位之前，等待副本节点追赶上高水位
+   * 当ISR中仅包含leader节点，follower节点正在尝试追赶的情形下有帮助
+   * 如果不进行等待，而直接推进高水位，follower节点的logEndOffset会永远在高水位身后（由leader节点的logEndOffset确认），因此follower节点将永远无法进入ISR中
    */
   private def maybeIncrementLeaderHW(leaderLog: Log, curTime: Long = time.milliseconds): Boolean = {
     val replicaLogEndOffsets = remoteReplicas.filter { replica =>

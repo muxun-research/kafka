@@ -17,26 +17,27 @@
 
 package kafka.server
 
-import java.util.{Collections, Optional}
 import java.util.concurrent.locks.ReentrantReadWriteLock
+import java.util.{Collections, Optional}
 
-import scala.collection.{Seq, Set, mutable}
-import scala.collection.JavaConverters._
-import kafka.cluster.{Broker, EndPoint}
 import kafka.api._
+import kafka.cluster.{Broker, EndPoint}
 import kafka.controller.StateChangeLogger
 import kafka.utils.CoreUtils._
 import kafka.utils.Logging
 import org.apache.kafka.common.internals.Topic
-import org.apache.kafka.common.{Cluster, Node, PartitionInfo, TopicPartition}
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.requests.{MetadataResponse, UpdateMetadataRequest}
+import org.apache.kafka.common.{Cluster, Node, PartitionInfo, TopicPartition}
+
+import scala.collection.JavaConverters._
+import scala.collection.{Seq, Set, mutable}
 
 
 /**
- *  A cache for the state (e.g., current leader) of each partition. This cache is updated through
- *  UpdateMetadataRequest from the controller. Every broker maintains the same cache, asynchronously.
+ * A cache for the state (e.g., current leader) of each partition. This cache is updated through
+ * UpdateMetadataRequest from the controller. Every broker maintains the same cache, asynchronously.
  */
 class MetadataCache(brokerId: Int) extends Logging {
 
@@ -195,21 +196,33 @@ class MetadataCache(brokerId: Int) extends Logging {
     }
   }
 
+  /**
+   * 获取给定的partition的EndPoints信息
+   * @param tp           topic-partition信息
+   * @param listenerName 监听器名称
+   */
   def getPartitionReplicaEndpoints(tp: TopicPartition, listenerName: ListenerName): Map[Int, Node] = {
     val snapshot = metadataSnapshot
+    // 从元数据中获取partition的状态进行遍历
+    // flatMap(): 过滤每个给定topic下的partition
+    // map(): 获取每个partition的副本节点信息，以partition为单位放入到Map中
     snapshot.partitionStates.get(tp.topic()).flatMap(_.get(tp.partition())).map { partitionInfo =>
       val replicaIds = partitionInfo.basePartitionState.replicas
       replicaIds.asScala
+        // 将副本节点包装为Node
         .map(replicaId => replicaId.intValue() -> {
           snapshot.aliveBrokers.get(replicaId.longValue()) match {
+            // 从存活的broker中获取当前broker的信息
             case Some(broker) =>
               broker.getNode(listenerName).getOrElse(Node.noNode())
             case None =>
               Node.noNode()
           }}).toMap
+        // 过滤掉空Node的情况，map会产生空Node
         .filter(pair => pair match {
           case (_, node) => !node.isEmpty
         })
+      // 如果flatMap()获得的结果为空，那么返回一个emptyMap()
     }.getOrElse(Map.empty[Int, Node])
   }
 

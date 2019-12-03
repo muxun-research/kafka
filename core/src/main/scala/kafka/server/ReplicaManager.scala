@@ -32,7 +32,6 @@ import kafka.server.QuotaFactory.QuotaManagers
 import kafka.server.checkpoints.{LazyOffsetCheckpoints, OffsetCheckpointFile, OffsetCheckpoints}
 import kafka.utils._
 import kafka.zk.KafkaZkClient
-import org.apache.kafka.common.{ElectionType, Node, TopicPartition}
 import org.apache.kafka.common.errors._
 import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.metrics.Metrics
@@ -50,6 +49,7 @@ import org.apache.kafka.common.requests.FetchResponse.AbortedTransaction
 import org.apache.kafka.common.requests.ProduceResponse.PartitionResponse
 import org.apache.kafka.common.requests._
 import org.apache.kafka.common.utils.Time
+import org.apache.kafka.common.{ElectionType, Node, TopicPartition}
 
 import scala.collection.JavaConverters._
 import scala.collection.{Map, Seq, Set, mutable}
@@ -224,6 +224,9 @@ class ReplicaManager(val config: KafkaConfig,
     }
   }
 
+  /**
+   * 副本节点选择器
+   */
   val replicaSelectorOpt: Option[ReplicaSelector] = createReplicaSelector()
 
   val leaderCount = newGauge(
@@ -431,6 +434,12 @@ class ReplicaManager(val config: KafkaConfig,
     allPartitions.values.iterator.count(_ == HostedPartition.Offline)
   }
 
+  /**
+   * 获取partition信息
+   * @param topicPartition topic-partition信息
+   * @param expectLeader
+   * @return
+   */
   def getPartitionOrException(topicPartition: TopicPartition, expectLeader: Boolean): Partition = {
     getPartition(topicPartition) match {
       case HostedPartition.Online(partition) =>
@@ -503,7 +512,6 @@ class ReplicaManager(val config: KafkaConfig,
 
       // 如果需要延迟生产请出去
       if (delayedProduceRequestRequired(requiredAcks, entriesPerPartition, localProduceResults)) {
-        // create delayed produce operation
         // 创建延迟生产操作
         val produceMetadata = ProduceMetadata(requiredAcks, produceStatus)
         // 创建延迟生产
@@ -823,9 +831,10 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   /**
-   * Fetch messages from a replica, and wait until enough data can be fetched and return;
-   * the callback function will be triggered either when timeout or required fetch info is satisfied.
-   * Consumers may fetch from any replica, but followers can only fetch from the leader.
+   * 从副本节点拉取消息
+   * 直到等待到足够多的数据之后才返回
+   * 回调任务可以在超时或者满足需要的拉取信息之后返回
+   * 消费者可能从任何一个副本节点拉取消息，但是follower节点仅能从leader节点拉取消息
    */
   def fetchMessages(timeout: Long,
                     replicaId: Int,
@@ -837,16 +846,26 @@ class ReplicaManager(val config: KafkaConfig,
                     responseCallback: Seq[(TopicPartition, FetchPartitionData)] => Unit,
                     isolationLevel: IsolationLevel,
                     clientMetadata: Option[ClientMetadata]): Unit = {
+    // 校验备份副本的编号
     val isFromFollower = Request.isValidBrokerId(replicaId)
-
+    // 确认拉取隔离级别
+    // 如果拉取请求来自于follower节点，或者备份副本编号是未来的本地副本编号，则使用FetchLogEnd策略
     val fetchIsolation = if (isFromFollower || replicaId == Request.FutureLocalReplicaId)
       FetchLogEnd
     else if (isolationLevel == IsolationLevel.READ_COMMITTED)
+    // 如果拉取隔离级别是可重复度，则使用FetchTxnCommitted策略
       FetchTxnCommitted
     else
+    // 否则，默认情况下使用FetchHighWatermark策略
       FetchHighWatermark
 
+    /**
+     * 读取日志文件信息
+     * @return key:   TopicPartition
+     *         value: LogReadResult
+     */
     def readFromLog(): Seq[(TopicPartition, LogReadResult)] = {
+      // 从本地日志中读取
       val result = readFromLocalLog(
         replicaId = replicaId,
         fetchOnlyFromLeader = isFromFollower,
@@ -856,7 +875,9 @@ class ReplicaManager(val config: KafkaConfig,
         readPartitionInfo = fetchInfos,
         quota = quota,
         clientMetadata = clientMetadata)
+      // 如果是follower节点的信息，则更新当前follower节点的拉取状态
       if (isFromFollower) updateFollowerFetchState(replicaId, result)
+      // 如果不是follower节点的FetchRequest，则直接返回读取结果
       else result
     }
 
@@ -923,7 +944,15 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   /**
-   * Read from multiple topic partitions at the given offset up to maxSize bytes
+   * 从多个topic-partition中获取从给定的offset开始到maxSize字节大小的数据
+   * @param replicaId           备份副本编号
+   * @param fetchOnlyFromLeader 是否只从leader节点拉取数据，副本节点仅会从leader节点拉取数据
+   * @param fetchIsolation      拉取隔离级别
+   * @param fetchMaxBytes       拉取的最大字节数
+   * @param hardMaxBytesLimit   是否要求必须获取
+   * @param readPartitionInfo   需要进行读取的topic-partition信息
+   * @param quota
+   * @param clientMetadata
    */
   def readFromLocalLog(replicaId: Int,
                        fetchOnlyFromLeader: Boolean,
@@ -934,24 +963,37 @@ class ReplicaManager(val config: KafkaConfig,
                        quota: ReplicaQuota,
                        clientMetadata: Option[ClientMetadata]): Seq[(TopicPartition, LogReadResult)] = {
 
+    /**
+     * 读取指定topic-partition的日志
+     * @param tp         指定的topic-partition
+     * @param fetchInfo  拉取信息
+     * @param limitBytes 最大限制拉取字节数
+     * @param minOneMessage
+     * @return
+     */
     def read(tp: TopicPartition, fetchInfo: PartitionData, limitBytes: Int, minOneMessage: Boolean): LogReadResult = {
+      // 给定分区拉取的起始offset
       val offset = fetchInfo.fetchOffset
+      // 需要拉取的字节数
       val partitionFetchSize = fetchInfo.maxBytes
+      // 给定partition的起始偏移量
       val followerLogStartOffset = fetchInfo.logStartOffset
-
+      // 标记给定topic的拉取频率
       brokerTopicStats.topicStats(tp.topic).totalFetchRequestRate.mark()
+      // 标记所有topic的拉取频率
       brokerTopicStats.allTopicsStats.totalFetchRequestRate.mark()
-
+      // 获取最大拉取字节数，由请求的最大拉取字节数和设置的最大拉取字节数组成
       val adjustedMaxBytes = math.min(fetchInfo.maxBytes, limitBytes)
       try {
         trace(s"Fetching log segment for partition $tp, offset $offset, partition fetch size $partitionFetchSize, " +
           s"remaining response limit $limitBytes" +
           (if (minOneMessage) s", ignoring response/partition size limits" else ""))
-
+        // 获取partition信息
         val partition = getPartitionOrException(tp, expectLeader = fetchOnlyFromLeader)
+        // 设置本次的拉取时间
         val fetchTimeMs = time.milliseconds
 
-        // If we are the leader, determine the preferred read-replica
+        // 如果当前节点是leader节点，那么确认首选的只读副本节点
         val preferredReadReplica = clientMetadata.flatMap(
           metadata => findPreferredReadReplica(tp, metadata, replicaId, fetchInfo.fetchOffset, fetchTimeMs))
 
@@ -1064,46 +1106,55 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   /**
-    * Using the configured [[ReplicaSelector]], determine the preferred read replica for a partition given the
-    * client metadata, the requested offset, and the current set of replicas. If the preferred read replica is the
-    * leader, return None
-    */
+   * 使用配置的[[ReplicaSelector]]，通过给定的客户端元数据，请求的offset，当前的ISR来partition确认首选读副本节点
+   * 如果首选的读副本节点就是leader节点，返回None
+   */
   def findPreferredReadReplica(tp: TopicPartition,
                                clientMetadata: ClientMetadata,
                                replicaId: Int,
                                fetchOffset: Long,
                                currentTimeMs: Long): Option[Int] = {
+    // 获取给定的分区信息
     val partition = getPartitionOrException(tp, expectLeader = false)
-
+    // 如果当前分区时leader节点
     if (partition.isLeader) {
+      // 如果通过了备份副本编号校验，则直接返回None
       if (Request.isValidBrokerId(replicaId)) {
-        // Don't look up preferred for follower fetches via normal replication
+        // 不要通过普通的复制同步来查找首选的follower节点
         Option.empty
       } else {
+        // 通过replicaSelector选择读副本节点
         replicaSelectorOpt.flatMap { replicaSelector =>
+          // 获取当前topic-partition节点的EndPoints信息
           val replicaEndpoints = metadataCache.getPartitionReplicaEndpoints(tp, new ListenerName(clientMetadata.listenerName))
+          // 获取partition的远程副本节点
           var replicaInfoSet: Set[ReplicaView] = partition.remoteReplicas
-            // Exclude replicas that don't have the requested offset (whether or not if they're in the ISR)
+            // 过滤正处于ISR状态的副本节点，也就是fetchOffset处于正常的偏移量范围内
             .filter(replica => replica.logEndOffset >= fetchOffset)
             .filter(replica => replica.logStartOffset <= fetchOffset)
+            // 构建副本选择器
             .map(replica => new DefaultReplicaView(
               replicaEndpoints.getOrElse(replica.brokerId, Node.noNode()),
               replica.logEndOffset,
               currentTimeMs - replica.lastCaughtUpTimeMs
             ))
-
+          // 如果partition有已声明的leader节点
           if (partition.leaderReplicaIdOpt.isDefined) {
+            // 获取leader节点
             val leaderReplica: ReplicaView = partition.leaderReplicaIdOpt
+              // 构建leader节点字典表
               .map(replicaId => replicaEndpoints.getOrElse(replicaId, Node.noNode()))
               .map(leaderNode => new DefaultReplicaView(leaderNode, partition.localLogOrException.logEndOffset, 0L))
               .get
+            // 此时replicaInfoSet已有所有的ISR远程副本节点
+            // 此时再加上所有的leader节点
             replicaInfoSet ++= Set(leaderReplica)
-
+            // 构建副本节点信息和leader节点信息
             val partitionInfo = new DefaultPartitionView(replicaInfoSet.asJava, leaderReplica)
+
             replicaSelector.select(tp, clientMetadata, partitionInfo).asScala
               .filter(!_.endpoint.isEmpty)
-              // Even though the replica selector can return the leader, we don't want to send it out with the
-              // FetchResponse, so we exclude it here
+              // 不希望leader节点发送FetchResponse，所以此处剔除了leader节点
               .filter(!_.equals(leaderReplica))
               .map(_.endpoint.id)
           } else {
@@ -1666,8 +1717,13 @@ class ReplicaManager(val config: KafkaConfig,
     new ReplicaAlterLogDirsManager(config, this, quotaManager, brokerTopicStats)
   }
 
+  /**
+   * 创建副本节点选择器
+   * @return 副本节点选择器
+   */
   protected def createReplicaSelector(): Option[ReplicaSelector] = {
     config.replicaSelectorClassName.map { className =>
+      // 通过副本选择器类名创建的是临时副本选择器
       val tmpReplicaSelector: ReplicaSelector = CoreUtils.createObject[ReplicaSelector](className)
       tmpReplicaSelector.configure(config.originals())
       tmpReplicaSelector

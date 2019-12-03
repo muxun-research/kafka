@@ -22,7 +22,11 @@ object Request {
   val DebuggingConsumerId: Int = -2
   val FutureLocalReplicaId: Int = -3
 
-  // Broker ids are non-negative int.
+  /**
+   * 备份副本编号必须为非负整数
+   * @param brokerId 备份副本编号
+   * @return 备份副本编号是否符号要求
+   */
   def isValidBrokerId(brokerId: Int): Boolean = brokerId >= 0
 
   def describeReplicaId(replicaId: Int): String = {

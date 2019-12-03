@@ -6,44 +6,60 @@
  * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-*/
+ */
 
 package kafka.cluster
 
-import kafka.log.{Log}
+import kafka.log.Log
+import kafka.server.LogOffsetMetadata
 import kafka.utils.Logging
-import kafka.server.{LogOffsetMetadata}
-import org.apache.kafka.common.{TopicPartition}
+import org.apache.kafka.common.TopicPartition
 
 class Replica(val brokerId: Int, val topicPartition: TopicPartition) extends Logging {
-  // the log end offset value, kept in all replicas;
-  // for local replica it is the log's end offset, for remote replicas its value is only updated by follower fetch
+  /**
+   * 偏移量元数据，在所有节点中都会进行存储
+   * 对于本地副本来说，是日志文件的结束偏移量
+   * 对于远程副本来说，只会由follower拉取时进行更新
+   */
   @volatile private[this] var _logEndOffsetMetadata = LogOffsetMetadata.UnknownOffsetMetadata
-  // the log start offset value, kept in all replicas;
   // for local replica it is the log's start offset, for remote replicas its value is only updated by follower fetch
+  /**
+   * log起始偏移量，在所有节点中都会进行存储
+   * 对于本地副本，是日志的起始偏移量
+   * 对于远程副本，只会在follower拉取时进行更新
+   */
   @volatile private[this] var _logStartOffset = Log.UnknownOffset
 
-  // The log end offset value at the time the leader received the last FetchRequest from this follower
-  // This is used to determine the lastCaughtUpTimeMs of the follower
+  /**
+   * 当前leader节点收到follower最近一次的FetchRequest的logEndOffset
+   * 用于确认follower节点的"lastCaughtUpTimeMs"
+   */
   @volatile private[this] var lastFetchLeaderLogEndOffset = 0L
 
-  // The time when the leader received the last FetchRequest from this follower
-  // This is used to determine the lastCaughtUpTimeMs of the follower
+  /**
+   * leader节点收到此follower节点最近一次FetchRequest的时间戳
+   * 用于确认follower节点的"lastCaughtUpTimeMs"
+   */
   @volatile private[this] var lastFetchTimeMs = 0L
 
-  // lastCaughtUpTimeMs is the largest time t such that the offset of most recent FetchRequest from this follower >=
-  // the LEO of leader at time t. This is used to determine the lag of this follower and ISR of this partition.
+  /**
+   * 是此follower节点大多数FetchRequest的offset ≥ leader节点的logEndOffset的最大时间
+   * 用于确认follower滞后的进度和分区的ISR
+   */
   @volatile private[this] var _lastCaughtUpTimeMs = 0L
 
-  // highWatermark is the leader's high watermark after the most recent FetchRequest from this follower. This is
-  // used to determine the maximum HW this follower knows about. See KIP-392
+  /**
+   * 最高水位是在follower节点的大多数FetchRequest之后，leader节点的最高水位
+   * 用于确认follower已知的最大高水位
+   * 请看KIP-392
+   */
   @volatile private[this] var _lastSentHighWatermark = 0L
 
   def logStartOffset: Long = _logStartOffset
@@ -57,26 +73,27 @@ class Replica(val brokerId: Int, val topicPartition: TopicPartition) extends Log
   def lastSentHighWatermark: Long = _lastSentHighWatermark
 
   /*
-   * If the FetchRequest reads up to the log end offset of the leader when the current fetch request is received,
-   * set `lastCaughtUpTimeMs` to the time when the current fetch request was received.
+   * 如果在收到当前FetchRequest时，FetchRequest读取到leader节点的logEndOffset位置，设置"lastCaughtUpTimeMs"时间为收到当前FetchRequest的时间
    *
-   * Else if the FetchRequest reads up to the log end offset of the leader when the previous fetch request was received,
-   * set `lastCaughtUpTimeMs` to the time when the previous fetch request was received.
+   * 或者如果在收到上一个FetchRequest时，FetchRequest读取到leader节点的logEndOffset位置，设置"lastCaughtUpTimeMs"时间为收到上一个FetchRequest的时间
    *
-   * This is needed to enforce the semantics of ISR, i.e. a replica is in ISR if and only if it lags behind leader's LEO
-   * by at most `replicaLagTimeMaxMs`. These semantics allow a follower to be added to the ISR even if the offset of its
-   * fetch request is always smaller than the leader's LEO, which can happen if small produce requests are received at
-   * high frequency.
+   * 用于强制执行ISR，比如，当且仅当副本节点最多落后于leader节点的logEndOffset（LEO）达到"replicaLagTimeMaxMs"时，副本节点才处于ISR
+   * 这些语义允许将关注者添加到ISR，即使它的FetchRequest的offset总是比leader的logEndOffset小，这可以发生在高频次接收生产请求时
    */
   def updateFetchState(followerFetchOffsetMetadata: LogOffsetMetadata,
                        followerStartOffset: Long,
                        followerFetchTimeMs: Long,
                        leaderEndOffset: Long): Unit = {
+    // 如果follower节点发送的FetchRequest请求的offset ≥ leader节点的logEndOffset
     if (followerFetchOffsetMetadata.messageOffset >= leaderEndOffset)
+    // 设置"lastCaughtUpTimeMs" ＝ "_lastCaughtUpTimeMs"和"follower节点FetchRequest时间"的最大值
       _lastCaughtUpTimeMs = math.max(_lastCaughtUpTimeMs, followerFetchTimeMs)
     else if (followerFetchOffsetMetadata.messageOffset >= lastFetchLeaderLogEndOffset)
+    // 如果follower节点发送的FetchRequest请求的offset ≥ leader节点收到follower最近一次的FetchRequest的logEndOffset
+    // 设置"lastCaughtUpTimeMs" ＝ "_lastCaughtUpTimeMs"和"lastFetchTimeMs"的最大值
       _lastCaughtUpTimeMs = math.max(_lastCaughtUpTimeMs, lastFetchTimeMs)
-
+    // 更新logStartOffset、logEndOffsetMetadata
+    // lastFetchLeaderLogEndOffset、lastFetchTimeMs
     _logStartOffset = followerStartOffset
     _logEndOffsetMetadata = followerFetchOffsetMetadata
     lastFetchLeaderLogEndOffset = leaderEndOffset
@@ -85,21 +102,32 @@ class Replica(val brokerId: Int, val topicPartition: TopicPartition) extends Log
   }
 
   /**
-    * Update the high watermark of this remote replica. This is used to track what we think is the last known HW to
-    * a remote follower. Since this is recorded when we send a response, there is no way to guarantee that the follower
-    * actually receives this HW. So we consider this to be an upper bound on what the follower knows.
-    *
-    * When handling fetches, the last sent high watermark for a replica is checked to see if we should return immediately
-    * in order to propagate the HW more expeditiously. See KIP-392
-    */
+   * 更新远程副本的高水位
+   * 用于追踪已知最新的远程副本的高水位
+   * 当发送响应时进行记录，并不保证follower节点实际会收到高水位，所以可以认为这是一个follower节点已知的上限水位
+   *
+   * 在处理拉取请求时，回去检查最近一次发送的高水位来得出是否需要立即返回响应，为了迅速的传播高水位
+   * 具体请看KIP-392
+   */
   def updateLastSentHighWatermark(highWatermark: Long): Unit = {
+    // 更新为最近一次发送的高水位
     _lastSentHighWatermark = highWatermark
     trace(s"Updated HW of replica to $highWatermark")
   }
 
+  /**
+   * 重置_lastCaughtUpTimeMs
+   * @param curLeaderLogEndOffset 进行更新的最近一次FetchRequest的logEndOffset
+   * @param curTimeMs             当前时间戳
+   * @param lastCaughtUpTimeMs    follower节点 ≥ leader节点的logEndOffset的最大时间
+   */
   def resetLastCaughtUpTime(curLeaderLogEndOffset: Long, curTimeMs: Long, lastCaughtUpTimeMs: Long): Unit = {
+    // 更新leader节点收到follower最近一次的FetchRequest的logEndOffset
     lastFetchLeaderLogEndOffset = curLeaderLogEndOffset
+    // 更新leader节点收到此follower节点最近一次FetchRequest的时间戳
+    // 为当前时间戳
     lastFetchTimeMs = curTimeMs
+    // 更新大多数FetchRequest的offset ≥ leader节点的logEndOffset的最大时间
     _lastCaughtUpTimeMs = lastCaughtUpTimeMs
     trace(s"Reset state of replica to $this")
   }

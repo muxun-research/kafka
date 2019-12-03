@@ -182,7 +182,7 @@ class LogSegment private[log] (val log: FileRecords,
 
   /**
    * 确认范围内的offset
-   * @param offset
+   * @param offset 偏移量
    */
   private def ensureOffsetInRange(offset: Long): Unit = {
     // 是否可追加到offsetIndex中

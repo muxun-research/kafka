@@ -42,64 +42,77 @@ public interface ReplicaView {
      */
     long timeSinceLastCaughtUpMs();
 
-    /**
-     * Comparator for ReplicaView that returns in the order of "most caught up". This is used for deterministic
-     * selection of a replica when there is a tie from a selector.
-     */
-    static Comparator<ReplicaView> comparator() {
-        return Comparator.comparingLong(ReplicaView::logEndOffset)
-            .thenComparing(Comparator.comparingLong(ReplicaView::timeSinceLastCaughtUpMs).reversed())
-            .thenComparing(replicaInfo -> replicaInfo.endpoint().id());
-    }
+	/**
+	 * Comparator for ReplicaView that returns in the order of "most caught up". This is used for deterministic
+	 * selection of a replica when there is a tie from a selector.
+	 */
+	static Comparator<ReplicaView> comparator() {
+		return Comparator.comparingLong(ReplicaView::logEndOffset)
+				.thenComparing(Comparator.comparingLong(ReplicaView::timeSinceLastCaughtUpMs).reversed())
+				.thenComparing(replicaInfo -> replicaInfo.endpoint().id());
+	}
 
-    class DefaultReplicaView implements ReplicaView {
-        private final Node endpoint;
-        private final long logEndOffset;
-        private final long timeSinceLastCaughtUpMs;
+	/**
+	 * 默认副本节点视图
+	 */
+	class DefaultReplicaView implements ReplicaView {
+		/**
+		 * broker的EndPoint
+		 */
+		private final Node endpoint;
+		/**
+		 * 偏移量
+		 * 可能是结束偏移量或者拉取的偏移量
+		 */
+		private final long logEndOffset;
+		/**
+		 * 上一次请求拉取的时间戳
+		 */
+		private final long timeSinceLastCaughtUpMs;
 
-        public DefaultReplicaView(Node endpoint, long logEndOffset, long timeSinceLastCaughtUpMs) {
-            this.endpoint = endpoint;
-            this.logEndOffset = logEndOffset;
-            this.timeSinceLastCaughtUpMs = timeSinceLastCaughtUpMs;
-        }
+		public DefaultReplicaView(Node endpoint, long logEndOffset, long timeSinceLastCaughtUpMs) {
+			this.endpoint = endpoint;
+			this.logEndOffset = logEndOffset;
+			this.timeSinceLastCaughtUpMs = timeSinceLastCaughtUpMs;
+		}
 
-        @Override
-        public Node endpoint() {
-            return endpoint;
-        }
+		@Override
+		public Node endpoint() {
+			return endpoint;
+		}
 
-        @Override
-        public long logEndOffset() {
-            return logEndOffset;
-        }
+		@Override
+		public long logEndOffset() {
+			return logEndOffset;
+		}
 
-        @Override
-        public long timeSinceLastCaughtUpMs() {
-            return timeSinceLastCaughtUpMs;
-        }
+		@Override
+		public long timeSinceLastCaughtUpMs() {
+			return timeSinceLastCaughtUpMs;
+		}
 
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            DefaultReplicaView that = (DefaultReplicaView) o;
-            return logEndOffset == that.logEndOffset &&
-                    Objects.equals(endpoint, that.endpoint) &&
-                    Objects.equals(timeSinceLastCaughtUpMs, that.timeSinceLastCaughtUpMs);
-        }
+		@Override
+		public boolean equals(Object o) {
+			if (this == o) return true;
+			if (o == null || getClass() != o.getClass()) return false;
+			DefaultReplicaView that = (DefaultReplicaView) o;
+			return logEndOffset == that.logEndOffset &&
+					Objects.equals(endpoint, that.endpoint) &&
+					Objects.equals(timeSinceLastCaughtUpMs, that.timeSinceLastCaughtUpMs);
+		}
 
-        @Override
-        public int hashCode() {
-            return Objects.hash(endpoint, logEndOffset, timeSinceLastCaughtUpMs);
-        }
+		@Override
+		public int hashCode() {
+			return Objects.hash(endpoint, logEndOffset, timeSinceLastCaughtUpMs);
+		}
 
-        @Override
-        public String toString() {
-            return "DefaultReplicaView{" +
-                    "endpoint=" + endpoint +
-                    ", logEndOffset=" + logEndOffset +
-                    ", timeSinceLastCaughtUpMs=" + timeSinceLastCaughtUpMs +
-                    '}';
-        }
-    }
+		@Override
+		public String toString() {
+			return "DefaultReplicaView{" +
+					"endpoint=" + endpoint +
+					", logEndOffset=" + logEndOffset +
+					", timeSinceLastCaughtUpMs=" + timeSinceLastCaughtUpMs +
+					'}';
+		}
+	}
 }
