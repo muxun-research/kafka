@@ -523,35 +523,40 @@ class LogManager(logDirs: Seq[File],
   }
 
   /**
-   * Delete all data in a partition and start the log at the new offset
-   *
-   * @param topicPartition The partition whose log needs to be truncated
-   * @param newOffset The new offset to start the log with
-   * @param isFuture True iff the truncation should be performed on the future log of the specified partition
+   * 删除partition中所有的数据，并从新的偏移量开始新的日志
+   * @param topicPartition 需要截断的partition信息
+   * @param newOffset      重新开始的偏移量
+   * @param isFuture       true: 截断可以作用在指定partition的future log上
    */
   def truncateFullyAndStartAt(topicPartition: TopicPartition, newOffset: Long, isFuture: Boolean): Unit = {
     val log = {
+      // 如果isFuture，则从future中获取当前partition的信息
       if (isFuture)
         futureLogs.get(topicPartition)
       else
+      // 否则从现有的log中获取指定partition的信息
         currentLogs.get(topicPartition)
     }
-    // If the log does not exist, skip it
+    // 如果没有指定partition的日志，直接跳过
     if (log != null) {
-        //Abort and pause the cleaning of the log, and resume after truncation is done.
+      // 中断并暂停log的清理工作，在阶段完成之后恢复
       if (cleaner != null && !isFuture)
         cleaner.abortAndPauseCleaning(topicPartition)
       try {
+        // 截断并开始新的日志
         log.truncateFullyAndStartAt(newOffset)
         if (cleaner != null && !isFuture) {
+          // 是否需要重置清理任务的检查点
           cleaner.maybeTruncateCheckpoint(log.dir.getParentFile, topicPartition, log.activeSegment.baseOffset)
         }
       } finally {
         if (cleaner != null && !isFuture) {
+          // 截断之后，恢复清理工作
           cleaner.resumeCleaning(Seq(topicPartition))
           info(s"Compaction for partition $topicPartition is resumed")
         }
       }
+      // 恢复
       checkpointRecoveryOffsetsAndCleanSnapshot(log.dir.getParentFile, Seq(log))
     }
   }
@@ -577,15 +582,14 @@ class LogManager(logDirs: Seq[File],
   }
 
   /**
-    * Write the recovery checkpoint file for all logs in provided directory and clean older snapshots for provided logs.
-    *
-    * @param dir the directory in which logs are checkpointed
-    * @param logsToCleanSnapshot logs whose snapshots need to be cleaned
-    */
-  // Only for testing
+   * 为给定的目录重写新的检查点文件，并清理过期的快照
+   * @param dir                 需要进行检查的数据目录
+   * @param logsToCleanSnapshot 需要清理的日志快照
+   */
   private[log] def checkpointRecoveryOffsetsAndCleanSnapshot(dir: File, logsToCleanSnapshot: Seq[Log]): Unit = {
     try {
       checkpointLogRecoveryOffsetsInDir(dir)
+      // 写入新的检查点后，删除过期的log快照
       logsToCleanSnapshot.foreach(_.deleteSnapshotsAfterRecoveryPointCheckpoint())
     } catch {
       case e: IOException =>
@@ -594,11 +598,18 @@ class LogManager(logDirs: Seq[File],
     }
   }
 
+  /**
+   * 恢复数据目录的检查点
+   * @param dir 需要恢复的数据目录
+   */
   private def checkpointLogRecoveryOffsetsInDir(dir: File): Unit = {
     for {
+      // 获取partition的日志文件
       partitionToLog <- logsByDir.get(dir.getAbsolutePath)
+      // 获取数据目录的检查点
       checkpoint <- recoveryPointCheckpoints.get(dir)
     } {
+      // 写入新的检查点
       checkpoint.write(partitionToLog.map { case (tp, log) => tp -> log.recoveryPoint })
     }
   }

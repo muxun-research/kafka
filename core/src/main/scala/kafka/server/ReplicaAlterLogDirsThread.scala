@@ -98,18 +98,27 @@ class ReplicaAlterLogDirsThread(name: String,
     partitionData
   }
 
-  // process fetched data
+  /**
+   * 处理拉取回来的数据
+   * @param topicPartition topic-partition信息
+   * @param fetchOffset    拉取偏移量
+   * @param partitionData  partition-records数据
+   * @return 日志追加信息
+   */
   override def processPartitionData(topicPartition: TopicPartition,
                                     fetchOffset: Long,
                                     partitionData: PartitionData[Records]): Option[LogAppendInfo] = {
+    // 获取当前分区的信息
     val partition = replicaMgr.nonOfflinePartition(topicPartition).get
+    // 获取正在追赶的日志信息
     val futureLog = partition.futureLocalLogOrException
+    // 将从服务端获取的数据转换为MemoryRecords
     val records = toMemoryRecords(partitionData.records)
-
+    // 如果拉取offset和当前追赶的offset不匹配，则抛出异常
     if (fetchOffset != futureLog.logEndOffset)
       throw new IllegalStateException("Offset mismatch for the future replica %s: fetched offset = %d, log end offset = %d.".format(
         topicPartition, fetchOffset, futureLog.logEndOffset))
-
+    // 构建LogAppendInfo
     val logAppendInfo = partition.appendRecordsToFollowerOrFutureReplica(records, isFuture = true)
     futureLog.updateHighWatermark(partitionData.highWatermark)
     futureLog.maybeIncrementLogStartOffset(partitionData.logStartOffset)

@@ -18,10 +18,9 @@
 package kafka.common
 
 /**
- * Indicates the follower or the future replica received records from the leader (or current
- * replica) with first offset less than expected next offset. 
- * @param firstOffset The first offset of the records to append
- * @param lastOffset  The last offset of the records to append
+ * 证明follower或者future副本收到了主副本（或当前副本）的firstOffset小于期望的offset
+ * @param firstOffset 需要追加的第一个offset
+ * @param lastOffset  要追加的记录的最后偏移量
  */
 class UnexpectedAppendOffsetException(val message: String,
                                       val firstOffset: Long,

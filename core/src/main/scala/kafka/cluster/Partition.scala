@@ -203,7 +203,9 @@ class Partition(val topicPartition: TopicPartition, // topic partition信息，�
   // completes and a switch to new location is performed.
   // log and futureLog variables defined below are used to capture this
   @volatile var log: Option[Log] = None
-  // If ReplicaAlterLogDir command is in progress, this is future location of the log
+  /**
+   * 如果备份副本节点正在追赶进度，那么futureLog将会替换当前的log地址
+   */
   @volatile var futureLog: Option[Log] = None
 
   /* Epoch of the controller that last changed the leader. This needs to be initialized correctly upon broker startup.
@@ -881,22 +883,12 @@ class Partition(val topicPartition: TopicPartition, // topic partition信息，�
     candidateReplicaIds.filter(replicaId => isFollowerOutOfSync(replicaId, leaderEndOffset, currentTimeMs, maxLagMs))
   }
 
-  private def doAppendRecordsToFollowerOrFutureReplica(records: MemoryRecords, isFuture: Boolean): Option[LogAppendInfo] = {
-    // The read lock is needed to handle race condition if request handler thread tries to
-    // remove future replica after receiving AlterReplicaLogDirsRequest.
-    inReadLock(leaderIsrUpdateLock) {
-      if (isFuture) {
-        // Note the replica may be undefined if it is removed by a non-ReplicaAlterLogDirsThread before
-        // this method is called
-        futureLog.map { _.appendAsFollower(records) }
-      } else {
-        // The read lock is needed to prevent the follower replica from being updated while ReplicaAlterDirThread
-        // is executing maybeDeleteAndSwapFutureReplica() to replace follower replica with the future replica.
-        Some(localLogOrException.appendAsFollower(records))
-      }
-    }
-  }
-
+  /**
+   *
+   * @param records
+   * @param isFuture
+   * @return
+   */
   def appendRecordsToFollowerOrFutureReplica(records: MemoryRecords, isFuture: Boolean): Option[LogAppendInfo] = {
     try {
       doAppendRecordsToFollowerOrFutureReplica(records, isFuture)
@@ -905,21 +897,39 @@ class Partition(val topicPartition: TopicPartition, // topic partition信息，�
         val log = if (isFuture) futureLocalLogOrException else localLogOrException
         val logEndOffset = log.logEndOffset
         if (logEndOffset == log.logStartOffset &&
-            e.firstOffset < logEndOffset && e.lastOffset >= logEndOffset) {
-          // This may happen if the log start offset on the leader (or current replica) falls in
-          // the middle of the batch due to delete records request and the follower tries to
-          // fetch its first offset from the leader.
-          // We handle this case here instead of Log#append() because we will need to remove the
-          // segment that start with log start offset and create a new one with earlier offset
-          // (base offset of the batch), which will move recoveryPoint backwards, so we will need
-          // to checkpoint the new recovery point before we append
+          e.firstOffset < logEndOffset && e.lastOffset >= logEndOffset) {
+          // 可能发生于主副本的logStartOffset（或者当前副本）陷入了中间状态的batch（删除records以及follower尝试拉取它的firstOffset信息）
+          // 使用这种方式处理来代替Log#append()，因为需要移除起始于logStartOffset的log段并且创建一个拥有更早Offset的log段（batch的baseOffset）
+          // 这会向前调整恢复点，所以我们需要在追加之前重新检查新的恢复点
           val replicaName = if (isFuture) "future replica" else "follower"
           info(s"Unexpected offset in append to $topicPartition. First offset ${e.firstOffset} is less than log start offset ${log.logStartOffset}." +
-               s" Since this is the first record to be appended to the $replicaName's log, will start the log from offset ${e.firstOffset}.")
+            s" Since this is the first record to be appended to the $replicaName's log, will start the log from offset ${e.firstOffset}.")
           truncateFullyAndStartAt(e.firstOffset, isFuture)
           doAppendRecordsToFollowerOrFutureReplica(records, isFuture)
         } else
           throw e
+    }
+  }
+
+  /**
+   *
+   * @param records
+   * @param isFuture
+   * @return
+   */
+  private def doAppendRecordsToFollowerOrFutureReplica(records: MemoryRecords, isFuture: Boolean): Option[LogAppendInfo] = {
+    // 读锁避免了请求处理器线程对接收到AlterReplicaLogDirsRequest请求后移除future replica的竞争
+    inReadLock(leaderIsrUpdateLock) {
+      // 如果目前处于追赶状态
+      if (isFuture) {
+        // 如果在方法调用之前，replica可能被非ReplicaAlterLogDirsThread线程移除
+        futureLog.map {
+          _.appendAsFollower(records)
+        }
+      } else {
+        // 读锁用于避免备份副本节点在ReplicaAlterDirThread执行maybeDeleteAndSwapFutureReplica()方法时，使用future replica替换follower replica的变化
+        Some(localLogOrException.appendAsFollower(records))
+      }
     }
   }
 
@@ -1108,14 +1118,12 @@ class Partition(val topicPartition: TopicPartition, // topic partition信息，�
   }
 
   /**
-    * Delete all data in the local log of this partition and start the log at the new offset
-    *
-    * @param newOffset The new offset to start the log with
-    * @param isFuture True iff the truncation should be performed on the future log of this partition
-    */
+   * 删除partition的所有本地日志，然后开始使用新的offset的日志
+   * @param newOffset 新的log文件的起始offset
+   * @param isFuture  如果返回true，证明截断需要作用在partition的future日志上
+   */
   def truncateFullyAndStartAt(newOffset: Long, isFuture: Boolean): Unit = {
-    // The read lock is needed to prevent the follower replica from being truncated while ReplicaAlterDirThread
-    // is executing maybeDeleteAndSwapFutureReplica() to replace follower replica with the future replica.
+    // 读锁需要避免在ReplicaAlterDirThread执行maybeDeleteAndSwapFutureReplica()方法时用future副本代替当前备份副本时，备份副本被截断，
     inReadLock(leaderIsrUpdateLock) {
       logManager.truncateFullyAndStartAt(topicPartition, newOffset, isFuture = isFuture)
     }

@@ -999,10 +999,10 @@ class Log(@volatile var dir: File,
   }
 
   /**
-   * Append this message set to the active segment of the log without assigning offsets or Partition Leader Epochs
-   * @param records The records to append
-   * @throws KafkaStorageException If the append fails due to an I/O error.
-   * @return Information about the appended messages including the first and last offset.
+   * 将消息追加到目前正活跃的log段，不用分配offset或者leader epoch
+   * @param records 需要追加的消息
+   * @throws KafkaStorageException IO异常，抛出异常
+   * @return 追加消息的起始offset和结束offset
    */
   def appendAsFollower(records: MemoryRecords): LogAppendInfo = {
     append(records, isFromClient = false, interBrokerProtocolVersion = ApiVersion.latestVersion, assignOffsets = false, leaderEpoch = -1)
@@ -1032,7 +1032,7 @@ class Log(@volatile var dir: File,
       if (appendInfo.shallowCount == 0)
         return appendInfo
 
-      // trim any invalid bytes or partial messages before appending it to the on-disk log
+      // 在消息落地之前，去掉任何无效的字节或者部分消息
       var validRecords = trimInvalidBytes(records, appendInfo)
 
       // 同步操作，进行追加
@@ -1402,10 +1402,10 @@ class Log(@volatile var dir: File,
   }
 
   /**
-   * Trim any invalid bytes from the end of this message set (if there are any)
-   * @param records The records to trim
-   * @param info    The general information of the message set
-   * @return A trimmed message set. This may be the same as what was passed in or it may not.
+   * 在消息落地之前，去掉任何无效的字节或者部分消息
+   * @param records 需要进行订正的消息
+   * @param info    消息集的通用信息
+   * @return 订正后的消息，可能和传入的消息集有出入
    */
   private def trimInvalidBytes(records: MemoryRecords, info: LogAppendInfo): MemoryRecords = {
     val validBytes = info.validBytes
@@ -1415,7 +1415,8 @@ class Log(@volatile var dir: File,
     if (validBytes == records.sizeInBytes) {
       records
     } else {
-      // trim invalid bytes
+      // 如果超过了字节数限制，那么直接去掉超出的部分
+      // 采用拷贝的方式
       val validByteBuffer = records.buffer.duplicate()
       validByteBuffer.limit(validBytes)
       MemoryRecords.readableRecords(validByteBuffer)
@@ -2021,24 +2022,19 @@ class Log(@volatile var dir: File,
   }
 
   /**
-   * Cleanup old producer snapshots after the recovery point is checkpointed. It is useful to retain
-   * the snapshots from the recent segments in case we need to truncate and rebuild the producer state.
-   * Otherwise, we would always need to rebuild from the earliest segment.
+   * 检查点重新检查后，清除过期的生产者快照，记录最近的log段快照是非常有用的，以防需要截断并重建producer状态
+   * 否则，需要从更早的log段中重建
    *
-   * More specifically:
+   * 更具体地说：
+   * 1. 总是保持近两个log段的producer快照，解决了使用offset截断活跃log段的通常情况，以及截断到上一个log段的罕见情况
+   * 2. 仅会删除小于恢复点offset的快照，恢复点会进行周期性的检查，在一次宕机时可能会大幅度落后
+   * 因为恢复会从恢复点开始，如果此时有所有需要恢复的log段的生产快照，那么一口气重建生产快照，并且不需要加载过期的log段的逻辑将会变得简单
    *
-   * 1. We always retain the producer snapshot from the last two segments. This solves the common case
-   * of truncating to an offset within the active segment, and the rarer case of truncating to the previous segment.
-   *
-   * 2. We only delete snapshots for offsets less than the recovery point. The recovery point is checkpointed
-   * periodically and it can be behind after a hard shutdown. Since recovery starts from the recovery point, the logic
-   * of rebuilding the producer snapshots in one pass and without loading older segments is simpler if we always
-   * have a producer snapshot for all segments being recovered.
-   *
-   * Return the minimum snapshots offset that was retained.
+   * 返回需要保存的最小快照offset
    */
   def deleteSnapshotsAfterRecoveryPointCheckpoint(): Long = {
     val minOffsetToRetain = minSnapshotsOffsetToRetain
+    // 删除过期的生产快照
     producerStateManager.deleteSnapshotsBefore(minOffsetToRetain)
     minOffsetToRetain
   }
@@ -2129,15 +2125,18 @@ class Log(@volatile var dir: File,
   }
 
   /**
-   * Delete all data in the log and start at the new offset
-   * @param newOffset The new offset to start the log with
+   * 删除partition中所有的数据，并从新的偏移量开始新的日志
+   * @param newOffset 重新开始的偏移量
    */
   private[log] def truncateFullyAndStartAt(newOffset: Long): Unit = {
     maybeHandleIOException(s"Error while truncating the entire log for $topicPartition in dir ${dir.getParent}") {
       debug(s"Truncate and start at offset $newOffset")
       lock synchronized {
+        // 校验文件通道是否关闭
         checkIfMemoryMappedBufferClosed()
+        // 移除并删除log段，采用异步删除
         removeAndDeleteSegments(logSegments, asyncDelete = true)
+        // 添加新的log段
         addSegment(LogSegment.open(dir,
           baseOffset = newOffset,
           config = config,
@@ -2145,21 +2144,25 @@ class Log(@volatile var dir: File,
           fileAlreadyExists = false,
           initFileSize = initFileSize,
           preallocate = config.preallocate))
+        // 更新新log的logEndOffset
         updateLogEndOffset(newOffset)
+        // 刷新新的leader epoch
         leaderEpochCache.foreach(_.clearAndFlush())
-
+        // 截断producer信息
         producerStateManager.truncate()
         producerStateManager.updateMapEndOffset(newOffset)
+        // 开启一个新的log段是都会判断是否需要增加一个不稳定的offset
         maybeIncrementFirstUnstableOffset()
-
+        // 更新检查点
         this.recoveryPoint = math.min(newOffset, this.recoveryPoint)
+        // 设置新的logStartOffset
         this.logStartOffset = newOffset
       }
     }
   }
 
   /**
-   * The time this log is last known to have been fully flushed to disk
+   * 上一次全量刷新到磁盘的时间
    */
   def lastFlushTime: Long = lastFlushedTime.get
 
@@ -2189,8 +2192,7 @@ class Log(@volatile var dir: File,
   }
 
   /**
-   * Get the largest log segment with a base offset less than or equal to the given offset, if one exists.
-   * @return the optional log segment
+   * @return 获取≤给定offset的baseOffset的最大log段的
    */
   private def floorLogSegment(offset: Long): Option[LogSegment] = {
     Option(segments.floorEntry(offset)).map(_.getValue)
@@ -2251,6 +2253,7 @@ class Log(@volatile var dir: File,
 
     if (asyncDelete) {
       info(s"Scheduling segments for deletion $segments")
+      // 异步的情况下，使用线程池进行调度
       scheduler.schedule("delete-file", () => deleteSegments, delay = config.fileDeleteDelayMs)
     } else {
       deleteSegments()

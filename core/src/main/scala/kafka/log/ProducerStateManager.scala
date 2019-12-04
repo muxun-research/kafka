@@ -674,6 +674,10 @@ class ProducerStateManager(val topicPartition: TopicPartition,
     }
   }
 
+  /**
+   * 更新最后一次映射的偏移量
+   * @param lastOffset 更新的最后一次映射的偏移量
+   */
   def updateMapEndOffset(lastOffset: Long): Unit = {
     lastMapOffset = lastOffset
   }
@@ -766,7 +770,7 @@ class ProducerStateManager(val topicPartition: TopicPartition,
   }
 
   /**
-   * Truncate the producer id mapping and remove all snapshots. This resets the state of the mapping.
+   * 截断producer id映射，并移除所有快照，重置了映射的状态
    */
   def truncate(): Unit = {
     producers.clear()

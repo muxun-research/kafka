@@ -173,63 +173,69 @@ public class DefaultRecord implements Record {
     }
 
     /**
-     * Write the record to `out` and return its size.
-     */
+	 * 将record写入到stream中，并返回写入的大小
+	 * 已经算上了varint
+	 */
     public static int writeTo(DataOutputStream out,
                               int offsetDelta,
                               long timestampDelta,
                               ByteBuffer key,
                               ByteBuffer value,
                               Header[] headers) throws IOException {
-        int sizeInBytes = sizeOfBodyInBytes(offsetDelta, timestampDelta, key, value, headers);
-        ByteUtils.writeVarint(sizeInBytes, out);
+		// 获取消息大小的整形数量
+		int sizeInBytes = sizeOfBodyInBytes(offsetDelta, timestampDelta, key, value, headers);
+		// 使用varint写入消息大小
+		ByteUtils.writeVarint(sizeInBytes, out);
 
-        byte attributes = 0; // there are no used record attributes at the moment
-        out.write(attributes);
+		byte attributes = 0; // 现在record attributes还没有使用
+		out.write(attributes);
+		// 相对时间戳，varint类型
+		ByteUtils.writeVarlong(timestampDelta, out);
+		// 相对偏移量，varint类型
+		ByteUtils.writeVarint(offsetDelta, out);
 
-        ByteUtils.writeVarlong(timestampDelta, out);
-        ByteUtils.writeVarint(offsetDelta, out);
+		if (key == null) {
+			// 如果没有key，则写入-1作为占位，也是varint类型
+			ByteUtils.writeVarint(-1, out);
+		} else {
+			// 使用varint写入key的大小，再正常的写入key
+			int keySize = key.remaining();
+			ByteUtils.writeVarint(keySize, out);
+			Utils.writeTo(out, key, keySize);
+		}
+		// 写入value
+		if (value == null) {
+			ByteUtils.writeVarint(-1, out);
+		} else {
+			int valueSize = value.remaining();
+			ByteUtils.writeVarint(valueSize, out);
+			Utils.writeTo(out, value, valueSize);
+		}
 
-        if (key == null) {
-            ByteUtils.writeVarint(-1, out);
-        } else {
-            int keySize = key.remaining();
-            ByteUtils.writeVarint(keySize, out);
-            Utils.writeTo(out, key, keySize);
-        }
+		if (headers == null)
+			throw new IllegalArgumentException("Headers cannot be null");
+		// 写入header的长度
+		ByteUtils.writeVarint(headers.length, out);
+		// 写入header信息
+		for (Header header : headers) {
+			String headerKey = header.key();
+			if (headerKey == null)
+				throw new IllegalArgumentException("Invalid null header key found in headers");
 
-        if (value == null) {
-            ByteUtils.writeVarint(-1, out);
-        } else {
-            int valueSize = value.remaining();
-            ByteUtils.writeVarint(valueSize, out);
-            Utils.writeTo(out, value, valueSize);
-        }
+			byte[] utf8Bytes = Utils.utf8(headerKey);
+			ByteUtils.writeVarint(utf8Bytes.length, out);
+			out.write(utf8Bytes);
 
-        if (headers == null)
-            throw new IllegalArgumentException("Headers cannot be null");
-
-        ByteUtils.writeVarint(headers.length, out);
-
-        for (Header header : headers) {
-            String headerKey = header.key();
-            if (headerKey == null)
-                throw new IllegalArgumentException("Invalid null header key found in headers");
-
-            byte[] utf8Bytes = Utils.utf8(headerKey);
-            ByteUtils.writeVarint(utf8Bytes.length, out);
-            out.write(utf8Bytes);
-
-            byte[] headerValue = header.value();
-            if (headerValue == null) {
-                ByteUtils.writeVarint(-1, out);
-            } else {
-                ByteUtils.writeVarint(headerValue.length, out);
-                out.write(headerValue);
-            }
-        }
-
-        return ByteUtils.sizeOfVarint(sizeInBytes) + sizeInBytes;
+			byte[] headerValue = header.value();
+			if (headerValue == null) {
+				ByteUtils.writeVarint(-1, out);
+			} else {
+				ByteUtils.writeVarint(headerValue.length, out);
+				out.write(headerValue);
+			}
+		}
+		// record的总大小（已经算上了varint）+ sizeInBytes的varint的大小
+		return ByteUtils.sizeOfVarint(sizeInBytes) + sizeInBytes;
     }
 
     @Override

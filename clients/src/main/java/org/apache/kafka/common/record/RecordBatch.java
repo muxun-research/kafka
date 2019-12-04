@@ -151,11 +151,9 @@ public interface RecordBatch extends Iterable<Record> {
     boolean hasProducerId();
 
     /**
-     * Get the base sequence number of this record batch. Like {@link #baseOffset()}, this value is not
-     * affected by compaction: it always retains the base sequence number from the original batch.
-     *
-     * @return The first sequence number or -1 if there is none
-     */
+	 * 获取当前batch的base sequence，比如{@link #baseOffset()}，并不会被压缩锁影响：始终保留原始batch的base sequence
+	 * @return 第一个base sequence，在没有的情况下返回-1
+	 */
     int baseSequence();
 
     /**
@@ -216,21 +214,21 @@ public interface RecordBatch extends Iterable<Record> {
      * Return a streaming iterator which basically delays decompression of the record stream until the records
      * are actually asked for using {@link Iterator#next()}. If the message format does not support streaming
      * iteration, then the normal iterator is returned. Either way, callers should ensure that the iterator is closed.
-     *
-     * @param decompressionBufferSupplier The supplier of ByteBuffer(s) used for decompression if supported.
-     *                                    For small record batches, allocating a potentially large buffer (64 KB for LZ4)
-     *                                    will dominate the cost of decompressing and iterating over the records in the
-     *                                    batch. As such, a supplier that reuses buffers will have a significant
-     *                                    performance impact.
-     * @return The closeable iterator
-     */
-    CloseableIterator<Record> streamingIterator(BufferSupplier decompressionBufferSupplier);
+	 *
+	 * @param decompressionBufferSupplier The supplier of ByteBuffer(s) used for decompression if supported.
+	 *                                    For small record batches, allocating a potentially large buffer (64 KB for LZ4)
+	 *                                    will dominate the cost of decompressing and iterating over the records in the
+	 *                                    batch. As such, a supplier that reuses buffers will have a significant
+	 *                                    performance impact.
+	 * @return The closeable iterator
+	 */
+	CloseableIterator<Record> streamingIterator(BufferSupplier decompressionBufferSupplier);
 
-    /**
-     * Check whether this is a control batch (i.e. whether the control bit is set in the batch attributes).
-     * For magic versions prior to 2, this is always false.
-     *
-     * @return Whether this is a batch containing control records
-     */
-    boolean isControlBatch();
+	/**
+	 * For magic versions prior to 2, this is always false.
+	 * 校验是否是一个control batch，control bit设置在batch attributes中
+	 * 对于2之前的
+	 * @return Whether this is a batch containing control records
+	 */
+	boolean isControlBatch();
 }
