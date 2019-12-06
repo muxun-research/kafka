@@ -1619,18 +1619,27 @@ class ReplicaManager(val config: KafkaConfig,
   def getLogEndOffset(topicPartition: TopicPartition): Option[Long] =
     nonOfflinePartition(topicPartition).flatMap(_.leaderLogIfLocal.map(_.logEndOffset))
 
-  // Flushes the highwatermark value for all partitions to the highwatermark file
+  /**
+   * 副本管理器刷写HW到最高水位
+   */
   def checkpointHighWatermarks(): Unit = {
+    // 迭代所有没有下线的partition
+    // 映射到一个列表中
     val localLogs = nonOfflinePartitionsIterator.flatMap { partition =>
       val logsList: mutable.Set[Log] = mutable.Set()
       partition.log.foreach(logsList.add)
       partition.futureLog.foreach(logsList.add)
       logsList
     }.toBuffer
+    // 根据数据目录进行分组
     val logsByDir = localLogs.groupBy(_.dir.getParent)
+    // 遍历每个数据目录和需要刷写的日志
     for ((dir, logs) <- logsByDir) {
+      // 从partition信息中获取每个日志文件最新的HW
+      // 每个partition的日志目录对应的都是本地副本
       val hwms = logs.map(log => log.topicPartition -> log.highWatermark).toMap
       try {
+        // 写入最新的HW
         highWatermarkCheckpoints.get(dir).foreach(_.write(hwms))
       } catch {
         case e: KafkaStorageException =>

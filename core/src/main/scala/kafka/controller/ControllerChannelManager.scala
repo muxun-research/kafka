@@ -68,8 +68,9 @@ class ControllerChannelManager(controllerContext: ControllerContext,
 
   def startup() = {
     controllerContext.liveOrShuttingDownBrokers.foreach(addNewBroker)
-
+    // 由于需要修改broker信息，可能此时broker已经开始工作了，所以进行同步操作
     brokerLock synchronized {
+      // 开启所有broker的请求线程
       brokerStateInfo.foreach(brokerState => startRequestSendThread(brokerState._1))
     }
   }
@@ -109,6 +110,10 @@ class ControllerChannelManager(controllerContext: ControllerContext,
     }
   }
 
+  /**
+   * 添加新的broker
+   * @param broker broker消息代理节点
+   */
   private def addNewBroker(broker: Broker): Unit = {
     val messageQueue = new LinkedBlockingQueue[QueueItem]
     debug(s"Controller ${config.brokerId} trying to connect to broker ${broker.id}")

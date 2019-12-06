@@ -714,47 +714,49 @@ class Partition(val topicPartition: TopicPartition, // topic partition信息，�
   }
 
   /*
-   * Returns a tuple where the first element is a boolean indicating whether enough replicas reached `requiredOffset`
-   * and the second element is an error (which would be `Errors.NONE` for no error).
+   * tuple中第一个元素表明了是否已经有足够多的副本达到了"requiredOffset"水位，第二个元素表明了异常信息
    *
-   * Note that this method will only be called if requiredAcks = -1 and we are waiting for all replicas in ISR to be
-   * fully caught up to the (local) leader's offset corresponding to this produce request before we acknowledge the
-   * produce request.
+   * 需要注意的是，方法仅会在requiredAcks = -1是调用，需要等待所有ISR副本节点全量追赶上leader的HW，再确认生产请求之前，与生产请求相关联
    */
   def checkEnoughReplicasReachOffset(requiredOffset: Long): (Boolean, Errors) = {
     leaderLogIfLocal match {
       case Some(leaderLog) =>
-        // keep the current immutable replica list reference
+        // 获取当前不可变的副本节点集的引用
         val curInSyncReplicaIds = inSyncReplicaIds
-
+        // 下面这段逻辑看似有用，实则无用，主要目的是为了log记录
         if (isTraceEnabled) {
           def logEndOffsetString: ((Int, Long)) => String = {
             case (brokerId, logEndOffset) => s"broker $brokerId: $logEndOffset"
           }
 
+          // 去除当前主节点的所有需要同步的副本集
           val curInSyncReplicaObjects = (curInSyncReplicaIds - localBrokerId).map(getReplicaOrException)
+          // 获取每个备份副本的Broker Id和logEndOffset
           val replicaInfo = curInSyncReplicaObjects.map(replica => (replica.brokerId, replica.logEndOffset))
+          // 构建主副本的本地日志信息
           val localLogInfo = (localBrokerId, localLogOrException.logEndOffset)
+          // 根据logEndOffset ≥ requiredOffset公式，将所有副本节点分为已完成的副本节点和等待同步的副本节点
           val (ackedReplicas, awaitingReplicas) = (replicaInfo + localLogInfo).partition { _._2 >= requiredOffset}
 
           trace(s"Progress awaiting ISR acks for offset $requiredOffset: " +
             s"acked: ${ackedReplicas.map(logEndOffsetString)}, " +
             s"awaiting ${awaitingReplicas.map(logEndOffsetString)}")
         }
-
+        // 设置的ISR副本节点数量的最小值
         val minIsr = leaderLog.config.minInSyncReplicas
+        // 主副本的HW＝requiredOffset时，实际上就表示ISR的所有副本都赶上了主副本
         if (leaderLog.highWatermark >= requiredOffset) {
-          /*
-           * The topic may be configured not to accept messages if there are not enough replicas in ISR
-           * in this scenario the request was already appended locally and then added to the purgatory before the ISR was shrunk
-           */
           if (minIsr <= curInSyncReplicaIds.size)
+          // ISR中所有的备份副本都赶上了主副本
             (true, Errors.NONE)
           else
+          // 虽然所有的备份副本都赶上了主副本，但是ISR副本的数量还是不满足最小值的设定
             (true, Errors.NOT_ENOUGH_REPLICAS_AFTER_APPEND)
         } else
+        // ISR中的副本还没有完全追赶上主副本，不会更新主副本的HW，返回false
           (false, Errors.NONE)
       case None =>
+        // 非主副本，返回false
         (false, Errors.NOT_LEADER_FOR_PARTITION)
     }
   }

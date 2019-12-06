@@ -80,10 +80,11 @@ class DelayedProduce(delayMs: Long,
     // 检查每个partition是否还有待定的acks
     produceMetadata.produceStatus.foreach { case (topicPartition, status) =>
       trace(s"Checking produce satisfaction for $topicPartition, current status $status")
-      // 忽略那些已经完成的partition
+      // 忽略那些已经完成应答的partition
       if (status.acksPending) {
         val (hasEnough, error) = replicaManager.getPartition(topicPartition) match {
           case HostedPartition.Online(partition) =>
+            // 如果partition处于在线状态，检查partition是否处于可完成应答状态
             partition.checkEnoughReplicasReachOffset(status.requiredOffset)
 
           case HostedPartition.Offline =>

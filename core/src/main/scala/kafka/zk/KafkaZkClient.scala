@@ -38,6 +38,7 @@ import org.apache.zookeeper.KeeperException.{Code, NodeExistsException}
 import org.apache.zookeeper.OpResult.{CreateResult, ErrorResult, SetDataResult}
 import org.apache.zookeeper.data.{ACL, Stat}
 import org.apache.zookeeper.{CreateMode, KeeperException, ZooKeeper}
+
 import scala.collection.{Map, Seq, mutable}
 
 /**
@@ -569,16 +570,19 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
   }
 
   /**
-   * Gets the assignments for the given topics.
-   * @param topics the topics whose partitions we wish to get the assignments for.
-   * @return the replica assignment for each partition from the given topics.
+   * 获取给定topic集合的分配信息，topic-replica
+   * @param topics 需要获取分配方式的topic
+   * @return 给定topic的分配信息
    */
   def getReplicaAssignmentForTopics(topics: Set[String]): Map[TopicPartition, Seq[Int]] = {
+    // 为每个分区构建一个GetDataRequest
     val getDataRequests = topics.map(topic => GetDataRequest(TopicZNode.path(topic), ctx = Some(topic)))
+    // 异步执行请求
     val getDataResponses = retryRequestsUntilConnected(getDataRequests.toSeq)
     getDataResponses.flatMap { getDataResponse =>
       val topic = getDataResponse.ctx.get.asInstanceOf[String]
       getDataResponse.resultCode match {
+        // 解析为(topic-partition)-replica字典表
         case Code.OK => TopicZNode.decode(topic, getDataResponse.data)
         case Code.NONODE => Map.empty[TopicPartition, Seq[Int]]
         case _ => throw getDataResponse.resultException.get
@@ -587,9 +591,9 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
   }
 
   /**
-   * Gets partition the assignments for the given topics.
-   * @param topics the topics whose partitions we wish to get the assignments for.
-   * @return the partition assignment for each partition from the given topics.
+   * 获取给定topic的分配信息，topic-partition
+   * @param topics 需要获取分配方式的topic
+   * @return 给定topic的分配信息
    */
   def getPartitionAssignmentForTopics(topics: Set[String]): Map[String, Map[Int, Seq[Int]]] = {
     val getDataRequests = topics.map(topic => GetDataRequest(TopicZNode.path(topic), ctx = Some(topic)))
