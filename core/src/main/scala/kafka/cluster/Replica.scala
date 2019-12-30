@@ -102,7 +102,7 @@ class Replica(val brokerId: Int, val topicPartition: TopicPartition) extends Log
   }
 
   /**
-   * 更新远程副本的高水位
+   * 更新本地副本中远程副本的高水位
    * 用于追踪已知最新的远程副本的高水位
    * 当发送响应时进行记录，并不保证follower节点实际会收到高水位，所以可以认为这是一个follower节点已知的上限水位
    *

@@ -6,7 +6,7 @@
  * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- package kafka.utils
+package kafka.utils
 
 import java.util.Properties
 
@@ -23,17 +23,24 @@ import joptsimple.{OptionParser, OptionSet, OptionSpec}
 import scala.collection.Set
 
 /**
-  * Helper functions for dealing with command line utilities
-  */
+ * Helper functions for dealing with command line utilities
+ */
 object CommandLineUtils extends Logging {
   /**
-    * Check if there are no options or `--help` option from command line
-    *
-    * @param commandOpts Acceptable options for a command
-    * @return true on matching the help check condition
-    */
-  def isPrintHelpNeeded(commandOpts: CommandDefaultOptions): Boolean = {
-    commandOpts.args.length == 0 || commandOpts.options.has(commandOpts.helpOpt)
+   * 如果没有操作参数、或者使用了"--help"参数，在打印所有的帮助信息
+   * 如果传入了"--version参数"，则打印version信息并退出
+   * 需要注意的是，函数名称不再要求拼写正确，因为需要检查version是否需要打印
+   * 重构意味着将更改所有的命令行工具，并不必要地增加此更改的爆炸半径
+   * @param commandOpts 命令的可请求参数
+   * @param message     在成功检查后需要展示的消息
+   */
+  def printHelpAndExitIfNeeded(commandOpts: CommandDefaultOptions, message: String) = {
+    // 是否需要打印帮助信息
+    if (isPrintHelpNeeded(commandOpts))
+      printUsageAndDie(commandOpts.parser, message)
+    // 是否需要打印版本信息
+    if (isPrintVersionNeeded(commandOpts))
+      printVersionAndDie()
   }
 
   def isPrintVersionNeeded(commandOpts: CommandDefaultOptions): Boolean = {
@@ -41,22 +48,12 @@ object CommandLineUtils extends Logging {
   }
 
   /**
-    * Check and print help message if there is no options or `--help` option
-    * from command line, if `--version` is specified on the command line
-    * print version information and exit.
-    * NOTE: The function name is not strictly speaking correct anymore
-    * as it also checks whether the version needs to be printed, but
-    * refactoring this would have meant changing all command line tools
-    * and unnecessarily increased the blast radius of this change.
-    *
-    * @param commandOpts Acceptable options for a command
-    * @param message     Message to display on successful check
-    */
-  def printHelpAndExitIfNeeded(commandOpts: CommandDefaultOptions, message: String) = {
-    if (isPrintHelpNeeded(commandOpts))
-      printUsageAndDie(commandOpts.parser, message)
-    if (isPrintVersionNeeded(commandOpts))
-      printVersionAndDie()
+   * Check if there are no options or `--help` option from command line
+   * @param commandOpts Acceptable options for a command
+   * @return true on matching the help check condition
+   */
+  def isPrintHelpNeeded(commandOpts: CommandDefaultOptions): Boolean = {
+    commandOpts.args.length == 0 || commandOpts.options.has(commandOpts.helpOpt)
   }
 
   /**
@@ -82,8 +79,8 @@ object CommandLineUtils extends Logging {
   }
 
   /**
-    * Check that none of the listed options are present with the combination of used options
-    */
+   * Check that none of the listed options are present with the combination of used options
+   */
   def checkInvalidArgsSet(parser: OptionParser, options: OptionSet, usedOptions: Set[OptionSpec[_]], invalidOptions: Set[OptionSpec[_]]): Unit = {
     if (usedOptions.count(options.has) == usedOptions.size) {
       for (arg <- invalidOptions) {
@@ -126,12 +123,12 @@ object CommandLineUtils extends Logging {
   }
 
   /**
-    * Merge the options into {@code props} for key {@code key}, with the following precedence, from high to low:
-    * 1) if {@code spec} is specified on {@code options} explicitly, use the value;
-    * 2) if {@code props} already has {@code key} set, keep it;
-    * 3) otherwise, use the default value of {@code spec}.
-    * A {@code null} value means to remove {@code key} from the {@code props}.
-    */
+   * Merge the options into {@code props} for key {@code key}, with the following precedence, from high to low:
+   * 1) if {@code spec} is specified on {@code options} explicitly, use the value;
+   * 2) if {@code props} already has {@code key} set, keep it;
+   * 3) otherwise, use the default value of {@code spec}.
+   * A {@code null} value means to remove {@code key} from the {@code props}.
+   */
   def maybeMergeOptions[V](props: Properties, key: String, options: OptionSet, spec: OptionSpec[V]): Unit = {
     if (options.has(spec) || !props.containsKey(key)) {
       val value = options.valueOf(spec)

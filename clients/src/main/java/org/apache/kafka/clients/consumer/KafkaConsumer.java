@@ -1015,24 +1015,20 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     }
 
     /**
-     * Subscribe to all topics matching specified pattern to get dynamically assigned partitions.
-     * The pattern matching will be done periodically against all topics existing at the time of check.
-     * This can be controlled through the {@code metadata.max.age.ms} configuration: by lowering
-     * the max metadata age, the consumer will refresh metadata more often and check for matching topics.
-     * <p>
-     * See {@link #subscribe(Collection, ConsumerRebalanceListener)} for details on the
-     * use of the {@link ConsumerRebalanceListener}. Generally rebalances are triggered when there
-     * is a change to the topics matching the provided pattern and when consumer group membership changes.
-     * Group rebalances only take place during an active call to {@link #poll(Duration)}.
-     *
-     * @param pattern Pattern to subscribe to
-     * @param listener Non-null listener instance to get notifications on partition assignment/revocation for the
-     *                 subscribed topics
-     * @throws IllegalArgumentException If pattern or listener is null
-     * @throws IllegalStateException If {@code subscribe()} is called previously with topics, or assign is called
-     *                               previously (without a subsequent call to {@link #unsubscribe()}), or if not
-     *                               configured at-least one partition assignment strategy
-     */
+	 * 订阅所有使用指定正则表达式匹配的topic，来动态获取分配的partition
+	 * 正在表达式匹配会在针对检查时存在的所有主题定期进行
+	 * 可以通过{@code metadata.max.age.ms}进行控制：
+	 * 通过减少max metadata的age属性，Consumer可以以更快的频率刷新metadata，并且检查匹配的topic
+	 * 可以查看{@link #subscribe(Collection, ConsumerRebalanceListener)}以获取更多使用{@link ConsumerRebalanceListener}的信息
+	 * 通常，再平衡是在topic发生变化时，以及消费组成员发生变化时触发的
+	 * 消费组的再平衡仅会在动态调用{@link #poll(Duration)}时触发
+	 * @param pattern  需要进行订阅的正则表达式
+	 * @param listener 获取partition分配/调用的通知监听器
+	 * @throws IllegalArgumentException 正则表达式或者再平衡监听器为null，抛出异常
+	 * @throws IllegalStateException    If {@code subscribe()} is called previously with topics, or assign is called
+	 *                                  previously (without a subsequent call to {@link #unsubscribe()}), or if not
+	 *                                  configured at-least one partition assignment strategy
+	 */
     @Override
     public void subscribe(Pattern pattern, ConsumerRebalanceListener listener) {
         maybeThrowInvalidGroupIdException();

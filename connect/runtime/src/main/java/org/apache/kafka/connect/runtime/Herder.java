@@ -31,23 +31,16 @@ import java.util.Objects;
 
 /**
  * <p>
- * The herder interface tracks and manages workers and connectors. It is the main interface for external components
- * to make changes to the state of the cluster. For example, in distributed mode, an implementation of this class
- * knows how to accept a connector configuration, may need to route it to the current leader worker for the cluster so
- * the config can be written to persistent storage, and then ensures the new connector is correctly instantiated on one
- * of the workers.
+ * Header接口用于追踪和管理worker和connectors，它是对外组件的主要接口，用于变更集群的状态，举个例子，在分布式模式下，此类的实现会知道如何去接收一个connector配置
+ * 可能需要路由这个connector到当前集群的主worker线程，因此配置可以被持久化存储，以此来确认新的connector正确的初始化于worker之上
  * </p>
  * <p>
- * This class must implement all the actions that can be taken on the cluster (add/remove connectors, pause/resume tasks,
- * get state of connectors and tasks, etc). The non-Java interfaces to the cluster (REST API and CLI) are very simple
- * wrappers of the functionality provided by this interface.
+ * 此类必须实现集群需要调用的方法，(add/remove connectors, pause/resume tasks,et state of connectors and tasks, 等)
+ * 对于集群的非Java接口类型的方法(REST API and CLI)，这个接口提供了简单的函数包装
  * </p>
  * <p>
- * In standalone mode, this implementation of this class will be trivial because no coordination is needed. In that case,
- * the implementation will mainly be delegating tasks directly to other components. For example, when creating a new
- * connector in standalone mode, there is no need to persist the config and the connector and its tasks must run in the
- * same process, so the standalone herder implementation can immediately instantiate and start the connector and its
- * tasks.
+ * 在单机模式下，此类的实现是微不足道的，因为不需要进行协调，在这种情况下，实现主要是将任务直接委派给其他组件
+ * 举个例子，在单机模式下创建一个新的connector，无需持久化存储配置，connector和任务都在同一个进程中，所以单机模式下的header实现可以立即初始化并开启connector和它的任务
  * </p>
  */
 public interface Herder {

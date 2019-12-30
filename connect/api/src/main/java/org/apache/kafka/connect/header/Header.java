@@ -19,48 +19,43 @@ package org.apache.kafka.connect.header;
 import org.apache.kafka.connect.data.Schema;
 
 /**
- * A {@link Header} is a key-value pair, and multiple headers can be included with the key, value, and timestamp in each Kafka message.
- * If the value contains schema information, then the header will have a non-null {@link #schema() schema}.
+ * {@link Header}是一个键值对类型，每个KafkaMessage中的key、value、时间戳都可以拥有多个Header
+ * 如果value中包含了格式信息，那么Header中将会拥有一个非空的{@link #schema()}
  * <p>
- * This is an immutable interface.
+ * 这是一个不可变的接口
  */
 public interface Header {
 
-    /**
-     * The header's key, which is not necessarily unique within the set of headers on a Kafka message.
-     *
-     * @return the header's key; never null
-     */
-    String key();
+	/**
+	 * The header's key, which is not necessarily unique within the set of headers on a Kafka message.
+	 * @return the header's key; never null
+	 */
+	String key();
 
-    /**
-     * Return the {@link Schema} associated with this header, if there is one. Not all headers will have schemas.
-     *
-     * @return the header's schema, or null if no schema is associated with this header
-     */
-    Schema schema();
+	/**
+	 * Return the {@link Schema} associated with this header, if there is one. Not all headers will have schemas.
+	 * @return the header's schema, or null if no schema is associated with this header
+	 */
+	Schema schema();
 
-    /**
-     * Get the header's value as deserialized by Connect's header converter.
-     *
-     * @return the deserialized object representation of the header's value; may be null
-     */
-    Object value();
+	/**
+	 * Get the header's value as deserialized by Connect's header converter.
+	 * @return the deserialized object representation of the header's value; may be null
+	 */
+	Object value();
 
-    /**
-     * Return a new {@link Header} object that has the same key but with the supplied value.
-     *
-     * @param schema the schema for the new value; may be null
-     * @param value  the new value
-     * @return the new {@link Header}; never null
-     */
-    Header with(Schema schema, Object value);
+	/**
+	 * Return a new {@link Header} object that has the same key but with the supplied value.
+	 * @param schema the schema for the new value; may be null
+	 * @param value  the new value
+	 * @return the new {@link Header}; never null
+	 */
+	Header with(Schema schema, Object value);
 
-    /**
-     * Return a new {@link Header} object that has the same schema and value but with the supplied key.
-     *
-     * @param key the key for the new header; may not be null
-     * @return the new {@link Header}; never null
-     */
-    Header rename(String key);
+	/**
+	 * Return a new {@link Header} object that has the same schema and value but with the supplied key.
+	 * @param key the key for the new header; may not be null
+	 * @return the new {@link Header}; never null
+	 */
+	Header rename(String key);
 }

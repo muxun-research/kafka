@@ -77,39 +77,55 @@ import java.util.stream.Collectors;
 
 /**
  * <p>
- * Worker runs a (dynamic) set of tasks in a set of threads, doing the work of actually moving
- * data to/from Kafka.
+ * Worker模型动态的在线程集合中运行了任务集合，执行真正的数据迁移任务
  * </p>
  * <p>
- * Since each task has a dedicated thread, this is mainly just a container for them.
+ * 因为每一个任务都有专属的线程，Worker模型是它们的一个容器
  * </p>
  */
 public class Worker {
-    private static final Logger log = LoggerFactory.getLogger(Worker.class);
+	private static final Logger log = LoggerFactory.getLogger(Worker.class);
 
-    protected Herder herder;
-    private final ExecutorService executor;
-    private final Time time;
-    private final String workerId;
-    private final Plugins plugins;
-    private final ConnectMetrics metrics;
-    private final WorkerMetricsGroup workerMetricsGroup;
-    private final WorkerConfig config;
-    private final Converter internalKeyConverter;
-    private final Converter internalValueConverter;
-    private final OffsetBackingStore offsetBackingStore;
+	protected Herder herder;
+	private final ExecutorService executor;
+	private final Time time;
+	private final String workerId;
+	private final Plugins plugins;
+	private final ConnectMetrics metrics;
+	private final WorkerMetricsGroup workerMetricsGroup;
+	/**
+	 * Worker配置
+	 */
+	private final WorkerConfig config;
+	/**
+	 * Kafka连接器与内部主题的key转换器
+	 */
+	private final Converter internalKeyConverter;
+	/**
+	 * Kafka连接器与内部主题的value转换器
+	 */
+	private final Converter internalValueConverter;
+	/**
+	 * Kafka连接器的offset存储器
+	 */
+	private final OffsetBackingStore offsetBackingStore;
+	/**
+	 * Worker管理的所有连接器
+	 */
+	private final ConcurrentMap<String, WorkerConnector> connectors = new ConcurrentHashMap<>();
+	/**
+	 * Worker管理的所有任务
+	 */
+	private final ConcurrentMap<ConnectorTaskId, WorkerTask> tasks = new ConcurrentHashMap<>();
+	private SourceTaskOffsetCommitter sourceTaskOffsetCommitter;
+	private WorkerConfigTransformer workerConfigTransformer;
+	private ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy;
 
-    private final ConcurrentMap<String, WorkerConnector> connectors = new ConcurrentHashMap<>();
-    private final ConcurrentMap<ConnectorTaskId, WorkerTask> tasks = new ConcurrentHashMap<>();
-    private SourceTaskOffsetCommitter sourceTaskOffsetCommitter;
-    private WorkerConfigTransformer workerConfigTransformer;
-    private ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy;
-
-    public Worker(
-        String workerId,
-        Time time,
-        Plugins plugins,
-        WorkerConfig config,
+	public Worker(
+			String workerId,
+			Time time,
+			Plugins plugins,
+			WorkerConfig config,
         OffsetBackingStore offsetBackingStore,
         ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy) {
         this(workerId, time, plugins, config, offsetBackingStore, Executors.newCachedThreadPool(), connectorClientConfigOverridePolicy);

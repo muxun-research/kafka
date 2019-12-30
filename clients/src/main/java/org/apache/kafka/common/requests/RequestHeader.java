@@ -45,25 +45,29 @@ public class RequestHeader extends AbstractRequestResponse {
             new Field(CORRELATION_ID_FIELD_NAME, INT32, "A user-supplied integer value that will be passed back with the response"),
             new Field(CLIENT_ID_FIELD_NAME, NULLABLE_STRING, "A user specified identifier for the client making the request.", ""));
 
-    // Version 0 of the controlled shutdown API used a non-standard request header (the clientId is missing).
-    // This can be removed once we drop support for that version.
-    private static final Schema CONTROLLED_SHUTDOWN_V0_SCHEMA = new Schema(
-            new Field(API_KEY_FIELD_NAME, INT16, "The id of the request type."),
-            new Field(API_VERSION_FIELD_NAME, INT16, "The version of the API."),
-            new Field(CORRELATION_ID_FIELD_NAME, INT32, "A user-supplied integer value that will be passed back with the response"));
+	// Version 0 of the controlled shutdown API used a non-standard request header (the clientId is missing).
+	// This can be removed once we drop support for that version.
+	private static final Schema CONTROLLED_SHUTDOWN_V0_SCHEMA = new Schema(
+			new Field(API_KEY_FIELD_NAME, INT16, "The id of the request type."),
+			new Field(API_VERSION_FIELD_NAME, INT16, "The version of the API."),
+			new Field(CORRELATION_ID_FIELD_NAME, INT32, "A user-supplied integer value that will be passed back with the response"));
 
-    private final ApiKeys apiKey;
-    private final short apiVersion;
-    private final String clientId;
-    private final int correlationId;
+	private final ApiKeys apiKey;
+	private final short apiVersion;
+	private final String clientId;
+	/**
+	 * 由客户端指定的一个数字唯一标示这个请求的ID，服务端处理完请求后也会把CorrelationId写入Response中
+	 * 由此客户度可以将请求和响应对应起来
+	 */
+	private final int correlationId;
 
-    public RequestHeader(Struct struct) {
-        short apiKey = struct.getShort(API_KEY_FIELD_NAME);
-        if (!ApiKeys.hasId(apiKey))
-            throw new InvalidRequestException("Unknown API key " + apiKey);
+	public RequestHeader(Struct struct) {
+		short apiKey = struct.getShort(API_KEY_FIELD_NAME);
+		if (!ApiKeys.hasId(apiKey))
+			throw new InvalidRequestException("Unknown API key " + apiKey);
 
-        this.apiKey = ApiKeys.forId(apiKey);
-        apiVersion = struct.getShort(API_VERSION_FIELD_NAME);
+		this.apiKey = ApiKeys.forId(apiKey);
+		apiVersion = struct.getShort(API_VERSION_FIELD_NAME);
 
         // only v0 of the controlled shutdown request is missing the clientId
         if (struct.hasField(CLIENT_ID_FIELD_NAME))

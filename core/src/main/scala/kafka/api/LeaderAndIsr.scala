@@ -6,7 +6,7 @@
  * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,6 +28,14 @@ object LeaderAndIsr {
   def duringDelete(isr: List[Int]): LeaderAndIsr = LeaderAndIsr(LeaderDuringDelete, isr)
 }
 
+/**
+ * 分区的主副本和ISR信息
+ * 主节点和InSyncReplica节点集群
+ * @param leader      主节点
+ * @param leaderEpoch 主节点版本
+ * @param isr         InSyncReplica节点集群
+ * @param zkVersion   ZK版本号
+ */
 case class LeaderAndIsr(leader: Int,
                         leaderEpoch: Int,
                         isr: List[Int],
@@ -40,6 +48,10 @@ case class LeaderAndIsr(leader: Int,
 
   def newEpochAndZkVersion = newLeaderAndIsr(leader, isr)
 
+  /**
+   * 设置leader节点
+   * @return leader节点
+   */
   def leaderOpt: Option[Int] = {
     if (leader == LeaderAndIsr.NoLeader) None else Some(leader)
   }

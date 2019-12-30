@@ -1196,6 +1196,13 @@ class ReplicaManager(val config: KafkaConfig,
     }
   }
 
+  /**
+   * 成为主节点或者副本节点
+   * @param correlationId
+   * @param leaderAndIsrRequest leader
+   * @param onLeadershipChange
+   * @return
+   */
   def becomeLeaderOrFollower(correlationId: Int,
                              leaderAndIsrRequest: LeaderAndIsrRequest,
                              onLeadershipChange: (Iterable[Partition], Iterable[Partition]) => Unit): LeaderAndIsrResponse = {
@@ -1604,6 +1611,12 @@ class ReplicaManager(val config: KafkaConfig,
     }
   }
 
+  /**
+   * 更新副本节点本地HighWaterMark
+   * @param topicPartition topic-partition信息
+   * @param followerId     副本节点ID
+   * @param highWatermark  副本的ID的最新HighWaterMark
+   */
   private def updateFollowerHighWatermark(topicPartition: TopicPartition, followerId: Int, highWatermark: Long): Unit = {
     nonOfflinePartition(topicPartition).flatMap(_.getReplica(followerId)) match {
       case Some(replica) => replica.updateLastSentHighWatermark(highWatermark)
