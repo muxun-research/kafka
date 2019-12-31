@@ -28,12 +28,12 @@ import org.apache.kafka.common.utils.Utils;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.Collections;
 
 import static org.apache.kafka.common.protocol.CommonFields.PARTITION_ID;
 import static org.apache.kafka.common.protocol.CommonFields.TOPIC_NAME;
@@ -318,116 +318,131 @@ public class LeaderAndIsrRequest extends AbstractControlRequest {
 
     public Map<TopicPartition, PartitionState> partitionStates() {
         return partitionStates;
-    }
+	}
 
-    public Set<Node> liveLeaders() {
-        return liveLeaders;
-    }
+	public Set<Node> liveLeaders() {
+		return liveLeaders;
+	}
 
-    public static LeaderAndIsrRequest parse(ByteBuffer buffer, short version) {
-        return new LeaderAndIsrRequest(ApiKeys.LEADER_AND_ISR.parseRequest(version, buffer), version);
-    }
+	public static LeaderAndIsrRequest parse(ByteBuffer buffer, short version) {
+		return new LeaderAndIsrRequest(ApiKeys.LEADER_AND_ISR.parseRequest(version, buffer), version);
+	}
 
-    public static final class PartitionState {
-        public final BasePartitionState basePartitionState;
-        public final List<Integer> addingReplicas;
-        public final List<Integer> removingReplicas;
-        public final boolean isNew;
+	/**
+	 * 分区状态
+	 */
+	public static final class PartitionState {
+		/**
+		 * LeaderAndIsrRequest.PartitionState和UpdateMetadataRequest.PartitionState之间共享的状态字段
+		 */
+		public final BasePartitionState basePartitionState;
+		/**
+		 * 新增的副本ID
+		 */
+		public final List<Integer> addingReplicas;
+		/**
+		 * 移除的副本ID
+		 */
+		public final List<Integer> removingReplicas;
+		/**
+		 * partiton是否是新创建的
+		 */
+		public final boolean isNew;
 
-        public PartitionState(int controllerEpoch,
-                              int leader,
-                              int leaderEpoch,
-                              List<Integer> isr,
-                              int zkVersion,
-                              List<Integer> replicas,
-                              boolean isNew) {
-            this(controllerEpoch,
-                 leader,
-                 leaderEpoch,
-                 isr,
-                 zkVersion,
-                 replicas,
-                 Collections.emptyList(),
-                 Collections.emptyList(),
-                 isNew);
-        }
+		public PartitionState(int controllerEpoch,
+							  int leader,
+							  int leaderEpoch,
+							  List<Integer> isr,
+							  int zkVersion,
+							  List<Integer> replicas,
+							  boolean isNew) {
+			this(controllerEpoch,
+					leader,
+					leaderEpoch,
+					isr,
+					zkVersion,
+					replicas,
+					Collections.emptyList(),
+					Collections.emptyList(),
+					isNew);
+		}
 
-        public PartitionState(int controllerEpoch,
-                              int leader,
-                              int leaderEpoch,
-                              List<Integer> isr,
-                              int zkVersion,
-                              List<Integer> replicas,
-                              List<Integer> addingReplicas,
-                              List<Integer> removingReplicas,
-                              boolean isNew) {
-            this.basePartitionState = new BasePartitionState(controllerEpoch, leader, leaderEpoch, isr, zkVersion, replicas);
-            this.addingReplicas = addingReplicas;
-            this.removingReplicas = removingReplicas;
-            this.isNew = isNew;
-        }
+		public PartitionState(int controllerEpoch,
+							  int leader,
+							  int leaderEpoch,
+							  List<Integer> isr,
+							  int zkVersion,
+							  List<Integer> replicas,
+							  List<Integer> addingReplicas,
+							  List<Integer> removingReplicas,
+							  boolean isNew) {
+			this.basePartitionState = new BasePartitionState(controllerEpoch, leader, leaderEpoch, isr, zkVersion, replicas);
+			this.addingReplicas = addingReplicas;
+			this.removingReplicas = removingReplicas;
+			this.isNew = isNew;
+		}
 
-        private PartitionState(Struct struct) {
-            int controllerEpoch = struct.get(CONTROLLER_EPOCH);
-            int leader = struct.get(LEADER);
-            int leaderEpoch = struct.get(LEADER_EPOCH);
+		private PartitionState(Struct struct) {
+			int controllerEpoch = struct.get(CONTROLLER_EPOCH);
+			int leader = struct.get(LEADER);
+			int leaderEpoch = struct.get(LEADER_EPOCH);
 
-            Object[] isrArray = struct.get(ISR);
-            List<Integer> isr = new ArrayList<>(isrArray.length);
-            for (Object r : isrArray)
-                isr.add((Integer) r);
+			Object[] isrArray = struct.get(ISR);
+			List<Integer> isr = new ArrayList<>(isrArray.length);
+			for (Object r : isrArray)
+				isr.add((Integer) r);
 
-            int zkVersion = struct.get(ZK_VERSION);
+			int zkVersion = struct.get(ZK_VERSION);
 
-            Object[] replicasArray = struct.get(REPLICAS);
-            List<Integer> replicas = new ArrayList<>(replicasArray.length);
-            for (Object r : replicasArray)
-                replicas.add((Integer) r);
+			Object[] replicasArray = struct.get(REPLICAS);
+			List<Integer> replicas = new ArrayList<>(replicasArray.length);
+			for (Object r : replicasArray)
+				replicas.add((Integer) r);
 
-            this.basePartitionState = new BasePartitionState(controllerEpoch, leader, leaderEpoch, isr, zkVersion, replicas);
+			this.basePartitionState = new BasePartitionState(controllerEpoch, leader, leaderEpoch, isr, zkVersion, replicas);
 
-            List<Integer> addingReplicas = new ArrayList<>();
-            if (struct.hasField(ADDING_REPLICAS)) {
-                for (Object r : struct.get(ADDING_REPLICAS))
-                    addingReplicas.add((Integer) r);
-            }
-            this.addingReplicas = addingReplicas;
+			List<Integer> addingReplicas = new ArrayList<>();
+			if (struct.hasField(ADDING_REPLICAS)) {
+				for (Object r : struct.get(ADDING_REPLICAS))
+					addingReplicas.add((Integer) r);
+			}
+			this.addingReplicas = addingReplicas;
 
-            List<Integer> removingReplicas = new ArrayList<>();
-            if (struct.hasField(REMOVING_REPLICAS)) {
-                for (Object r : struct.get(REMOVING_REPLICAS))
-                    removingReplicas.add((Integer) r);
-            }
-            this.removingReplicas = removingReplicas;
+			List<Integer> removingReplicas = new ArrayList<>();
+			if (struct.hasField(REMOVING_REPLICAS)) {
+				for (Object r : struct.get(REMOVING_REPLICAS))
+					removingReplicas.add((Integer) r);
+			}
+			this.removingReplicas = removingReplicas;
 
-            this.isNew = struct.getOrElse(IS_NEW, false);
-        }
+			this.isNew = struct.getOrElse(IS_NEW, false);
+		}
 
-        @Override
-        public String toString() {
-            return "PartitionState(controllerEpoch=" + basePartitionState.controllerEpoch +
-                ", leader=" + basePartitionState.leader +
-                ", leaderEpoch=" + basePartitionState.leaderEpoch +
-                ", isr=" + Utils.join(basePartitionState.isr, ",") +
-                ", zkVersion=" + basePartitionState.zkVersion +
-                ", replicas=" + Utils.join(basePartitionState.replicas, ",") +
-                ", addingReplicas=" + Utils.join(addingReplicas, ",") +
-                ", removingReplicas=" + Utils.join(removingReplicas, ",") +
-                ", isNew=" + isNew + ")";
-        }
+		@Override
+		public String toString() {
+			return "PartitionState(controllerEpoch=" + basePartitionState.controllerEpoch +
+					", leader=" + basePartitionState.leader +
+					", leaderEpoch=" + basePartitionState.leaderEpoch +
+					", isr=" + Utils.join(basePartitionState.isr, ",") +
+					", zkVersion=" + basePartitionState.zkVersion +
+					", replicas=" + Utils.join(basePartitionState.replicas, ",") +
+					", addingReplicas=" + Utils.join(addingReplicas, ",") +
+					", removingReplicas=" + Utils.join(removingReplicas, ",") +
+					", isNew=" + isNew + ")";
+		}
 
-        private void setStruct(Struct struct, short version) {
-            struct.set(CONTROLLER_EPOCH, basePartitionState.controllerEpoch);
-            struct.set(LEADER, basePartitionState.leader);
-            struct.set(LEADER_EPOCH, basePartitionState.leaderEpoch);
-            struct.set(ISR, basePartitionState.isr.toArray());
-            struct.set(ZK_VERSION, basePartitionState.zkVersion);
-            struct.set(REPLICAS, basePartitionState.replicas.toArray());
-            if (version >= 3) {
-                struct.set(ADDING_REPLICAS, addingReplicas.toArray());
-                struct.set(REMOVING_REPLICAS, removingReplicas.toArray());
-            }
-            struct.setIfExists(IS_NEW, isNew);
-        }
-    }
+		private void setStruct(Struct struct, short version) {
+			struct.set(CONTROLLER_EPOCH, basePartitionState.controllerEpoch);
+			struct.set(LEADER, basePartitionState.leader);
+			struct.set(LEADER_EPOCH, basePartitionState.leaderEpoch);
+			struct.set(ISR, basePartitionState.isr.toArray());
+			struct.set(ZK_VERSION, basePartitionState.zkVersion);
+			struct.set(REPLICAS, basePartitionState.replicas.toArray());
+			if (version >= 3) {
+				struct.set(ADDING_REPLICAS, addingReplicas.toArray());
+				struct.set(REMOVING_REPLICAS, removingReplicas.toArray());
+			}
+			struct.setIfExists(IS_NEW, isNew);
+		}
+	}
 }

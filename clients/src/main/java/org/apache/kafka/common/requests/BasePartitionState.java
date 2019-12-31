@@ -18,23 +18,43 @@ package org.apache.kafka.common.requests;
 
 import java.util.List;
 
-// This class contains the common fields shared between LeaderAndIsrRequest.PartitionState and UpdateMetadataRequest.PartitionState
+/**
+ * 类中包含了在LeaderAndIsrRequest.PartitionState和UpdateMetadataRequest.PartitionState之间共享的状态字段
+ */
 public class BasePartitionState {
 
-    public final int controllerEpoch;
-    public final int leader;
-    public final int leaderEpoch;
-    public final List<Integer> isr;
-    public final int zkVersion;
-    public final List<Integer> replicas;
+	/**
+	 * 控制器epoch
+	 */
+	public final int controllerEpoch;
+	/**
+	 * leader节点
+	 */
+	public final int leader;
+	/**
+	 * leader epoch
+	 */
+	public final int leaderEpoch;
+	/**
+	 * ISR集合
+	 */
+	public final List<Integer> isr;
+	/**
+	 * ZK版本
+	 */
+	public final int zkVersion;
+	/**
+	 * AR集合
+	 */
+	public final List<Integer> replicas;
 
-    BasePartitionState(int controllerEpoch, int leader, int leaderEpoch, List<Integer> isr, int zkVersion, List<Integer> replicas) {
-        this.controllerEpoch = controllerEpoch;
-        this.leader = leader;
-        this.leaderEpoch = leaderEpoch;
-        this.isr = isr;
-        this.zkVersion = zkVersion;
-        this.replicas = replicas;
-    }
+	BasePartitionState(int controllerEpoch, int leader, int leaderEpoch, List<Integer> isr, int zkVersion, List<Integer> replicas) {
+		this.controllerEpoch = controllerEpoch;
+		this.leader = leader;
+		this.leaderEpoch = leaderEpoch;
+		this.isr = isr;
+		this.zkVersion = zkVersion;
+		this.replicas = replicas;
+	}
 
 }

@@ -402,25 +402,34 @@ abstract class AbstractFetcherThread(name: String,
     warn(s"Partition $topicPartition marked as failed")
   }
 
-
+  /**
+   * 拉取线程关联偏移量-leader epoch
+   * @param initialFetchStates 初始化状态
+   */
   def addPartitions(initialFetchStates: Map[TopicPartition, OffsetAndEpoch]): Unit = {
     partitionMapLock.lockInterruptibly()
     try {
+      // 遍历所有需要进行初始化配置的状态
       initialFetchStates.foreach { case (tp, initialFetchState) =>
-        // We can skip the truncation step iff the leader epoch matches the existing epoch
+        // 如果已存在的leader epoch和当前的leader epoch相匹配，可以跳过截断的步骤
         val currentState = partitionStates.stateValue(tp)
         val updatedState = if (currentState != null && currentState.currentLeaderEpoch == initialFetchState.leaderEpoch) {
+          // 直接复用当前的状态
           currentState
         } else {
           val initialFetchOffset = if (initialFetchState.offset < 0)
+          // 如果初始化的offset是非负数，拉取offset并进行截断
             fetchOffsetAndTruncate(tp, initialFetchState.leaderEpoch)
           else
+          // 否则直接返回初始化的offset
             initialFetchState.offset
+          // 使用初始化的拉取offset创建新的PartitionFetchOffset
           PartitionFetchState(initialFetchOffset, initialFetchState.leaderEpoch, state = Truncating)
         }
+        // 更新并移到末尾
         partitionStates.updateAndMoveToEnd(tp, updatedState)
       }
-
+      // 唤醒其他等待获取锁的线程，并解锁
       partitionMapCond.signalAll()
     } finally partitionMapLock.unlock()
   }

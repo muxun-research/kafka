@@ -225,14 +225,20 @@ class KafkaApis(val requestChannel: RequestChannel,
       // 当broker快速重启时，broker可能会受到来自上一代的请求，因此broker应该直接跳过过期的请求
       info("Received LeaderAndIsr request with broker epoch " +
         s"${leaderAndIsrRequest.brokerEpoch()} smaller than the current broker epoch ${controller.brokerEpoch}")
-
+      // 直接返回响应，免除节流
       sendResponseExemptThrottle(request, leaderAndIsrRequest.getErrorResponse(0, Errors.STALE_BROKER_EPOCH.exception))
     } else {
+      // broker没有过期，通过副本管理器变更节点身份
       val response = replicaManager.becomeLeaderOrFollower(correlationId, leaderAndIsrRequest, onLeadershipChange)
+      // 直接返回响应，免除节流
       sendResponseExemptThrottle(request, response)
     }
   }
 
+  /**
+   * 处理停止副本节点请求
+   * @param request 请求
+   */
   def handleStopReplicaRequest(request: RequestChannel.Request): Unit = {
     // ensureTopicExists is only for client facing requests
     // We can't have the ensureTopicExists check here since the controller sends it as an advisory to all brokers so they
@@ -2796,10 +2802,18 @@ class KafkaApis(val requestChannel: RequestChannel,
     sendErrorOrCloseConnection(request, error, throttleTimeMs)
   }
 
+  /**
+   *
+   * @param request    LeaderAndIsrRequest请求
+   * @param response   LeaderAndIsrRequest响应
+   * @param onComplete 是否完成
+   */
   private def sendResponseExemptThrottle(request: RequestChannel.Request,
                                          response: AbstractResponse,
                                          onComplete: Option[Send => Unit] = None): Unit = {
+    // 计数，避免节流
     quotas.request.maybeRecordExempt(request)
+    // 返回响应
     sendResponse(request, Some(response), onComplete)
   }
 

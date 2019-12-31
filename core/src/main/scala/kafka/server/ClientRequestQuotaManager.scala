@@ -34,18 +34,29 @@ class ClientRequestQuotaManager(private val config: ClientQuotaManagerConfig,
                                 quotaCallback: Option[ClientQuotaCallback])
                                 extends ClientQuotaManager(config, metrics, QuotaType.Request, time, threadNamePrefix, quotaCallback) {
   val maxThrottleTimeMs = TimeUnit.SECONDS.toMillis(this.config.quotaWindowSizeSeconds)
+
   def exemptSensor = getOrCreateSensor(exemptSensorName, exemptMetricName)
 
-  def recordExempt(value: Double): Unit = {
-    exemptSensor.record(value)
+  /**
+   * 以避免节流的方式计数
+   * @param request 请求实体
+   */
+  def maybeRecordExempt(request: RequestChannel.Request): Unit = {
+    // 开启配额管理
+    if (quotasEnabled) {
+      // 使用非限额sensor记录值
+      request.recordNetworkThreadTimeCallback = Some(timeNanos => recordExempt(nanosToPercentage(timeNanos)))
+      // 记录信息，并占用配额
+      recordExempt(nanosToPercentage(request.requestThreadTimeNanos))
+    }
   }
 
   /**
-    * Records that a user/clientId changed request processing time being throttled. If quota has been violated, return
-    * throttle time in milliseconds. Throttle time calculation may be overridden by sub-classes.
-    * @param request client request
-    * @return Number of milliseconds to throttle in case of quota violation. Zero otherwise
-    */
+   * Records that a user/clientId changed request processing time being throttled. If quota has been violated, return
+   * throttle time in milliseconds. Throttle time calculation may be overridden by sub-classes.
+   * @param request client request
+   * @return Number of milliseconds to throttle in case of quota violation. Zero otherwise
+   */
   def maybeRecordAndGetThrottleTimeMs(request: RequestChannel.Request): Int = {
     if (request.apiRemoteCompleteTimeNanos == -1) {
       // When this callback is triggered, the remote API call has completed
@@ -62,11 +73,13 @@ class ClientRequestQuotaManager(private val config: ClientQuotaManagerConfig,
     }
   }
 
-  def maybeRecordExempt(request: RequestChannel.Request): Unit = {
-    if (quotasEnabled) {
-      request.recordNetworkThreadTimeCallback = Some(timeNanos => recordExempt(nanosToPercentage(timeNanos)))
-      recordExempt(nanosToPercentage(request.requestThreadTimeNanos))
-    }
+  /**
+   * 避免限流进行计数
+   * @param value 需要计数的值
+   */
+  def recordExempt(value: Double): Unit = {
+    // 使用非限额sensor记录值
+    exemptSensor.record(value)
   }
 
   override protected def throttleTime(clientMetric: KafkaMetric): Long = {

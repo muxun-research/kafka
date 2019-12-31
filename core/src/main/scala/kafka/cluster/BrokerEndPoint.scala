@@ -56,14 +56,15 @@ object BrokerEndPoint {
 }
 
 /**
- * BrokerEndpoint is used to connect to specific host:port pair.
- * It is typically used by clients (or brokers when connecting to other brokers)
- * and contains no information about the security protocol used on the connection.
- * Clients should know which security protocol to use from configuration.
- * This allows us to keep the wire protocol with the clients unchanged where the protocol is not needed.
+ * BrokerEndpoint用于连接特定的host:port对
+ * 通常由客户端使用（或者连接其他broker的broker），并且没有包含有关连接上使用的安全协议范围
+ * 客户端需要知道从配置中使用哪些协议范围
+ * 可以在不需要协议的情况下雨客户端保持有线协议不变
  */
 case class BrokerEndPoint(id: Int, host: String, port: Int) {
-
+  /**
+   * @return 连接串
+   */
   def connectionString(): String = formatAddress(host, port)
 
   def writeTo(buffer: ByteBuffer): Unit = {

@@ -17,16 +17,16 @@
 package org.apache.kafka.common.metrics;
 
 /**
- * A measurable quantity that can be registered as a metric
+ * 可以注册为度量的可测量数量
  */
 public interface Measurable extends MetricValueProvider<Double> {
 
-    /**
-     * Measure this quantity and return the result as a double
-     * @param config The configuration for this metric
-     * @param now The POSIX time in milliseconds the measurement is being taken
-     * @return The measured value
-     */
-    double measure(MetricConfig config, long now);
+	/**
+	 * 测量此数量，并将结果作为两倍返回
+	 * @param config 指标用到的配置
+	 * @param now    当前时间时间戳
+	 * @return 测量结果
+	 */
+	double measure(MetricConfig config, long now);
 
 }

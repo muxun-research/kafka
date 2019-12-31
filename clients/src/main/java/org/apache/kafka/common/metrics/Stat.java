@@ -17,16 +17,16 @@
 package org.apache.kafka.common.metrics;
 
 /**
- * A Stat is a quantity such as average, max, etc that is computed off the stream of updates to a sensor
+ * Stat是指从传感器中更新流中计算出的数量，例如平均值、最大值等
  */
 public interface Stat {
 
-    /**
-     * Record the given value
-     * @param config The configuration to use for this metric
-     * @param value The value to record
-     * @param timeMs The POSIX time in milliseconds this value occurred
-     */
-    void record(MetricConfig config, double value, long timeMs);
+	/**
+	 * 记录给定的值
+	 * @param config 用于指标的配置
+	 * @param value  记录的给定值
+	 * @param timeMs 时间戳
+	 */
+	void record(MetricConfig config, double value, long timeMs);
 
 }

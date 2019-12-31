@@ -24,8 +24,8 @@ import kafka.network.RequestChannel
 import kafka.network.RequestChannel._
 import kafka.server.ClientQuotaManager._
 import kafka.utils.{Logging, ShutdownableThread}
-import org.apache.kafka.common.metrics.{Metrics, _}
 import org.apache.kafka.common.metrics.stats.{Avg, CumulativeSum, Rate}
+import org.apache.kafka.common.metrics.{Metrics, _}
 import org.apache.kafka.common.security.auth.KafkaPrincipal
 import org.apache.kafka.common.utils.{Sanitizer, Time}
 import org.apache.kafka.common.{Cluster, MetricName}
@@ -61,8 +61,10 @@ object ClientQuotaManagerConfig {
   // Always have 10 whole windows + 1 current window
   val DefaultNumQuotaSamples = 11
   val DefaultQuotaWindowSizeSeconds = 1
-  // Purge sensors after 1 hour of inactivity
-  val InactiveSensorExpirationTimeSeconds  = 3600
+  /**
+   * 闲置一小时后清除传感器
+   */
+  val InactiveSensorExpirationTimeSeconds = 3600
   val QuotaRequestPercentDefault = Int.MaxValue.toDouble
   val NanosToPercentagePerSecond = 100.0 / TimeUnit.SECONDS.toNanos(1)
 
@@ -203,22 +205,21 @@ class ClientQuotaManager(private val config: ClientQuotaManagerConfig,
   }
 
   /**
-   * Returns true if any quotas are enabled for this quota manager. This is used
-   * to determine if quota related metrics should be created.
-   * Note: If any quotas (static defaults, dynamic defaults or quota overrides) have
-   * been configured for this broker at any time for this quota type, quotasEnabled will
-   * return true until the next broker restart, even if all quotas are subsequently deleted.
+   * 如果开启定额配置，返回true
+   * 用于确认是否应该创建于配额相关的指标
+   * 需要注意的是：如果任何配额（静态默认，动态默认，配额重写）随时为该代理配置了此配额类型，quotasEnabled属性将返回true直到下一个broker重新启动
+   * 即使随后删除了所有的配额
    */
   def quotasEnabled: Boolean = quotaTypesEnabled != QuotaTypes.NoQuotas
 
   /**
-    * Records that a user/clientId changed produced/consumed bytes being throttled at the specified time. If quota has
-    * been violated, return throttle time in milliseconds. Throttle time calculation may be overridden by sub-classes.
+   * Records that a user/clientId changed produced/consumed bytes being throttled at the specified time. If quota has
+   * been violated, return throttle time in milliseconds. Throttle time calculation may be overridden by sub-classes.
    * @param request client request
-    * @param value amount of data in bytes or request processing time as a percentage
-    * @param timeMs time to record the value at
-    * @return throttle time in milliseconds
-    */
+   * @param value   amount of data in bytes or request processing time as a percentage
+   * @param timeMs  time to record the value at
+   * @return throttle time in milliseconds
+   */
   def maybeRecordAndGetThrottleTimeMs(request: RequestChannel.Request, value: Double, timeMs: Long): Int = {
     maybeRecordAndGetThrottleTimeMs(request.session, request.header.clientId, value, timeMs)
   }
@@ -390,6 +391,12 @@ class ClientQuotaManager(private val config: ClientQuotaManagerConfig,
       .quota(new Quota(quotaLimit, true))
   }
 
+  /**
+   * 创建配额计数传感器
+   * @param sensorName 传感器名称
+   * @param metricName 计数器名称
+   * @return 配额计数传感器
+   */
   protected def getOrCreateSensor(sensorName: String, metricName: MetricName): Sensor = {
     sensorAccessor.getOrCreate(
       sensorName,
@@ -403,7 +410,6 @@ class ClientQuotaManager(private val config: ClientQuotaManagerConfig,
   /**
    * Overrides quotas for <user>, <client-id> or <user, client-id> or the dynamic defaults
    * for any of these levels.
-   *
    * @param sanitizedUser     user to override if quota applies to <user> or <user, client-id>
    * @param clientId          client to override if quota applies to <client-id> or <user, client-id>
    * @param sanitizedClientId sanitized client ID to override if quota applies to <client-id> or <user, client-id>

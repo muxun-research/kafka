@@ -74,8 +74,7 @@ object RequestChannel extends Logging {
                 memoryPool: MemoryPool,
                 @volatile private var buffer: ByteBuffer,
                 metrics: RequestChannel.Metrics) extends BaseRequest {
-    // These need to be volatile because the readers are in the network thread and the writers are in the request
-    // handler threads or the purgatory threads
+    // 属性需要是volatile类型，读取器位于网络线程，写入器位于请求处理线程或者缓存线程
     @volatile var requestDequeueTimeNanos = -1L
     @volatile var apiLocalCompleteTimeNanos = -1L
     @volatile var responseCompleteTimeNanos = -1L
@@ -83,12 +82,16 @@ object RequestChannel extends Logging {
     @volatile var apiRemoteCompleteTimeNanos = -1L
     @volatile var messageConversionsTimeNanos = 0L
     @volatile var temporaryMemoryBytes = 0L
+    /**
+     * 记录网络线程时间回调
+     */
     @volatile var recordNetworkThreadTimeCallback: Option[Long => Unit] = None
 
     val session = Session(context.principal, context.clientAddress)
     private val bodyAndSize: RequestAndSize = context.parseRequest(buffer)
 
     def header: RequestHeader = context.header
+
     def sizeOfBodyInBytes: Int = bodyAndSize.size
 
     //most request types are parsed entirely into objects at this point. for those we can release the underlying buffer.
