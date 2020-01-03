@@ -304,79 +304,87 @@ class KafkaController(val config: KafkaConfig,
 
   private def state: ControllerState = eventManager.state
 
-  /**
-   * 此回调任务在ZookeeperLeaderElector选举当前broker节点作为新的controller时进行调用
-   * 它在成为controller的状态变化上，做了如下的事情：
-   * 1. 实例化持有当前所有topic、存活的broker和所有已存在的partition的主副本缓存的controller的context对象
-   * 2. 开启controller的channel管理
-   * 3. 开启副本状态机管理
-   * 4. 开启partition状态机管理
-   * 如果在成为controller是，当前broker出现异常或者错误，它会卸任本次选举出来的controller的身份
-   * 这也意味着会触发下一次的controller身份的选举，也就是总是会有一个处于活跃、可服务状态的controller
-   */
-  private def onControllerFailover(): Unit = {
-    info("Registering handlers")
-
-    // 再从Zookeeper中读取真实数据之前，首先注册获取broker/topic信息的回调任务监听器
-    // 比如broker变化监听器，topic变化监听器等
-    val childChangeHandlers = Seq(brokerChangeHandler, topicChangeHandler, topicDeletionHandler, logDirEventNotificationHandler,
-      isrChangeNotificationHandler)
-    childChangeHandlers.foreach(zkClient.registerZNodeChildChangeHandler)
-    // 同时也需要注册首选副本节点选举监听器、分区重分配监听器
-    val nodeChangeHandlers = Seq(preferredReplicaElectionHandler, partitionReassignmentHandler)
-    nodeChangeHandlers.foreach(zkClient.registerZNodeChangeHandlerAndCheckExistence)
-
-    info("Deleting log dir event notifications")
-    zkClient.deleteLogDirEventNotifications(controllerContext.epochZkVersion)
-    info("Deleting isr change notifications")
-    zkClient.deleteIsrChangeNotifications(controllerContext.epochZkVersion)
-    info("Initializing controller context")
-
-    /**
-     * 初始化controler context
-     */
-    initializeControllerContext()
-
-
-    info("Fetching topic deletions in progress")
-    // 然后获取需要进行删除的topic信息和准备删除的topic信息
-    val (topicsToBeDeleted, topicsIneligibleForDeletion) = fetchTopicDeletionsInProgress()
-    info("Initializing topic deletion manager")
-    // 初始化topic删除处理器
-    topicDeletionManager.init(topicsToBeDeleted, topicsIneligibleForDeletion)
-
-    // Kafka需要在controller context初始化之后，在状态机初始化之前，发送UpdateMetadataRequest
-    // 因为broker需要从UpdateMetadataRequest获取存活状态的broker列表，在可以处理由replicaStateMachine.startup()和partitionStateMachine.startup()产生的LeaderAndIsrRequests
-    info("Sending update metadata request")
-    sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq, Set.empty)
-    // 启动副本状态机
-    replicaStateMachine.startup()
-    // 启动分区状态机
-    partitionStateMachine.startup()
-
-    info(s"Ready to serve as the new controller with epoch $epoch")
-    // 竞争成为新的控制器后，看是否需要触发partition的重分配
-    maybeTriggerPartitionReassignment(controllerContext.partitionsBeingReassigned.keySet)
-    // 尝试删除无效的topic
-    topicDeletionManager.tryTopicDeletion()
-    val pendingPreferredReplicaElections = fetchPendingPreferredReplicaElections()
-    // 进行副本节点的选举
-    onReplicaElection(pendingPreferredReplicaElections, ElectionType.PREFERRED, ZkTriggered)
-    info("Starting the controller scheduler")
-    // 启动Kafka的独立的调度器
-    kafkaScheduler.startup()
-    if (config.autoLeaderRebalanceEnable) {
-      // 如果开启自动leader平衡，则创建一个自动进行leader平衡的调度任务
-      scheduleAutoLeaderRebalanceTask(delay = 5, unit = TimeUnit.SECONDS)
-    }
-
-    if (config.tokenAuthEnabled) {
-      info("starting the token expiry check scheduler")
-      tokenCleanScheduler.startup()
-      tokenCleanScheduler.schedule(name = "delete-expired-tokens",
-        fun = () => tokenManager.expireTokens,
-        period = config.delegationTokenExpiryCheckIntervalMs,
-        unit = TimeUnit.MILLISECONDS)
+  override def process(event: ControllerEvent): Unit = {
+    try {
+      event match {
+        case event: MockEvent =>
+          // Mock事件
+          event.process()
+        case ShutdownEventThread =>
+          // Shutdown事件，应该由ControllerEventThread来处理
+          error("Received a ShutdownEventThread event. This type of event is supposed to be handle by ControllerEventThread")
+        case AutoPreferredReplicaLeaderElection =>
+          // 自动首选leader副本节点选举
+          processAutoPreferredReplicaLeaderElection()
+        case ReplicaLeaderElection(partitions, electionType, electionTrigger, callback) =>
+          // leader节点选取
+          processReplicaLeaderElection(partitions, electionType, electionTrigger, callback)
+        case UncleanLeaderElectionEnable =>
+          // 非ISR leader节点选举
+          processUncleanLeaderElectionEnable()
+        case TopicUncleanLeaderElectionEnable(topic) =>
+          // topic级别非ISR leader节点选举开启事件处理
+          processTopicUncleanLeaderElectionEnable(topic)
+        case ControlledShutdown(id, brokerEpoch, callback) =>
+          // 控制器关闭事件处理
+          processControlledShutdown(id, brokerEpoch, callback)
+        case LeaderAndIsrResponseReceived(response, brokerId) =>
+          // 收到LeaderAndIsrResponse处理事件
+          processLeaderAndIsrResponseReceived(response, brokerId)
+        case TopicDeletionStopReplicaResponseReceived(replicaId, requestError, partitionErrors) =>
+          // 收到删除topic停止副本节点响应处理事件
+          processTopicDeletionStopReplicaResponseReceived(replicaId, requestError, partitionErrors)
+        case BrokerChange =>
+          // broker发生变化事件处理
+          processBrokerChange()
+        case BrokerModifications(brokerId) =>
+          // broker发生修改事件处理
+          processBrokerModification(brokerId)
+        case ControllerChange =>
+          // 控制器发生变化事件处理
+          processControllerChange()
+        case Reelect =>
+          // 重新进行选举事件处理
+          processReelect()
+        case RegisterBrokerAndReelect =>
+          // 注册broker并触发重新选举事件处理
+          processRegisterBrokerAndReelect()
+        case Expire =>
+          // 控制器失效时间处理
+          processExpire()
+        case TopicChange =>
+          // topic变化事件处理
+          processTopicChange()
+        case LogDirEventNotification =>
+          // 日志牡蛎事件通知处理
+          processLogDirEventNotification()
+        case PartitionModifications(topic) =>
+          // partition信息修改时间处理
+          processPartitionModifications(topic)
+        case TopicDeletion =>
+          // topic删除事件处理
+          processTopicDeletion()
+        case PartitionReassignment =>
+          // partition重分配事件处理
+          processPartitionReassignment()
+        case PartitionReassignmentIsrChange(partition) =>
+          // partition重分配引发的ISR变化事件处理
+          processPartitionReassignmentIsrChange(partition)
+        case IsrChangeNotification =>
+          // ISR发生变化通知处理
+          processIsrChangeNotification()
+        case Startup =>
+          // 启动时间处理
+          processStartup()
+      }
+    } catch {
+      case e: ControllerMovedException =>
+        info(s"Controller moved to another broker when processing $event.", e)
+        maybeResign()
+      case e: Throwable =>
+        error(s"Error processing event $event", e)
+    } finally {
+      updateMetrics()
     }
   }
 
@@ -727,12 +735,94 @@ class KafkaController(val config: KafkaConfig,
   }
 
   /**
-   * Attempt to elect a replica as leader for each of the given partitions.
-   * @param partitions      The partitions to have a new leader elected
-   * @param electionType    The type of election to perform
-   * @param electionTrigger The reason for tigger this election
-   * @return A map of failed and successful elections. The keys are the topic partitions and the corresponding values are
-   *         either the exception that was thrown or new leader & ISR.
+   * broker成为主控制器时使用
+   *
+   * 此回调任务在Zookeeper Leader Elector选举当前broker节点作为新的controller时进行调用
+   * 它在成为controller的状态变化上，做了如下的事情：
+   * 1. 实例化持有当前所有topic、存活的broker和所有已存在的partition的主副本缓存的controller的context对象
+   * 2. 开启controller的channel管理
+   * 3. 开启副本状态机管理
+   * 4. 开启partition状态机管理
+   * 如果在成为controller是，当前broker出现异常或者错误，它会卸任本次选举出来的controller的身份
+   * 这也意味着会触发下一次的controller身份的选举，也就是总是会有一个处于活跃、可服务状态的controller
+   */
+  private def onControllerFailover(): Unit = {
+    info("Registering handlers")
+
+    // 再从Zookeeper中读取真实数据之前，首先注册获取broker/topic信息的回调任务监听器
+    // 比如broker变化监听器，topic变化监听器等
+    val childChangeHandlers = Seq(brokerChangeHandler, topicChangeHandler, topicDeletionHandler, logDirEventNotificationHandler,
+      isrChangeNotificationHandler)
+    childChangeHandlers.foreach(zkClient.registerZNodeChildChangeHandler)
+    // 同时也需要注册首选副本节点选举监听器、分区重分配监听器
+    val nodeChangeHandlers = Seq(preferredReplicaElectionHandler, partitionReassignmentHandler)
+    nodeChangeHandlers.foreach(zkClient.registerZNodeChangeHandlerAndCheckExistence)
+
+    info("Deleting log dir event notifications")
+    zkClient.deleteLogDirEventNotifications(controllerContext.epochZkVersion)
+    info("Deleting isr change notifications")
+    zkClient.deleteIsrChangeNotifications(controllerContext.epochZkVersion)
+    info("Initializing controller context")
+
+    /**
+     * 初始化controler context
+     */
+    initializeControllerContext()
+
+
+    info("Fetching topic deletions in progress")
+    // 然后获取需要进行删除的topic信息和准备删除的topic信息
+    val (topicsToBeDeleted, topicsIneligibleForDeletion) = fetchTopicDeletionsInProgress()
+    info("Initializing topic deletion manager")
+    // 初始化topic删除处理器
+    topicDeletionManager.init(topicsToBeDeleted, topicsIneligibleForDeletion)
+
+    // Kafka需要在controller context初始化之后，在状态机初始化之前，发送UpdateMetadataRequest
+    // 因为broker需要从UpdateMetadataRequest获取存活状态的broker列表，在可以处理由replicaStateMachine.startup()和partitionStateMachine.startup()产生的LeaderAndIsrRequests
+    info("Sending update metadata request")
+    sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq, Set.empty)
+    // 启动副本状态机
+    replicaStateMachine.startup()
+    // 启动分区状态机
+    partitionStateMachine.startup()
+
+    info(s"Ready to serve as the new controller with epoch $epoch")
+    // 竞争成为新的控制器后，看是否需要触发partition的重分配
+    maybeTriggerPartitionReassignment(controllerContext.partitionsBeingReassigned.keySet)
+    // 尝试删除无效的topic
+    topicDeletionManager.tryTopicDeletion()
+    val pendingPreferredReplicaElections = fetchPendingPreferredReplicaElections()
+    // 进行副本节点的选举
+    onReplicaElection(pendingPreferredReplicaElections, ElectionType.PREFERRED, ZkTriggered)
+    info("Starting the controller scheduler")
+    // 启动Kafka的独立的调度器
+    kafkaScheduler.startup()
+    if (config.autoLeaderRebalanceEnable) {
+      // 如果开启自动leader平衡，则创建一个自动进行leader平衡的调度任务
+      scheduleAutoLeaderRebalanceTask(delay = 5, unit = TimeUnit.SECONDS)
+    }
+
+    if (config.tokenAuthEnabled) {
+      info("starting the token expiry check scheduler")
+      tokenCleanScheduler.startup()
+      tokenCleanScheduler.schedule(name = "delete-expired-tokens",
+        fun = () => tokenManager.expireTokens,
+        period = config.delegationTokenExpiryCheckIntervalMs,
+        unit = TimeUnit.MILLISECONDS)
+    }
+  }
+
+  /**
+   * 对给定的partition选举出一个leader节点
+   * @param partitions      需要进行选举的partition
+   * @param electionType    选举类型
+   * @param electionTrigger 选举原因
+   * @return 成功和失败的选举字典表
+   *         key: topic-partition
+   *         value: {
+   *         "失败": exception,
+   *         "成功": 新leader和ISR
+   *         }
    */
   private[this] def onReplicaElection(
                                        partitions: Set[TopicPartition],
@@ -741,23 +831,28 @@ class KafkaController(val config: KafkaConfig,
                                      ): Map[TopicPartition, Either[Throwable, LeaderAndIsr]] = {
     info(s"Starting replica leader election ($electionType) for partitions ${partitions.mkString(",")} triggerd by $electionTrigger")
     try {
+      // 选举策略
       val strategy = electionType match {
         case ElectionType.PREFERRED => PreferredReplicaPartitionLeaderElectionStrategy
         case ElectionType.UNCLEAN =>
-          /* Let's be conservative and only trigger unclean election if the election type is unclean and it was
-           * triggered by the admin client
+          /*
+           * 保守一点，只在选举类型是unclean并且由admin客户端触发的情况下进行unclean选举
            */
           OfflinePartitionLeaderElectionStrategy(allowUnclean = electionTrigger == AdminClientTriggered)
       }
 
+      // partition状态机处理状态变化
       val results = partitionStateMachine.handleStateChanges(
         partitions.toSeq,
         OnlinePartition,
         Some(strategy)
       )
+      // 如果选举原因不是AdminClientTriggered
       if (electionTrigger != AdminClientTriggered) {
         results.foreach {
+          // 对于状态机处理状态变化的异常进行处理
           case (tp, Left(throwable)) =>
+            // 如果出现控制器迁移异常
             if (throwable.isInstanceOf[ControllerMovedException]) {
               info(s"Error completing replica leader election ($electionType) for partition $tp because controller has moved to another broker.", throwable)
               throw throwable
@@ -767,48 +862,14 @@ class KafkaController(val config: KafkaConfig,
           case (_, Right(_)) => // Ignored; No need to log or throw exception for the success cases
         }
       }
-
+      // 返回partition状态处理结果
       results
     } finally {
       if (electionTrigger != AdminClientTriggered) {
+        // 将partition从首选副本节点选举中移除
         removePartitionsFromPreferredReplicaElection(partitions, electionTrigger == AutoTriggered)
       }
     }
-  }
-
-  /**
-   * 初始化controler context
-   */
-  private def initializeControllerContext(): Unit = {
-    // 获取集群中所有的存活状态的broker和epoch信息
-    val curBrokerAndEpochs = zkClient.getAllBrokerAndEpochsInCluster
-    controllerContext.setLiveBrokerAndEpochs(curBrokerAndEpochs)
-    info(s"Initialized broker epochs cache: ${controllerContext.liveBrokerIdAndEpochs}")
-    // 获取所有的topic信息
-    controllerContext.allTopics = zkClient.getAllTopicsInCluster.toSet
-    // 注册partition更新监听器
-    registerPartitionModificationsHandlers(controllerContext.allTopics.toSeq)
-    // 从Zookeeper获取topic-partition信息和分配的副本节点信息
-    // 请求Zookeeper获取最新的(topic-partition)-replica字典表信息
-    // 更新到控制器上下文中
-    zkClient.getReplicaAssignmentForTopics(controllerContext.allTopics.toSet).foreach {
-      case (topicPartition, assignedReplicas) => controllerContext.updatePartitionReplicaAssignment(topicPartition, assignedReplicas)
-    }
-    // 清空partition leader信息，便于下文的updateLeaderAndIsrCache()重新更新
-    // 清空宕机的broker信息
-    controllerContext.partitionLeadershipInfo.clear()
-    controllerContext.shuttingDownBrokerIds = mutable.Set.empty[Int]
-    // 注册broker更新监听器
-    registerBrokerModificationsHandler(controllerContext.liveOrShuttingDownBrokerIds)
-    // 从Zookeeper更新来自于Zookeeper的所有partition的leader和isr信息
-    updateLeaderAndIsrCache()
-    // 启动controller channel manager
-    controllerChannelManager.startup()
-    // 初始化partition的重分配信息，并注入到控制器上下文中
-    initializePartitionReassignment()
-    info(s"Currently active brokers in the cluster: ${controllerContext.liveBrokerIds}")
-    info(s"Currently shutting brokers in the cluster: ${controllerContext.shuttingDownBrokerIds}")
-    info(s"Current list of topics in the cluster: ${controllerContext.allTopics}")
   }
 
   private def fetchPendingPreferredReplicaElections(): Set[TopicPartition] = {
@@ -1095,49 +1156,89 @@ class KafkaController(val config: KafkaConfig,
     finalLeaderIsrAndControllerEpoch
   }
 
+  /**
+   * 初始化controller context
+   */
+  private def initializeControllerContext(): Unit = {
+    // 获取集群中所有的存活状态的broker和epoch信息
+    val curBrokerAndEpochs = zkClient.getAllBrokerAndEpochsInCluster
+    controllerContext.setLiveBrokerAndEpochs(curBrokerAndEpochs)
+    info(s"Initialized broker epochs cache: ${controllerContext.liveBrokerIdAndEpochs}")
+    // 获取所有的topic信息
+    controllerContext.allTopics = zkClient.getAllTopicsInCluster.toSet
+    // 注册partition更新监听器
+    registerPartitionModificationsHandlers(controllerContext.allTopics.toSeq)
+    // 从Zookeeper获取topic-partition信息和分配的副本节点信息
+    // 请求Zookeeper获取最新的(topic-partition)-replica字典表信息
+    // 更新到控制器上下文中
+    zkClient.getReplicaAssignmentForTopics(controllerContext.allTopics.toSet).foreach {
+      case (topicPartition, assignedReplicas) => controllerContext.updatePartitionReplicaAssignment(topicPartition, assignedReplicas)
+    }
+    // 清空partition leader信息，便于下文的updateLeaderAndIsrCache()重新更新
+    // 清空宕机的broker信息
+    controllerContext.partitionLeadershipInfo.clear()
+    controllerContext.shuttingDownBrokerIds = mutable.Set.empty[Int]
+    // 注册broker更新监听器
+    registerBrokerModificationsHandler(controllerContext.liveOrShuttingDownBrokerIds)
+    // 从Zookeeper更新来自于Zookeeper的所有partition的leader和isr信息
+    updateLeaderAndIsrCache()
+    // 启动controller channel manager
+    controllerChannelManager.startup()
+    // 初始化partition的重分配信息，并注入到控制器上下文中
+    initializePartitionReassignment()
+    info(s"Currently active brokers in the cluster: ${controllerContext.liveBrokerIds}")
+    info(s"Currently shutting brokers in the cluster: ${controllerContext.shuttingDownBrokerIds}")
+    info(s"Current list of topics in the cluster: ${controllerContext.allTopics}")
+  }
+
+  /**
+   * 检查并处罚自动leader在平衡
+   */
   private def checkAndTriggerAutoLeaderRebalance(): Unit = {
     trace("Checking need to trigger auto leader balancing")
+    // broker => topic的首选副本节点 字典表
     val preferredReplicasForTopicsByBrokers: Map[Int, Map[TopicPartition, Seq[Int]]] =
+    // 从控制器上下文中获取所有的partition，并去除需要删除的topic所在的partition
       controllerContext.allPartitions.filterNot {
         tp => topicDeletionManager.isTopicQueuedUpForDeletion(tp.topic)
       }.map { tp =>
+        // 并以topic为key进行映射
         (tp, controllerContext.partitionReplicaAssignment(tp))
+        // 最后以topic分配的副本节点进行聚集
       }.toMap.groupBy { case (_, assignedReplicas) => assignedReplicas.head }
 
     debug(s"Preferred replicas by broker $preferredReplicasForTopicsByBrokers")
 
-    // for each broker, check if a preferred replica election needs to be triggered
+    // 遍历每个broker，检查是否需要出发首选副本节点选举
     preferredReplicasForTopicsByBrokers.foreach { case (leaderBroker, topicPartitionsForBroker) =>
+      // 过滤那些需要出发选举的topic
       val topicsNotInPreferredReplica = topicPartitionsForBroker.filter { case (topicPartition, _) =>
         val leadershipInfo = controllerContext.partitionLeadershipInfo.get(topicPartition)
+        // 如果LeaderAndIsr中的leader节点和当前的leader节点不是同一个节点，则证明需要触发选举
         leadershipInfo.exists(_.leaderAndIsr.leader != leaderBroker)
       }
       debug(s"Topics not in preferred replica for broker $leaderBroker $topicsNotInPreferredReplica")
-
+      // 计算不平衡率
       val imbalanceRatio = topicsNotInPreferredReplica.size.toDouble / topicPartitionsForBroker.size
       trace(s"Leader imbalance ratio for broker $leaderBroker is $imbalanceRatio")
 
-      // check ratio and if greater than desired ratio, trigger a rebalance for the topic partitions
-      // that need to be on this broker
+      // 检查不平衡率是否超过理想比率
+      // 如果超过，触发topic的再平衡操作
       if (imbalanceRatio > (config.leaderImbalancePerBrokerPercentage.toDouble / 100)) {
-        // do this check only if the broker is live and there are no partitions being reassigned currently
-        // and preferred replica election is not in progress
-        val candidatePartitions = topicsNotInPreferredReplica.keys.filter(tp => controllerContext.isReplicaOnline(leaderBroker, tp) &&
-          controllerContext.partitionsBeingReassigned.isEmpty &&
-          !topicDeletionManager.isTopicQueuedUpForDeletion(tp.topic) &&
-          controllerContext.allTopics.contains(tp.topic))
+        // 只有在broker存活，并且partition当前没有处于重分配，没有进行首选副本节点选举的情况下进行检查
+        val candidatePartitions = topicsNotInPreferredReplica.keys.filter(
+          // 过滤条件
+          // broker是否处于在线状态
+          tp => controllerContext.isReplicaOnline(leaderBroker, tp) &&
+            // partition是否处于充分为状态
+            controllerContext.partitionsBeingReassigned.isEmpty &&
+            // topic是否在等待删除
+            !topicDeletionManager.isTopicQueuedUpForDeletion(tp.topic) &&
+            // topic是否属于当前集群
+            controllerContext.allTopics.contains(tp.topic))
+        // 对候选的partition进行重新选举，选举类型是首选节点类型，触发方式为自动触发
         onReplicaElection(candidatePartitions.toSet, ElectionType.PREFERRED, AutoTriggered)
       }
-    }
-  }
-
-  private def processAutoPreferredReplicaLeaderElection(): Unit = {
-    if (!isActive) return
-    try {
-      info("Processing automatic preferred replica leader election")
-      checkAndTriggerAutoLeaderRebalance()
-    } finally {
-      scheduleAutoLeaderRebalanceTask(delay = config.leaderImbalanceCheckIntervalSeconds, unit = TimeUnit.SECONDS)
     }
   }
 
@@ -1622,6 +1723,49 @@ class KafkaController(val config: KafkaConfig,
     )
   }
 
+  /**
+   *
+   * 自动首选leader副本节点选举
+   * 需要属性：autoLeaderRebalanceEnable
+   * onControllerFailover()
+   */
+  private def processAutoPreferredReplicaLeaderElection(): Unit = {
+    if (!isActive) return
+    try {
+      info("Processing automatic preferred replica leader election")
+      // 检查并处罚自动leader再平衡
+      checkAndTriggerAutoLeaderRebalance()
+    } finally {
+      scheduleAutoLeaderRebalanceTask(delay = config.leaderImbalanceCheckIntervalSeconds, unit = TimeUnit.SECONDS)
+    }
+  }
+
+  private def processControllerChange(): Unit = {
+    maybeResign()
+  }
+
+  private def processReelect(): Unit = {
+    maybeResign()
+    elect()
+  }
+
+  private def processRegisterBrokerAndReelect(): Unit = {
+    _brokerEpoch = zkClient.registerBroker(brokerInfo)
+    processReelect()
+  }
+
+  private def processExpire(): Unit = {
+    activeControllerId = -1
+    onControllerResignation()
+  }
+
+  /**
+   * leader节点选举
+   * @param partitionsFromAdminClientOpt
+   * @param electionType 选举类型
+   * @param electionTrigger
+   * @param callback     选举结束回调任务
+   */
   private def processReplicaLeaderElection(
                                             partitionsFromAdminClientOpt: Option[Set[TopicPartition]],
                                             electionType: ElectionType,
@@ -1693,88 +1837,6 @@ class KafkaController(val config: KafkaConfig,
         debug(s"Waiting for any successful result for election type ($electionType) by $electionTrigger for partitions: $results")
         callback(results)
       }
-    }
-  }
-
-  private def processControllerChange(): Unit = {
-    maybeResign()
-  }
-
-  private def processReelect(): Unit = {
-    maybeResign()
-    elect()
-  }
-
-  private def processRegisterBrokerAndReelect(): Unit = {
-    _brokerEpoch = zkClient.registerBroker(brokerInfo)
-    processReelect()
-  }
-
-  private def processExpire(): Unit = {
-    activeControllerId = -1
-    onControllerResignation()
-  }
-
-
-  override def process(event: ControllerEvent): Unit = {
-    try {
-      event match {
-        case event: MockEvent =>
-          // Used only in test cases
-          event.process()
-        case ShutdownEventThread =>
-          error("Received a ShutdownEventThread event. This type of event is supposed to be handle by ControllerEventThread")
-        case AutoPreferredReplicaLeaderElection =>
-          processAutoPreferredReplicaLeaderElection()
-        case ReplicaLeaderElection(partitions, electionType, electionTrigger, callback) =>
-          processReplicaLeaderElection(partitions, electionType, electionTrigger, callback)
-        case UncleanLeaderElectionEnable =>
-          processUncleanLeaderElectionEnable()
-        case TopicUncleanLeaderElectionEnable(topic) =>
-          processTopicUncleanLeaderElectionEnable(topic)
-        case ControlledShutdown(id, brokerEpoch, callback) =>
-          processControlledShutdown(id, brokerEpoch, callback)
-        case LeaderAndIsrResponseReceived(response, brokerId) =>
-          processLeaderAndIsrResponseReceived(response, brokerId)
-        case TopicDeletionStopReplicaResponseReceived(replicaId, requestError, partitionErrors) =>
-          processTopicDeletionStopReplicaResponseReceived(replicaId, requestError, partitionErrors)
-        case BrokerChange =>
-          processBrokerChange()
-        case BrokerModifications(brokerId) =>
-          processBrokerModification(brokerId)
-        case ControllerChange =>
-          processControllerChange()
-        case Reelect =>
-          processReelect()
-        case RegisterBrokerAndReelect =>
-          processRegisterBrokerAndReelect()
-        case Expire =>
-          processExpire()
-        case TopicChange =>
-          processTopicChange()
-        case LogDirEventNotification =>
-          processLogDirEventNotification()
-        case PartitionModifications(topic) =>
-          processPartitionModifications(topic)
-        case TopicDeletion =>
-          processTopicDeletion()
-        case PartitionReassignment =>
-          processPartitionReassignment()
-        case PartitionReassignmentIsrChange(partition) =>
-          processPartitionReassignmentIsrChange(partition)
-        case IsrChangeNotification =>
-          processIsrChangeNotification()
-        case Startup =>
-          processStartup()
-      }
-    } catch {
-      case e: ControllerMovedException =>
-        info(s"Controller moved to another broker when processing $event.", e)
-        maybeResign()
-      case e: Throwable =>
-        error(s"Error processing event $event", e)
-    } finally {
-      updateMetrics()
     }
   }
 

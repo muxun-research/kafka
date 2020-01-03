@@ -6,14 +6,14 @@
  * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-*/
+ */
 package kafka.controller
 
 import kafka.api.LeaderAndIsr
@@ -21,13 +21,13 @@ import kafka.common.StateChangeFailedException
 import kafka.controller.Election._
 import kafka.server.KafkaConfig
 import kafka.utils.Logging
-import kafka.zk.KafkaZkClient
 import kafka.zk.KafkaZkClient.UpdateLeaderAndIsrResult
-import kafka.zk.TopicPartitionStateZNode
+import kafka.zk.{KafkaZkClient, TopicPartitionStateZNode}
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.errors.ControllerMovedException
 import org.apache.zookeeper.KeeperException
 import org.apache.zookeeper.KeeperException.Code
+
 import scala.collection.{Map, Seq, mutable}
 
 abstract class PartitionStateMachine(controllerContext: ControllerContext) extends Logging {
@@ -97,31 +97,28 @@ abstract class PartitionStateMachine(controllerContext: ControllerContext) exten
   }
 
   def handleStateChanges(
-    partitions: Seq[TopicPartition],
-    targetState: PartitionState
-  ): Map[TopicPartition, Either[Throwable, LeaderAndIsr]] = {
+                          partitions: Seq[TopicPartition],
+                          targetState: PartitionState
+                        ): Map[TopicPartition, Either[Throwable, LeaderAndIsr]] = {
     handleStateChanges(partitions, targetState, None)
   }
 
   def handleStateChanges(
-    partitions: Seq[TopicPartition],
-    targetState: PartitionState,
-    leaderElectionStrategy: Option[PartitionLeaderElectionStrategy]
-  ): Map[TopicPartition, Either[Throwable, LeaderAndIsr]]
+                          partitions: Seq[TopicPartition],
+                          targetState: PartitionState,
+                          leaderElectionStrategy: Option[PartitionLeaderElectionStrategy]
+                        ): Map[TopicPartition, Either[Throwable, LeaderAndIsr]]
 
 }
 
 /**
- * This class represents the state machine for partitions. It defines the states that a partition can be in, and
- * transitions to move the partition to another legal state. The different states that a partition can be in are -
- * 1. NonExistentPartition: This state indicates that the partition was either never created or was created and then
- *                          deleted. Valid previous state, if one exists, is OfflinePartition
- * 2. NewPartition        : After creation, the partition is in the NewPartition state. In this state, the partition should have
- *                          replicas assigned to it, but no leader/isr yet. Valid previous states are NonExistentPartition
- * 3. OnlinePartition     : Once a leader is elected for a partition, it is in the OnlinePartition state.
- *                          Valid previous states are NewPartition/OfflinePartition
- * 4. OfflinePartition    : If, after successful leader election, the leader for partition dies, then the partition
- *                          moves to the OfflinePartition state. Valid previous states are NewPartition/OnlinePartition
+ * ZkPartitionStateMachine代表partition的状态机
+ * 它声明了partition可以处于的状态，并且将partition转换到另一个合法的状态
+ * partition状态如下：
+ * 1. NonExistentPartition: 此状态证明partition没有创建或者创建后删除，如果需要合法的前置状态，是OfflinePartition
+ * 2. NewPartition: 经过创建，partition处于NewPartition状态，在这种状态下，partition需要分配副本节点，但是此时还没有leader/isr，合法的前置状态是NonExistentPartition
+ * 3. OnlinePartition: 当partition选举出leader，那么partition就会处于OnlinePartition状态，合法的前置状态是NewPartition/OfflinePartition
+ * 4. OfflinePartition: 如果在leader选举成功后，partition的leader节点挂掉，partition会迁转换到OfflinePartition状态，前置合法状态是NewPartition/OnlinePartition
  */
 class ZkPartitionStateMachine(config: KafkaConfig,
                               stateChangeLogger: StateChangeLogger,
@@ -134,28 +131,33 @@ class ZkPartitionStateMachine(config: KafkaConfig,
   this.logIdent = s"[PartitionStateMachine controllerId=$controllerId] "
 
   /**
-   * Try to change the state of the given partitions to the given targetState, using the given
-   * partitionLeaderElectionStrategyOpt if a leader election is required.
-   * @param partitions The partitions
-   * @param targetState The state
-   * @param partitionLeaderElectionStrategyOpt The leader election strategy if a leader election is required.
-   * @return A map of failed and successful elections when targetState is OnlinePartitions. The keys are the
-   *         topic partitions and the corresponding values are either the exception that was thrown or new
-   *         leader & ISR.
+   * 将给定的partition从当前状态转换为目标状态，
+   * 如果需要leader选举，使用给定的partition的leader选举策略
+   * @param partitions                         需要进行状态变更的partition
+   * @param targetState                        目标转换状态
+   * @param partitionLeaderElectionStrategyOpt 需要leader选举的情况下，leader的选举策略
+   * @return 当目标状态为OnlinePartitions时，状态转换失败或者成功选举的字典表
+   *         key: topic-partition
+   *         value: {
+   *         "失败": exception,
+   *         "成功": 新leader节点和ISR
+   *         }
    */
   override def handleStateChanges(
-    partitions: Seq[TopicPartition],
-    targetState: PartitionState,
-    partitionLeaderElectionStrategyOpt: Option[PartitionLeaderElectionStrategy]
-  ): Map[TopicPartition, Either[Throwable, LeaderAndIsr]] = {
+                                   partitions: Seq[TopicPartition],
+                                   targetState: PartitionState,
+                                   partitionLeaderElectionStrategyOpt: Option[PartitionLeaderElectionStrategy]
+                                 ): Map[TopicPartition, Either[Throwable, LeaderAndIsr]] = {
     if (partitions.nonEmpty) {
       try {
         controllerBrokerRequestBatch.newBatch()
+        // 执行partition状态变更
         val result = doHandleStateChanges(
           partitions,
           targetState,
           partitionLeaderElectionStrategyOpt
         )
+        // 控制器发起，广播LeaderAndIsrRequest、UpdateMetadataRequest、StopRelica事件
         controllerBrokerRequestBatch.sendRequestsToBrokers(controllerContext.epoch)
         result
       } catch {
@@ -201,27 +203,37 @@ class ZkPartitionStateMachine(config: KafkaConfig,
    *         leader & ISR.
    */
   private def doHandleStateChanges(
-    partitions: Seq[TopicPartition],
-    targetState: PartitionState,
-    partitionLeaderElectionStrategyOpt: Option[PartitionLeaderElectionStrategy]
-  ): Map[TopicPartition, Either[Throwable, LeaderAndIsr]] = {
+                                    partitions: Seq[TopicPartition],
+                                    targetState: PartitionState,
+                                    partitionLeaderElectionStrategyOpt: Option[PartitionLeaderElectionStrategy]
+                                  ): Map[TopicPartition, Either[Throwable, LeaderAndIsr]] = {
+    // 创建partition状态变更日志
     val stateChangeLog = stateChangeLogger.withControllerEpoch(controllerContext.epoch)
+
     partitions.foreach(partition => controllerContext.putPartitionStateIfNotExists(partition, NonExistentPartition))
     val (validPartitions, invalidPartitions) = controllerContext.checkValidPartitionStateChange(partitions, targetState)
+    // 记录非法的状态的转换，这种类型不进行状态转换
     invalidPartitions.foreach(partition => logInvalidTransition(partition, targetState))
-
+    // 目标状态过滤
     targetState match {
       case NewPartition =>
         validPartitions.foreach { partition =>
           stateChangeLog.trace(s"Changed partition $partition state from ${partitionState(partition)} to $targetState with " +
             s"assigned replicas ${controllerContext.partitionReplicaAssignment(partition).mkString(",")}")
+          // 直接将状态变更为NewPartition
           controllerContext.putPartitionState(partition, NewPartition)
         }
         Map.empty
       case OnlinePartition =>
+        // 没有进行初始化的partition
+        // 条件：partition的当前状态是NewPartition
         val uninitializedPartitions = validPartitions.filter(partition => partitionState(partition) == NewPartition)
+        // 需要进行leader选举的partition
+        // 条件：partition的当前状态是OfflinePartition或者OnlinePartition
         val partitionsToElectLeader = validPartitions.filter(partition => partitionState(partition) == OfflinePartition || partitionState(partition) == OnlinePartition)
+        // 处理未进行初始化的partition
         if (uninitializedPartitions.nonEmpty) {
+          // 进行初始化，也就是leader和ISR选举
           val successfulInitializations = initializeLeaderAndIsrForPartitions(uninitializedPartitions)
           successfulInitializations.foreach { partition =>
             stateChangeLog.trace(s"Changed partition $partition from ${partitionState(partition)} to $targetState with state " +
@@ -253,12 +265,14 @@ class ZkPartitionStateMachine(config: KafkaConfig,
       case OfflinePartition =>
         validPartitions.foreach { partition =>
           stateChangeLog.trace(s"Changed partition $partition state from ${partitionState(partition)} to $targetState")
+          // 直接将状态转换为OfflinePartition
           controllerContext.putPartitionState(partition, OfflinePartition)
         }
         Map.empty
       case NonExistentPartition =>
         validPartitions.foreach { partition =>
           stateChangeLog.trace(s"Changed partition $partition state from ${partitionState(partition)} to $targetState")
+          // 直接将状态转换为NonExistentPartition
           controllerContext.putPartitionState(partition, NonExistentPartition)
         }
         Map.empty
@@ -266,19 +280,25 @@ class ZkPartitionStateMachine(config: KafkaConfig,
   }
 
   /**
-   * Initialize leader and isr partition state in zookeeper.
-   * @param partitions The partitions  that we're trying to initialize.
-   * @return The partitions that have been successfully initialized.
+   * 在Zookeeper中实现leader和ISR
+   * @param partitions 尝试初始化的partition
+   * @return 成功初始化的partition
    */
   private def initializeLeaderAndIsrForPartitions(partitions: Seq[TopicPartition]): Seq[TopicPartition] = {
+    // 成功初始化的partition集合
     val successfulInitializations = mutable.Buffer.empty[TopicPartition]
+    // 获取每个partition所在的副本节点
     val replicasPerPartition = partitions.map(partition => partition -> controllerContext.partitionReplicaAssignment(partition))
+    // 获取每个partition存活的副本节点
     val liveReplicasPerPartition = replicasPerPartition.map { case (partition, replicas) =>
-        val liveReplicasForPartition = replicas.filter(replica => controllerContext.isReplicaOnline(replica, partition))
-        partition -> liveReplicasForPartition
+      val liveReplicasForPartition = replicas.filter(
+        // 副本节点处于在线状态
+        replica => controllerContext.isReplicaOnline(replica, partition))
+      partition -> liveReplicasForPartition
     }
+    // 对partition是否拥有存活的副本节点进行分区
     val (partitionsWithoutLiveReplicas, partitionsWithLiveReplicas) = liveReplicasPerPartition.partition { case (_, liveReplicas) => liveReplicas.isEmpty }
-
+    // 对于没有存活副本节点的partition，记录失败的状态转换，不进行状态转换
     partitionsWithoutLiveReplicas.foreach { case (partition, replicas) =>
       val failMsg = s"Controller $controllerId epoch ${controllerContext.epoch} encountered error during state change of " +
         s"partition $partition from New to Online, assigned replicas are " +
@@ -286,19 +306,24 @@ class ZkPartitionStateMachine(config: KafkaConfig,
         "replica is alive."
       logFailedStateChange(partition, NewPartition, OnlinePartition, new StateChangeFailedException(failMsg))
     }
+    // 对于存活副本节点的partition
     val leaderIsrAndControllerEpochs = partitionsWithLiveReplicas.map { case (partition, liveReplicas) =>
+      // 创建LeaderAndIsr
       val leaderAndIsr = LeaderAndIsr(liveReplicas.head, liveReplicas.toList)
+      // 创建新的LeaderAndIsrControllerEpoch
       val leaderIsrAndControllerEpoch = LeaderIsrAndControllerEpoch(leaderAndIsr, controllerContext.epoch)
       partition -> leaderIsrAndControllerEpoch
     }.toMap
+    // 创建状态变更响应
     val createResponses = try {
+      // 在ZK上创建
       zkClient.createTopicPartitionStatesRaw(leaderIsrAndControllerEpochs, controllerContext.epochZkVersion)
     } catch {
       case e: ControllerMovedException =>
         error("Controller moved to another broker when trying to create the topic partition state znode", e)
         throw e
       case e: Exception =>
-        partitionsWithLiveReplicas.foreach { case (partition,_) => logFailedStateChange(partition, partitionState(partition), NewPartition, e) }
+        partitionsWithLiveReplicas.foreach { case (partition, _) => logFailedStateChange(partition, partitionState(partition), NewPartition, e) }
         Seq.empty
     }
     createResponses.foreach { createResponse =>
@@ -314,20 +339,21 @@ class ZkPartitionStateMachine(config: KafkaConfig,
         logFailedStateChange(partition, NewPartition, OnlinePartition, code)
       }
     }
+    // 返回成功实例化的partition
     successfulInitializations
   }
 
   /**
    * Repeatedly attempt to elect leaders for multiple partitions until there are no more remaining partitions to retry.
-   * @param partitions The partitions that we're trying to elect leaders for.
+   * @param partitions                      The partitions that we're trying to elect leaders for.
    * @param partitionLeaderElectionStrategy The election strategy to use.
    * @return A map of failed and successful elections. The keys are the topic partitions and the corresponding values are
    *         either the exception that was thrown or new leader & ISR.
    */
   private def electLeaderForPartitions(
-    partitions: Seq[TopicPartition],
-    partitionLeaderElectionStrategy: PartitionLeaderElectionStrategy
-  ): Map[TopicPartition, Either[Throwable, LeaderAndIsr]] = {
+                                        partitions: Seq[TopicPartition],
+                                        partitionLeaderElectionStrategy: PartitionLeaderElectionStrategy
+                                      ): Map[TopicPartition, Either[Throwable, LeaderAndIsr]] = {
     var remaining = partitions
     val finishedElections = mutable.Map.empty[TopicPartition, Either[Throwable, LeaderAndIsr]]
 
@@ -350,8 +376,7 @@ class ZkPartitionStateMachine(config: KafkaConfig,
   /**
    * Try to elect leaders for multiple partitions.
    * Electing a leader for a partition updates partition state in zookeeper.
-   *
-   * @param partitions The partitions that we're trying to elect leaders for.
+   * @param partitions                      The partitions that we're trying to elect leaders for.
    * @param partitionLeaderElectionStrategy The election strategy to use.
    * @return A tuple of two values:
    *         1. The partitions and the expected leader and isr that successfully had a leader elected. And exceptions
@@ -360,9 +385,9 @@ class ZkPartitionStateMachine(config: KafkaConfig,
    *         the partition leader updated partition state while the controller attempted to update partition state.
    */
   private def doElectLeaderForPartitions(
-    partitions: Seq[TopicPartition],
-    partitionLeaderElectionStrategy: PartitionLeaderElectionStrategy
-  ): (Map[TopicPartition, Either[Exception, LeaderAndIsr]], Seq[TopicPartition]) = {
+                                          partitions: Seq[TopicPartition],
+                                          partitionLeaderElectionStrategy: PartitionLeaderElectionStrategy
+                                        ): (Map[TopicPartition, Either[Exception, LeaderAndIsr]], Seq[TopicPartition]) = {
     val getDataResponses = try {
       zkClient.getTopicPartitionStatesRaw(partitions)
     } catch {
@@ -454,9 +479,9 @@ class ZkPartitionStateMachine(config: KafkaConfig,
    *         3. allow unclean
    */
   private def collectUncleanLeaderElectionState(
-    leaderAndIsrs: Seq[(TopicPartition, LeaderAndIsr)],
-    allowUnclean: Boolean
-  ): Seq[(TopicPartition, Option[LeaderAndIsr], Boolean)] = {
+                                                 leaderAndIsrs: Seq[(TopicPartition, LeaderAndIsr)],
+                                                 allowUnclean: Boolean
+                                               ): Seq[(TopicPartition, Option[LeaderAndIsr], Boolean)] = {
     val (partitionsWithNoLiveInSyncReplicas, partitionsWithLiveInSyncReplicas) = leaderAndIsrs.partition {
       case (partition, leaderAndIsr) =>
         val liveInSyncReplicas = leaderAndIsr.isr.filter(controllerContext.isReplicaOnline(_, partition))
@@ -488,9 +513,9 @@ class ZkPartitionStateMachine(config: KafkaConfig,
     }
 
     electionForPartitionWithoutLiveReplicas ++
-    partitionsWithLiveInSyncReplicas.map { case (partition, leaderAndIsr) =>
-      (partition, Option(leaderAndIsr), false)
-    }
+      partitionsWithLiveInSyncReplicas.map { case (partition, leaderAndIsr) =>
+        (partition, Option(leaderAndIsr), false)
+      }
   }
 
   private def logInvalidTransition(partition: TopicPartition, targetState: PartitionState): Unit = {
@@ -540,13 +565,18 @@ object PartitionLeaderElectionAlgorithms {
 }
 
 sealed trait PartitionLeaderElectionStrategy
+
 final case class OfflinePartitionLeaderElectionStrategy(allowUnclean: Boolean) extends PartitionLeaderElectionStrategy
+
 final case object ReassignPartitionLeaderElectionStrategy extends PartitionLeaderElectionStrategy
+
 final case object PreferredReplicaPartitionLeaderElectionStrategy extends PartitionLeaderElectionStrategy
+
 final case object ControlledShutdownPartitionLeaderElectionStrategy extends PartitionLeaderElectionStrategy
 
 sealed trait PartitionState {
   def state: Byte
+
   def validPreviousStates: Set[PartitionState]
 }
 
