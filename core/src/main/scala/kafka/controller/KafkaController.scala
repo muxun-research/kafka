@@ -356,7 +356,7 @@ class KafkaController(val config: KafkaConfig,
           // topic变化事件处理
           processTopicChange()
         case LogDirEventNotification =>
-          // 日志牡蛎事件通知处理
+          // 日志目录事件通知处理
           processLogDirEventNotification()
         case PartitionModifications(topic) =>
           // partition信息修改时间处理
@@ -537,44 +537,12 @@ class KafkaController(val config: KafkaConfig,
   }
 
   /**
-   * This method marks the given replicas as offline. It does the following -
-   * 1. Marks the given partitions as offline
-   * 2. Triggers the OnlinePartition state change for all new/offline partitions
-   * 3. Invokes the OfflineReplica state change on the input list of newly offline replicas
-   * 4. If no partitions are affected then send UpdateMetadataRequest to live or shutting down brokers
-   *
-   * Note that we don't need to refresh the leader/isr cache for all topic/partitions at this point. This is because
-   * the partition state machine will refresh our cache for us when performing leader election for all new/offline
-   * partitions coming online.
+   * 非ISR leader节点选取
    */
-  private def onReplicasBecomeOffline(newOfflineReplicas: Set[PartitionAndReplica]): Unit = {
-    val (newOfflineReplicasForDeletion, newOfflineReplicasNotForDeletion) =
-      newOfflineReplicas.partition(p => topicDeletionManager.isTopicQueuedUpForDeletion(p.topic))
-
-    val partitionsWithoutLeader = controllerContext.partitionLeadershipInfo.filter(partitionAndLeader =>
-      !controllerContext.isReplicaOnline(partitionAndLeader._2.leaderAndIsr.leader, partitionAndLeader._1) &&
-        !topicDeletionManager.isTopicQueuedUpForDeletion(partitionAndLeader._1.topic)).keySet
-
-    // trigger OfflinePartition state for all partitions whose current leader is one amongst the newOfflineReplicas
-    partitionStateMachine.handleStateChanges(partitionsWithoutLeader.toSeq, OfflinePartition)
-    // trigger OnlinePartition state changes for offline or new partitions
+  private def processUncleanLeaderElectionEnable(): Unit = {
+    if (!isActive) return
+    info("Unclean leader election has been enabled by default")
     partitionStateMachine.triggerOnlinePartitionStateChange()
-    // trigger OfflineReplica state change for those newly offline replicas
-    replicaStateMachine.handleStateChanges(newOfflineReplicasNotForDeletion.toSeq, OfflineReplica)
-
-    // fail deletion of topics that are affected by the offline replicas
-    if (newOfflineReplicasForDeletion.nonEmpty) {
-      // it is required to mark the respective replicas in TopicDeletionFailed state since the replica cannot be
-      // deleted when its log directory is offline. This will prevent the replica from being in TopicDeletionStarted state indefinitely
-      // since topic deletion cannot be retried until at least one replica is in TopicDeletionStarted state
-      topicDeletionManager.failReplicaDeletion(newOfflineReplicasForDeletion)
-    }
-
-    // If replica failure did not require leader re-election, inform brokers of the offline brokers
-    // Note that during leader re-election, brokers update their metadata
-    if (partitionsWithoutLeader.isEmpty) {
-      sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq, Set.empty)
-    }
   }
 
   /**
@@ -1242,10 +1210,18 @@ class KafkaController(val config: KafkaConfig,
     }
   }
 
-  private def processUncleanLeaderElectionEnable(): Unit = {
-    if (!isActive) return
-    info("Unclean leader election has been enabled by default")
-    partitionStateMachine.triggerOnlinePartitionStateChange()
+  /**
+   * 处理控制器关闭
+   * @param id                         broker id
+   * @param brokerEpoch                broker epoch
+   * @param controlledShutdownCallback 控制器关闭的回调任务
+   */
+  private def processControlledShutdown(id: Int, brokerEpoch: Long, controlledShutdownCallback: Try[Set[TopicPartition]] => Unit): Unit = {
+    val controlledShutdownResult = Try {
+      // 关闭控制器
+      doControlledShutdown(id, brokerEpoch)
+    }
+    controlledShutdownCallback(controlledShutdownResult)
   }
 
   private def processTopicUncleanLeaderElectionEnable(topic: String): Unit = {
@@ -1258,22 +1234,21 @@ class KafkaController(val config: KafkaConfig,
     controlledShutdownCallback(Failure(new ControllerMovedException("Controller moved to another broker")))
   }
 
-  private def processControlledShutdown(id: Int, brokerEpoch: Long, controlledShutdownCallback: Try[Set[TopicPartition]] => Unit): Unit = {
-    val controlledShutdownResult = Try {
-      doControlledShutdown(id, brokerEpoch)
-    }
-    controlledShutdownCallback(controlledShutdownResult)
-  }
-
+  /**
+   * 处理控制器关闭
+   * @param id          broker id
+   * @param brokerEpoch broker epoch
+   * @return
+   */
   private def doControlledShutdown(id: Int, brokerEpoch: Long): Set[TopicPartition] = {
     if (!isActive) {
       throw new ControllerMovedException("Controller moved to another broker. Aborting controlled shutdown")
     }
 
-    // broker epoch in the request is unknown if the controller hasn't been upgraded to use KIP-380
-    // so we will keep the previous behavior and don't reject the request
+    // 如果控制器还没有升级到使用KIP-380，控制器的broker epoch则为未知，需要保存上一次的表现，并不会拒绝请求
     if (brokerEpoch != AbstractControlRequest.UNKNOWN_BROKER_EPOCH) {
       val cachedBrokerEpoch = controllerContext.liveBrokerIdAndEpochs(id)
+      // broker epoch和本地存储的broker epoch存在出入，日志记录并抛出异常
       if (brokerEpoch < cachedBrokerEpoch) {
         val stateBrokerEpochErrorMessage = "Received controlled shutdown request from an old broker epoch " +
           s"$brokerEpoch for broker $id. Current broker epoch is $cachedBrokerEpoch."
@@ -1283,39 +1258,50 @@ class KafkaController(val config: KafkaConfig,
     }
 
     info(s"Shutting down broker $id")
-
+    // 如果存活状态和准备关闭的broker中都没有当前的broker，则抛出broker不可以异常
     if (!controllerContext.liveOrShuttingDownBrokerIds.contains(id))
       throw new BrokerNotAvailableException(s"Broker id $id does not exist.")
-
+    // 向控制器上下文中将当前的broker添加到准备停止的broker集合中
     controllerContext.shuttingDownBrokerIds.add(id)
     debug(s"All shutting down brokers: ${controllerContext.shuttingDownBrokerIds.mkString(",")}")
     debug(s"Live brokers: ${controllerContext.liveBrokerIds.mkString(",")}")
-
+    // 获取当前broker关联的partition并进行过滤
+    // partition分配的副本节点数量大于1，并且此partition存有leaderAndIsr信息，并且此partition的topic不处于准备删除的状态
+    // 总结就是筛选出正常运行的partition的
     val partitionsToActOn = controllerContext.partitionsOnBroker(id).filter { partition =>
       controllerContext.partitionReplicaAssignment(partition).size > 1 &&
         controllerContext.partitionLeadershipInfo.contains(partition) &&
         !topicDeletionManager.isTopicQueuedUpForDeletion(partition.topic)
     }
+    // 获取给定的broker lead的partition和follow的partition
     val (partitionsLedByBroker, partitionsFollowedByBroker) = partitionsToActOn.partition { partition =>
       controllerContext.partitionLeadershipInfo(partition).leaderAndIsr.leader == id
     }
+    // 处理partition发生的状态变化，节点需要下线，则对给定的broker lead的partition发送一个重新选举的事件
     partitionStateMachine.handleStateChanges(partitionsLedByBroker.toSeq, OnlinePartition, Some(ControlledShutdownPartitionLeaderElectionStrategy))
     try {
       brokerRequestBatch.newBatch()
       partitionsFollowedByBroker.foreach { partition =>
         brokerRequestBatch.addStopReplicaRequestForBrokers(Seq(id), partition, deletePartition = false)
       }
+      // 发送到需要接收的broker上
       brokerRequestBatch.sendRequestsToBrokers(epoch)
     } catch {
       case e: IllegalStateException =>
         handleIllegalState(e)
     }
-    // If the broker is a follower, updates the isr in ZK and notifies the current leader
+    // 如果给定的broker是一个follower，则在ZK中更新并通知此partition的leader节点
     replicaStateMachine.handleStateChanges(partitionsFollowedByBroker.map(partition =>
       PartitionAndReplica(partition, id)).toSeq, OfflineReplica)
 
+    /**
+     * 高阶函数
+     * @return
+     */
     def replicatedPartitionsBrokerLeads() = {
       trace(s"All leaders = ${controllerContext.partitionLeadershipInfo.mkString(",")}")
+      // 对当前上下文中的具有leader节点的partition集合过滤
+      // 过滤条件：partition所在的topic没有正在被删除，并且给定的partition的leader节点是当前的副本节点，并且partition分配的副本节点数量大于1
       controllerContext.partitionLeadershipInfo.filter {
         case (topicPartition, leaderIsrAndControllerEpoch) =>
           !topicDeletionManager.isTopicQueuedUpForDeletion(topicPartition.topic) &&
@@ -1323,33 +1309,86 @@ class KafkaController(val config: KafkaConfig,
             controllerContext.partitionReplicaAssignment(topicPartition).size > 1
       }.keys
     }
-
+    // 返回给定的broker lead的副本节点集合
     replicatedPartitionsBrokerLeads().toSet
   }
 
+  /**
+   * 处理收到的LeaderAndIsrResponse
+   * @param leaderAndIsrResponseObj LeaderAndIsrResponse对象
+   * @param brokerId                收到响应的broker id
+   */
   private def processLeaderAndIsrResponseReceived(leaderAndIsrResponseObj: AbstractResponse, brokerId: Int): Unit = {
     if (!isActive) return
+    // 获取leaderAndIsr响应
     val leaderAndIsrResponse = leaderAndIsrResponseObj.asInstanceOf[LeaderAndIsrResponse]
 
     if (leaderAndIsrResponse.error != Errors.NONE) {
       stateChangeLogger.error(s"Received error in LeaderAndIsr response $leaderAndIsrResponse from broker $brokerId")
       return
     }
-
+    // 需要下线的副本节点信息
     val offlineReplicas = leaderAndIsrResponse.responses.asScala.collect {
       case (tp, error) if error == Errors.KAFKA_STORAGE_ERROR => tp
     }
+    // 需要上线的副本节点信息
     val onlineReplicas = leaderAndIsrResponse.responses.asScala.collect {
       case (tp, error) if error == Errors.NONE => tp
     }
+    // 获取前置下线的副本节点信息
     val previousOfflineReplicas = controllerContext.replicasOnOfflineDirs.getOrElse(brokerId, Set.empty[TopicPartition])
+    // 获取当前仍处于下线的副本节点信息
     val currentOfflineReplicas = previousOfflineReplicas -- onlineReplicas ++ offlineReplicas
+    // 重新记录下线的副本节点信息
     controllerContext.replicasOnOfflineDirs.put(brokerId, currentOfflineReplicas)
+    // 新的下线副本节点信息
     val newOfflineReplicas = currentOfflineReplicas -- previousOfflineReplicas
-
     if (newOfflineReplicas.nonEmpty) {
+      // 存在新的下线副本节点信息，将副本节点置为下线
       stateChangeLogger.info(s"Mark replicas ${newOfflineReplicas.mkString(",")} on broker $brokerId as offline")
       onReplicasBecomeOffline(newOfflineReplicas.map(PartitionAndReplica(_, brokerId)))
+    }
+  }
+
+  /**
+   * 此方法将给定的replica标记为Offline，它做了如下操作：
+   * 1. 标记给定的partition为Offline状态
+   * 2. 触发所有新/下线partition的状态变化
+   * 3. 触发新Offline replica的OfflineReplica状态变化
+   * 4. 如果没有partition受影响，发送UpdateMetadataRequest到正在存活或正在关闭的broker上
+   *
+   * 需要注意的是，不需在此节点刷新所有topic/partition的leader/isr缓存
+   * 因为partition的状态机会在为new/offline的leader选举时刷新缓存
+   */
+  private def onReplicasBecomeOffline(newOfflineReplicas: Set[PartitionAndReplica]): Unit = {
+    // 划分新的offline副本节点
+    // 为等待删除的offline副本节点和不进行删除的offline副本节点
+    val (newOfflineReplicasForDeletion, newOfflineReplicasNotForDeletion) =
+    newOfflineReplicas.partition(p => topicDeletionManager.isTopicQueuedUpForDeletion(p.topic))
+    // 筛选出控制器缓存中没有处于在线状态，并且没有准备删除的broker集合
+    val partitionsWithoutLeader = controllerContext.partitionLeadershipInfo.filter(partitionAndLeader =>
+      !controllerContext.isReplicaOnline(partitionAndLeader._2.leaderAndIsr.leader, partitionAndLeader._1) &&
+        !topicDeletionManager.isTopicQueuedUpForDeletion(partitionAndLeader._1.topic)).keySet
+
+    // 触发当前leader节点是新Offline副本节点的所有partition为OfflinePartion状态
+    partitionStateMachine.handleStateChanges(partitionsWithoutLeader.toSeq, OfflinePartition)
+    // 为offline或new partition触发OnlinePartition状态变化
+    partitionStateMachine.triggerOnlinePartitionStateChange()
+    // 为那些新的Offline副本节点触发OfflineReplica状态变化
+    replicaStateMachine.handleStateChanges(newOfflineReplicasNotForDeletion.toSeq, OfflineReplica)
+
+    // 由于offline副本节点而影响的删除失败的topic
+    if (newOfflineReplicasForDeletion.nonEmpty) {
+      // 需要为topic删除失败状态标记相应的副本节点，因为如果副本节点的日志目录处于offline状态，那么topic是无法被删除的
+      // 这会防止副本节点无限处于topic启动删除状态，由于至少一个副本节点处于topic启动删除状态之前无法重试删除topic
+      topicDeletionManager.failReplicaDeletion(newOfflineReplicasForDeletion)
+    }
+
+    // 如果副本节点失败了，但是不需要leader的重新选举，通知offline broker的brokers
+    // 需要注意的是，在leader重新选举的过程中，broker会更新它们的metadata
+    if (partitionsWithoutLeader.isEmpty) {
+      // 发送UpdateMetadataRequest请求到所有正在存活和正在关闭的broker上
+      sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq, Set.empty)
     }
   }
 
@@ -1736,6 +1775,8 @@ class KafkaController(val config: KafkaConfig,
       // 检查并处罚自动leader再平衡
       checkAndTriggerAutoLeaderRebalance()
     } finally {
+      // 执行一次后，后续的自动调度将由调度器完成
+      // 调度策略，配置的leader.imbalance.check.interval.seconds时间，单位s
       scheduleAutoLeaderRebalanceTask(delay = config.leaderImbalanceCheckIntervalSeconds, unit = TimeUnit.SECONDS)
     }
   }
@@ -1761,10 +1802,10 @@ class KafkaController(val config: KafkaConfig,
 
   /**
    * leader节点选举
-   * @param partitionsFromAdminClientOpt
-   * @param electionType 选举类型
-   * @param electionTrigger
-   * @param callback     选举结束回调任务
+   * @param partitionsFromAdminClientOpt admin客户端发起的leader节点选举，传递过来的partition集合
+   * @param electionType                 选举类型
+   * @param electionTrigger              选举触发器
+   * @param callback                     选举结束回调任务
    */
   private def processReplicaLeaderElection(
                                             partitionsFromAdminClientOpt: Option[Set[TopicPartition]],
@@ -1777,41 +1818,50 @@ class KafkaController(val config: KafkaConfig,
         partitions.iterator.map(partition => partition -> Left(new ApiError(Errors.NOT_CONTROLLER, null))).toMap
       })
     } else {
-      // We need to register the watcher if the path doesn't exist in order to detect future preferred replica
-      // leader elections and we get the `path exists` check for free
+      // 由于path当前并不存在，所以需要注册一个ZK监听器，用于检测未来的首选副本节点leader选举，可以不进行"路径存在的检查"
+      // 向给定路径注册一个监听器，如果路径存在，返回true
       if (electionTrigger == AdminClientTriggered || zkClient.registerZNodeChangeHandlerAndCheckExistence(preferredReplicaElectionHandler)) {
+        // 如果传入的partition集合为None，则从ZK获取中获取首先副本选举节点
         val partitions = partitionsFromAdminClientOpt match {
           case Some(partitions) => partitions
           case None => zkClient.getPreferredReplicaElection
         }
-
+        // 划分partition集合，划分依据：控制器是否知道此partition
         val (knownPartitions, unknownPartitions) = partitions.partition(tp => controllerContext.allPartitions.contains(tp))
         unknownPartitions.foreach { p =>
           info(s"Skipping replica leader election ($electionType) for partition $p by $electionTrigger since it doesn't exist.")
         }
-
+        // 继续划分已知的partition，将其划分为等待删除的partition和正处于存活状态的partition
         val (partitionsBeingDeleted, livePartitions) = knownPartitions.partition(partition =>
           topicDeletionManager.isTopicQueuedUpForDeletion(partition.topic))
+        // 如果存在需要删除的partition，日志记录信息
         if (partitionsBeingDeleted.nonEmpty) {
           warn(s"Skipping replica leader election ($electionType) for partitions $partitionsBeingDeleted " +
             s"by $electionTrigger since the respective topics are being deleted")
         }
 
-        // partition those that have a valid leader
+        // 继续划分正处于存活状态的partition，划分为需要进行选举的partition和已有leader的partition
         val (electablePartitions, alreadyValidLeader) = livePartitions.partition { partition =>
           electionType match {
+            // 如果partition的选举类型是首选副本节点
             case ElectionType.PREFERRED =>
+              // 获取当前partition已分配的副本节点
               val assignedReplicas = controllerContext.partitionReplicaAssignment(partition)
+              // 获取已分配partition的第一个副本节点
               val preferredReplica = assignedReplicas.head
+              // 从leaderAndIsr中获取分配的leader节点
+              // 如果当前获取到的leader节点并不是首选副本节点，则需要重新进行选举
               val currentLeader = controllerContext.partitionLeadershipInfo(partition).leaderAndIsr.leader
               currentLeader != preferredReplica
-
+            // unclean模式的选举类型
             case ElectionType.UNCLEAN =>
+              // 从LeaderAndIsr中获取当前的leader节点
+              // 如果当前的partition没有leader节点，或者存活的broker中并不包含当前的leader节点，则需要进行重新选举
               val currentLeader = controllerContext.partitionLeadershipInfo(partition).leaderAndIsr.leader
               currentLeader == LeaderAndIsr.NoLeader || !controllerContext.liveBrokerIds.contains(currentLeader)
           }
         }
-
+        // 对需要进行重新选举的partition进行重新选举
         val results = onReplicaElection(electablePartitions, electionType, electionTrigger).map {
           case (k, Left(ex)) =>
             if (ex.isInstanceOf[StateChangeFailedException]) {
@@ -1826,6 +1876,7 @@ class KafkaController(val config: KafkaConfig,
             }
           case (k, Right(leaderAndIsr)) => k -> Right(leaderAndIsr.leader)
         } ++
+          // 返回其他异常情况下的选举结果
           alreadyValidLeader.map(_ -> Left(new ApiError(Errors.ELECTION_NOT_NEEDED))) ++
           partitionsBeingDeleted.map(
             _ -> Left(new ApiError(Errors.INVALID_TOPIC_EXCEPTION, "The topic is being deleted"))

@@ -174,9 +174,9 @@ class KafkaZkClient private[zk](zooKeeperClient: ZooKeeperClient, isSecure: Bool
   }
 
   /**
-   * Gets topic partition states for the given partitions.
-   * @param partitions the partitions for which we want ot get states.
-   * @return sequence of GetDataResponses whose contexts are the partitions they are associated with.
+   * 获取给定的partition的状态
+   * @param partitions 需要查询状态的partition集合
+   * @return GetDataResponses的序列，其上下文是与它们关联的partition
    */
   def getTopicPartitionStatesRaw(partitions: Seq[TopicPartition]): Seq[GetDataResponse] = {
     val getDataRequests = partitions.map { partition =>
@@ -992,10 +992,11 @@ class KafkaZkClient private[zk](zooKeeperClient: ZooKeeperClient, isSecure: Bool
   }
 
   /**
-   * Gets the partitions marked for preferred replica election.
-   * @return sequence of partitions.
+   * 获取标记为首选副本选举的partition集合
+   * @return partition序列
    */
   def getPreferredReplicaElection: Set[TopicPartition] = {
+    // 从ZK中获取首先副本选举节点
     val getDataRequest = GetDataRequest(PreferredReplicaElectionZNode.path)
     val getDataResponse = retryRequestUntilConnected(getDataRequest)
     getDataResponse.resultCode match {
@@ -1347,11 +1348,10 @@ class KafkaZkClient private[zk](zooKeeperClient: ZooKeeperClient, isSecure: Bool
   }
 
   /**
-   * This registers a ZNodeChangeHandler and attempts to register a watcher with an ExistsRequest, which allows data
-   * watcher registrations on paths which might not even exist.
-   * @param zNodeChangeHandler
-   * @return `true` if the path exists or `false` if it does not
-   * @throws KeeperException if an error is returned by ZooKeeper
+   * 注册一个ZNodeChangeHandler，并尝试使用ExistsRequest注册一个监听器，这个监听器允许数据观察者在可能根本不存在的路径上注册
+   * @param zNodeChangeHandler 需要注册的时间处理器
+   * @return 路径存在，返回true，其他情况，返回false
+   * @throws KeeperException ZK返回error
    */
   def registerZNodeChangeHandlerAndCheckExistence(zNodeChangeHandler: ZNodeChangeHandler): Boolean = {
     zooKeeperClient.registerZNodeChangeHandler(zNodeChangeHandler)
