@@ -40,7 +40,6 @@ buildscript {
     classpath "com.github.jengelman.gradle.plugins:shadow:$versions.shadowPlugin"
     classpath "org.owasp:dependency-check-gradle:$versions.owaspDepCheckPlugin"
     classpath "com.diffplug.spotless:spotless-plugin-gradle:$versions.spotlessPlugin"
-    classpath "gradle.plugin.com.github.spotbugs:spotbugs-gradle-plugin:$versions.spotbugsPlugin"
   }
 }
 
@@ -156,7 +155,6 @@ subprojects {
   apply plugin: 'maven'
   apply plugin: 'signing'
   apply plugin: 'checkstyle'
-  apply plugin: "com.github.spotbugs"
 
   sourceCompatibility = minJavaVersion
   targetCompatibility = minJavaVersion
@@ -458,21 +456,6 @@ subprojects {
 
   test.dependsOn('checkstyleMain', 'checkstyleTest')
 
-  spotbugs {
-    toolVersion = "$versions.spotbugs"
-    excludeFilter = file("$rootDir/gradle/spotbugs-exclude.xml")
-    ignoreFailures = false
-  }
-  test.dependsOn('spotbugsMain')
-
-  tasks.withType(com.github.spotbugs.SpotBugsTask) {
-    reports {
-      // Continue supporting `xmlFindBugsReport` for compatibility
-      xml.enabled(project.hasProperty('xmlSpotBugsReport') || project.hasProperty('xmlFindBugsReport'))
-      html.enabled(!project.hasProperty('xmlSpotBugsReport') && !project.hasProperty('xmlFindBugsReport'))
-    }
-  }
-
   // Ignore core since its a scala project
   if (it.path != ':core') {
     apply plugin: "jacoco"
@@ -498,12 +481,6 @@ subprojects {
   def coverageGen = it.path == ':core' ? 'reportScoverage' : 'jacocoTestReport'
   task reportCoverage(dependsOn: [coverageGen])
 
-}
-
-gradle.taskGraph.whenReady { taskGraph ->
-  taskGraph.getAllTasks().findAll { it.name.contains('spotbugsScoverage') || it.name.contains('spotbugsTest') }.each { task ->
-    task.enabled = false
-  }
 }
 
 def fineTuneEclipseClasspathFile(eclipse, project) {
@@ -541,30 +518,6 @@ def checkstyleConfigProperties(configFileName) {
   [importControlFile: "$rootDir/checkstyle/$configFileName",
    suppressionsFile: "$rootDir/checkstyle/suppressions.xml",
    headerFile: "$rootDir/checkstyle/java.header"]
-}
-
-// Aggregates all jacoco results into the root project directory
-task jacocoRootReport(type: org.gradle.testing.jacoco.tasks.JacocoReport) {
-  def javaProjects = subprojects.findAll { it.path != ':core' }
-
-  description = 'Generates an aggregate report from all subprojects'
-  dependsOn(javaProjects.test)
-
-  additionalSourceDirs = files(javaProjects.sourceSets.main.allSource.srcDirs)
-  sourceDirectories = files(javaProjects.sourceSets.main.allSource.srcDirs)
-  classDirectories =  files(javaProjects.sourceSets.main.output)
-  executionData = files(javaProjects.jacocoTestReport.executionData)
-
-  reports {
-    html.enabled = true
-    xml.enabled = true
-  }
-
-  // workaround to ignore projects that don't have any tests at all
-  onlyIf = { true }
-  doFirst {
-    executionData = files(executionData.findAll { it.exists() })
-  }
 }
 
 task reportCoverage(dependsOn: ['jacocoRootReport', 'core:reportCoverage'])
