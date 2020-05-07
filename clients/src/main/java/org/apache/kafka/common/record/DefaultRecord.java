@@ -182,9 +182,9 @@ public class DefaultRecord implements Record {
                               ByteBuffer key,
                               ByteBuffer value,
                               Header[] headers) throws IOException {
-		// 获取消息大小的整形数量
+		// 获取key，value的字节大小，使用Protobuf压缩后的
 		int sizeInBytes = sizeOfBodyInBytes(offsetDelta, timestampDelta, key, value, headers);
-		// 使用varint写入消息大小
+		// 使用varint写入消息key，value
 		ByteUtils.writeVarint(sizeInBytes, out);
 
 		byte attributes = 0; // 现在record attributes还没有使用

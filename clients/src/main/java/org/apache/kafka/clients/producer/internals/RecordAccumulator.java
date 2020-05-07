@@ -59,7 +59,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 用于累加客户端发送的消息，等到一个batch满了之后，再用同意的sender线程进行统一的发送
+ * 用于累加客户端发送的消息，等到一个batch满了之后，再用prodcuer的sender线程进行统一的发送
  * 累加器使用了一个有限的内存空间，如果资源被耗尽，那么继续添加会引发阻塞，除非这个功能被明确地禁止
  */
 public final class RecordAccumulator {
@@ -79,7 +79,7 @@ public final class RecordAccumulator {
 	/**
 	 * key: partition信息
 	 * value: 存储batch的双向队列
-	 * 用于存储每个分区双向队列batch的并发容器
+	 * 用于存储每个partition双向队列batch的并发容器
 	 */
 	private final ConcurrentMap<TopicPartition, Deque<ProducerBatch>> batches;
 	/**
@@ -179,7 +179,7 @@ public final class RecordAccumulator {
 	 * 添加一条记录到记录累加器，返回追加结果
 	 * 追加结果包括future元数据，是否batch已满，或者一个新的batch已经创建
 	 *
-	 * @param tp 记录要发送到的分区
+	 * @param tp 记录要发送到的partition
 	 * @param timestamp 记录的时间戳
 	 * @param key 记录的key
 	 * @param value 记录的value
@@ -214,7 +214,8 @@ public final class RecordAccumulator {
                     return appendResult;
 			}
 
-			// 如果是在创建一个新的batch
+			// 此时为没有追加record成功
+			// 如果可以在创建一个新的batch时中断当前的追加操作
             if (abortOnNewBatch) {
 				// 返回null结果，让其他调用继续追加
                 return new RecordAppendResult(null, false, false, true);
@@ -224,27 +225,30 @@ public final class RecordAccumulator {
 			// 估算消息的字节数大小
             int size = Math.max(this.batchSize, AbstractRecords.estimateSizeInBytesUpperBound(maxUsableMagic, compression, key, value, headers));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {}", size, tp.topic(), tp.partition());
+			// 申请一块用于追加当前record的对外内存
             buffer = free.allocate(size, maxTimeToBlock);
             synchronized (dq) {
-                // Need to check if producer is closed again after grabbing the dequeue lock.
+                // 获取batch队列锁之后，需要重新校验producer的状态
                 if (closed)
                     throw new KafkaException("Producer closed while send in progress");
-
+				// 再度尝试追加record
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, headers, callback, dq);
                 if (appendResult != null) {
-                    // Somebody else found us a batch, return the one we waited for! Hopefully this doesn't happen often...
+                    // 此时可能是Sender线程将batch发送，多出一个空间
                     return appendResult;
                 }
-
+				// 此时仍没有可追加的空间
+				// 则使用给定内存创建一个新的batch，并向新batch中追加record
                 MemoryRecordsBuilder recordsBuilder = recordsBuilder(buffer, maxUsableMagic);
                 ProducerBatch batch = new ProducerBatch(tp, recordsBuilder, time.milliseconds());
                 FutureRecordMetadata future = Objects.requireNonNull(batch.tryAppend(timestamp, key, value, headers,
                         callback, time.milliseconds()));
-
+				// 将batch添加到当前partition的batch队列中
                 dq.addLast(batch);
+				// 此batch为新batch，必定为未发送的batch
                 incomplete.add(batch);
 
-                // Don't deallocate this buffer in the finally block as it's being used in the record batch
+				// 由于在锁中，batch还在使用这块对外内存，所以此时不要进行对外内存的接触分配
                 buffer = null;
                 return new RecordAppendResult(future, dq.size() > 1 || batch.isFull(), true, false);
             }
@@ -289,7 +293,7 @@ public final class RecordAccumulator {
     }
 
     private boolean isMuted(TopicPartition tp, long now) {
-		// 要小心避免不必要的map查找，因为此方法会因为向大规模分区生产消息而产生热区域
+		// 要小心避免不必要的map查找，因为此方法会因为向大规模partition生产消息而产生热区域
 		// 获取设置的阈值
         Long throttleUntilTime = muted.get(tp);
 		// 不存在阈值的话，直接返回false
@@ -376,25 +380,27 @@ public final class RecordAccumulator {
     }
 
     /**
-     * Split the big batch that has been rejected and reenqueue the split batches in to the accumulator.
-     * @return the number of split batches.
+	 * 将生产请求拒绝的大batch分割为小batch，并重新入队
+     * @return 分割的小batch数量
      */
     public int splitAndReenqueue(ProducerBatch bigBatch) {
-        // Reset the estimated compression ratio to the initial value or the big batch compression ratio, whichever
-        // is bigger. There are several different ways to do the reset. We chose the most conservative one to ensure
-        // the split doesn't happen too often.
+		// 将估计压缩率重置为初始值或大batch的压缩率
+		// 有几种不同的方法来做重置，我们选择了最保守的一个方法来确认分割操作不会经常发生
         CompressionRatioEstimator.setEstimation(bigBatch.topicPartition.topic(), compression,
                                                 Math.max(1.0f, (float) bigBatch.compressionRatio()));
+		// 根据每个batch大小配置对batch进行分割
         Deque<ProducerBatch> dq = bigBatch.split(this.batchSize);
         int numSplitBatches = dq.size();
+		// 获取partition的消息队列
         Deque<ProducerBatch> partitionDequeue = getOrCreateDeque(bigBatch.topicPartition);
         while (!dq.isEmpty()) {
+			// 以栈的方式，后进先出，放入到消息队列的头部
             ProducerBatch batch = dq.pollLast();
             incomplete.add(batch);
-            // We treat the newly split batches as if they are not even tried.
+			// 我们将新分割出的子batch视为还没有发送过的batch
             synchronized (partitionDequeue) {
                 if (transactionManager != null) {
-                    // We should track the newly created batches since they already have assigned sequences.
+					// 由于已经分配了sequence序号，所以我们不能打破之前的分配顺序
                     transactionManager.addInFlightBatch(batch);
                     insertInSequenceOrder(partitionDequeue, batch);
                 } else {
@@ -458,13 +464,13 @@ public final class RecordAccumulator {
 	}
 
 	/**
-	 * 获取准备就绪的分区节点列表，以及最早的不可发送分区的准备就绪时间，并且返回累加的分区batch中，是否有不清楚首领分区节点
+	 * 获取准备就绪的partition节点列表，以及最早的不可发送partition的准备就绪时间，并且返回累加的partitionbatch中，是否有不清楚首领partition节点
 	 * 作为目的地的节点，知道满足以下情况才算准备就绪
-	 * 至少有一个分区没有后退其发送，并且这些分区都不是未完成的（避免重新排序，如果{@value org.apache.kafka.clients.producer.ProducerConfig#MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION}设置为1）
+	 * 至少有一个partition没有后退其发送，并且这些partition都不是未完成的（避免重新排序，如果{@value org.apache.kafka.clients.producer.ProducerConfig#MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION}设置为1）
 	 * 并且满足如下的任一条件：
-	 * 	1. record集合已经满了
-	 * 	2. record集合已经放入到累加器中
-	 * 	3. 累加器已经超出内存，线程正在阻塞等待空间（此时所有的分区立即会被确认为就绪状态）
+	 * 	1. 消息队列已经满了
+	 * 	2. 消息队列已经放入到累加器中
+	 * 	3. 累加器已经超出内存，线程正在阻塞等待空间（此时所有的partition立即会被确认为就绪状态）
 	 * 	4. 累加器已经关闭
      */
     public ReadyCheckResult ready(Cluster cluster, long nowMs) {
@@ -473,49 +479,51 @@ public final class RecordAccumulator {
         Set<String> unknownLeaderTopics = new HashSet<>();
 		// 是否有等待获取内存的线程
         boolean exhausted = this.free.queued() > 0;
-		// 遍历每个分区
+		// 遍历每个partition的消息队列
         for (Map.Entry<TopicPartition, Deque<ProducerBatch>> entry : this.batches.entrySet()) {
-			// 获取每个分区的record双向队列
             Deque<ProducerBatch> deque = entry.getValue();
-			// 对双向队列进行同步操作
+			// 对双向队列进行同步操作，避免还有追加的操作
 			synchronized (deque) {
-				// 当向比较多的分区生产消息时，当前调用是个热区域
-				// 我们通常校验第一个batch，用于避免更昂贵的校验
+				// 当向比较多的partition生产消息时，当前调用是个热区域
+				// 我们通常校验第一个batch，用于避免更昂贵代价的校验
 				// 获取队列中第一个封装好的batch
                 ProducerBatch batch = deque.peekFirst();
 				if (batch != null) {
-					// 获取分区信息
+					// 获取partition信息
                     TopicPartition part = entry.getKey();
-					// 获取当前分区的首领节点
+					// 从集群信息中获取当前partition的leader节点
                     Node leader = cluster.leaderFor(part);
 					if (leader == null) {
-						// 如果当前分区不存在首领节点，添加到未知手里能节点topic集合中
-						// 首领节点不存在的情况下，也是可以进行消息发送的
+						// 如果当前partition不存在leader节点，添加到未知leader节点的topic集合中
+						// leader节点不存在的情况下，也是可以进行消息发送的
 						// 需要注意的是，即使双向队列为空，也不会将元素从batch中移除
                         unknownLeaderTopics.add(part.topic());
-						// 此时分区存在首领节点
-						// 如果就绪节点集合中没有当前节点，并且当且节点处于
                     } else if (!readyNodes.contains(leader) && !isMuted(part, nowMs)) {
-						// 获取当前batch的等待时间
+						// 此时partition存在leader节点
+						// 如果就绪节点集合中没有当前leader节点，并且当前partition不处于静默状态
+
+						// 获取当前batch的已经等待的时间
                         long waitedTimeMs = batch.waitedTimeMs(nowMs);
-						// 是否需要进行反馈
+						// 是否需要进行重试
                         boolean backingOff = batch.attempts() > 0 && waitedTimeMs < retryBackoffMs;
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
-						// 判断batch是否处于满的状态，半满也算满
+						// 判断batch是否处于满的状态，需要消息队列有至少两个batch
                         boolean full = deque.size() > 1 || batch.isFull();
-						// 是否已经过期
+						// 是否超过等待时间
                         boolean expired = waitedTimeMs >= timeToWaitMs;
 						// 判断是否可发送
                         boolean sendable = full || expired || exhausted || closed || flushInProgress();
-						// 如果可发送，且不需要进行反馈，则当前节点处于就绪状态
+						// 如果可发送，且无需进行重试，则将此partition对应的leader节点置为准备就绪状态
                         if (sendable && !backingOff) {
 							readyNodes.add(leader);
 						} else {
+							// 如果不可发送，或者需要进行重试
 							// 计算剩余等待时间
                             long timeLeftMs = Math.max(timeToWaitMs - waitedTimeMs, 0);
-							// 备注，这是一个保守的估计结果，因为一个不可发送数据的分区可能会有一个手里能借点，不久之后会发现拥有可发送的数据
+							// 注意：这是一个保守的估计结果
+							// 因为一个不可发送数据的partition可能会有一个临界点，不久之后会发现拥有可发送的数据
 							// 然而这已经足够好了，因为我们只是唤醒一下，然后就会继续sleep剩余的持续时间
-							// 取剩余等待时间和下一次就绪状态检查时间的最小值
+							// 所以取剩余等待时间和下一次就绪状态检查时间的最小值
                             nextReadyCheckDelayMs = Math.min(timeLeftMs, nextReadyCheckDelayMs);
 						}
 					}
@@ -580,21 +588,21 @@ public final class RecordAccumulator {
 	 */
 	private List<ProducerBatch> drainBatchesForOneNode(Cluster cluster, Node node, int maxSize, long now) {
 		int size = 0;
-		// 获取当前节点的分区信息
+		// 获取当前节点的partition信息
 		List<PartitionInfo> parts = cluster.partitionsForNode(node.id());
 
 		List<ProducerBatch> ready = new ArrayList<>();
 		// 为了减少竞争，循环不从索引0开始
 		int start = drainIndex = drainIndex % parts.size();
 		do {
-			// 获取指定索引的分区
+			// 获取指定索引的partition
 			PartitionInfo part = parts.get(drainIndex);
-			// 创建topic-partition对象，存储关联信息
+			// 创建topic-partition对象，用于存储关联信息
 			TopicPartition tp = new TopicPartition(part.topic(), part.partition());
-			// 计算新的排空索引
+			// 计算下一个需要进行排空的索引
 			this.drainIndex = (this.drainIndex + 1) % parts.size();
 
-			// 如果当前分区请求处于已关闭状态，继续遍历下一个partition
+			// 如果当前partition请求处于静默状态，继续遍历下一个partition
 			if (isMuted(tp, now))
 				continue;
 			// 获取当前partition的batch队列
@@ -604,7 +612,7 @@ public final class RecordAccumulator {
 				continue;
 			// 队列不为空的情况下，需要对队列进行同步操作
 			synchronized (deque) {
-				// 获取当前partition batch队列的第一个batch
+				// 获取当前partition batch队列的第一个batch，但不取出
 				ProducerBatch first = deque.peekFirst();
 				// 如果不存在第一个batch，继续遍历下一个partition
 				if (first == null)
@@ -616,27 +624,27 @@ public final class RecordAccumulator {
 				// 需要进行失败重试，继续遍历下一个partition
 				if (backoff)
 					continue;
-				// 如果大小总和已经超过当次发送总大小的阈值，并且节点就绪batch列表不为空
+				// 如果大小总和已经超过当次发送总大小的阈值
 				if (size + first.estimatedSizeInBytes() > maxSize && !ready.isEmpty()) {
 					// 不需要继续发送了，跳出循环
 					break;
 				} else {
 					// 如果没有超出发送总大小阈值
-					// 首先对是否停止排空进行验证
+					// 首先对是否停止排空进行验证，主要是对事务状态进行校验
 					if (shouldStopDrainBatchesForPartition(first, tp))
 						break;
 					// 判断当前partition是否处于事务状态
 					boolean isTransactional = transactionManager != null && transactionManager.isTransactional();
-					// 是否需要producer id以及epoch
+					// 生成Kafka集群需要用到的producer id和epoch版本
 					ProducerIdAndEpoch producerIdAndEpoch =
 							transactionManager != null ? transactionManager.producerIdAndEpoch() : null;
-					// 在把当前batch放回到队列中
+					// 此时需要获取第一个batch
 					ProducerBatch batch = deque.pollFirst();
 					// 如果需要produce id以及epoch，同时batch不需要序列号
 					if (producerIdAndEpoch != null && !batch.hasSequence()) {
 						// 如果当前batch已经分配了一个序列号，我们就不要去修改produce id和序列号，因为可能会产生重复的情况
-						// 尤其是在前一次尚持可能被接受的情况，并且如果我们修改了producer id和序列号，本次尝试也可能会被接受，引发了重复
-						// 除此之外，我们会更新为当前分区更新下一个序列号，同时也可以用事务管理器记录batch，这样即使在接收到顺序之外的请求，我们也能根据序列号继续确保维持序列号的顺序
+						// 尤其是在前一次存在可能被接受的情况，并且如果我们修改了producer id和序列号，本次尝试也可能会被接受，引发了重复
+						// 除此之外，我们会更新为当前partition更新下一个序列号，同时也可以用事务管理器记录batch，这样即使在接收到顺序之外的请求，我们也能根据序列号继续确保维持序列号的顺序
 						batch.setProducerState(producerIdAndEpoch, transactionManager.sequenceNumber(batch.topicPartition), isTransactional);
 						transactionManager.incrementSequenceNumber(batch.topicPartition, batch.recordCount);
 						log.debug("Assigned producerId {} and producerEpoch {} to batch with base sequence " +
@@ -696,14 +704,14 @@ public final class RecordAccumulator {
 	}
 
 	/**
-	 * 从指定的分区中获取存储record的双向队列，如有必要，创建一个
+	 * 从指定的partition中获取存储record的双向队列，如有必要，创建一个
      */
     private Deque<ProducerBatch> getOrCreateDeque(TopicPartition tp) {
 		// 从缓存中获取
         Deque<ProducerBatch> d = this.batches.get(tp);
         if (d != null)
 			return d;
-		// 没有指定的分区的batch deque，创建一个新的
+		// 没有指定的partition的batch deque，创建一个新的
         d = new ArrayDeque<>();
 		// 避免出现并发的情况，获取覆盖的值，如果其他线程已经创建了新deque，则使用此deque，否则使用当前线程创建的deque
         Deque<ProducerBatch> previous = this.batches.putIfAbsent(tp, d);
@@ -714,12 +722,14 @@ public final class RecordAccumulator {
     }
 
     /**
-     * Deallocate the record batch
+	 * 回收batch的内存
+	 * @param batch 指定batch
      */
     public void deallocate(ProducerBatch batch) {
+		// 从未完成batch缓存中移除指定batch
         incomplete.remove(batch);
-        // Only deallocate the batch if it is not a split batch because split batch are allocated outside the
-        // buffer pool.
+		// 如果不是拆分的batch，则取消分配的batch
+		// 因为拆分的batch已经在buffer池外进行了分配
         if (!batch.isSplitBatch())
             free.deallocate(batch.buffer(), batch.initialCapacity());
     }
@@ -810,7 +820,7 @@ public final class RecordAccumulator {
     void abortBatches(final RuntimeException reason) {
         for (ProducerBatch batch : incomplete.copyAll()) {
             Deque<ProducerBatch> dq = getDeque(batch.topicPartition);
-			// 获取到指定分区对应的分去
+			// 获取到指定partition对应的分去
 			synchronized (dq) {
 				batch.abortRecordAppends();
 				// 从当前队列中删除
@@ -869,7 +879,8 @@ public final class RecordAccumulator {
 	}
 
 	/*
-	 * 记录追加累加器
+	 * record追加结果
+	 * 通常代表的是将record发送到Kafka服务端后，服务端返回的结果
      */
     public final static class RecordAppendResult {
 		// 存储的记录元数据

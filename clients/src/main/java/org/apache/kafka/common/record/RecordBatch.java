@@ -32,7 +32,13 @@ public interface RecordBatch extends Iterable<Record> {
      * The "magic" values
      */
     byte MAGIC_VALUE_V0 = 0;
+	/**
+	 * 0.9.0
+	 */
     byte MAGIC_VALUE_V1 = 1;
+	/**
+	 * 0.10.2
+	 */
     byte MAGIC_VALUE_V2 = 2;
 
     /**

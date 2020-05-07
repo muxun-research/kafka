@@ -41,9 +41,8 @@ import scala.math.max
 /**
  * GroupCoordinator处理一般的消费组consumer关系和offset管理
  *
- * 每个Kafka服务端都会实例化一个协调起来负责一个消费组集合，消费组基于消费组名称的方式分配给协调器
+ * 每个Kafka服务端都会实例化一个协调器来负责一个消费组集合，消费组基于消费组名称的方式分配给协调器
  *
- * <b>Delayed operation locking notes:</b>
  * 延迟操作锁提示
  * 在消费组协调器中的延迟操作使用"group"作为延迟操作锁，在持有消费组锁时，ReplicaManager.appendRecords可能会被调用
  * 延迟的毁掉任务可能需要持有消费组锁，因为延迟的操作之后再占有消费组锁的前提下，才会完成

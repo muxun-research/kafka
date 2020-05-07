@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.clients.producer.internals;
 
-import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.record.RecordBatch;
 
@@ -25,16 +24,22 @@ import java.util.concurrent.TimeUnit;
 
 
 /**
- * A class that models the future completion of a produce request for a single partition. There is one of these per
- * partition in a produce request and it is shared by all the {@link RecordMetadata} instances that are batched together
- * for the same partition in the request.
+ * 在每个partition的生产请求中只有这样的一个对象，所有的RecordMetadata共享同一个ProducerRequestResult实例，因为它们都是向同一个partition发送数据的
  */
 public class ProduceRequestResult {
 
     private final CountDownLatch latch = new CountDownLatch(1);
+	/**
+	 * 追加到的topic-partition对象
+	 */
     private final TopicPartition topicPartition;
-
+	/**
+	 * 当前日志文件的基准偏移量
+	 */
     private volatile Long baseOffset = null;
+	/**
+	 * record追加时间
+	 */
     private volatile long logAppendTime = RecordBatch.NO_TIMESTAMP;
     private volatile RuntimeException error;
 

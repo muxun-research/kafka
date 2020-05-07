@@ -391,7 +391,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 
 	/**
 	 * 追加record
-	 * 对于V0、V1版本的消息，反正CRC
+	 * 对于V0、V1版本的消息，返回CRC
 	 * 对于V2及以上版本的消息，返回null
 	 */
 	private Long appendWithOffset(long offset, boolean isControlRecord, long timestamp, ByteBuffer key,
@@ -635,7 +635,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 	 */
 	private void appendDefaultRecord(long offset, long timestamp, ByteBuffer key, ByteBuffer value,
 									 Header[] headers) throws IOException {
-		// 确认stream流处于开启状态
+		// 确认数据输出流处于开启状态
 		ensureOpenForRecordAppend();
 		// 计算相对偏移量
 		int offsetDelta = (int) (offset - baseOffset);

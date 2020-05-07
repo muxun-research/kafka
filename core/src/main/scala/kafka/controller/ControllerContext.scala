@@ -22,16 +22,25 @@ import org.apache.kafka.common.TopicPartition
 
 import scala.collection.{Map, Seq, Set, mutable}
 
+/**
+ * 控制器上下文
+ */
 class ControllerContext {
   val stats = new ControllerStats
   var offlinePartitionCount = 0
   var shuttingDownBrokerIds: mutable.Set[Int] = mutable.Set.empty
+  // 目前存活的broker
   private var liveBrokers: Set[Broker] = Set.empty
   private var liveBrokerEpochs: Map[Int, Long] = Map.empty
   var epoch: Int = KafkaController.InitialControllerEpoch
   var epochZkVersion: Int = KafkaController.InitialControllerEpochZkVersion
-
+  /**
+   * Kafka中目前所有的topic
+   */
   var allTopics: Set[String] = Set.empty
+  /**
+   * partition的分配
+   */
   val partitionAssignments = mutable.Map.empty[String, mutable.Map[Int, Seq[Int]]]
   val partitionLeadershipInfo = mutable.Map.empty[TopicPartition, LeaderIsrAndControllerEpoch]
   val partitionsBeingReassigned = mutable.Map.empty[TopicPartition, ReassignedPartitionsContext]

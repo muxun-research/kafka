@@ -556,7 +556,7 @@ public class NetworkClient implements KafkaClient {
             completeResponses(responses);
             return responses;
 		}
-		// 计算集群metadata的下一次进行更新的时间
+		// 计算集群元数据的下一次进行更新的时间
         long metadataTimeout = metadataUpdater.maybeUpdate(now);
         try {
             this.selector.poll(Utils.min(timeout, metadataTimeout, defaultRequestTimeoutMs));
@@ -564,7 +564,7 @@ public class NetworkClient implements KafkaClient {
             log.error("Unexpected error during I/O", e);
         }
 
-        // process completed actions
+        // 处理完成的请求
         long updatedNow = this.time.milliseconds();
         List<ClientResponse> responses = new ArrayList<>();
         handleCompletedSends(responses, updatedNow);

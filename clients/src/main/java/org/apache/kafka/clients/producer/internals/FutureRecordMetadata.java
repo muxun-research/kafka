@@ -28,14 +28,38 @@ import java.util.concurrent.TimeoutException;
  * The future result of a record send
  */
 public final class FutureRecordMetadata implements Future<RecordMetadata> {
-
+	/**
+	 * 生产消息请求结果
+	 */
     private final ProduceRequestResult result;
+	/**
+	 * 相对偏移量
+	 */
     private final long relativeOffset;
+	/**
+	 * 创建record的时间戳
+	 * 会根据设置的时间戳类型可能会由Kafka服务端进行修改
+	 */
     private final long createTimestamp;
+	/**
+	 * 检验码
+	 */
     private final Long checksum;
+	/**
+	 * 序列化key的大小
+	 */
     private final int serializedKeySize;
+	/**
+	 * 序列化value的大小
+	 */
     private final int serializedValueSize;
+	/**
+	 * 时间戳
+	 */
     private final Time time;
+	/**
+	 * 将batch分为小batch之后的record元数据的连接点
+	 */
     private volatile FutureRecordMetadata nextRecordMetadata = null;
 
     public FutureRecordMetadata(ProduceRequestResult result, long relativeOffset, long createTimestamp,

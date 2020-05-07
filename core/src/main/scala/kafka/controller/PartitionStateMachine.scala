@@ -30,9 +30,13 @@ import org.apache.zookeeper.KeeperException.Code
 
 import scala.collection.{Map, Seq, mutable}
 
+/**
+ * partition状态机
+ * @param controllerContext
+ */
 abstract class PartitionStateMachine(controllerContext: ControllerContext) extends Logging {
   /**
-   * Invoked on successful controller election.
+   * 在主控制器选举成功之后调用
    */
   def startup(): Unit = {
     info("Initializing partition state")
@@ -81,12 +85,13 @@ abstract class PartitionStateMachine(controllerContext: ControllerContext) exten
   }
 
   /**
-   * Invoked on startup of the partition's state machine to set the initial state for all existing partitions in
-   * zookeeper
+   * 调用并启动partition状态机，并设置所有ZK中已存在的partition的初始状态
    */
   private def initializePartitionState(): Unit = {
+    // 获取控制器从ZK中的读取的partition信息
     for (topicPartition <- controllerContext.allPartitions) {
       // check if leader and isr path exists for partition. If not, then it is in NEW state
+      // 判断leader
       controllerContext.partitionLeadershipInfo.get(topicPartition) match {
         case Some(currentLeaderIsrAndEpoch) =>
           // else, check if the leader for partition is alive. If yes, it is in Online state, else it is in Offline state
@@ -183,10 +188,10 @@ class ZkPartitionStateMachine(config: KafkaConfig,
   }
 
   /**
-   * 这个API练习了partition的状态机，它确保了每个状态从合法的先前状态到目标状态的转换，合法的状态转换如下：
+   * 这个API实现了partition的状态机，它确保了每个状态从合法的先前状态到目标状态的转换，合法的状态转换如下：
    * 1. NonExistentPartition -> NewPartition: 将从ZK获取的分配的副本节点信息加载到控制器缓存中
    * 2. NewPartition -> OnlinePartition:
-   * ① 非配第一个处于存活状态的副本节点为leader节点，其他存活的副本节点即为ISR，将leader节点和ISR写入到ZK中
+   * ① 分配第一个处于存活状态的副本节点为leader节点，其他存活的副本节点即为ISR，将leader节点和ISR写入到ZK中
    * ② 向每个存活的副本节点发送LeaderAndIsrRequest，向每个存活的broker发送UpdateMetadataRequest
    * 3. OnlinePartition,OfflinePartition -> OnlinePartition:
    * ① 选举partition新的leader节点和ISR，以及需要接收LeaderAndIsrRequest的副本节点集合，并将新的选举信息写入到ZK中
