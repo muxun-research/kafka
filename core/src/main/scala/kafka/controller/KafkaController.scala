@@ -1334,7 +1334,6 @@ class KafkaController(val config: KafkaConfig,
     // 需要上线的副本节点信息
     val onlineReplicas = leaderAndIsrResponse.responses.asScala.collect {
       case (tp, error) if error == Errors.NONE => tp
-    }
     // 获取前置下线的副本节点信息
     val previousOfflineReplicas = controllerContext.replicasOnOfflineDirs.getOrElse(brokerId, Set.empty[TopicPartition])
     // 获取当前仍处于下线的副本节点信息
@@ -1384,24 +1383,33 @@ class KafkaController(val config: KafkaConfig,
       topicDeletionManager.failReplicaDeletion(newOfflineReplicasForDeletion)
     }
 
-    // 如果副本节点失败了，但是不需要leader的重新选举，通知offline broker的brokers
-    // 需要注意的是，在leader重新选举的过程中，broker会更新它们的metadata
-    if (partitionsWithoutLeader.isEmpty) {
-      // 发送UpdateMetadataRequest请求到所有正在存活和正在关闭的broker上
-      sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq, Set.empty)
+      // 如果副本节点失败了，但是不需要leader的重新选举，通知offline broker的brokers
+      // 需要注意的是，在leader重新选举的过程中，broker会更新它们的metadata
+      if (partitionsWithoutLeader.isEmpty) {
+        // 发送UpdateMetadataRequest请求到所有正在存活和正在关闭的broker上
+        sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq, Set.empty)
+      }
     }
-  }
 
-  private def processTopicDeletionStopReplicaResponseReceived(replicaId: Int,
-                                                              requestError: Errors,
-                                                              partitionErrors: Map[TopicPartition, Errors]): Unit = {
-    if (!isActive) return
-    debug(s"Delete topic callback invoked on StopReplica response received from broker $replicaId: " +
-      s"request error = $requestError, partition errors = $partitionErrors")
+    /**
+     * 处理topic删除，停止节点事件
+     * @param replicaId       副本节点ID
+     * @param requestError    请求错误信息
+     * @param partitionErrors key: topic partition value: Errors
+     */
+    private def processTopicDeletionStopReplicaResponseReceived(replicaId: Int,
+                                                                requestError: Errors,
+                                                                partitionErrors: Map[TopicPartition, Errors]): Unit
 
-    val partitionsInError = if (requestError != Errors.NONE)
-      partitionErrors.keySet
-    else
+    =
+    {
+      if (!isActive) return
+      debug(s"Delete topic callback invoked on StopReplica response received from broker $replicaId: " +
+        s"request error = $requestError, partition errors = $partitionErrors")
+      // 获取出现Error的partition集合
+      val partitionsInError = if (requestError != Errors.NONE)
+        partitionErrors.keySet
+      else
       partitionErrors.filter { case (_, error) => error != Errors.NONE }.keySet
 
     val replicasInError = partitionsInError.map(PartitionAndReplica(_, replicaId))
