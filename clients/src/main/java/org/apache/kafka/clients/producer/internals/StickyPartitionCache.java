@@ -18,16 +18,17 @@ package org.apache.kafka.clients.producer.internals;
 
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.PartitionInfo;
-
-import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ConcurrentHashMap;
 import org.apache.kafka.common.utils.Utils;
 
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ThreadLocalRandom;
+
 /**
- * An internal class that implements a cache used for sticky partitioning behavior. The cache tracks the current sticky
- * partition for any given topic. This class should not be used externally. 
+ * 内部类，实现partition粘性缓存
+ * 缓存追踪了当前粘性partition
+ * 此类不对外使用
  */
 public class StickyPartitionCache {
     private final ConcurrentMap<String, Integer> indexCache;
@@ -44,32 +45,39 @@ public class StickyPartitionCache {
     }
 
     public int nextPartition(String topic, Cluster cluster, int prevPartition) {
-        List<PartitionInfo> partitions = cluster.partitionsForTopic(topic);
-        Integer oldPart = indexCache.get(topic);
-        Integer newPart = oldPart;
-        // Check that the current sticky partition for the topic is either not set or that the partition that 
-        // triggered the new batch matches the sticky partition that needs to be changed.
-        if (oldPart == null || oldPart == prevPartition) {
-            List<PartitionInfo> availablePartitions = cluster.availablePartitionsForTopic(topic);
-            if (availablePartitions.size() < 1) {
-                Integer random = Utils.toPositive(ThreadLocalRandom.current().nextInt());
-                newPart = random % partitions.size();
-            } else if (availablePartitions.size() == 1) {
-                newPart = availablePartitions.get(0).partition();
-            } else {
-                while (newPart == null || newPart.equals(oldPart)) {
-                    Integer random = Utils.toPositive(ThreadLocalRandom.current().nextInt());
-                    newPart = availablePartitions.get(random % availablePartitions.size()).partition();
-                }
-            }
-            // Only change the sticky partition if it is null or prevPartition matches the current sticky partition.
-            if (oldPart == null) {
-                indexCache.putIfAbsent(topic, newPart);
-            } else {
-                indexCache.replace(topic, prevPartition, newPart);
-            }
-            return indexCache.get(topic);
-        }
+		List<PartitionInfo> partitions = cluster.partitionsForTopic(topic);
+		Integer oldPart = indexCache.get(topic);
+		Integer newPart = oldPart;
+		// 校验当前粘性的状态，可能有两种状态:
+		// 1. 没有设置此topic的粘性状态
+		// 2. 触发创建新batch，需要切换粘性分区
+		if (oldPart == null || oldPart == prevPartition) {
+			// 获取topic下可用的partition
+			List<PartitionInfo> availablePartitions = cluster.availablePartitionsForTopic(topic);
+			if (availablePartitions.size() < 1) {
+				// 无可用partition，随机返回一个partition
+				Integer random = Utils.toPositive(ThreadLocalRandom.current().nextInt());
+				newPart = random % partitions.size();
+			} else if (availablePartitions.size() == 1) {
+				// 只有一个partition，则使用此partition
+				newPart = availablePartitions.get(0).partition();
+			} else {
+				// 多个可用的partition，则随机选择一个partition
+				while (newPart == null || newPart.equals(oldPart)) {
+					// 计算并获取下一个partition的分区号
+					Integer random = Utils.toPositive(ThreadLocalRandom.current().nextInt());
+					newPart = availablePartitions.get(random % availablePartitions.size()).partition();
+				}
+			}
+			// 如果旧的partition为null，或者上一个粘性partition匹配了当前的partition，只更新粘性partition，
+			if (oldPart == null) {
+				indexCache.putIfAbsent(topic, newPart);
+			} else {
+				indexCache.replace(topic, prevPartition, newPart);
+			}
+			// 获取更新后的partition
+			return indexCache.get(topic);
+		}
         return indexCache.get(topic);
     }
 
