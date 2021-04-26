@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.streams.processor.internals;
 
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.InvalidOffsetException;
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
@@ -31,15 +30,17 @@ import org.apache.kafka.streams.errors.StreamsException;
 import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.kstream.internals.InternalNameProvider;
 import org.apache.kafka.streams.kstream.internals.KTableSource;
-import org.apache.kafka.streams.kstream.internals.TimestampedKeyValueStoreMaterializer;
 import org.apache.kafka.streams.kstream.internals.MaterializedInternal;
+import org.apache.kafka.streams.kstream.internals.TimestampedKeyValueStoreMaterializer;
 import org.apache.kafka.streams.processor.StateStore;
+import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.test.MockStateRestoreListener;
 import org.apache.kafka.test.TestUtils;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.io.File;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -47,6 +48,7 @@ import java.util.Set;
 
 import static org.apache.kafka.streams.processor.internals.GlobalStreamThread.State.DEAD;
 import static org.apache.kafka.streams.processor.internals.GlobalStreamThread.State.RUNNING;
+import static org.apache.kafka.streams.processor.internals.testutil.ConsumerRecordUtil.record;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.core.IsInstanceOf.instanceOf;
@@ -61,13 +63,13 @@ public class GlobalStreamThreadTest {
     private final MockTime time = new MockTime();
     private final MockStateRestoreListener stateRestoreListener = new MockStateRestoreListener();
     private GlobalStreamThread globalStreamThread;
-    private StreamsConfig config;
+	private StreamsConfig config;
+	private String baseDirectoryName;
 
     private final static String GLOBAL_STORE_TOPIC_NAME = "foo";
     private final static String GLOBAL_STORE_NAME = "bar";
     private final TopicPartition topicPartition = new TopicPartition(GLOBAL_STORE_TOPIC_NAME, 0);
 
-    @SuppressWarnings("unchecked")
     @Before
     public void before() {
         final MaterializedInternal<Object, Object, KeyValueStore<Bytes, byte[]>> materialized =
@@ -86,31 +88,36 @@ public class GlobalStreamThreadTest {
                 "store-"
             );
 
-        builder.addGlobalStore(
-            new TimestampedKeyValueStoreMaterializer<>(materialized).materialize().withLoggingDisabled(),
-            "sourceName",
-            null,
-            null,
-            null,
-            GLOBAL_STORE_TOPIC_NAME,
-            "processorName",
-            new KTableSource<>(GLOBAL_STORE_NAME, GLOBAL_STORE_NAME));
+		builder.addGlobalStore(
+				new TimestampedKeyValueStoreMaterializer<>(materialized).materialize().withLoggingDisabled(),
+				"sourceName",
+				null,
+				null,
+				null,
+				GLOBAL_STORE_TOPIC_NAME,
+				"processorName",
+				() -> ProcessorAdapter.adapt(new KTableSource<>(GLOBAL_STORE_NAME, GLOBAL_STORE_NAME).get()));
 
-        final HashMap<String, Object> properties = new HashMap<>();
-        properties.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "blah");
-        properties.put(StreamsConfig.APPLICATION_ID_CONFIG, "blah");
-        properties.put(StreamsConfig.STATE_DIR_CONFIG, TestUtils.tempDirectory().getAbsolutePath());
-        config = new StreamsConfig(properties);
-        globalStreamThread = new GlobalStreamThread(builder.rewriteTopology(config).buildGlobalStateTopology(),
-                                                    config,
-                                                    mockConsumer,
-                                                    new StateDirectory(config, time, true),
-                                                    0,
-                                                    new Metrics(),
-                                                    new MockTime(),
-                                                    "clientId",
-                                                     stateRestoreListener);
-    }
+		baseDirectoryName = TestUtils.tempDirectory().getAbsolutePath();
+		final HashMap<String, Object> properties = new HashMap<>();
+		properties.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "blah");
+		properties.put(StreamsConfig.APPLICATION_ID_CONFIG, "testAppId");
+		properties.put(StreamsConfig.STATE_DIR_CONFIG, baseDirectoryName);
+		config = new StreamsConfig(properties);
+		globalStreamThread = new GlobalStreamThread(
+				builder.rewriteTopology(config).buildGlobalStateTopology(),
+				config,
+				mockConsumer,
+				new StateDirectory(config, time, true),
+				0,
+				new StreamsMetricsImpl(new Metrics(), "test-client", StreamsConfig.METRICS_LATEST, time),
+				time,
+				"clientId",
+				stateRestoreListener,
+				e -> {
+				}
+		);
+	}
 
     @Test
     public void shouldThrowStreamsExceptionOnStartupIfThereIsAStreamsException() {
@@ -125,55 +132,58 @@ public class GlobalStreamThreadTest {
         assertFalse(globalStreamThread.stillRunning());
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     public void shouldThrowStreamsExceptionOnStartupIfExceptionOccurred() {
-        final MockConsumer<byte[], byte[]> mockConsumer = new MockConsumer(OffsetResetStrategy.EARLIEST) {
-            @Override
-            public List<PartitionInfo> partitionsFor(final String topic) {
-                throw new RuntimeException("KABOOM!");
-            }
-        };
-        globalStreamThread = new GlobalStreamThread(builder.buildGlobalStateTopology(),
-                                                    config,
-                                                    mockConsumer,
-                                                    new StateDirectory(config, time, true),
-                                                    0,
-                                                    new Metrics(),
-                                                    new MockTime(),
-                                                    "clientId",
-                                                    stateRestoreListener);
+		final MockConsumer<byte[], byte[]> mockConsumer = new MockConsumer<byte[], byte[]>(OffsetResetStrategy.EARLIEST) {
+			@Override
+			public List<PartitionInfo> partitionsFor(final String topic) {
+				throw new RuntimeException("KABOOM!");
+			}
+		};
+		globalStreamThread = new GlobalStreamThread(
+				builder.buildGlobalStateTopology(),
+				config,
+				mockConsumer,
+				new StateDirectory(config, time, true),
+				0,
+				new StreamsMetricsImpl(new Metrics(), "test-client", StreamsConfig.METRICS_LATEST, time),
+				time,
+				"clientId",
+				stateRestoreListener,
+				e -> {
+				}
+		);
 
-        try {
-            globalStreamThread.start();
-            fail("Should have thrown StreamsException if start up failed");
-        } catch (final StreamsException e) {
-            assertThat(e.getCause(), instanceOf(RuntimeException.class));
-            assertThat(e.getCause().getMessage(), equalTo("KABOOM!"));
-        }
-        assertFalse(globalStreamThread.stillRunning());
-    }
+		try {
+			globalStreamThread.start();
+			fail("Should have thrown StreamsException if start up failed");
+		} catch (final StreamsException e) {
+			assertThat(e.getCause(), instanceOf(RuntimeException.class));
+			assertThat(e.getCause().getMessage(), equalTo("KABOOM!"));
+		}
+		assertFalse(globalStreamThread.stillRunning());
+	}
 
     @Test
     public void shouldBeRunningAfterSuccessfulStart() {
-        initializeConsumer();
-        globalStreamThread.start();
-        assertTrue(globalStreamThread.stillRunning());
+		initializeConsumer();
+		startAndSwallowError();
+		assertTrue(globalStreamThread.stillRunning());
     }
 
     @Test(timeout = 30000)
     public void shouldStopRunningWhenClosedByUser() throws Exception {
-        initializeConsumer();
-        globalStreamThread.start();
-        globalStreamThread.shutdown();
+		initializeConsumer();
+		startAndSwallowError();
+		globalStreamThread.shutdown();
         globalStreamThread.join();
         assertEquals(GlobalStreamThread.State.DEAD, globalStreamThread.state());
     }
 
     @Test
     public void shouldCloseStateStoresOnClose() throws Exception {
-        initializeConsumer();
-        globalStreamThread.start();
+		initializeConsumer();
+		startAndSwallowError();
         final StateStore globalStore = builder.globalStateStores().get(GLOBAL_STORE_NAME);
         assertTrue(globalStore.isOpen());
         globalStreamThread.shutdown();
@@ -181,87 +191,113 @@ public class GlobalStreamThreadTest {
         assertFalse(globalStore.isOpen());
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     public void shouldTransitionToDeadOnClose() throws Exception {
-        initializeConsumer();
-        globalStreamThread.start();
-        globalStreamThread.shutdown();
+		initializeConsumer();
+		startAndSwallowError();
+		globalStreamThread.shutdown();
         globalStreamThread.join();
 
         assertEquals(GlobalStreamThread.State.DEAD, globalStreamThread.state());
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     public void shouldStayDeadAfterTwoCloses() throws Exception {
-        initializeConsumer();
-        globalStreamThread.start();
-        globalStreamThread.shutdown();
+		initializeConsumer();
+		startAndSwallowError();
+		globalStreamThread.shutdown();
         globalStreamThread.join();
         globalStreamThread.shutdown();
 
         assertEquals(GlobalStreamThread.State.DEAD, globalStreamThread.state());
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     public void shouldTransitionToRunningOnStart() throws Exception {
-        initializeConsumer();
-        globalStreamThread.start();
+		initializeConsumer();
+		startAndSwallowError();
 
         TestUtils.waitForCondition(
-            () -> globalStreamThread.state() == RUNNING,
-            10 * 1000,
-            "Thread never started.");
+				() -> globalStreamThread.state() == RUNNING,
+				10 * 1000,
+				"Thread never started.");
 
-        globalStreamThread.shutdown();
-    }
+		globalStreamThread.shutdown();
+	}
 
-    @Test
-    public void shouldDieOnInvalidOffsetException() throws Exception {
-        initializeConsumer();
-        globalStreamThread.start();
+	@Test
+	public void shouldDieOnInvalidOffsetExceptionDuringStartup() throws Exception {
+		initializeConsumer();
+		mockConsumer.setPollException(new InvalidOffsetException("Try Again!") {
+			@Override
+			public Set<TopicPartition> partitions() {
+				return Collections.singleton(topicPartition);
+			}
+		});
 
-        TestUtils.waitForCondition(
-            () -> globalStreamThread.state() == RUNNING,
-            10 * 1000,
-            "Thread never started.");
+		startAndSwallowError();
 
-        mockConsumer.updateEndOffsets(Collections.singletonMap(topicPartition, 1L));
-        mockConsumer.addRecord(new ConsumerRecord<>(GLOBAL_STORE_TOPIC_NAME, 0, 0L, "K1".getBytes(), "V1".getBytes()));
+		TestUtils.waitForCondition(
+				() -> globalStreamThread.state() == DEAD,
+				10 * 1000,
+				"GlobalStreamThread should have died."
+		);
 
-        TestUtils.waitForCondition(
+		assertFalse(new File(baseDirectoryName + File.separator + "testAppId" + File.separator + "global").exists());
+	}
+
+	@Test
+	public void shouldDieOnInvalidOffsetExceptionWhileRunning() throws Exception {
+		initializeConsumer();
+		startAndSwallowError();
+
+		TestUtils.waitForCondition(
+				() -> globalStreamThread.state() == RUNNING,
+				10 * 1000,
+				"Thread never started.");
+
+		mockConsumer.updateEndOffsets(Collections.singletonMap(topicPartition, 1L));
+		mockConsumer.addRecord(record(GLOBAL_STORE_TOPIC_NAME, 0, 0L, "K1".getBytes(), "V1".getBytes()));
+
+		TestUtils.waitForCondition(
             () -> mockConsumer.position(topicPartition) == 1L,
             10 * 1000,
             "Input record never consumed");
 
-        mockConsumer.setPollException(new InvalidOffsetException("Try Again!") {
-            @Override
-            public Set<TopicPartition> partitions() {
-                return Collections.singleton(topicPartition);
-            }
-        });
-        // feed first record for recovery
-        mockConsumer.addRecord(new ConsumerRecord<>(GLOBAL_STORE_TOPIC_NAME, 0, 0L, "K1".getBytes(), "V1".getBytes()));
+		mockConsumer.setPollException(new InvalidOffsetException("Try Again!") {
+			@Override
+			public Set<TopicPartition> partitions() {
+				return Collections.singleton(topicPartition);
+			}
+		});
 
-        TestUtils.waitForCondition(
-            () -> globalStreamThread.state() == DEAD,
-            10 * 1000,
-            "GlobalStreamThread should have died.");
-    }
+		TestUtils.waitForCondition(
+				() -> globalStreamThread.state() == DEAD,
+				10 * 1000,
+				"GlobalStreamThread should have died."
+		);
+
+		assertFalse(new File(baseDirectoryName + File.separator + "testAppId" + File.separator + "global").exists());
+	}
 
     private void initializeConsumer() {
         mockConsumer.updatePartitions(
             GLOBAL_STORE_TOPIC_NAME,
-            Collections.singletonList(new PartitionInfo(
-                GLOBAL_STORE_TOPIC_NAME,
-                0,
-                null,
-                new Node[0],
-                new Node[0])));
-        mockConsumer.updateBeginningOffsets(Collections.singletonMap(topicPartition, 0L));
-        mockConsumer.updateEndOffsets(Collections.singletonMap(topicPartition, 0L));
-        mockConsumer.assign(Collections.singleton(topicPartition));
-    }
+				Collections.singletonList(new PartitionInfo(
+						GLOBAL_STORE_TOPIC_NAME,
+						0,
+						null,
+						new Node[0],
+						new Node[0])));
+		mockConsumer.updateBeginningOffsets(Collections.singletonMap(topicPartition, 0L));
+		mockConsumer.updateEndOffsets(Collections.singletonMap(topicPartition, 0L));
+		mockConsumer.assign(Collections.singleton(topicPartition));
+	}
+
+	private void startAndSwallowError() {
+		try {
+			globalStreamThread.start();
+		} catch (final IllegalStateException ignored) {
+		}
+	}
 }

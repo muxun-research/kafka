@@ -16,32 +16,32 @@
  */
 package org.apache.kafka.common.utils;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.zip.Checksum;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class Crc32Test {
 
     @Test
     public void testUpdate() {
-        final byte[] bytes = "Any String you want".getBytes();
-        final int len = bytes.length;
+		final byte[] bytes = "Any String you want".getBytes();
+		final int len = bytes.length;
 
-        Checksum crc1 = Crc32C.create();
-        Checksum crc2 = Crc32C.create();
-        Checksum crc3 = Crc32C.create();
+		Checksum crc1 = new Crc32();
+		Checksum crc2 = new Crc32();
+		Checksum crc3 = new Crc32();
 
-        crc1.update(bytes, 0, len);
-        for (int i = 0; i < len; i++)
-            crc2.update(bytes[i]);
-        crc3.update(bytes, 0, len / 2);
-        crc3.update(bytes, len / 2, len - len / 2);
+		crc1.update(bytes, 0, len);
+		for (int i = 0; i < len; i++)
+			crc2.update(bytes[i]);
+		crc3.update(bytes, 0, len / 2);
+		crc3.update(bytes, len / 2, len - len / 2);
 
-        assertEquals("Crc values should be the same", crc1.getValue(), crc2.getValue());
-        assertEquals("Crc values should be the same", crc1.getValue(), crc3.getValue());
-    }
+		assertEquals(crc1.getValue(), crc2.getValue(), "Crc values should be the same");
+		assertEquals(crc1.getValue(), crc3.getValue(), "Crc values should be the same");
+	}
 
     @Test
     public void testValue() {

@@ -16,22 +16,24 @@
  */
 package org.apache.kafka.test;
 
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerInterceptor;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.common.ClusterResourceListener;
 import org.apache.kafka.common.ClusterResource;
+import org.apache.kafka.common.ClusterResourceListener;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.ConfigException;
+import org.apache.kafka.common.header.internals.RecordHeaders;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -56,7 +58,6 @@ public class MockConsumerInterceptor implements ClusterResourceListener, Consume
     }
 
     @Override
-    @SuppressWarnings("deprecation")
     public ConsumerRecords<String, String> onConsume(ConsumerRecords<String, String> records) {
 
         // This will ensure that we get the cluster metadata when onConsume is called for the first time
@@ -67,15 +68,16 @@ public class MockConsumerInterceptor implements ClusterResourceListener, Consume
         for (TopicPartition tp : records.partitions()) {
             List<ConsumerRecord<String, String>> lst = new ArrayList<>();
             for (ConsumerRecord<String, String> record: records.records(tp)) {
-                lst.add(new ConsumerRecord<>(record.topic(), record.partition(), record.offset(),
-                                             record.timestamp(), record.timestampType(),
-                                             record.checksum(), record.serializedKeySize(),
-                                             record.serializedValueSize(),
-                                             record.key(), record.value().toUpperCase(Locale.ROOT)));
+				lst.add(new ConsumerRecord<>(record.topic(), record.partition(), record.offset(),
+						record.timestamp(), record.timestampType(),
+						record.serializedKeySize(),
+						record.serializedValueSize(),
+						record.key(), record.value().toUpperCase(Locale.ROOT),
+						new RecordHeaders(), Optional.empty()));
             }
             recordMap.put(tp, lst);
         }
-        return new ConsumerRecords<String, String>(recordMap);
+		return new ConsumerRecords<>(recordMap);
     }
 
     @Override

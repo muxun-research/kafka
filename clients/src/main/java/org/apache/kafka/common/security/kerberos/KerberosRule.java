@@ -46,6 +46,7 @@ class KerberosRule {
     private final String toPattern;
     private final boolean repeat;
     private final boolean toLowerCase;
+	private final boolean toUpperCase;
 
     KerberosRule(String defaultRealm) {
         this.defaultRealm = defaultRealm;
@@ -56,21 +57,23 @@ class KerberosRule {
         fromPattern = null;
         toPattern = null;
         repeat = false;
-        toLowerCase = false;
+		toLowerCase = false;
+		toUpperCase = false;
     }
 
-    KerberosRule(String defaultRealm, int numOfComponents, String format, String match, String fromPattern,
-                 String toPattern, boolean repeat, boolean toLowerCase) {
-        this.defaultRealm = defaultRealm;
-        isDefault = false;
-        this.numOfComponents = numOfComponents;
-        this.format = format;
-        this.match = match == null ? null : Pattern.compile(match);
-        this.fromPattern =
-                fromPattern == null ? null : Pattern.compile(fromPattern);
-        this.toPattern = toPattern;
-        this.repeat = repeat;
-        this.toLowerCase = toLowerCase;
+	KerberosRule(String defaultRealm, int numOfComponents, String format, String match, String fromPattern,
+				 String toPattern, boolean repeat, boolean toLowerCase, boolean toUpperCase) {
+		this.defaultRealm = defaultRealm;
+		isDefault = false;
+		this.numOfComponents = numOfComponents;
+		this.format = format;
+		this.match = match == null ? null : Pattern.compile(match);
+		this.fromPattern =
+				fromPattern == null ? null : Pattern.compile(fromPattern);
+		this.toPattern = toPattern;
+		this.repeat = repeat;
+		this.toLowerCase = toLowerCase;
+		this.toUpperCase = toUpperCase;
     }
 
     @Override
@@ -92,17 +95,20 @@ class KerberosRule {
             if (fromPattern != null) {
                 buf.append("s/");
                 buf.append(fromPattern);
-                buf.append('/');
-                buf.append(toPattern);
-                buf.append('/');
-                if (repeat) {
-                    buf.append('g');
-                }
-            }
-            if (toLowerCase) {
-                buf.append("/L");
-            }
-        }
+				buf.append('/');
+				buf.append(toPattern);
+				buf.append('/');
+				if (repeat) {
+					buf.append('g');
+				}
+			}
+			if (toLowerCase) {
+				buf.append("/L");
+			}
+			if (toUpperCase) {
+				buf.append("/U");
+			}
+		}
         return buf.toString();
     }
 
@@ -186,12 +192,15 @@ class KerberosRule {
                 }
             }
         }
-        if (result != null && NON_SIMPLE_PATTERN.matcher(result).find()) {
-            throw new NoMatchingRule("Non-simple name " + result + " after auth_to_local rule " + this);
-        }
-        if (toLowerCase && result != null) {
-            result = result.toLowerCase(Locale.ENGLISH);
-        }
-        return result;
+		if (result != null && NON_SIMPLE_PATTERN.matcher(result).find()) {
+			throw new NoMatchingRule("Non-simple name " + result + " after auth_to_local rule " + this);
+		}
+		if (toLowerCase && result != null) {
+			result = result.toLowerCase(Locale.ENGLISH);
+		} else if (toUpperCase && result != null) {
+			result = result.toUpperCase(Locale.ENGLISH);
+		}
+
+		return result;
     }
 }

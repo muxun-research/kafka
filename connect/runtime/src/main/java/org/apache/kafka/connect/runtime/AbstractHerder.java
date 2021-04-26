@@ -30,6 +30,7 @@ import org.apache.kafka.connect.connector.policy.ConnectorClientConfigRequest;
 import org.apache.kafka.connect.errors.NotFoundException;
 import org.apache.kafka.connect.runtime.distributed.ClusterConfigState;
 import org.apache.kafka.connect.runtime.isolation.Plugins;
+import org.apache.kafka.connect.runtime.rest.entities.ActiveTopicsInfo;
 import org.apache.kafka.connect.runtime.rest.entities.ConfigInfo;
 import org.apache.kafka.connect.runtime.rest.entities.ConfigInfos;
 import org.apache.kafka.connect.runtime.rest.entities.ConfigKeyInfo;
@@ -60,8 +61,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Abstract Herder implementation which handles connector/task lifecycle tracking. Extensions
@@ -86,28 +91,31 @@ import java.util.regex.Pattern;
  */
 public abstract class AbstractHerder implements Herder, TaskStatus.Listener, ConnectorStatus.Listener {
 
-    private final String workerId;
-    protected final Worker worker;
-    private final String kafkaClusterId;
-    protected final StatusBackingStore statusBackingStore;
-    protected final ConfigBackingStore configBackingStore;
-    private final ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy;
+	private final String workerId;
+	protected final Worker worker;
+	private final String kafkaClusterId;
+	protected final StatusBackingStore statusBackingStore;
+	protected final ConfigBackingStore configBackingStore;
+	private final ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy;
+	protected volatile boolean running = false;
+	private final ExecutorService connectorExecutor;
 
-    private Map<String, Connector> tempConnectors = new ConcurrentHashMap<>();
+	private ConcurrentMap<String, Connector> tempConnectors = new ConcurrentHashMap<>();
 
-    public AbstractHerder(Worker worker,
-                          String workerId,
-                          String kafkaClusterId,
-                          StatusBackingStore statusBackingStore,
-                          ConfigBackingStore configBackingStore,
-                          ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy) {
-        this.worker = worker;
+	public AbstractHerder(Worker worker,
+						  String workerId,
+						  String kafkaClusterId,
+						  StatusBackingStore statusBackingStore,
+						  ConfigBackingStore configBackingStore,
+						  ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy) {
+		this.worker = worker;
         this.worker.herder = this;
         this.workerId = workerId;
         this.kafkaClusterId = kafkaClusterId;
         this.statusBackingStore = statusBackingStore;
         this.configBackingStore = configBackingStore;
-        this.connectorClientConfigOverridePolicy = connectorClientConfigOverridePolicy;
+		this.connectorClientConfigOverridePolicy = connectorClientConfigOverridePolicy;
+		this.connectorExecutor = Executors.newCachedThreadPool();
     }
 
     @Override
@@ -117,26 +125,32 @@ public abstract class AbstractHerder implements Herder, TaskStatus.Listener, Con
 
     protected abstract int generation();
 
-    protected void startServices() {
-        this.worker.start();
-        this.statusBackingStore.start();
-        this.configBackingStore.start();
-    }
+	protected void startServices() {
+		this.worker.start();
+		this.statusBackingStore.start();
+		this.configBackingStore.start();
+	}
 
-    protected void stopServices() {
-        this.statusBackingStore.stop();
-        this.configBackingStore.stop();
-        this.worker.stop();
-    }
+	protected void stopServices() {
+		this.statusBackingStore.stop();
+		this.configBackingStore.stop();
+		this.worker.stop();
+		this.connectorExecutor.shutdown();
+	}
 
-    @Override
-    public void onStartup(String connector) {
-        statusBackingStore.put(new ConnectorStatus(connector, ConnectorStatus.State.RUNNING,
-                workerId, generation()));
-    }
+	@Override
+	public boolean isRunning() {
+		return running;
+	}
 
-    @Override
-    public void onPause(String connector) {
+	@Override
+	public void onStartup(String connector) {
+		statusBackingStore.put(new ConnectorStatus(connector, ConnectorStatus.State.RUNNING,
+				workerId, generation()));
+	}
+
+	@Override
+	public void onPause(String connector) {
         statusBackingStore.put(new ConnectorStatus(connector, ConnectorStatus.State.PAUSED,
                 workerId, generation()));
     }
@@ -181,114 +195,179 @@ public abstract class AbstractHerder implements Herder, TaskStatus.Listener, Con
 
     @Override
     public void onPause(ConnectorTaskId id) {
-        statusBackingStore.put(new TaskStatus(id, TaskStatus.State.PAUSED, workerId, generation()));
-    }
+		statusBackingStore.put(new TaskStatus(id, TaskStatus.State.PAUSED, workerId, generation()));
+	}
 
-    @Override
-    public void onDeletion(String connector) {
-        for (TaskStatus status : statusBackingStore.getAll(connector))
-            statusBackingStore.put(new TaskStatus(status.id(), TaskStatus.State.DESTROYED, workerId, generation()));
-        statusBackingStore.put(new ConnectorStatus(connector, ConnectorStatus.State.DESTROYED, workerId, generation()));
-    }
+	@Override
+	public void onDeletion(String connector) {
+		for (TaskStatus status : statusBackingStore.getAll(connector))
+			onDeletion(status.id());
+		statusBackingStore.put(new ConnectorStatus(connector, ConnectorStatus.State.DESTROYED, workerId, generation()));
+	}
 
-    @Override
-    public void pauseConnector(String connector) {
-        if (!configBackingStore.contains(connector))
-            throw new NotFoundException("Unknown connector " + connector);
-        configBackingStore.putTargetState(connector, TargetState.PAUSED);
-    }
+	@Override
+	public void onDeletion(ConnectorTaskId id) {
+		statusBackingStore.put(new TaskStatus(id, TaskStatus.State.DESTROYED, workerId, generation()));
+	}
 
-    @Override
-    public void resumeConnector(String connector) {
+	@Override
+	public void pauseConnector(String connector) {
+		if (!configBackingStore.contains(connector))
+			throw new NotFoundException("Unknown connector " + connector);
+		configBackingStore.putTargetState(connector, TargetState.PAUSED);
+	}
+
+	@Override
+	public void resumeConnector(String connector) {
         if (!configBackingStore.contains(connector))
             throw new NotFoundException("Unknown connector " + connector);
         configBackingStore.putTargetState(connector, TargetState.STARTED);
-    }
+	}
 
-    @Override
-    public Plugins plugins() {
-        return worker.getPlugins();
-    }
+	@Override
+	public Plugins plugins() {
+		return worker.getPlugins();
+	}
 
-    /*
-     * Retrieves config map by connector name
-     */
-    protected abstract Map<String, String> config(String connName);
+	/*
+	 * Retrieves raw config map by connector name.
+	 */
+	protected abstract Map<String, String> rawConfig(String connName);
 
-    @Override
-    public Collection<String> connectors() {
-        return configBackingStore.snapshot().connectors();
-    }
+	@Override
+	public void connectorConfig(String connName, Callback<Map<String, String>> callback) {
+		// Subset of connectorInfo, so piggy back on that implementation
+		connectorInfo(connName, (error, result) -> {
+			if (error != null)
+				callback.onCompletion(error, null);
+			else
+				callback.onCompletion(null, result.config());
+		});
+	}
 
-    @Override
-    public ConnectorInfo connectorInfo(String connector) {
-        final ClusterConfigState configState = configBackingStore.snapshot();
+	@Override
+	public Collection<String> connectors() {
+		return configBackingStore.snapshot().connectors();
+	}
+
+	@Override
+	public ConnectorInfo connectorInfo(String connector) {
+		final ClusterConfigState configState = configBackingStore.snapshot();
 
         if (!configState.contains(connector))
             return null;
-        Map<String, String> config = configState.rawConnectorConfig(connector);
+		Map<String, String> config = configState.rawConnectorConfig(connector);
 
-        return new ConnectorInfo(
-            connector,
-            config,
-            configState.tasks(connector),
-            connectorTypeForClass(config.get(ConnectorConfig.CONNECTOR_CLASS_CONFIG))
-        );
-    }
+		return new ConnectorInfo(
+				connector,
+				config,
+				configState.tasks(connector),
+				connectorTypeForClass(config.get(ConnectorConfig.CONNECTOR_CLASS_CONFIG))
+		);
+	}
 
-    @Override
-    public ConnectorStateInfo connectorStatus(String connName) {
-        ConnectorStatus connector = statusBackingStore.get(connName);
-        if (connector == null)
-            throw new NotFoundException("No status found for connector " + connName);
-        
-        Collection<TaskStatus> tasks = statusBackingStore.getAll(connName);
+	protected Map<ConnectorTaskId, Map<String, String>> buildTasksConfig(String connector) {
+		final ClusterConfigState configState = configBackingStore.snapshot();
 
-        ConnectorStateInfo.ConnectorState connectorState = new ConnectorStateInfo.ConnectorState(
+		if (!configState.contains(connector))
+			return Collections.emptyMap();
+
+		Map<ConnectorTaskId, Map<String, String>> configs = new HashMap<>();
+		for (ConnectorTaskId cti : configState.tasks(connector)) {
+			configs.put(cti, configState.taskConfig(cti));
+		}
+
+		return configs;
+	}
+
+	@Override
+	public ConnectorStateInfo connectorStatus(String connName) {
+		ConnectorStatus connector = statusBackingStore.get(connName);
+		if (connector == null)
+			throw new NotFoundException("No status found for connector " + connName);
+
+		Collection<TaskStatus> tasks = statusBackingStore.getAll(connName);
+
+		ConnectorStateInfo.ConnectorState connectorState = new ConnectorStateInfo.ConnectorState(
                 connector.state().toString(), connector.workerId(), connector.trace());
         List<ConnectorStateInfo.TaskState> taskStates = new ArrayList<>();
 
         for (TaskStatus status : tasks) {
             taskStates.add(new ConnectorStateInfo.TaskState(status.id().task(),
-                    status.state().toString(), status.workerId(), status.trace()));
-        }
+					status.state().toString(), status.workerId(), status.trace()));
+		}
 
-        Collections.sort(taskStates);
+		Collections.sort(taskStates);
 
-        Map<String, String> conf = config(connName);
-        return new ConnectorStateInfo(connName, connectorState, taskStates,
-            conf == null ? ConnectorType.UNKNOWN : connectorTypeForClass(conf.get(ConnectorConfig.CONNECTOR_CLASS_CONFIG)));
-    }
+		Map<String, String> conf = rawConfig(connName);
+		return new ConnectorStateInfo(connName, connectorState, taskStates,
+				conf == null ? ConnectorType.UNKNOWN : connectorTypeForClass(conf.get(ConnectorConfig.CONNECTOR_CLASS_CONFIG)));
+	}
 
-    @Override
-    public ConnectorStateInfo.TaskState taskStatus(ConnectorTaskId id) {
-        TaskStatus status = statusBackingStore.get(id);
+	@Override
+	public ActiveTopicsInfo connectorActiveTopics(String connName) {
+		Collection<String> topics = statusBackingStore.getAllTopics(connName).stream()
+				.map(TopicStatus::topic)
+				.collect(Collectors.toList());
+		return new ActiveTopicsInfo(connName, topics);
+	}
 
-        if (status == null)
-            throw new NotFoundException("No status found for task " + id);
+	@Override
+	public void resetConnectorActiveTopics(String connName) {
+		statusBackingStore.getAllTopics(connName).stream()
+				.forEach(status -> statusBackingStore.deleteTopic(status.connector(), status.topic()));
+	}
 
-        return new ConnectorStateInfo.TaskState(id.task(), status.state().toString(),
-                status.workerId(), status.trace());
-    }
+	@Override
+	public StatusBackingStore statusBackingStore() {
+		return statusBackingStore;
+	}
 
-    protected Map<String, ConfigValue> validateBasicConnectorConfig(Connector connector,
-                                                                    ConfigDef configDef,
-                                                                    Map<String, String> config) {
-        return configDef.validateAll(config);
-    }
+	@Override
+	public ConnectorStateInfo.TaskState taskStatus(ConnectorTaskId id) {
+		TaskStatus status = statusBackingStore.get(id);
 
-    @Override
-    public ConfigInfos validateConnectorConfig(Map<String, String> connectorProps) {
-        if (worker.configTransformer() != null) {
-            connectorProps = worker.configTransformer().transform(connectorProps);
-        }
-        String connType = connectorProps.get(ConnectorConfig.CONNECTOR_CLASS_CONFIG);
-        if (connType == null)
-            throw new BadRequestException("Connector config " + connectorProps + " contains no connector type");
+		if (status == null)
+			throw new NotFoundException("No status found for task " + id);
 
-        Connector connector = getConnector(connType);
-        org.apache.kafka.connect.health.ConnectorType connectorType;
-        ClassLoader savedLoader = plugins().compareAndSwapLoaders(connector);
+		return new ConnectorStateInfo.TaskState(id.task(), status.state().toString(),
+				status.workerId(), status.trace());
+	}
+
+	protected Map<String, ConfigValue> validateBasicConnectorConfig(Connector connector,
+																	ConfigDef configDef,
+																	Map<String, String> config) {
+		return configDef.validateAll(config);
+	}
+
+	@Override
+	public void validateConnectorConfig(Map<String, String> connectorProps, Callback<ConfigInfos> callback) {
+		validateConnectorConfig(connectorProps, callback, true);
+	}
+
+	@Override
+	public void validateConnectorConfig(Map<String, String> connectorProps, Callback<ConfigInfos> callback, boolean doLog) {
+		connectorExecutor.submit(() -> {
+			try {
+				ConfigInfos result = validateConnectorConfig(connectorProps, doLog);
+				callback.onCompletion(null, result);
+			} catch (Throwable t) {
+				callback.onCompletion(t, null);
+			}
+		});
+	}
+
+	ConfigInfos validateConnectorConfig(Map<String, String> connectorProps, boolean doLog) {
+		if (worker.configTransformer() != null) {
+			connectorProps = worker.configTransformer().transform(connectorProps);
+		}
+		String connType = connectorProps.get(ConnectorConfig.CONNECTOR_CLASS_CONFIG);
+		if (connType == null)
+			throw new BadRequestException("Connector config " + connectorProps + " contains no connector type");
+
+		Connector connector = getConnector(connType);
+		org.apache.kafka.connect.health.ConnectorType connectorType;
+		ClassLoader savedLoader = plugins().compareAndSwapLoaders(connector);
         try {
             ConfigDef baseConfigDef;
             if (connector instanceof SourceConnector) {
@@ -303,39 +382,39 @@ public abstract class AbstractHerder implements Herder, TaskStatus.Listener, Con
             Map<String, ConfigValue> validatedConnectorConfig = validateBasicConnectorConfig(
                     connector,
                     enrichedConfigDef,
-                    connectorProps
-            );
-            List<ConfigValue> configValues = new ArrayList<>(validatedConnectorConfig.values());
-            Map<String, ConfigKey> configKeys = new LinkedHashMap<>(enrichedConfigDef.configKeys());
-            Set<String> allGroups = new LinkedHashSet<>(enrichedConfigDef.groups());
+					connectorProps
+			);
+			List<ConfigValue> configValues = new ArrayList<>(validatedConnectorConfig.values());
+			Map<String, ConfigKey> configKeys = new LinkedHashMap<>(enrichedConfigDef.configKeys());
+			Set<String> allGroups = new LinkedHashSet<>(enrichedConfigDef.groups());
 
-            // do custom connector-specific validation
-            Config config = connector.validate(connectorProps);
-            if (null == config) {
-                throw new BadRequestException(
-                    String.format(
-                        "%s.validate() must return a Config that is not null.",
-                        connector.getClass().getName()
-                    )
-                );
-            }
-            ConfigDef configDef = connector.config();
-            if (null == configDef) {
-                throw new BadRequestException(
-                    String.format(
-                        "%s.config() must return a ConfigDef that is not null.",
-                        connector.getClass().getName()
-                    )
-                );
-            }
-            configKeys.putAll(configDef.configKeys());
-            allGroups.addAll(configDef.groups());
-            configValues.addAll(config.configValues());
-            ConfigInfos configInfos =  generateResult(connType, configKeys, configValues, new ArrayList<>(allGroups));
+			// do custom connector-specific validation
+			ConfigDef configDef = connector.config();
+			if (null == configDef) {
+				throw new BadRequestException(
+						String.format(
+								"%s.config() must return a ConfigDef that is not null.",
+								connector.getClass().getName()
+						)
+				);
+			}
+			Config config = connector.validate(connectorProps);
+			if (null == config) {
+				throw new BadRequestException(
+						String.format(
+								"%s.validate() must return a Config that is not null.",
+								connector.getClass().getName()
+						)
+				);
+			}
+			configKeys.putAll(configDef.configKeys());
+			allGroups.addAll(configDef.groups());
+			configValues.addAll(config.configValues());
+			ConfigInfos configInfos = generateResult(connType, configKeys, configValues, new ArrayList<>(allGroups));
 
-            AbstractConfig connectorConfig = new AbstractConfig(new ConfigDef(), connectorProps);
-            String connName = connectorProps.get(ConnectorConfig.NAME_CONFIG);
-            ConfigInfos producerConfigInfos = null;
+			AbstractConfig connectorConfig = new AbstractConfig(new ConfigDef(), connectorProps, doLog);
+			String connName = connectorProps.get(ConnectorConfig.NAME_CONFIG);
+			ConfigInfos producerConfigInfos = null;
             ConfigInfos consumerConfigInfos = null;
             ConfigInfos adminConfigInfos = null;
             if (connectorType.equals(org.apache.kafka.connect.health.ConnectorType.SOURCE)) {
@@ -449,8 +528,8 @@ public abstract class AbstractHerder implements Herder, TaskStatus.Listener, Con
             String configName = configValue.name();
             configValueMap.put(configName, configValue);
             if (!configKeys.containsKey(configName)) {
-                configValue.addErrorMessage("Configuration is not defined: " + configName);
-                configInfoList.add(new ConfigInfo(null, convertConfigValue(configValue, null)));
+				configInfoList.add(new ConfigInfo(null, convertConfigValue(configValue, null)));
+				errorCount += configValue.errorMessages().size();
             }
         }
 
@@ -513,13 +592,7 @@ public abstract class AbstractHerder implements Herder, TaskStatus.Listener, Con
     }
 
     protected Connector getConnector(String connType) {
-        if (tempConnectors.containsKey(connType)) {
-            return tempConnectors.get(connType);
-        } else {
-            Connector connector = plugins().newConnector(connType);
-            tempConnectors.put(connType, connector);
-            return connector;
-        }
+		return tempConnectors.computeIfAbsent(connType, k -> plugins().newConnector(k));
     }
 
     /*
@@ -556,7 +629,7 @@ public abstract class AbstractHerder implements Herder, TaskStatus.Listener, Con
             callback.onCompletion(
                 new BadRequestException(
                     messages.append(
-                        "\nYou can also find the above list of errors at the endpoint `/{connectorType}/config/validate`"
+							"\nYou can also find the above list of errors at the endpoint `/connector-plugins/{connectorType}/config/validate`"
                     ).toString()
                 ), null
             );
@@ -568,7 +641,7 @@ public abstract class AbstractHerder implements Herder, TaskStatus.Listener, Con
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try {
             t.printStackTrace(new PrintStream(output, false, StandardCharsets.UTF_8.name()));
-            return output.toString("UTF-8");
+			return output.toString(StandardCharsets.UTF_8.name());
         } catch (UnsupportedEncodingException e) {
             return null;
         }

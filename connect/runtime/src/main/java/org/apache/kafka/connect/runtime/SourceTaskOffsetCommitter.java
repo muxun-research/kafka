@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.connect.runtime;
 
+import org.apache.kafka.common.utils.ThreadUtils;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.util.ConnectorTaskId;
 import org.apache.kafka.connect.util.LoggingContext;
@@ -60,9 +61,10 @@ class SourceTaskOffsetCommitter {
     }
 
     public SourceTaskOffsetCommitter(WorkerConfig config) {
-        this(config, Executors.newSingleThreadScheduledExecutor(),
-                new ConcurrentHashMap<ConnectorTaskId, ScheduledFuture<?>>());
-    }
+		this(config, Executors.newSingleThreadScheduledExecutor(ThreadUtils.createThreadFactory(
+				SourceTaskOffsetCommitter.class.getSimpleName() + "-%d", false)),
+				new ConcurrentHashMap<>());
+	}
 
     public void close(long timeoutMs) {
         commitExecutorService.shutdown();
@@ -76,17 +78,14 @@ class SourceTaskOffsetCommitter {
     }
 
     public void schedule(final ConnectorTaskId id, final WorkerSourceTask workerTask) {
-        long commitIntervalMs = config.getLong(WorkerConfig.OFFSET_COMMIT_INTERVAL_MS_CONFIG);
-        ScheduledFuture<?> commitFuture = commitExecutorService.scheduleWithFixedDelay(new Runnable() {
-            @Override
-            public void run() {
-                try (LoggingContext loggingContext = LoggingContext.forOffsets(id)) {
-                    commit(workerTask);
-                }
-            }
-        }, commitIntervalMs, commitIntervalMs, TimeUnit.MILLISECONDS);
-        committers.put(id, commitFuture);
-    }
+		long commitIntervalMs = config.getLong(WorkerConfig.OFFSET_COMMIT_INTERVAL_MS_CONFIG);
+		ScheduledFuture<?> commitFuture = commitExecutorService.scheduleWithFixedDelay(() -> {
+			try (LoggingContext loggingContext = LoggingContext.forOffsets(id)) {
+				commit(workerTask);
+			}
+		}, commitIntervalMs, commitIntervalMs, TimeUnit.MILLISECONDS);
+		committers.put(id, commitFuture);
+	}
 
     public void remove(ConnectorTaskId id) {
         final ScheduledFuture<?> task = committers.remove(id);

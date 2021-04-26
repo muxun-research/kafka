@@ -16,6 +16,14 @@
  */
 package org.apache.kafka.common.security.scram.internals;
 
+import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.security.scram.ScramCredential;
+import org.apache.kafka.common.security.scram.internals.ScramMessages.ClientFinalMessage;
+import org.apache.kafka.common.security.scram.internals.ScramMessages.ClientFirstMessage;
+import org.apache.kafka.common.security.scram.internals.ScramMessages.ServerFirstMessage;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
@@ -24,15 +32,6 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-
-import org.apache.kafka.common.KafkaException;
-import org.apache.kafka.common.security.scram.ScramCredential;
-import org.apache.kafka.common.security.scram.internals.ScramMessages.ClientFinalMessage;
-import org.apache.kafka.common.security.scram.internals.ScramMessages.ClientFirstMessage;
-import org.apache.kafka.common.security.scram.internals.ScramMessages.ServerFirstMessage;
 
 /**
  * Scram message salt and hash functions defined in <a href="https://tools.ietf.org/html/rfc5802">RFC 5802</a>.
@@ -63,14 +62,14 @@ public class ScramFormatter {
         return messageDigest.digest(str);
     }
 
-    public byte[] xor(byte[] first, byte[] second) {
-        if (first.length != second.length)
-            throw new IllegalArgumentException("Argument arrays must be of the same length");
-        byte[] result = new byte[first.length];
-        for (int i = 0; i < result.length; i++)
-            result[i] = (byte) (first[i] ^ second[i]);
-        return result;
-    }
+	public static byte[] xor(byte[] first, byte[] second) {
+		if (first.length != second.length)
+			throw new IllegalArgumentException("Argument arrays must be of the same length");
+		byte[] result = new byte[first.length];
+		for (int i = 0; i < result.length; i++)
+			result[i] = (byte) (first[i] ^ second[i]);
+		return result;
+	}
 
     public byte[] hi(byte[] str, byte[] salt, int iterations) throws InvalidKeyException {
         mac.init(new SecretKeySpec(str, mac.getAlgorithm()));
@@ -86,9 +85,9 @@ public class ScramFormatter {
         return result;
     }
 
-    public byte[] normalize(String str) {
-        return toBytes(str);
-    }
+	public static byte[] normalize(String str) {
+		return toBytes(str);
+	}
 
     public byte[] saltedPassword(String password, byte[] salt, int iterations) throws InvalidKeyException {
         return hi(normalize(password), salt, iterations);
@@ -102,22 +101,22 @@ public class ScramFormatter {
         return hash(clientKey);
     }
 
-    public String saslName(String username) {
-        String replace1 = EQUAL.matcher(username).replaceAll(Matcher.quoteReplacement("=3D"));
-        return COMMA.matcher(replace1).replaceAll(Matcher.quoteReplacement("=2C"));
-    }
+	public static String saslName(String username) {
+		String replace1 = EQUAL.matcher(username).replaceAll(Matcher.quoteReplacement("=3D"));
+		return COMMA.matcher(replace1).replaceAll(Matcher.quoteReplacement("=2C"));
+	}
 
-    public String username(String saslName) {
-        String username = EQUAL_TWO_C.matcher(saslName).replaceAll(Matcher.quoteReplacement(","));
-        if (EQUAL_THREE_D.matcher(username).replaceAll(Matcher.quoteReplacement("")).indexOf('=') >= 0) {
-            throw new IllegalArgumentException("Invalid username: " + saslName);
-        }
-        return EQUAL_THREE_D.matcher(username).replaceAll(Matcher.quoteReplacement("="));
-    }
+	public static String username(String saslName) {
+		String username = EQUAL_TWO_C.matcher(saslName).replaceAll(Matcher.quoteReplacement(","));
+		if (EQUAL_THREE_D.matcher(username).replaceAll(Matcher.quoteReplacement("")).indexOf('=') >= 0) {
+			throw new IllegalArgumentException("Invalid username: " + saslName);
+		}
+		return EQUAL_THREE_D.matcher(username).replaceAll(Matcher.quoteReplacement("="));
+	}
 
-    public String authMessage(String clientFirstMessageBare, String serverFirstMessage, String clientFinalMessageWithoutProof) {
-        return clientFirstMessageBare + "," + serverFirstMessage + "," + clientFinalMessageWithoutProof;
-    }
+	public static String authMessage(String clientFirstMessageBare, String serverFirstMessage, String clientFinalMessageWithoutProof) {
+		return clientFirstMessageBare + "," + serverFirstMessage + "," + clientFinalMessageWithoutProof;
+	}
 
     public byte[] clientSignature(byte[] storedKey, ClientFirstMessage clientFirstMessage, ServerFirstMessage serverFirstMessage, ClientFinalMessage clientFinalMessage) throws InvalidKeyException {
         byte[] authMessage = authMessage(clientFirstMessage, serverFirstMessage, clientFinalMessage);
@@ -141,37 +140,53 @@ public class ScramFormatter {
         return hash(xor(clientSignature, clientProof));
     }
 
-    public byte[] serverKey(byte[] saltedPassword) throws InvalidKeyException {
-        return hmac(saltedPassword, toBytes("Server Key"));
-    }
+	public byte[] serverKey(byte[] saltedPassword) throws InvalidKeyException {
+		return hmac(saltedPassword, toBytes("Server Key"));
+	}
 
-    public byte[] serverSignature(byte[] serverKey, ClientFirstMessage clientFirstMessage, ServerFirstMessage serverFirstMessage, ClientFinalMessage clientFinalMessage) throws InvalidKeyException {
-        byte[] authMessage = authMessage(clientFirstMessage, serverFirstMessage, clientFinalMessage);
-        return hmac(serverKey, authMessage);
-    }
+	public byte[] serverSignature(byte[] serverKey, ClientFirstMessage clientFirstMessage, ServerFirstMessage serverFirstMessage, ClientFinalMessage clientFinalMessage) throws InvalidKeyException {
+		byte[] authMessage = authMessage(clientFirstMessage, serverFirstMessage, clientFinalMessage);
+		return hmac(serverKey, authMessage);
+	}
 
-    public String secureRandomString() {
-        return new BigInteger(130, random).toString(Character.MAX_RADIX);
-    }
+	public String secureRandomString() {
+		return secureRandomString(random);
+	}
 
-    public byte[] secureRandomBytes() {
-        return toBytes(secureRandomString());
-    }
+	public static String secureRandomString(SecureRandom random) {
+		return new BigInteger(130, random).toString(Character.MAX_RADIX);
+	}
 
-    public byte[] toBytes(String str) {
-        return str.getBytes(StandardCharsets.UTF_8);
-    }
+	public byte[] secureRandomBytes() {
+		return secureRandomBytes(random);
+	}
 
-    public ScramCredential generateCredential(String password, int iterations) {
-        try {
-            byte[] salt = secureRandomBytes();
-            byte[] saltedPassword = saltedPassword(password, salt, iterations);
-            byte[] clientKey = clientKey(saltedPassword);
-            byte[] storedKey = storedKey(clientKey);
-            byte[] serverKey = serverKey(saltedPassword);
-            return new ScramCredential(salt, storedKey, serverKey, iterations);
-        } catch (InvalidKeyException e) {
-            throw new KafkaException("Could not create credential", e);
-        }
-    }
+	public static byte[] secureRandomBytes(SecureRandom random) {
+		return toBytes(secureRandomString(random));
+	}
+
+	public static byte[] toBytes(String str) {
+		return str.getBytes(StandardCharsets.UTF_8);
+	}
+
+	public ScramCredential generateCredential(String password, int iterations) {
+		try {
+			byte[] salt = secureRandomBytes();
+			byte[] saltedPassword = saltedPassword(password, salt, iterations);
+			return generateCredential(salt, saltedPassword, iterations);
+		} catch (InvalidKeyException e) {
+			throw new KafkaException("Could not create credential", e);
+		}
+	}
+
+	public ScramCredential generateCredential(byte[] salt, byte[] saltedPassword, int iterations) {
+		try {
+			byte[] clientKey = clientKey(saltedPassword);
+			byte[] storedKey = storedKey(clientKey);
+			byte[] serverKey = serverKey(saltedPassword);
+			return new ScramCredential(salt, storedKey, serverKey, iterations);
+		} catch (InvalidKeyException e) {
+			throw new KafkaException("Could not create credential", e);
+		}
+	}
 }

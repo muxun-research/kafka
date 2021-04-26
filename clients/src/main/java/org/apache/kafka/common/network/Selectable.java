@@ -19,11 +19,12 @@ package org.apache.kafka.common.network;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 异步，多Channel的网络IO模型
+ * An interface for asynchronous, multi-channel network I/O
  */
 public interface Selectable {
 
@@ -33,52 +34,52 @@ public interface Selectable {
 	int USE_DEFAULT_BUFFER_SIZE = -1;
 
 	/**
-	 * 开始建立一个socket连接到给定的地址，
-	 * @param id                连接的node id
-	 * @param address           连接的网络地址
-	 * @param sendBufferSize    需要发送的buffer大小
-	 * @param receiveBufferSize 需要接受的buffer大小
-	 * @throws IOException 连接失败，抛出IO异常
+	 * Begin establishing a socket connection to the given address identified by the given address
+	 * @param id                The id for this connection
+	 * @param address           The address to connect to
+	 * @param sendBufferSize    The send buffer for the socket
+	 * @param receiveBufferSize The receive buffer for the socket
+	 * @throws IOException If we cannot begin connecting
 	 */
 	void connect(String id, InetSocketAddress address, int sendBufferSize, int receiveBufferSize) throws IOException;
 
 	/**
-	 * 在Selector出现IO阻塞的情况下，唤醒Selector
+	 * Wakeup this selector if it is blocked on I/O
 	 */
 	void wakeup();
 
 	/**
-	 * 关闭Selector
+	 * Close this selector
 	 */
 	void close();
 
 	/**
-	 * 关闭由给定ID标识的连接
+	 * Close the connection identified by the given id
 	 */
 	void close(String id);
 
 	/**
-	 * 将指定请求放入队列，在随后的{@link #poll(long)}方法后调用
-	 * @param send 需要发送的请求
+	 * Queue the given request for sending in the subsequent {@link #poll(long) poll()} calls
+	 * @param send The request to send
 	 */
-	void send(Send send);
+	void send(NetworkSend send);
 
 	/**
-	 * 进行IO操作，读、写，建立连接等
-	 * @param timeout 空闲等待时间
-	 * @throws IOException 出现异常，则抛出IO异常
+	 * Do I/O. Reads, writes, connection establishment, etc.
+	 * @param timeout The amount of time to block if there is nothing to do
+	 * @throws IOException
 	 */
 	void poll(long timeout) throws IOException;
 
 	/**
 	 * The list of sends that completed on the last {@link #poll(long) poll()} call.
 	 */
-	List<Send> completedSends();
+	List<NetworkSend> completedSends();
 
 	/**
-	 * The list of receives that completed on the last {@link #poll(long) poll()} call.
+	 * The collection of receives that completed on the last {@link #poll(long) poll()} call.
 	 */
-	List<NetworkReceive> completedReceives();
+	Collection<NetworkReceive> completedReceives();
 
 	/**
 	 * The connections that finished disconnecting on the last {@link #poll(long) poll()}

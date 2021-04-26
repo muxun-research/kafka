@@ -16,20 +16,19 @@
  */
 package org.apache.kafka.common.security.plain.internals;
 
+import org.apache.kafka.common.errors.SaslAuthenticationException;
+import org.apache.kafka.common.security.JaasContext;
+import org.apache.kafka.common.security.authenticator.TestJaasConfig;
 import org.apache.kafka.common.security.plain.PlainLoginModule;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThrows;
-
-import org.apache.kafka.common.errors.SaslAuthenticationException;
-import org.apache.kafka.common.security.JaasContext;
-import org.apache.kafka.common.security.authenticator.TestJaasConfig;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class PlainSaslServerTest {
 
@@ -40,7 +39,7 @@ public class PlainSaslServerTest {
 
     private PlainSaslServer saslServer;
 
-    @Before
+	@BeforeEach
     public void setUp() {
         TestJaasConfig jaasConfig = new TestJaasConfig();
         Map<String, Object> options = new HashMap<>();
@@ -55,29 +54,29 @@ public class PlainSaslServerTest {
 
     @Test
     public void noAuthorizationIdSpecified() throws Exception {
-        byte[] nextChallenge = saslServer.evaluateResponse(saslMessage("", USER_A, PASSWORD_A));
-        assertEquals(0, nextChallenge.length);
-    }
+		byte[] nextChallenge = saslServer.evaluateResponse(saslMessage("", USER_A, PASSWORD_A));
+		assertEquals(0, nextChallenge.length);
+	}
 
-    @Test
-    public void authorizatonIdEqualsAuthenticationId() throws Exception {
-        byte[] nextChallenge = saslServer.evaluateResponse(saslMessage(USER_A, USER_A, PASSWORD_A));
-        assertEquals(0, nextChallenge.length);
-    }
+	@Test
+	public void authorizatonIdEqualsAuthenticationId() throws Exception {
+		byte[] nextChallenge = saslServer.evaluateResponse(saslMessage(USER_A, USER_A, PASSWORD_A));
+		assertEquals(0, nextChallenge.length);
+	}
 
-    @Test(expected = SaslAuthenticationException.class)
-    public void authorizatonIdNotEqualsAuthenticationId() throws Exception {
-        saslServer.evaluateResponse(saslMessage(USER_B, USER_A, PASSWORD_A));
-    }
+	@Test
+	public void authorizatonIdNotEqualsAuthenticationId() {
+		assertThrows(SaslAuthenticationException.class, () -> saslServer.evaluateResponse(saslMessage(USER_B, USER_A, PASSWORD_A)));
+	}
 
-    @Test
-    public void emptyTokens() {
-        Exception e = assertThrows(SaslAuthenticationException.class, () ->
-            saslServer.evaluateResponse(saslMessage("", "", "")));
-        assertEquals("Authentication failed: username not specified", e.getMessage());
+	@Test
+	public void emptyTokens() {
+		Exception e = assertThrows(SaslAuthenticationException.class, () ->
+				saslServer.evaluateResponse(saslMessage("", "", "")));
+		assertEquals("Authentication failed: username not specified", e.getMessage());
 
-        e = assertThrows(SaslAuthenticationException.class, () ->
-            saslServer.evaluateResponse(saslMessage("", "", "p")));
+		e = assertThrows(SaslAuthenticationException.class, () ->
+				saslServer.evaluateResponse(saslMessage("", "", "p")));
         assertEquals("Authentication failed: username not specified", e.getMessage());
 
         e = assertThrows(SaslAuthenticationException.class, () ->

@@ -93,25 +93,34 @@
     </module>
     <module name="Indentation"/>
     <module name="MethodParamPad"/>
-    <module name="ParenPad"/>
-    <module name="TypecastParenPad"/>
+      <module name="ParenPad"/>
+      <module name="TypecastParenPad"/>
 
-    <!-- locale-sensitive methods should specify locale -->
-    <module name="Regexp">
-      <property name="format" value="\.to(Lower|Upper)Case\(\)"/>
-      <property name="illegalPattern" value="true"/>
-      <property name="ignoreComments" value="true"/>
-    </module>
+      <!-- locale-sensitive methods should specify locale -->
+      <module name="Regexp">
+          <property name="format" value="\.to(Lower|Upper)Case\(\)"/>
+          <property name="illegalPattern" value="true"/>
+          <property name="ignoreComments" value="true"/>
+      </module>
 
-    <!-- code quality -->
-    <module name="MethodLength"/>
-    <module name="ParameterNumber">
-      <!-- default is 8 -->
-      <property name="max" value="13"/>
-    </module>
-    <module name="ClassDataAbstractionCoupling">
-      <!-- default is 7 -->
-      <property name="max" value="25"/>
+      <module name="Regexp">
+          <property name="id" value="dontUseSystemExit"/>
+          <property name="format" value="System\.exit"/>
+          <property name="illegalPattern" value="true"/>
+          <property name="ignoreComments" value="true"/>
+          <property name="message" value="'System.exit': Should not directly call System.exit, but Exit.exit instead."/>
+      </module>
+
+      <!-- code quality -->
+      <module name="MethodLength"/>
+      <module name="ParameterNumber">
+          <!-- default is 8 -->
+          <property name="max" value="13"/>
+      </module>
+      <module name="ClassDataAbstractionCoupling">
+          <!-- default is 7 -->
+          <property name="max" value="25"/>
+          <property name="excludeClassesRegexps" value="AtomicInteger"/>
     </module>
     <module name="BooleanExpressionComplexity">
       <!-- default is 3 -->

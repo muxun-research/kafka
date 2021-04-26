@@ -29,17 +29,17 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 
-public class MockScheduler implements Scheduler, MockTime.MockTimeListener {
-    private static final Logger log = LoggerFactory.getLogger(MockScheduler.class);
+public class MockScheduler implements Scheduler, MockTime.Listener {
+	private static final Logger log = LoggerFactory.getLogger(MockScheduler.class);
 
-    /**
-     * The MockTime object.
-     */
-    private final MockTime time;
+	/**
+	 * The MockTime object.
+	 */
+	private final MockTime time;
 
-    /**
-     * Futures which are waiting for a specified wall-clock time to arrive.
-     */
+	/**
+	 * Futures which are waiting for a specified wall-clock time to arrive.
+	 */
     private final TreeMap<Long, List<KafkaFutureImpl<Long>>> waiters = new TreeMap<>();
 
     public MockScheduler(MockTime time) {
@@ -52,18 +52,18 @@ public class MockScheduler implements Scheduler, MockTime.MockTimeListener {
         return time;
     }
 
-    @Override
-    public synchronized void tick() {
-        long timeMs = time.milliseconds();
-        while (true) {
-            Map.Entry<Long, List<KafkaFutureImpl<Long>>> entry = waiters.firstEntry();
-            if ((entry == null) || (entry.getKey() > timeMs)) {
-                break;
-            }
-            for (KafkaFutureImpl<Long> future : entry.getValue()) {
-                future.complete(timeMs);
-            }
-            waiters.remove(entry.getKey());
+	@Override
+	public synchronized void onTimeUpdated() {
+		long timeMs = time.milliseconds();
+		while (true) {
+			Map.Entry<Long, List<KafkaFutureImpl<Long>>> entry = waiters.firstEntry();
+			if ((entry == null) || (entry.getKey() > timeMs)) {
+				break;
+			}
+			for (KafkaFutureImpl<Long> future : entry.getValue()) {
+				future.complete(timeMs);
+			}
+			waiters.remove(entry.getKey());
         }
     }
 

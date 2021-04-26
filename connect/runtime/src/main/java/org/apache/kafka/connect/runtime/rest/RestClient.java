@@ -19,7 +19,6 @@ package org.apache.kafka.connect.runtime.rest;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import javax.ws.rs.core.HttpHeaders;
 import org.apache.kafka.connect.runtime.WorkerConfig;
 import org.apache.kafka.connect.runtime.rest.entities.ErrorMessage;
 import org.apache.kafka.connect.runtime.rest.errors.ConnectRestException;
@@ -34,6 +33,8 @@ import org.eclipse.jetty.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.crypto.SecretKey;
+import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -49,79 +50,106 @@ public class RestClient {
     /**
      * Sends HTTP request to remote REST server
      *
-     * @param url             HTTP connection will be established with this url.
-     * @param method          HTTP method ("GET", "POST", "PUT", etc.)
-     * @param headers         HTTP headers from REST endpoint
-     * @param requestBodyData Object to serialize as JSON and send in the request body.
-     * @param responseFormat  Expected format of the response to the HTTP request.
-     * @param <T>             The type of the deserialized response to the HTTP request.
-     * @return The deserialized response to the HTTP request, or null if no data is expected.
-     */
-    public static <T> HttpResponse<T> httpRequest(String url, String method, HttpHeaders headers, Object requestBodyData,
-                                                  TypeReference<T> responseFormat, WorkerConfig config) {
-        HttpClient client;
+	 * @param url             HTTP connection will be established with this url.
+	 * @param method          HTTP method ("GET", "POST", "PUT", etc.)
+	 * @param headers         HTTP headers from REST endpoint
+	 * @param requestBodyData Object to serialize as JSON and send in the request body.
+	 * @param responseFormat  Expected format of the response to the HTTP request.
+	 * @param <T>             The type of the deserialized response to the HTTP request.
+	 * @return The deserialized response to the HTTP request, or null if no data is expected.
+	 */
+	public static <T> HttpResponse<T> httpRequest(String url, String method, HttpHeaders headers, Object requestBodyData,
+												  TypeReference<T> responseFormat, WorkerConfig config) {
+		return httpRequest(url, method, headers, requestBodyData, responseFormat, config, null, null);
+	}
 
-        if (url.startsWith("https://")) {
-            client = new HttpClient(SSLUtils.createClientSideSslContextFactory(config));
-        } else {
-            client = new HttpClient();
-        }
+	/**
+	 * Sends HTTP request to remote REST server
+	 * @param url                       HTTP connection will be established with this url.
+	 * @param method                    HTTP method ("GET", "POST", "PUT", etc.)
+	 * @param headers                   HTTP headers from REST endpoint
+	 * @param requestBodyData           Object to serialize as JSON and send in the request body.
+	 * @param responseFormat            Expected format of the response to the HTTP request.
+	 * @param <T>                       The type of the deserialized response to the HTTP request.
+	 * @param sessionKey                The key to sign the request with (intended for internal requests only);
+	 *                                  may be null if the request doesn't need to be signed
+	 * @param requestSignatureAlgorithm The algorithm to sign the request with (intended for internal requests only);
+	 *                                  may be null if the request doesn't need to be signed
+	 * @return The deserialized response to the HTTP request, or null if no data is expected.
+	 */
+	public static <T> HttpResponse<T> httpRequest(String url, String method, HttpHeaders headers, Object requestBodyData,
+												  TypeReference<T> responseFormat, WorkerConfig config,
+												  SecretKey sessionKey, String requestSignatureAlgorithm) {
+		HttpClient client;
 
-        client.setFollowRedirects(false);
+		if (url.startsWith("https://")) {
+			client = new HttpClient(SSLUtils.createClientSideSslContextFactory(config));
+		} else {
+			client = new HttpClient();
+		}
 
-        try {
-            client.start();
-        } catch (Exception e) {
-            log.error("Failed to start RestClient: ", e);
-            throw new ConnectRestException(Response.Status.INTERNAL_SERVER_ERROR, "Failed to start RestClient: " + e.getMessage(), e);
-        }
+		client.setFollowRedirects(false);
 
-        try {
-            String serializedBody = requestBodyData == null ? null : JSON_SERDE.writeValueAsString(requestBodyData);
-            log.trace("Sending {} with input {} to {}", method, serializedBody, url);
+		try {
+			client.start();
+		} catch (Exception e) {
+			log.error("Failed to start RestClient: ", e);
+			throw new ConnectRestException(Response.Status.INTERNAL_SERVER_ERROR, "Failed to start RestClient: " + e.getMessage(), e);
+		}
 
-            Request req = client.newRequest(url);
-            req.method(method);
-            req.accept("application/json");
-            req.agent("kafka-connect");
-            addHeadersToRequest(headers, req);
+		try {
+			String serializedBody = requestBodyData == null ? null : JSON_SERDE.writeValueAsString(requestBodyData);
+			log.trace("Sending {} with input {} to {}", method, serializedBody, url);
 
-            if (serializedBody != null) {
-                req.content(new StringContentProvider(serializedBody, StandardCharsets.UTF_8), "application/json");
-            }
+			Request req = client.newRequest(url);
+			req.method(method);
+			req.accept("application/json");
+			req.agent("kafka-connect");
+			addHeadersToRequest(headers, req);
 
-            ContentResponse res = req.send();
+			if (serializedBody != null) {
+				req.content(new StringContentProvider(serializedBody, StandardCharsets.UTF_8), "application/json");
+				if (sessionKey != null && requestSignatureAlgorithm != null) {
+					InternalRequestSignature.addToRequest(
+							sessionKey,
+							serializedBody.getBytes(StandardCharsets.UTF_8),
+							requestSignatureAlgorithm,
+							req
+					);
+				}
+			}
 
-            int responseCode = res.getStatus();
-            log.debug("Request's response code: {}", responseCode);
-            if (responseCode == HttpStatus.NO_CONTENT_204) {
-                return new HttpResponse<>(responseCode, convertHttpFieldsToMap(res.getHeaders()), null);
-            } else if (responseCode >= 400) {
-                ErrorMessage errorMessage = JSON_SERDE.readValue(res.getContentAsString(), ErrorMessage.class);
-                throw new ConnectRestException(responseCode, errorMessage.errorCode(), errorMessage.message());
-            } else if (responseCode >= 200 && responseCode < 300) {
-                T result = JSON_SERDE.readValue(res.getContentAsString(), responseFormat);
-                return new HttpResponse<>(responseCode, convertHttpFieldsToMap(res.getHeaders()), result);
-            } else {
-                throw new ConnectRestException(Response.Status.INTERNAL_SERVER_ERROR,
-                        Response.Status.INTERNAL_SERVER_ERROR.getStatusCode(),
-                        "Unexpected status code when handling forwarded request: " + responseCode);
-            }
-        } catch (IOException | InterruptedException | TimeoutException | ExecutionException e) {
-            log.error("IO error forwarding REST request: ", e);
-            throw new ConnectRestException(Response.Status.INTERNAL_SERVER_ERROR, "IO Error trying to forward REST request: " + e.getMessage(), e);
-        } finally {
-            if (client != null)
-                try {
-                    client.stop();
-                } catch (Exception e) {
-                    log.error("Failed to stop HTTP client", e);
-                }
-        }
-    }
+			ContentResponse res = req.send();
+
+			int responseCode = res.getStatus();
+			log.debug("Request's response code: {}", responseCode);
+			if (responseCode == HttpStatus.NO_CONTENT_204) {
+				return new HttpResponse<>(responseCode, convertHttpFieldsToMap(res.getHeaders()), null);
+			} else if (responseCode >= 400) {
+				ErrorMessage errorMessage = JSON_SERDE.readValue(res.getContentAsString(), ErrorMessage.class);
+				throw new ConnectRestException(responseCode, errorMessage.errorCode(), errorMessage.message());
+			} else if (responseCode >= 200 && responseCode < 300) {
+				T result = JSON_SERDE.readValue(res.getContentAsString(), responseFormat);
+				return new HttpResponse<>(responseCode, convertHttpFieldsToMap(res.getHeaders()), result);
+			} else {
+				throw new ConnectRestException(Response.Status.INTERNAL_SERVER_ERROR,
+						Response.Status.INTERNAL_SERVER_ERROR.getStatusCode(),
+						"Unexpected status code when handling forwarded request: " + responseCode);
+			}
+		} catch (IOException | InterruptedException | TimeoutException | ExecutionException e) {
+			log.error("IO error forwarding REST request: ", e);
+			throw new ConnectRestException(Response.Status.INTERNAL_SERVER_ERROR, "IO Error trying to forward REST request: " + e.getMessage(), e);
+		} finally {
+			try {
+				client.stop();
+			} catch (Exception e) {
+				log.error("Failed to stop HTTP client", e);
+			}
+		}
+	}
 
 
-    /**
+	/**
      * Extract headers from REST call and add to client request
      * @param headers         Headers from REST endpoint
      * @param req             The client request to modify
@@ -141,9 +169,9 @@ public class RestClient {
      * @return
      */
     private static Map<String, String> convertHttpFieldsToMap(HttpFields httpFields) {
-        Map<String, String> headers = new HashMap<String, String>();
+        Map<String, String> headers = new HashMap<>();
 
-        if (httpFields == null || httpFields.size() == 0)
+		if (httpFields == null || httpFields.size() == 0)
             return headers;
 
         for (HttpField field : httpFields) {

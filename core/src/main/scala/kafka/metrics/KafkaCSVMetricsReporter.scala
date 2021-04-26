@@ -20,21 +20,19 @@
 
 package kafka.metrics
 
-import com.yammer.metrics.Metrics
-import java.io.File
-import java.nio.file.Files
-
 import com.yammer.metrics.reporting.CsvReporter
-import java.util.concurrent.TimeUnit
-
 import kafka.utils.{Logging, VerifiableProperties}
 import org.apache.kafka.common.utils.Utils
+
+import java.io.File
+import java.nio.file.Files
+import java.util.concurrent.TimeUnit
 
 private trait KafkaCSVMetricsReporterMBean extends KafkaMetricsReporterMBean
 
 private class KafkaCSVMetricsReporter extends KafkaMetricsReporter
-                              with KafkaCSVMetricsReporterMBean
-                              with Logging {
+  with KafkaCSVMetricsReporterMBean
+  with Logging {
 
   private var csvDir: File = null
   private var underlying: CsvReporter = null
@@ -52,7 +50,7 @@ private class KafkaCSVMetricsReporter extends KafkaMetricsReporter
         csvDir = new File(props.getString("kafka.csv.metrics.dir", "kafka_metrics"))
         Utils.delete(csvDir)
         Files.createDirectories(csvDir.toPath())
-        underlying = new CsvReporter(Metrics.defaultRegistry(), csvDir)
+        underlying = new CsvReporter(KafkaYammerMetrics.defaultRegistry(), csvDir)
         if (props.getBoolean("kafka.csv.metrics.reporter.enabled", default = false)) {
           initialized = true
           startReporter(metricsConfig.pollingIntervalSecs)
@@ -79,7 +77,7 @@ private class KafkaCSVMetricsReporter extends KafkaMetricsReporter
         underlying.shutdown()
         running = false
         info("Stopped Kafka CSV metrics reporter")
-        underlying = new CsvReporter(Metrics.defaultRegistry(), csvDir)
+        underlying = new CsvReporter(KafkaYammerMetrics.defaultRegistry(), csvDir)
       }
     }
   }

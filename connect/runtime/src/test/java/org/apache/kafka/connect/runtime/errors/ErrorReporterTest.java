@@ -43,6 +43,7 @@ import org.powermock.modules.junit4.PowerMockRunner;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 
 import static java.util.Collections.emptyMap;
@@ -60,6 +61,7 @@ import static org.apache.kafka.connect.runtime.errors.DeadLetterQueueReporter.ER
 import static org.easymock.EasyMock.replay;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(PowerMockRunner.class)
@@ -95,9 +97,9 @@ public class ErrorReporterTest {
         }
     }
 
-    @Test(expected = NullPointerException.class)
+	@Test
     public void initializeDLQWithNullMetrics() {
-        new DeadLetterQueueReporter(producer, config(emptyMap()), TASK_ID, null);
+		assertThrows(NullPointerException.class, () -> new DeadLetterQueueReporter(producer, config(emptyMap()), TASK_ID, null));
     }
 
     @Test
@@ -131,27 +133,56 @@ public class ErrorReporterTest {
     }
 
     @Test
-    public void testReportDLQTwice() {
-        DeadLetterQueueReporter deadLetterQueueReporter = new DeadLetterQueueReporter(
-                producer, config(singletonMap(SinkConnectorConfig.DLQ_TOPIC_NAME_CONFIG, DLQ_TOPIC)), TASK_ID, errorHandlingMetrics);
+	public void testReportDLQTwice() {
+		DeadLetterQueueReporter deadLetterQueueReporter = new DeadLetterQueueReporter(
+				producer, config(singletonMap(SinkConnectorConfig.DLQ_TOPIC_NAME_CONFIG, DLQ_TOPIC)), TASK_ID, errorHandlingMetrics);
 
-        ProcessingContext context = processingContext();
+		ProcessingContext context = processingContext();
 
-        EasyMock.expect(producer.send(EasyMock.anyObject(), EasyMock.anyObject())).andReturn(metadata).times(2);
-        replay(producer);
+		EasyMock.expect(producer.send(EasyMock.anyObject(), EasyMock.anyObject())).andReturn(metadata).times(2);
+		replay(producer);
 
-        deadLetterQueueReporter.report(context);
-        deadLetterQueueReporter.report(context);
+		deadLetterQueueReporter.report(context);
+		deadLetterQueueReporter.report(context);
 
-        PowerMock.verifyAll();
-    }
+		PowerMock.verifyAll();
+	}
 
-    @Test
-    public void testLogOnDisabledLogReporter() {
-        LogReporter logReporter = new LogReporter(TASK_ID, config(emptyMap()), errorHandlingMetrics);
+	@Test
+	public void testDLQReportAndReturnFuture() {
+		DeadLetterQueueReporter deadLetterQueueReporter = new DeadLetterQueueReporter(
+				producer, config(singletonMap(SinkConnectorConfig.DLQ_TOPIC_NAME_CONFIG, DLQ_TOPIC)), TASK_ID, errorHandlingMetrics);
 
-        ProcessingContext context = processingContext();
-        context.error(new RuntimeException());
+		ProcessingContext context = processingContext();
+
+		EasyMock.expect(producer.send(EasyMock.anyObject(), EasyMock.anyObject())).andReturn(metadata);
+		replay(producer);
+
+		deadLetterQueueReporter.report(context);
+
+		PowerMock.verifyAll();
+	}
+
+	@Test
+	public void testCloseDLQ() {
+		DeadLetterQueueReporter deadLetterQueueReporter = new DeadLetterQueueReporter(
+				producer, config(singletonMap(SinkConnectorConfig.DLQ_TOPIC_NAME_CONFIG, DLQ_TOPIC)), TASK_ID, errorHandlingMetrics);
+
+		producer.close();
+		EasyMock.expectLastCall();
+		replay(producer);
+
+		deadLetterQueueReporter.close();
+
+		PowerMock.verifyAll();
+	}
+
+	@Test
+	public void testLogOnDisabledLogReporter() {
+		LogReporter logReporter = new LogReporter(TASK_ID, config(emptyMap()), errorHandlingMetrics);
+
+		ProcessingContext context = processingContext();
+		context.error(new RuntimeException());
 
         // reporting a context without an error should not cause any errors.
         logReporter.report(context);
@@ -187,24 +218,43 @@ public class ErrorReporterTest {
         props.put(ConnectorConfig.ERRORS_LOG_ENABLE_CONFIG, "true");
         props.put(ConnectorConfig.ERRORS_LOG_INCLUDE_MESSAGES_CONFIG, "true");
 
-        LogReporter logReporter = new LogReporter(TASK_ID, config(props), errorHandlingMetrics);
+		LogReporter logReporter = new LogReporter(TASK_ID, config(props), errorHandlingMetrics);
 
-        ProcessingContext context = processingContext();
+		ProcessingContext context = processingContext();
 
-        String msg = logReporter.message(context);
-        assertEquals("Error encountered in task job-0. Executing stage 'KEY_CONVERTER' with class " +
-                "'org.apache.kafka.connect.json.JsonConverter', where consumed record is {topic='test-topic', " +
-                "partition=5, offset=100}.", msg);
-    }
+		String msg = logReporter.message(context);
+		assertEquals("Error encountered in task job-0. Executing stage 'KEY_CONVERTER' with class " +
+				"'org.apache.kafka.connect.json.JsonConverter', where consumed record is {topic='test-topic', " +
+				"partition=5, offset=100}.", msg);
+	}
 
-    @Test
-    public void testSetDLQConfigs() {
-        SinkConnectorConfig configuration = config(singletonMap(SinkConnectorConfig.DLQ_TOPIC_NAME_CONFIG, DLQ_TOPIC));
-        assertEquals(configuration.dlqTopicName(), DLQ_TOPIC);
+	@Test
+	public void testLogReportAndReturnFuture() {
+		Map<String, String> props = new HashMap<>();
+		props.put(ConnectorConfig.ERRORS_LOG_ENABLE_CONFIG, "true");
+		props.put(ConnectorConfig.ERRORS_LOG_INCLUDE_MESSAGES_CONFIG, "true");
 
-        configuration = config(singletonMap(SinkConnectorConfig.DLQ_TOPIC_REPLICATION_FACTOR_CONFIG, "7"));
-        assertEquals(configuration.dlqTopicReplicationFactor(), 7);
-    }
+		LogReporter logReporter = new LogReporter(TASK_ID, config(props), errorHandlingMetrics);
+
+		ProcessingContext context = processingContext();
+
+		String msg = logReporter.message(context);
+		assertEquals("Error encountered in task job-0. Executing stage 'KEY_CONVERTER' with class " +
+				"'org.apache.kafka.connect.json.JsonConverter', where consumed record is {topic='test-topic', " +
+				"partition=5, offset=100}.", msg);
+
+		Future<RecordMetadata> future = logReporter.report(context);
+		assertTrue(future instanceof CompletableFuture);
+	}
+
+	@Test
+	public void testSetDLQConfigs() {
+		SinkConnectorConfig configuration = config(singletonMap(SinkConnectorConfig.DLQ_TOPIC_NAME_CONFIG, DLQ_TOPIC));
+		assertEquals(configuration.dlqTopicName(), DLQ_TOPIC);
+
+		configuration = config(singletonMap(SinkConnectorConfig.DLQ_TOPIC_REPLICATION_FACTOR_CONFIG, "7"));
+		assertEquals(configuration.dlqTopicReplicationFactor(), 7);
+	}
 
     @Test
     public void testDlqHeaderConsumerRecord() {

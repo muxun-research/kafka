@@ -17,70 +17,45 @@
 
 package org.apache.kafka.common.requests;
 
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.message.ElectLeadersResponseData;
+import org.apache.kafka.common.message.ElectLeadersResponseData.ReplicaElectionResult;
+import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
+import org.apache.kafka.common.protocol.Errors;
+
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.message.ElectLeadersResponseData.PartitionResult;
-import org.apache.kafka.common.message.ElectLeadersResponseData.ReplicaElectionResult;
-import org.apache.kafka.common.message.ElectLeadersResponseData;
-import org.apache.kafka.common.protocol.ApiKeys;
-import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.Struct;
 
 public class ElectLeadersResponse extends AbstractResponse {
 
-    private final short version;
-    private final ElectLeadersResponseData data;
+	private final ElectLeadersResponseData data;
 
-    public ElectLeadersResponse(Struct struct) {
-        this(struct, ApiKeys.ELECT_LEADERS.latestVersion());
-    }
+	public ElectLeadersResponse(ElectLeadersResponseData data) {
+		super(ApiKeys.ELECT_LEADERS);
+		this.data = data;
+	}
 
-    public ElectLeadersResponse(Struct struct, short version) {
-        this.version = version;
-        this.data = new ElectLeadersResponseData(struct, version);
-    }
-
-    public ElectLeadersResponse(
-            int throttleTimeMs,
-            short errorCode,
-            List<ReplicaElectionResult> electionResults) {
-        this(throttleTimeMs, errorCode, electionResults, ApiKeys.ELECT_LEADERS.latestVersion());
-    }
-
-    public ElectLeadersResponse(
-            int throttleTimeMs,
-            short errorCode,
-            List<ReplicaElectionResult> electionResults,
-            short version) {
-
-        this.version = version;
-        this.data = new ElectLeadersResponseData();
-
-        data.setThrottleTimeMs(throttleTimeMs);
-
-        if (version >= 1) {
-            data.setErrorCode(errorCode);
-        }
-
+	public ElectLeadersResponse(
+			int throttleTimeMs,
+			short errorCode,
+			List<ReplicaElectionResult> electionResults,
+			short version) {
+		super(ApiKeys.ELECT_LEADERS);
+		this.data = new ElectLeadersResponseData();
+		data.setThrottleTimeMs(throttleTimeMs);
+		if (version >= 1)
+			data.setErrorCode(errorCode);
         data.setReplicaElectionResults(electionResults);
     }
 
-    public ElectLeadersResponseData data() {
-        return data;
-    }
-
-    public short version() {
-        return version;
-    }
-
-    @Override
-    protected Struct toStruct(short version) {
-        return data.toStruct(version);
-    }
+	@Override
+	public ElectLeadersResponseData data() {
+		return data;
+	}
 
     @Override
     public int throttleTimeMs() {
@@ -89,18 +64,18 @@ public class ElectLeadersResponse extends AbstractResponse {
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-        HashMap<Errors, Integer> counts = new HashMap<>();
-        for (ReplicaElectionResult result : data.replicaElectionResults()) {
-            for (PartitionResult partitionResult : result.partitionResult()) {
-                Errors error = Errors.forCode(partitionResult.errorCode());
-                counts.put(error, counts.getOrDefault(error, 0) + 1);
-            }
-        }
-        return counts;
-    }
+		HashMap<Errors, Integer> counts = new HashMap<>();
+		updateErrorCounts(counts, Errors.forCode(data.errorCode()));
+		data.replicaElectionResults().forEach(result ->
+				result.partitionResult().forEach(partitionResult ->
+						updateErrorCounts(counts, Errors.forCode(partitionResult.errorCode()))
+				)
+		);
+		return counts;
+	}
 
     public static ElectLeadersResponse parse(ByteBuffer buffer, short version) {
-        return new ElectLeadersResponse(ApiKeys.ELECT_LEADERS.responseSchema(version).read(buffer), version);
+		return new ElectLeadersResponse(new ElectLeadersResponseData(new ByteBufferAccessor(buffer), version));
     }
 
     @Override

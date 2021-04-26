@@ -17,9 +17,9 @@
 
 package kafka.coordinator.group
 
-import java.util
-
 import kafka.utils.nonthreadsafe
+
+import java.util
 
 case class MemberSummary(memberId: String,
                          groupInstanceId: Option[String],
@@ -50,41 +50,35 @@ private object MemberMetadata {
  *                                 member has sent the join group request
  * 2. Awaiting sync callback: when the group is in the awaiting-sync state, its sync callback
  *                            is kept in metadata until the leader provides the group assignment
- *                            and the group transitions to stable
+ * and the group transitions to stable
  */
 @nonthreadsafe
 private[group] class MemberMetadata(var memberId: String,
-                                    val groupId: String,
                                     val groupInstanceId: Option[String],
                                     val clientId: String,
                                     val clientHost: String,
                                     val rebalanceTimeoutMs: Int,
                                     val sessionTimeoutMs: Int,
                                     val protocolType: String,
-                                    // 支持的协议集合
-                                    var supportedProtocols: List[(String, Array[Byte])]) {
-  /**
-   * 消费者的partition分配结果
-   */
-  var assignment: Array[Byte] = Array.empty[Byte]
-  /**
-   * 加入消费组的回调方法
-   */
-  var awaitingJoinCallback: JoinGroupResult => Unit = null
-  /**
-   * 同步消费组的回调方法
-   */
-  var awaitingSyncCallback: SyncGroupResult => Unit = null
-  /**
-   * 最近一次心跳的时间
-   */
-  var latestHeartbeat: Long = -1
-  var isLeaving: Boolean = false
-  var isNew: Boolean = false
-  val isStaticMember: Boolean = groupInstanceId.isDefined
+                                    var supportedProtocols: List[(String, Array[Byte])],
+                                    var assignment: Array[Byte] = Array.empty[Byte]) {
 
-  def isAwaitingJoin = awaitingJoinCallback != null
-  def isAwaitingSync = awaitingSyncCallback != null
+  var awaitingJoinCallback: JoinGroupResult => Unit = _
+  var awaitingSyncCallback: SyncGroupResult => Unit = _
+  var isNew: Boolean = false
+
+  def isStaticMember: Boolean = groupInstanceId.isDefined
+
+  // This variable is used to track heartbeat completion through the delayed
+  // heartbeat purgatory. When scheduling a new heartbeat expiration, we set
+  // this value to `false`. Upon receiving the heartbeat (or any other event
+  // indicating the liveness of the client), we set it to `true` so that the
+  // delayed heartbeat can be completed.
+  var heartbeatSatisfied: Boolean = false
+
+  def isAwaitingJoin: Boolean = awaitingJoinCallback != null
+
+  def isAwaitingSync: Boolean = awaitingSyncCallback != null
 
   /**
    * Get metadata corresponding to the provided protocol.
@@ -97,19 +91,17 @@ private[group] class MemberMetadata(var memberId: String,
     }
   }
 
-  /**
-   * 是否认为consumer是存活的
-   * @param deadlineMs 截止时间戳
-   * @return
-   */
-  def shouldKeepAlive(deadlineMs: Long): Boolean = {
-    if (isAwaitingJoin)
-    // 在等待加入的情况下，
-    // 如果并非是加入的member，或者上一次进行心跳的时间+新member加入消费组的等待时间>截止进行心跳的时间戳，满足一个条件返回true
-      !isNew || latestHeartbeat + GroupCoordinator.NewMemberJoinTimeoutMs > deadlineMs
-    else awaitingSyncCallback != null ||
-      // 如果有等待同步消费组请求的回调任务，或者上一次进行心跳的时间+会话超时时间>截止进行心跳的时间戳，满足一个条件即返回true
-      latestHeartbeat + sessionTimeoutMs > deadlineMs
+  def hasSatisfiedHeartbeat: Boolean = {
+    if (isNew) {
+      // New members can be expired while awaiting join, so we have to check this first
+      heartbeatSatisfied
+    } else if (isAwaitingJoin || isAwaitingSync) {
+      // Members that are awaiting a rebalance automatically satisfy expected heartbeats
+      true
+    } else {
+      // Otherwise we require the next heartbeat
+      heartbeatSatisfied
+    }
   }
 
   /**
@@ -156,7 +148,7 @@ private[group] class MemberMetadata(var memberId: String,
       s"clientHost=$clientHost, " +
       s"sessionTimeoutMs=$sessionTimeoutMs, " +
       s"rebalanceTimeoutMs=$rebalanceTimeoutMs, " +
-      s"supportedProtocols=${supportedProtocols.map(_._1)}, " +
+      s"supportedProtocols=${supportedProtocols.map(_._1)}" +
       ")"
   }
 }

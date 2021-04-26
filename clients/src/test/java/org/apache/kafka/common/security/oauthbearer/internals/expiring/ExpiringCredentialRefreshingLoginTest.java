@@ -16,13 +16,22 @@
  */
 package org.apache.kafka.common.security.oauthbearer.internals.expiring;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.mockito.Mockito.inOrder;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import org.apache.kafka.common.config.ConfigDef;
+import org.apache.kafka.common.config.SaslConfigs;
+import org.apache.kafka.common.internals.KafkaFutureImpl;
+import org.apache.kafka.common.security.oauthbearer.internals.expiring.ExpiringCredentialRefreshingLogin.LoginContextFactory;
+import org.apache.kafka.common.utils.MockScheduler;
+import org.apache.kafka.common.utils.MockTime;
+import org.apache.kafka.common.utils.Time;
+import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
+import org.mockito.Mockito;
 
+import javax.security.auth.Subject;
+import javax.security.auth.login.AppConfigurationEntry;
+import javax.security.auth.login.Configuration;
+import javax.security.auth.login.LoginContext;
+import javax.security.auth.login.LoginException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -32,32 +41,23 @@ import java.util.Objects;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-import javax.security.auth.Subject;
-import javax.security.auth.login.AppConfigurationEntry;
-import javax.security.auth.login.Configuration;
-import javax.security.auth.login.LoginContext;
-import javax.security.auth.login.LoginException;
-
-import org.apache.kafka.common.config.ConfigDef;
-import org.apache.kafka.common.config.SaslConfigs;
-import org.apache.kafka.common.internals.KafkaFutureImpl;
-import org.apache.kafka.common.security.oauthbearer.internals.expiring.ExpiringCredentialRefreshingLogin.LoginContextFactory;
-import org.apache.kafka.common.utils.MockScheduler;
-import org.apache.kafka.common.utils.MockTime;
-import org.apache.kafka.common.utils.Time;
-import org.junit.Test;
-import org.mockito.InOrder;
-import org.mockito.Mockito;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class ExpiringCredentialRefreshingLoginTest {
-    private static final Configuration EMPTY_WILDCARD_CONFIGURATION;
-    static {
-        EMPTY_WILDCARD_CONFIGURATION = new Configuration() {
-            @Override
-            public AppConfigurationEntry[] getAppConfigurationEntry(String name) {
-                return new AppConfigurationEntry[0]; // match any name
-            }
-        };
+	private static final Configuration EMPTY_WILDCARD_CONFIGURATION;
+
+	static {
+		EMPTY_WILDCARD_CONFIGURATION = new Configuration() {
+			@Override
+			public AppConfigurationEntry[] getAppConfigurationEntry(String name) {
+				return new AppConfigurationEntry[0]; // match any name
+			}
+		};
     }
 
     /*
@@ -368,6 +368,7 @@ public class ExpiringCredentialRefreshingLoginTest {
                         inOrder.verify(mockLoginContext).login();
                     }
                 }
+				testExpiringCredentialRefreshingLogin.close();
             }
         }
     }

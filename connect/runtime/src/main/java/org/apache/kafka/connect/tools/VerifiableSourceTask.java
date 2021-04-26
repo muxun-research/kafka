@@ -18,11 +18,12 @@ package org.apache.kafka.connect.tools;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.kafka.tools.ThroughputThrottler;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
+import org.apache.kafka.tools.ThroughputThrottler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -119,18 +120,18 @@ public class VerifiableSourceTask extends SourceTask {
         return result;
     }
 
-    @Override
-    public void commitRecord(SourceRecord record) throws InterruptedException {
-        Map<String, Object> data = new HashMap<>();
-        data.put("name", name);
-        data.put("task", id);
-        data.put("topic", this.topic);
-        data.put("time_ms", System.currentTimeMillis());
-        data.put("seqno", record.value());
-        data.put("committed", true);
+	@Override
+	public void commitRecord(SourceRecord record, RecordMetadata metadata) throws InterruptedException {
+		Map<String, Object> data = new HashMap<>();
+		data.put("name", name);
+		data.put("task", id);
+		data.put("topic", this.topic);
+		data.put("time_ms", System.currentTimeMillis());
+		data.put("seqno", record.value());
+		data.put("committed", true);
 
-        String dataJson;
-        try {
+		String dataJson;
+		try {
             dataJson = JSON_SERDE.writeValueAsString(data);
         } catch (JsonProcessingException e) {
             dataJson = "Bad data can't be written as json: " + e.getMessage();

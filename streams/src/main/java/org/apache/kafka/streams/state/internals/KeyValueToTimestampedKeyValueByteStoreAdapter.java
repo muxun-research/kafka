@@ -20,6 +20,7 @@ import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateStore;
+import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.state.KeyValueBytesStoreSupplier;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.KeyValueStore;
@@ -77,25 +78,31 @@ public class KeyValueToTimestampedKeyValueByteStoreAdapter implements KeyValueSt
     }
 
     @Override
-    public String name() {
-        return store.name();
-    }
+	public String name() {
+		return store.name();
+	}
 
-    @Override
-    public void init(final ProcessorContext context,
-                     final StateStore root) {
-        store.init(context, root);
-    }
+	@Deprecated
+	@Override
+	public void init(final ProcessorContext context,
+					 final StateStore root) {
+		store.init(context, root);
+	}
 
-    @Override
-    public void flush() {
-        store.flush();
-    }
+	@Override
+	public void init(final StateStoreContext context, final StateStore root) {
+		store.init(context, root);
+	}
 
-    @Override
-    public void close() {
-        store.close();
-    }
+	@Override
+	public void flush() {
+		store.flush();
+	}
+
+	@Override
+	public void close() {
+		store.close();
+	}
 
     @Override
     public boolean persistent() {
@@ -108,24 +115,35 @@ public class KeyValueToTimestampedKeyValueByteStoreAdapter implements KeyValueSt
     }
 
     @Override
-    public byte[] get(final Bytes key) {
-        return convertToTimestampedFormat(store.get(key));
-    }
+	public byte[] get(final Bytes key) {
+		return convertToTimestampedFormat(store.get(key));
+	}
 
-    @Override
-    public KeyValueIterator<Bytes, byte[]> range(final Bytes from,
-                                                 final Bytes to) {
-        return new KeyValueToTimestampedKeyValueIteratorAdapter<>(store.range(from, to));
-    }
+	@Override
+	public KeyValueIterator<Bytes, byte[]> range(final Bytes from,
+												 final Bytes to) {
+		return new KeyValueToTimestampedKeyValueIteratorAdapter<>(store.range(from, to));
+	}
 
-    @Override
-    public KeyValueIterator<Bytes, byte[]> all() {
-        return new KeyValueToTimestampedKeyValueIteratorAdapter<>(store.all());
-    }
+	@Override
+	public KeyValueIterator<Bytes, byte[]> reverseRange(final Bytes from,
+														final Bytes to) {
+		return new KeyValueToTimestampedKeyValueIteratorAdapter<>(store.reverseRange(from, to));
+	}
 
-    @Override
-    public long approximateNumEntries() {
-        return store.approximateNumEntries();
-    }
+	@Override
+	public KeyValueIterator<Bytes, byte[]> all() {
+		return new KeyValueToTimestampedKeyValueIteratorAdapter<>(store.all());
+	}
+
+	@Override
+	public KeyValueIterator<Bytes, byte[]> reverseAll() {
+		return new KeyValueToTimestampedKeyValueIteratorAdapter<>(store.reverseAll());
+	}
+
+	@Override
+	public long approximateNumEntries() {
+		return store.approximateNumEntries();
+	}
 
 }

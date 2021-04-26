@@ -19,54 +19,66 @@ package org.apache.kafka.common.network;
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.GatheringByteChannel;
 
 /**
- * 一个发送buffer数组的备份
+ * A send backed by an array of byte buffers
  */
 public class ByteBufferSend implements Send {
 
-    private final String destination;
-    private final int size;
-    protected final ByteBuffer[] buffers;
-    private int remaining;
-    private boolean pending = false;
+	private final long size;
+	protected final ByteBuffer[] buffers;
+	private long remaining;
+	private boolean pending = false;
 
-    public ByteBufferSend(String destination, ByteBuffer... buffers) {
-        this.destination = destination;
-        this.buffers = buffers;
-		// 计算剩余未发送的字节数
-        for (ByteBuffer buffer : buffers)
-            remaining += buffer.remaining();
-        this.size = remaining;
+	public ByteBufferSend(ByteBuffer... buffers) {
+		this.buffers = buffers;
+		for (ByteBuffer buffer : buffers)
+			remaining += buffer.remaining();
+		this.size = remaining;
+	}
+
+	public ByteBufferSend(ByteBuffer[] buffers, long size) {
+		this.buffers = buffers;
+		this.size = size;
+		this.remaining = size;
+	}
+
+	@Override
+	public boolean completed() {
+		return remaining <= 0 && !pending;
+	}
+
+	@Override
+	public long size() {
+		return this.size;
     }
 
-    @Override
-    public String destination() {
-        return destination;
-    }
+	@Override
+	public long writeTo(TransferableChannel channel) throws IOException {
+		long written = channel.write(buffers);
+		if (written < 0)
+			throw new EOFException("Wrote negative bytes to channel. This shouldn't happen.");
+		remaining -= written;
+		pending = channel.hasPendingWrites();
+		return written;
+	}
 
-    @Override
-    public boolean completed() {
-        return remaining <= 0 && !pending;
-    }
+	public long remaining() {
+		return remaining;
+	}
 
-    @Override
-    public long size() {
-        return this.size;
-    }
+	@Override
+	public String toString() {
+		return "ByteBufferSend(" +
+				", size=" + size +
+				", remaining=" + remaining +
+				", pending=" + pending +
+				')';
+	}
 
-    @Override
-    public long writeTo(GatheringByteChannel channel) throws IOException {
-		// 向channel中写入buffer
-        long written = channel.write(buffers);
-		// 写入的字节数为非负数，视为异常
-        if (written < 0)
-            throw new EOFException("Wrote negative bytes to channel. This shouldn't happen.");
-		// 计算剩余需要写入的字节数
-        remaining -= written;
-
-		pending = TransportLayers.hasPendingWrites(channel);
-        return written;
-    }
+	public static ByteBufferSend sizePrefixed(ByteBuffer buffer) {
+		ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
+		sizeBuffer.putInt(0, buffer.remaining());
+		return new ByteBufferSend(sizeBuffer, buffer);
+	}
 }

@@ -20,18 +20,19 @@ package kafka.utils.json
 import scala.collection.Seq
 
 import com.fasterxml.jackson.databind.{ObjectMapper, JsonMappingException}
-import org.junit.Test
-import org.junit.Assert._
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assertions._
 
 import kafka.utils.Json
 
 class JsonValueTest {
 
-  private val json = """
-    |{
-    |  "boolean": false,
-    |  "int": 1234,
-    |  "long": 3000000000,
+  private val json =
+    """
+      |{
+      |  "boolean": false,
+      |  "int": 1234,
+      |  "long": 3000000000,
     |  "double": 16.244355,
     |  "string": "string",
     |  "number_as_string": "123",

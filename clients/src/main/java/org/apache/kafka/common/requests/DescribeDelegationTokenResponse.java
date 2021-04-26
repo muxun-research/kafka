@@ -20,8 +20,8 @@ import org.apache.kafka.common.message.DescribeDelegationTokenResponseData;
 import org.apache.kafka.common.message.DescribeDelegationTokenResponseData.DescribedDelegationToken;
 import org.apache.kafka.common.message.DescribeDelegationTokenResponseData.DescribedDelegationTokenRenewer;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.Struct;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
 import org.apache.kafka.common.security.token.delegation.DelegationToken;
 import org.apache.kafka.common.security.token.delegation.TokenInformation;
@@ -37,6 +37,7 @@ public class DescribeDelegationTokenResponse extends AbstractResponse {
     private final DescribeDelegationTokenResponseData data;
 
     public DescribeDelegationTokenResponse(int throttleTimeMs, Errors error, List<DelegationToken> tokens) {
+		super(ApiKeys.DESCRIBE_DELEGATION_TOKEN);
         List<DescribedDelegationToken> describedDelegationTokenList = tokens
             .stream()
             .map(dt -> new DescribedDelegationToken()
@@ -53,33 +54,35 @@ public class DescribeDelegationTokenResponse extends AbstractResponse {
                     .collect(Collectors.toList())))
             .collect(Collectors.toList());
 
-        this.data = new DescribeDelegationTokenResponseData()
-            .setThrottleTimeMs(throttleTimeMs)
-            .setErrorCode(error.code())
-            .setTokens(describedDelegationTokenList);
+		this.data = new DescribeDelegationTokenResponseData()
+				.setThrottleTimeMs(throttleTimeMs)
+				.setErrorCode(error.code())
+				.setTokens(describedDelegationTokenList);
+	}
+
+	public DescribeDelegationTokenResponse(int throttleTimeMs, Errors error) {
+		this(throttleTimeMs, error, new ArrayList<>());
+	}
+
+	public DescribeDelegationTokenResponse(DescribeDelegationTokenResponseData data) {
+		super(ApiKeys.DESCRIBE_DELEGATION_TOKEN);
+		this.data = data;
+	}
+
+	public static DescribeDelegationTokenResponse parse(ByteBuffer buffer, short version) {
+		return new DescribeDelegationTokenResponse(new DescribeDelegationTokenResponseData(
+				new ByteBufferAccessor(buffer), version));
+	}
+
+	@Override
+	public Map<Errors, Integer> errorCounts() {
+		return errorCounts(error());
     }
 
-    public DescribeDelegationTokenResponse(int throttleTimeMs, Errors error) {
-        this(throttleTimeMs, error, new ArrayList<>());
-    }
-
-    public DescribeDelegationTokenResponse(Struct struct, short version) {
-        this.data = new DescribeDelegationTokenResponseData(struct, version);
-    }
-
-    public static DescribeDelegationTokenResponse parse(ByteBuffer buffer, short version) {
-        return new DescribeDelegationTokenResponse(ApiKeys.DESCRIBE_DELEGATION_TOKEN.responseSchema(version).read(buffer), version);
-    }
-
-    @Override
-    public Map<Errors, Integer> errorCounts() {
-        return errorCounts(error());
-    }
-
-    @Override
-    protected Struct toStruct(short version) {
-        return data.toStruct(version);
-    }
+	@Override
+	public DescribeDelegationTokenResponseData data() {
+		return data;
+	}
 
     @Override
     public int throttleTimeMs() {

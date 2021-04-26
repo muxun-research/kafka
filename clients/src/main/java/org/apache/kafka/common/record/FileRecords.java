@@ -17,7 +17,7 @@
 package org.apache.kafka.common.record;
 
 import org.apache.kafka.common.KafkaException;
-import org.apache.kafka.common.network.TransportLayer;
+import org.apache.kafka.common.network.TransferableChannel;
 import org.apache.kafka.common.record.FileLogInputStream.FileChannelRecordBatch;
 import org.apache.kafka.common.utils.AbstractIterator;
 import org.apache.kafka.common.utils.Time;
@@ -29,7 +29,6 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.channels.GatheringByteChannel;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.Objects;
@@ -125,29 +124,53 @@ public class FileRecords extends AbstractRecords implements Closeable {
     /**
      * Return a slice of records from this instance, which is a view into this set starting from the given position
      * and with the given size limit.
-     *
-     * If the size is beyond the end of the file, the end will be based on the size of the file at the time of the read.
-     *
-     * If this message set is already sliced, the position will be taken relative to that slicing.
-     *
-     * @param position The start position to begin the read from
-     * @param size The number of bytes after the start position to include
-     * @return A sliced wrapper on this message set limited based on the given position and size
-     */
-    public FileRecords slice(int position, int size) throws IOException {
-        if (position < 0)
-            throw new IllegalArgumentException("Invalid position: " + position + " in read from " + this);
-        if (position > sizeInBytes() - start)
-            throw new IllegalArgumentException("Slice from position " + position + " exceeds end position of " + this);
-        if (size < 0)
-            throw new IllegalArgumentException("Invalid size: " + size + " in read from " + this);
+	 *
+	 * If the size is beyond the end of the file, the end will be based on the size of the file at the time of the read.
+	 *
+	 * If this message set is already sliced, the position will be taken relative to that slicing.
+	 *
+	 * @param position The start position to begin the read from
+	 * @param size The number of bytes after the start position to include
+	 * @return A sliced wrapper on this message set limited based on the given position and size
+	 */
+	public FileRecords slice(int position, int size) throws IOException {
+		int availableBytes = availableBytes(position, size);
+		int startPosition = this.start + position;
+		return new FileRecords(file, channel, startPosition, startPosition + availableBytes, true);
+	}
 
-        int end = this.start + position + size;
-        // handle integer overflow or if end is beyond the end of the file
-        if (end < 0 || end >= start + sizeInBytes())
-            end = start + sizeInBytes();
-        return new FileRecords(file, channel, this.start + position, end, true);
-    }
+	/**
+	 * Return a slice of records from this instance, the difference with {@link FileRecords#slice(int, int)} is
+	 * that the position is not necessarily on an offset boundary.
+	 * <p>
+	 * This method is reserved for cases where offset alignment is not necessary, such as in the replication of raft
+	 * snapshots.
+	 * @param position The start position to begin the read from
+	 * @param size     The number of bytes after the start position to include
+	 * @return A unaligned slice of records on this message set limited based on the given position and size
+	 */
+	public UnalignedFileRecords sliceUnaligned(int position, int size) {
+		int availableBytes = availableBytes(position, size);
+		return new UnalignedFileRecords(channel, this.start + position, availableBytes);
+	}
+
+	private int availableBytes(int position, int size) {
+		// Cache current size in case concurrent write changes it
+		int currentSizeInBytes = sizeInBytes();
+
+		if (position < 0)
+			throw new IllegalArgumentException("Invalid position: " + position + " in read from " + this);
+		if (position > currentSizeInBytes - start)
+			throw new IllegalArgumentException("Slice from position " + position + " exceeds end position of " + this);
+		if (size < 0)
+			throw new IllegalArgumentException("Invalid size: " + size + " in read from " + this);
+
+		int end = this.start + position + size;
+		// Handle integer overflow or if end is beyond the end of the file
+		if (end < 0 || end > start + currentSizeInBytes)
+			end = this.start + currentSizeInBytes;
+		return end - (this.start + position);
+	}
 
     /**
 	 * 追加消息集到文件中
@@ -163,24 +186,31 @@ public class FileRecords extends AbstractRecords implements Closeable {
         int written = records.writeFullyTo(channel);
 		// 累加写入的字节数
         size.getAndAdd(written);
-        return written;
-    }
+		return written;
+	}
 
-    /**
+	/**
 	 * 提交所有写入数据到磁盘上
-     */
-    public void flush() throws IOException {
-        channel.force(true);
-    }
+	 */
+	public void flush() throws IOException {
+		channel.force(true);
+	}
 
-    /**
-     * Close this record set
-     */
-    public void close() throws IOException {
-        flush();
-        trim();
-        channel.close();
-    }
+	/**
+	 * Flush the parent directory of a file to the physical disk, which makes sure the file is accessible after crashing.
+	 */
+	public void flushParentDir() throws IOException {
+		Utils.flushParentDir(file.toPath());
+	}
+
+	/**
+	 * Close this record set
+	 */
+	public void close() throws IOException {
+		flush();
+		trim();
+		channel.close();
+	}
 
     /**
      * Close file handlers used by the FileChannel but don't write to disk. This is used when the disk may have failed
@@ -207,13 +237,13 @@ public class FileRecords extends AbstractRecords implements Closeable {
         truncateTo(sizeInBytes());
     }
 
-    /**
-     * Update the file reference (to be used with caution since this does not reopen the file channel)
-     * @param file The new file to use
-     */
-    public void setFile(File file) {
-        this.file = file;
-    }
+	/**
+	 * Update the parent directory (to be used with caution since this does not reopen the file channel)
+	 * @param parentDir The new parent directory
+	 */
+	public void updateParentDir(File parentDir) {
+		this.file = new File(parentDir, file.getName());
+	}
 
     /**
      * Rename the file that backs this message set
@@ -221,7 +251,7 @@ public class FileRecords extends AbstractRecords implements Closeable {
      */
     public void renameTo(File f) throws IOException {
         try {
-            Utils.atomicMoveWithFallback(file.toPath(), f.toPath());
+			Utils.atomicMoveWithFallback(file.toPath(), f.toPath(), false);
         } finally {
             this.file = f;
         }
@@ -266,26 +296,19 @@ public class FileRecords extends AbstractRecords implements Closeable {
         }
     }
 
-    @Override
-    public long writeTo(GatheringByteChannel destChannel, long offset, int length) throws IOException {
-        long newSize = Math.min(channel.size(), end) - start;
-        int oldSize = sizeInBytes();
-        if (newSize < oldSize)
-            throw new KafkaException(String.format(
-                    "Size of FileRecords %s has been truncated during write: old size %d, new size %d",
-                    file.getAbsolutePath(), oldSize, newSize));
+	@Override
+	public long writeTo(TransferableChannel destChannel, long offset, int length) throws IOException {
+		long newSize = Math.min(channel.size(), end) - start;
+		int oldSize = sizeInBytes();
+		if (newSize < oldSize)
+			throw new KafkaException(String.format(
+					"Size of FileRecords %s has been truncated during write: old size %d, new size %d",
+					file.getAbsolutePath(), oldSize, newSize));
 
-        long position = start + offset;
-        int count = Math.min(length, oldSize);
-        final long bytesTransferred;
-        if (destChannel instanceof TransportLayer) {
-            TransportLayer tl = (TransportLayer) destChannel;
-            bytesTransferred = tl.transferFrom(channel, position, count);
-        } else {
-            bytesTransferred = channel.transferTo(position, count, destChannel);
-        }
-        return bytesTransferred;
-    }
+		long position = start + offset;
+		long count = Math.min(length, oldSize - offset);
+		return destChannel.transferFrom(channel, position, count);
+	}
 
 	/**
 	 * 直接查询最后一个offset的文件位置，如果这个offset≥给定的offset
@@ -373,10 +396,11 @@ public class FileRecords extends AbstractRecords implements Closeable {
 
     @Override
     public String toString() {
-        return "FileRecords(file= " + file +
-                ", start=" + start +
-                ", end=" + end +
-                ")";
+		return "FileRecords(size=" + sizeInBytes() +
+				", file=" + file +
+				", start=" + start +
+				", end=" + end +
+				")";
 	}
 
 	/**

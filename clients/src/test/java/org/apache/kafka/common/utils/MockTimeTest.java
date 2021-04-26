@@ -16,38 +16,35 @@
  */
 package org.apache.kafka.common.utils;
 
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.Timeout;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
+@Timeout(120)
 public class MockTimeTest extends TimeTest {
 
-    @Rule
-    final public Timeout globalTimeout = Timeout.millis(120000);
+	@Test
+	public void testAdvanceClock() {
+		MockTime time = new MockTime(0, 100, 200);
+		assertEquals(100, time.milliseconds());
+		assertEquals(200, time.nanoseconds());
+		time.sleep(1);
+		assertEquals(101, time.milliseconds());
+		assertEquals(1000200, time.nanoseconds());
+	}
 
-    @Test
-    public void testAdvanceClock() {
-        MockTime time = new MockTime(0, 100, 200);
-        assertEquals(100, time.milliseconds());
-        assertEquals(200, time.nanoseconds());
-        time.sleep(1);
-        assertEquals(101, time.milliseconds());
-        assertEquals(1000200, time.nanoseconds());
-    }
+	@Test
+	public void testAutoTickMs() {
+		MockTime time = new MockTime(1, 100, 200);
+		assertEquals(101, time.milliseconds());
+		assertEquals(2000200, time.nanoseconds());
+		assertEquals(103, time.milliseconds());
+		assertEquals(104, time.milliseconds());
+	}
 
-    @Test
-    public void testAutoTickMs() {
-        MockTime time = new MockTime(1, 100, 200);
-        assertEquals(101, time.milliseconds());
-        assertEquals(2000200, time.nanoseconds());
-        assertEquals(103, time.milliseconds());
-        assertEquals(104, time.milliseconds());
-    }
-
-    @Override
-    protected Time createTime() {
-        return new MockTime();
-    }
+	@Override
+	protected Time createTime() {
+		return new MockTime();
+	}
 }

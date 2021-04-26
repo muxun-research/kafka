@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.streams.kstream;
 
+import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.streams.errors.TopologyException;
 
 import java.io.IOException;
@@ -32,25 +33,21 @@ import java.util.Objects;
  * @see KStream#print(Printed)
  */
 public class Printed<K, V> implements NamedOperation<Printed<K, V>> {
-    protected final OutputStream outputStream;
-    protected String label;
-    protected String processorName;
-    protected KeyValueMapper<? super K, ? super V, String> mapper = new KeyValueMapper<K, V, String>() {
-        @Override
-        public String apply(final K key, final V value) {
-            return String.format("%s, %s", key, value);
-        }
-    };
+	protected final OutputStream outputStream;
+	protected String label;
+	protected String processorName;
+	protected KeyValueMapper<? super K, ? super V, String> mapper =
+			(KeyValueMapper<K, V, String>) (key, value) -> String.format("%s, %s", key, value);
 
-    private Printed(final OutputStream outputStream) {
-        this.outputStream = outputStream;
-    }
+	private Printed(final OutputStream outputStream) {
+		this.outputStream = outputStream;
+	}
 
-    /**
-     * Copy constructor.
-     * @param printed   instance of {@link Printed} to copy
-     */
-    protected Printed(final Printed<K, V> printed) {
+	/**
+	 * Copy constructor.
+	 * @param printed instance of {@link Printed} to copy
+	 */
+	protected Printed(final Printed<K, V> printed) {
         this.outputStream = printed.outputStream;
         this.label = printed.label;
         this.mapper = printed.mapper;
@@ -67,10 +64,10 @@ public class Printed<K, V> implements NamedOperation<Printed<K, V>> {
      */
     public static <K, V> Printed<K, V> toFile(final String filePath) {
         Objects.requireNonNull(filePath, "filePath can't be null");
-        if (filePath.trim().isEmpty()) {
-            throw new TopologyException("filePath can't be an empty string");
-        }
-        try {
+        if (Utils.isBlank(filePath)) {
+			throw new TopologyException("filePath can't be an empty string");
+		}
+		try {
             return new Printed<>(Files.newOutputStream(Paths.get(filePath)));
         } catch (final IOException e) {
             throw new TopologyException("Unable to write stream to file at [" + filePath + "] " + e.getMessage());

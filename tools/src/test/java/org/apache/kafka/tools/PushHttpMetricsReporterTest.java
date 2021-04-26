@@ -16,9 +16,24 @@
  */
 package org.apache.kafka.tools;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.io.IOException;
 import java.util.List;
+
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.metrics.Gauge;
@@ -26,15 +41,6 @@ import org.apache.kafka.common.metrics.KafkaMetric;
 import org.apache.kafka.common.metrics.MetricConfig;
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.common.utils.Time;
-import org.easymock.Capture;
-import org.easymock.EasyMock;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.api.easymock.PowerMock;
-import org.powermock.api.easymock.annotation.MockStrict;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
 
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -50,138 +56,135 @@ import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-import static org.powermock.api.easymock.PowerMock.replayAll;
-import static org.powermock.api.easymock.PowerMock.verifyAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(PushHttpMetricsReporter.class)
 public class PushHttpMetricsReporterTest {
 
-    private static final URL URL;
-    static {
-        try {
-            URL = new URL("http://fake:80");
-        } catch (MalformedURLException e) {
-            throw new RuntimeException(e);
-        }
-    }
-    private PushHttpMetricsReporter reporter;
-    private Time time = new MockTime();
-    @MockStrict
-    private ScheduledExecutorService executor;
-    private Capture<Runnable> reportRunnable = EasyMock.newCapture();
-    @MockStrict
-    private HttpURLConnection httpReq;
-    @MockStrict
-    private OutputStream httpOut;
-    private Capture<byte[]> httpPayload = EasyMock.newCapture();
-    @MockStrict
-    private InputStream httpErr;
+	private static final URL URL;
 
-    @Before
-    public void setUp() {
-        reporter = new PushHttpMetricsReporter(time, executor);
-        PowerMock.mockStatic(PushHttpMetricsReporter.class);
-    }
+	static {
+		try {
+			URL = new URL("http://fake:80");
+		} catch (MalformedURLException e) {
+			throw new RuntimeException(e);
+		}
+	}
 
-    @Test
-    public void testConfigureClose() throws Exception {
-        expectConfigure();
-        expectClose();
+	private final Time time = new MockTime();
 
-        replayAll();
+	private final ScheduledExecutorService executor = mock(ScheduledExecutorService.class);
+	private final HttpURLConnection httpReq = mock(HttpURLConnection.class);
+	private final OutputStream httpOut = mock(OutputStream.class);
+	private final InputStream httpErr = mock(InputStream.class);
+	private final ArgumentCaptor<Runnable> reportRunnableCaptor = ArgumentCaptor.forClass(Runnable.class);
+	private final ArgumentCaptor<byte[]> httpPayloadCaptor = ArgumentCaptor.forClass(byte[].class);
 
-        configure();
-        reporter.close();
+	private PushHttpMetricsReporter reporter;
+	private MockedStatic<PushHttpMetricsReporter> mockedStaticReporter;
 
-        verifyAll();
-    }
+	@BeforeEach
+	public void setUp() {
+		reporter = new PushHttpMetricsReporter(time, executor);
+		mockedStaticReporter = Mockito.mockStatic(PushHttpMetricsReporter.class);
+	}
 
-    @Test(expected = ConfigException.class)
-    public void testConfigureBadUrl() throws Exception {
-        Map<String, String> config = new HashMap<>();
-        config.put(PushHttpMetricsReporter.METRICS_URL_CONFIG, "malformed;url");
-        config.put(PushHttpMetricsReporter.METRICS_PERIOD_CONFIG, "5");
-        reporter.configure(config);
-    }
+	@AfterEach
+	public void tearDown() {
+		mockedStaticReporter.close();
+	}
 
-    @Test(expected = ConfigException.class)
-    public void testConfigureMissingPeriod() throws Exception {
-        Map<String, String> config = new HashMap<>();
-        config.put(PushHttpMetricsReporter.METRICS_URL_CONFIG, URL.toString());
-        reporter.configure(config);
-    }
+	@Test
+	public void testConfigureClose() throws Exception {
+		whenClose();
 
-    @Test
-    public void testNoMetrics() throws Exception {
-        expectConfigure();
-        expectRequest(200);
-        expectClose();
+		configure();
+		reporter.close();
 
-        replayAll();
+		verifyConfigure();
+		verifyClose();
+	}
 
-        configure();
-        reportRunnable.getValue().run();
-        JsonNode payload = new ObjectMapper().readTree(httpPayload.getValue());
-        assertTrue(payload.isObject());
+	@Test
+	public void testConfigureBadUrl() {
+		Map<String, String> config = new HashMap<>();
+		config.put(PushHttpMetricsReporter.METRICS_URL_CONFIG, "malformed;url");
+		config.put(PushHttpMetricsReporter.METRICS_PERIOD_CONFIG, "5");
+		assertThrows(ConfigException.class, () -> reporter.configure(config));
+	}
 
-        assertPayloadHasClientInfo(payload);
+	@Test
+	public void testConfigureMissingPeriod() {
+		Map<String, String> config = new HashMap<>();
+		config.put(PushHttpMetricsReporter.METRICS_URL_CONFIG, URL.toString());
+		assertThrows(ConfigException.class, () -> reporter.configure(config));
+	}
 
-        // Should contain an empty list of metrics, i.e. we report updates even if there are no metrics to report to
-        // indicate liveness
-        JsonNode metrics = payload.get("metrics");
-        assertTrue(metrics.isArray());
-        assertEquals(0, metrics.size());
+	@Test
+	public void testNoMetrics() throws Exception {
+		whenRequest(200);
 
-        reporter.close();
+		configure();
+		verifyConfigure();
 
-        verifyAll();
+		reportRunnableCaptor.getValue().run();
+		verifyResponse();
+
+		JsonNode payload = new ObjectMapper().readTree(httpPayloadCaptor.getValue());
+		assertTrue(payload.isObject());
+
+		assertPayloadHasClientInfo(payload);
+
+		// Should contain an empty list of metrics, i.e. we report updates even if there are no metrics to report to
+		// indicate liveness
+		JsonNode metrics = payload.get("metrics");
+		assertTrue(metrics.isArray());
+		assertEquals(0, metrics.size());
+
+		reporter.close();
+		verifyClose();
     }
 
     // For error conditions, we expect them to come with a response body that we can read & log
     @Test
     public void testClientError() throws Exception {
-        expectConfigure();
-        expectRequest(400, true);
-        expectClose();
+		whenRequest(400, true);
 
-        replayAll();
+		configure();
+		verifyConfigure();
 
-        configure();
-        reportRunnable.getValue().run();
+		reportRunnableCaptor.getValue().run();
+		verifyResponse();
 
-        reporter.close();
-
-        verifyAll();
-    }
+		reporter.close();
+		verifyClose();
+	}
 
     @Test
     public void testServerError() throws Exception {
-        expectConfigure();
-        expectRequest(500, true);
-        expectClose();
+		whenRequest(500, true);
 
-        replayAll();
+		configure();
+		verifyConfigure();
 
-        configure();
-        reportRunnable.getValue().run();
+		reportRunnableCaptor.getValue().run();
+		verifyResponse();
 
-        reporter.close();
-
-        verifyAll();
-    }
+		reporter.close();
+		verifyClose();
+	}
 
     @Test
     public void testMetricValues() throws Exception {
-        expectConfigure();
-        expectRequest(200);
-        expectClose();
+		whenRequest(200);
 
-        replayAll();
-
-        configure();
+		configure();
+		verifyConfigure();
         KafkaMetric metric1 = new KafkaMetric(
                 new Object(),
                 new MetricName("name1", "group1", "desc1", Collections.singletonMap("key1", "value1")),
@@ -213,28 +216,30 @@ public class PushHttpMetricsReporterTest {
         KafkaMetric metric4 = new KafkaMetric(
             new Object(),
             new MetricName("name4", "group4", "desc4", Collections.singletonMap("key4", "value4")),
-            new ImmutableValue<>("value4"),
-            null,
-            time
-        );
+				new ImmutableValue<>("value4"),
+				null,
+				time
+		);
 
-        reporter.init(Arrays.asList(metric1, metric2, metric4));
-        reporter.metricChange(newMetric1); // added in init, modified
-        reporter.metricChange(metric3); // added by change
-        reporter.metricRemoval(metric2); // added in init, deleted by removal
+		reporter.init(Arrays.asList(metric1, metric2, metric4));
+		reporter.metricChange(newMetric1); // added in init, modified
+		reporter.metricChange(metric3); // added by change
+		reporter.metricRemoval(metric2); // added in init, deleted by removal
 
-        reportRunnable.getValue().run();
-        JsonNode payload = new ObjectMapper().readTree(httpPayload.getValue());
-        assertTrue(payload.isObject());
-        assertPayloadHasClientInfo(payload);
+		reportRunnableCaptor.getValue().run();
+		verifyResponse();
 
-        // We should be left with the modified version of metric1 and metric3
-        JsonNode metrics = payload.get("metrics");
-        assertTrue(metrics.isArray());
-        assertEquals(3, metrics.size());
-        List<JsonNode> metricsList = Arrays.asList(metrics.get(0), metrics.get(1), metrics.get(2));
-        // Sort metrics based on name so that we can verify the value for each metric below
-        metricsList.sort((m1, m2) -> m1.get("name").textValue().compareTo(m2.get("name").textValue()));
+		JsonNode payload = new ObjectMapper().readTree(httpPayloadCaptor.getValue());
+		assertTrue(payload.isObject());
+		assertPayloadHasClientInfo(payload);
+
+		// We should be left with the modified version of metric1 and metric3
+		JsonNode metrics = payload.get("metrics");
+		assertTrue(metrics.isArray());
+		assertEquals(3, metrics.size());
+		List<JsonNode> metricsList = Arrays.asList(metrics.get(0), metrics.get(1), metrics.get(2));
+		// Sort metrics based on name so that we can verify the value for each metric below
+		metricsList.sort((m1, m2) -> m1.get("name").textValue().compareTo(m2.get("name").textValue()));
 
         JsonNode m1 = metricsList.get(0);
         assertEquals("name1", m1.get("name").textValue());
@@ -263,90 +268,82 @@ public class PushHttpMetricsReporterTest {
         assertEquals("value4", m4Tags.get("key4").textValue());
         assertEquals("value4", m4.get("value").textValue());
 
-        reporter.close();
+		reporter.close();
+		verifyClose();
+	}
 
-        verifyAll();
-    }
+	private void configure() {
+		Map<String, String> config = new HashMap<>();
+		config.put(PushHttpMetricsReporter.METRICS_URL_CONFIG, URL.toString());
+		config.put(PushHttpMetricsReporter.METRICS_PERIOD_CONFIG, "5");
+		reporter.configure(config);
+	}
 
-    private void expectConfigure() {
-        EasyMock.expect(
-                executor.scheduleAtFixedRate(EasyMock.capture(reportRunnable), EasyMock.eq(5L), EasyMock.eq(5L), EasyMock.eq(TimeUnit.SECONDS))
-        ).andReturn(null); // return value not expected to be used
-    }
+	private void whenRequest(int returnStatus) throws Exception {
+		whenRequest(returnStatus, false);
+	}
 
-    private void configure() {
-        Map<String, String> config = new HashMap<>();
-        config.put(PushHttpMetricsReporter.METRICS_URL_CONFIG, URL.toString());
-        config.put(PushHttpMetricsReporter.METRICS_PERIOD_CONFIG, "5");
-        reporter.configure(config);
-    }
+	// Expect that a request is made with the given response code
+	private void whenRequest(int returnStatus, boolean readResponse) throws Exception {
+		when(PushHttpMetricsReporter.newHttpConnection(URL)).thenReturn(httpReq);
+		when(httpReq.getOutputStream()).thenReturn(httpOut);
+		when(httpReq.getResponseCode()).thenReturn(returnStatus);
+		if (readResponse)
+			whenReadResponse();
+	}
 
-    private void expectRequest(int returnStatus) throws Exception {
-        expectRequest(returnStatus, false);
-    }
+	private void assertPayloadHasClientInfo(JsonNode payload) throws UnknownHostException {
+		// Should contain client info...
+		JsonNode client = payload.get("client");
+		assertTrue(client.isObject());
+		assertEquals(InetAddress.getLocalHost().getCanonicalHostName(), client.get("host").textValue());
+		assertEquals("", client.get("client_id").textValue());
+		assertEquals(time.milliseconds(), client.get("time").longValue());
+	}
 
-    // Expect that a request is made with the given response code
-    private void expectRequest(int returnStatus, boolean readResponse) throws Exception {
-        EasyMock.expect(PushHttpMetricsReporter.newHttpConnection(URL)).andReturn(httpReq);
-        httpReq.setRequestMethod("POST");
-        EasyMock.expectLastCall();
-        httpReq.setDoInput(true);
-        EasyMock.expectLastCall();
-        httpReq.setRequestProperty("Content-Type", "application/json");
-        EasyMock.expectLastCall();
-        httpReq.setRequestProperty(EasyMock.eq("Content-Length"), EasyMock.anyString());
-        EasyMock.expectLastCall();
-        httpReq.setRequestProperty("Accept", "*/*");
-        EasyMock.expectLastCall();
-        httpReq.setUseCaches(false);
-        EasyMock.expectLastCall();
-        httpReq.setDoOutput(true);
-        EasyMock.expectLastCall();
-        EasyMock.expect(httpReq.getOutputStream()).andReturn(httpOut);
-        httpOut.write(EasyMock.capture(httpPayload));
-        EasyMock.expectLastCall();
-        httpOut.flush();
-        EasyMock.expectLastCall();
-        httpOut.close();
-        EasyMock.expectLastCall();
+	private void whenReadResponse() {
+		when(httpReq.getErrorStream()).thenReturn(httpErr);
+		when(PushHttpMetricsReporter.readResponse(httpErr)).thenReturn("error response message");
+	}
 
-        EasyMock.expect(httpReq.getResponseCode()).andReturn(returnStatus);
+	private void whenClose() throws Exception {
+		when(executor.awaitTermination(anyLong(), any())).thenReturn(true);
+	}
 
-        if (readResponse)
-            expectReadResponse();
+	private void verifyClose() throws InterruptedException {
+		InOrder inOrder = inOrder(executor);
+		inOrder.verify(executor).shutdown();
+		inOrder.verify(executor).awaitTermination(30L, TimeUnit.SECONDS);
+	}
 
-        httpReq.disconnect();
-        EasyMock.expectLastCall();
-    }
+	private void verifyConfigure() {
+		verify(executor).scheduleAtFixedRate(reportRunnableCaptor.capture(),
+				eq(5L), eq(5L), eq(TimeUnit.SECONDS));
+	}
 
-    private void assertPayloadHasClientInfo(JsonNode payload) throws UnknownHostException {
-        // Should contain client info...
-        JsonNode client = payload.get("client");
-        assertTrue(client.isObject());
-        assertEquals(InetAddress.getLocalHost().getCanonicalHostName(), client.get("host").textValue());
-        assertEquals("", client.get("client_id").textValue());
-        assertEquals(time.milliseconds(), client.get("time").longValue());
-    }
+	private void verifyResponse() throws IOException {
+		verify(httpReq).setRequestMethod("POST");
+		verify(httpReq).setDoInput(true);
+		verify(httpReq).setRequestProperty("Content-Type", "application/json");
+		verify(httpReq).setRequestProperty(eq("Content-Length"), anyString());
+		verify(httpReq).setRequestProperty("Accept", "*/*");
+		verify(httpReq).setUseCaches(false);
+		verify(httpReq).setDoOutput(true);
+		verify(httpReq).disconnect();
 
-    private void expectReadResponse() throws Exception {
-        EasyMock.expect(httpReq.getErrorStream()).andReturn(httpErr);
-        EasyMock.expect(PushHttpMetricsReporter.readResponse(httpErr)).andReturn("error response message");
-        EasyMock.expectLastCall();
-    }
+		verify(httpOut).write(httpPayloadCaptor.capture());
+		verify(httpOut).flush();
+		verify(httpOut).close();
+	}
 
-    private void expectClose() throws Exception {
-        executor.shutdown();
-        EasyMock.expect(executor.awaitTermination(EasyMock.anyLong(), EasyMock.anyObject(TimeUnit.class))).andReturn(true);
-    }
+	static class ImmutableValue<T> implements Gauge<T> {
+		private final T value;
 
-    static class ImmutableValue<T> implements Gauge<T> {
-        private final T value;
+		public ImmutableValue(T value) {
+			this.value = value;
+		}
 
-        public ImmutableValue(T value) {
-            this.value = value;
-        }
-
-        @Override
+		@Override
         public T value(MetricConfig config, long now) {
             return value;
         }

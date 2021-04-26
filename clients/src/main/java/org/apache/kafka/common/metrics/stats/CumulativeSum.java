@@ -37,14 +37,18 @@ public class CumulativeSum implements MeasurableStat {
         total = value;
     }
 
-    @Override
-    public void record(MetricConfig config, double value, long now) {
-        total += value;
-    }
+	@Override
+	public void record(MetricConfig config, double value, long now) {
+		total += value;
+	}
 
-    @Override
-    public double measure(MetricConfig config, long now) {
-        return total;
-    }
+	@Override
+	public double measure(MetricConfig config, long now) {
+		return total;
+	}
 
+	@Override
+	public String toString() {
+		return "CumulativeSum(total=" + total + ")";
+	}
 }

@@ -29,6 +29,7 @@ import org.slf4j.Logger;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Manages the metadata for KafkaAdminClient.
@@ -90,37 +91,33 @@ public class AdminMetadataManager {
         }
 
         @Override
-        public boolean isUpdateDue(long now) {
-            return false;
-        }
+		public boolean isUpdateDue(long now) {
+			return false;
+		}
 
-        @Override
-        public long maybeUpdate(long now) {
-            return Long.MAX_VALUE;
-        }
+		@Override
+		public long maybeUpdate(long now) {
+			return Long.MAX_VALUE;
+		}
 
-        @Override
-        public void handleDisconnection(String destination) {
-            // Do nothing
-        }
+		@Override
+		public void handleServerDisconnect(long now, String destinationId, Optional<AuthenticationException> maybeFatalException) {
+			maybeFatalException.ifPresent(AdminMetadataManager.this::updateFailed);
+			AdminMetadataManager.this.requestUpdate();
+		}
 
-        @Override
-        public void handleFatalException(KafkaException e) {
-            updateFailed(e);
-        }
+		@Override
+		public void handleFailedRequest(long now, Optional<KafkaException> maybeFatalException) {
+			// Do nothing
+		}
 
-        @Override
-        public void handleCompletedMetadataResponse(RequestHeader requestHeader, long now, MetadataResponse metadataResponse) {
-            // Do nothing
-        }
+		@Override
+		public void handleSuccessfulResponse(RequestHeader requestHeader, long now, MetadataResponse metadataResponse) {
+			// Do nothing
+		}
 
-        @Override
-        public void requestUpdate() {
-            AdminMetadataManager.this.requestUpdate();
-        }
-
-        @Override
-        public void close() {
+		@Override
+		public void close() {
         }
     }
 

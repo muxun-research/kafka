@@ -25,10 +25,12 @@ import java.util.Objects;
  * The schema for a compound record definition
  */
 public class Schema extends Type {
+    private final static Object[] NO_VALUES = new Object[0];
 
     private final BoundField[] fields;
     private final Map<String, BoundField> fieldsByName;
-    private final boolean tolerateMissingFieldsWithDefaults;
+	private final boolean tolerateMissingFieldsWithDefaults;
+	private final Struct cachedStruct;
 
     /**
      * Construct the schema with a given list of its field values
@@ -52,17 +54,20 @@ public class Schema extends Type {
      * @throws SchemaException If the given list have duplicate fields
      */
     public Schema(boolean tolerateMissingFieldsWithDefaults, Field... fs) {
-        this.fields = new BoundField[fs.length];
-        this.fieldsByName = new HashMap<>();
-        this.tolerateMissingFieldsWithDefaults = tolerateMissingFieldsWithDefaults;
-        for (int i = 0; i < this.fields.length; i++) {
-            Field def = fs[i];
-            if (fieldsByName.containsKey(def.name))
-                throw new SchemaException("Schema contains a duplicate field: " + def.name);
-            this.fields[i] = new BoundField(def, this, i);
-            this.fieldsByName.put(def.name, this.fields[i]);
-        }
-    }
+		this.fields = new BoundField[fs.length];
+		this.fieldsByName = new HashMap<>();
+		this.tolerateMissingFieldsWithDefaults = tolerateMissingFieldsWithDefaults;
+		for (int i = 0; i < this.fields.length; i++) {
+			Field def = fs[i];
+			if (fieldsByName.containsKey(def.name))
+				throw new SchemaException("Schema contains a duplicate field: " + def.name);
+			this.fields[i] = new BoundField(def, this, i);
+			this.fieldsByName.put(def.name, this.fields[i]);
+		}
+		//6 schemas have no fields at the time of this writing (3 versions each of list_groups and api_versions)
+		//for such schemas there's no point in even creating a unique Struct object when deserializing.
+		this.cachedStruct = this.fields.length > 0 ? null : new Struct(this, NO_VALUES);
+	}
 
     /**
      * Write a struct to the buffer
@@ -90,16 +95,19 @@ public class Schema extends Type {
      */
     @Override
     public Struct read(ByteBuffer buffer) {
-        Object[] objects = new Object[fields.length];
-        for (int i = 0; i < fields.length; i++) {
-            try {
-                if (tolerateMissingFieldsWithDefaults) {
-                    if (buffer.hasRemaining()) {
-                        objects[i] = fields[i].def.type.read(buffer);
-                    } else if (fields[i].def.hasDefaultValue) {
-                        objects[i] = fields[i].def.defaultValue;
-                    } else {
-                        throw new SchemaException("Missing value for field '" + fields[i].def.name +
+		if (cachedStruct != null) {
+			return cachedStruct;
+		}
+		Object[] objects = new Object[fields.length];
+		for (int i = 0; i < fields.length; i++) {
+			try {
+				if (tolerateMissingFieldsWithDefaults) {
+					if (buffer.hasRemaining()) {
+						objects[i] = fields[i].def.type.read(buffer);
+					} else if (fields[i].def.hasDefaultValue) {
+						objects[i] = fields[i].def.defaultValue;
+					} else {
+						throw new SchemaException("Missing value for field '" + fields[i].def.name +
                                 "' which has no default value.");
                     }
                 } else {
@@ -140,8 +148,8 @@ public class Schema extends Type {
 
     /**
      * Get a field by its slot in the record array
-     * 
-     * @param slot The slot at which this field sits
+	 *
+	 * @param slot The slot at which this field sits
      * @return The field
      */
     public BoundField get(int slot) {
@@ -150,8 +158,8 @@ public class Schema extends Type {
 
     /**
      * Get a field by its name
-     * 
-     * @param name The name of the field
+	 *
+	 * @param name The name of the field
      * @return The field
      */
     public BoundField get(String name) {
@@ -204,18 +212,17 @@ public class Schema extends Type {
     }
 
     private static void handleNode(Type node, Visitor visitor) {
-        if (node instanceof Schema) {
-            Schema schema = (Schema) node;
-            visitor.visit(schema);
-            for (BoundField f : schema.fields())
-                handleNode(f.def.type, visitor);
-        } else if (node instanceof ArrayOf) {
-            ArrayOf array = (ArrayOf) node;
-            visitor.visit(array);
-            handleNode(array.type(), visitor);
-        } else {
-            visitor.visit(node);
-        }
+		if (node instanceof Schema) {
+			Schema schema = (Schema) node;
+			visitor.visit(schema);
+			for (BoundField f : schema.fields())
+				handleNode(f.def.type, visitor);
+		} else if (node.isArray()) {
+			visitor.visit(node);
+			handleNode(node.arrayElementType().get(), visitor);
+		} else {
+			visitor.visit(node);
+		}
     }
 
     /**
@@ -223,7 +230,6 @@ public class Schema extends Type {
      */
     public static abstract class Visitor {
         public void visit(Schema schema) {}
-        public void visit(ArrayOf array) {}
         public void visit(Type field) {}
     }
 }

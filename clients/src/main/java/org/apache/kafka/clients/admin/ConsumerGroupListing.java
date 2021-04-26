@@ -17,43 +17,97 @@
 
 package org.apache.kafka.clients.admin;
 
+import org.apache.kafka.common.ConsumerGroupState;
+
+import java.util.Objects;
+import java.util.Optional;
+
 /**
  * A listing of a consumer group in the cluster.
  */
 public class ConsumerGroupListing {
-    private final String groupId;
-    private final boolean isSimpleConsumerGroup;
+	private final String groupId;
+	private final boolean isSimpleConsumerGroup;
+	private final Optional<ConsumerGroupState> state;
 
-    /**
-     * Create an instance with the specified parameters.
-     *
-     * @param groupId Group Id
-     * @param isSimpleConsumerGroup If consumer group is simple or not.
-     */
-    public ConsumerGroupListing(String groupId, boolean isSimpleConsumerGroup) {
-        this.groupId = groupId;
-        this.isSimpleConsumerGroup = isSimpleConsumerGroup;
-    }
+	/**
+	 * Create an instance with the specified parameters.
+	 * @param groupId               Group Id
+	 * @param isSimpleConsumerGroup If consumer group is simple or not.
+	 */
+	public ConsumerGroupListing(String groupId, boolean isSimpleConsumerGroup) {
+		this(groupId, isSimpleConsumerGroup, Optional.empty());
+	}
 
-    /**
-     * Consumer Group Id
-     */
-    public String groupId() {
-        return groupId;
-    }
+	/**
+	 * Create an instance with the specified parameters.
+	 * @param groupId               Group Id
+	 * @param isSimpleConsumerGroup If consumer group is simple or not.
+	 * @param state                 The state of the consumer group
+	 */
+	public ConsumerGroupListing(String groupId, boolean isSimpleConsumerGroup, Optional<ConsumerGroupState> state) {
+		this.groupId = groupId;
+		this.isSimpleConsumerGroup = isSimpleConsumerGroup;
+		this.state = Objects.requireNonNull(state);
+	}
 
-    /**
-     * If Consumer Group is simple or not.
-     */
-    public boolean isSimpleConsumerGroup() {
-        return isSimpleConsumerGroup;
-    }
+	/**
+	 * Consumer Group Id
+	 */
+	public String groupId() {
+		return groupId;
+	}
 
-    @Override
-    public String toString() {
-        return "(" +
-            "groupId='" + groupId + '\'' +
-            ", isSimpleConsumerGroup=" + isSimpleConsumerGroup +
-            ')';
-    }
+	/**
+	 * If Consumer Group is simple or not.
+	 */
+	public boolean isSimpleConsumerGroup() {
+		return isSimpleConsumerGroup;
+	}
+
+	/**
+	 * Consumer Group state
+	 */
+	public Optional<ConsumerGroupState> state() {
+		return state;
+	}
+
+	@Override
+	public String toString() {
+		return "(" +
+				"groupId='" + groupId + '\'' +
+				", isSimpleConsumerGroup=" + isSimpleConsumerGroup +
+				", state=" + state +
+				')';
+	}
+
+	@Override
+	public int hashCode() {
+		return Objects.hash(groupId, isSimpleConsumerGroup, state);
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		if (this == obj)
+			return true;
+		if (obj == null)
+			return false;
+		if (getClass() != obj.getClass())
+			return false;
+		ConsumerGroupListing other = (ConsumerGroupListing) obj;
+		if (groupId == null) {
+			if (other.groupId != null)
+				return false;
+		} else if (!groupId.equals(other.groupId))
+			return false;
+		if (isSimpleConsumerGroup != other.isSimpleConsumerGroup)
+			return false;
+		if (state == null) {
+			if (other.state != null)
+				return false;
+		} else if (!state.equals(other.state))
+			return false;
+		return true;
+	}
+
 }

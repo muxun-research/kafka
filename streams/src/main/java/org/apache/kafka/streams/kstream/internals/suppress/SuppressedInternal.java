@@ -52,32 +52,33 @@ public class SuppressedInternal<K> implements Suppressed<K>, NamedSuppressed<K> 
                               final boolean safeToDropTombstones) {
         this.name = name;
         this.timeToWaitForMoreEvents = suppressionTime == null ? DEFAULT_SUPPRESSION_TIME : suppressionTime;
-        this.timeDefinition = timeDefinition == null ? TimeDefinitions.RecordTimeDefintion.instance() : timeDefinition;
-        this.bufferConfig = bufferConfig == null ? DEFAULT_BUFFER_CONFIG : (BufferConfigInternal) bufferConfig;
+		this.timeDefinition = timeDefinition == null ? TimeDefinitions.RecordTimeDefinition.instance() : timeDefinition;
+		this.bufferConfig = bufferConfig == null ? DEFAULT_BUFFER_CONFIG : (BufferConfigInternal) bufferConfig;
         this.safeToDropTombstones = safeToDropTombstones;
     }
 
-    @Override
-    public Suppressed<K> withName(final String name) {
-        return new SuppressedInternal<>(name, timeToWaitForMoreEvents, bufferConfig, timeDefinition, safeToDropTombstones);
-    }
+	@Override
+	public Suppressed<K> withName(final String name) {
+		return new SuppressedInternal<>(name, timeToWaitForMoreEvents, bufferConfig, timeDefinition, safeToDropTombstones);
+	}
 
-    @Override
-    public String name() {
-        return name;
-    }
+	@Override
+	public String name() {
+		return name;
+	}
 
-    BufferConfigInternal bufferConfig() {
-        return bufferConfig;
-    }
+	@SuppressWarnings("unchecked")
+	public <BC extends Suppressed.BufferConfig<BC>> BufferConfigInternal<BC> bufferConfig() {
+		return bufferConfig;
+	}
 
-    TimeDefinition<K> timeDefinition() {
-        return timeDefinition;
-    }
+	TimeDefinition<K> timeDefinition() {
+		return timeDefinition;
+	}
 
-    Duration timeToWaitForMoreEvents() {
-        return timeToWaitForMoreEvents == null ? Duration.ZERO : timeToWaitForMoreEvents;
-    }
+	Duration timeToWaitForMoreEvents() {
+		return timeToWaitForMoreEvents == null ? Duration.ZERO : timeToWaitForMoreEvents;
+	}
 
     boolean safeToDropTombstones() {
         return safeToDropTombstones;

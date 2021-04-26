@@ -16,17 +16,20 @@
  */
 package org.apache.kafka.streams.integration;
 
+import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.integration.utils.EmbeddedKafkaCluster;
 import org.apache.kafka.streams.integration.utils.IntegrationTestUtils;
 import org.apache.kafka.streams.tests.SmokeTestClient;
 import org.apache.kafka.streams.tests.SmokeTestDriver;
 import org.apache.kafka.test.IntegrationTest;
+import org.junit.AfterClass;
 import org.junit.Assert;
-import org.junit.ClassRule;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Map;
@@ -38,18 +41,27 @@ import static org.apache.kafka.streams.tests.SmokeTestDriver.verify;
 
 @Category(IntegrationTest.class)
 public class SmokeTestDriverIntegrationTest {
-    @ClassRule
-    public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(3);
+	public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(3);
+
+	@BeforeClass
+	public static void startCluster() throws IOException {
+		CLUSTER.start();
+	}
+
+	@AfterClass
+	public static void closeCluster() {
+		CLUSTER.stop();
+	}
 
 
-    private static class Driver extends Thread {
-        private String bootstrapServers;
-        private int numKeys;
-        private int maxRecordsPerKey;
-        private Exception exception = null;
-        private SmokeTestDriver.VerificationResult result;
+	private static class Driver extends Thread {
+		private String bootstrapServers;
+		private int numKeys;
+		private int maxRecordsPerKey;
+		private Exception exception = null;
+		private SmokeTestDriver.VerificationResult result;
 
-        private Driver(final String bootstrapServers, final int numKeys, final int maxRecordsPerKey) {
+		private Driver(final String bootstrapServers, final int numKeys, final int maxRecordsPerKey) {
             this.bootstrapServers = bootstrapServers;
             this.numKeys = numKeys;
             this.maxRecordsPerKey = maxRecordsPerKey;
@@ -79,15 +91,21 @@ public class SmokeTestDriverIntegrationTest {
 
     @Test
     public void shouldWorkWithRebalance() throws InterruptedException {
-        int numClientsCreated = 0;
-        final ArrayList<SmokeTestClient> clients = new ArrayList<>();
+		Exit.setExitProcedure((statusCode, message) -> {
+			throw new AssertionError("Test called exit(). code:" + statusCode + " message:" + message);
+		});
+		Exit.setHaltProcedure((statusCode, message) -> {
+			throw new AssertionError("Test called halt(). code:" + statusCode + " message:" + message);
+		});
+		int numClientsCreated = 0;
+		final ArrayList<SmokeTestClient> clients = new ArrayList<>();
 
-        IntegrationTestUtils.cleanStateBeforeTest(CLUSTER, SmokeTestDriver.topics());
+		IntegrationTestUtils.cleanStateBeforeTest(CLUSTER, SmokeTestDriver.topics());
 
-        final String bootstrapServers = CLUSTER.bootstrapServers();
-        final Driver driver = new Driver(bootstrapServers, 10, 1000);
-        driver.start();
-        System.out.println("started driver");
+		final String bootstrapServers = CLUSTER.bootstrapServers();
+		final Driver driver = new Driver(bootstrapServers, 10, 1000);
+		driver.start();
+		System.out.println("started driver");
 
 
         final Properties props = new Properties();
@@ -95,38 +113,40 @@ public class SmokeTestDriverIntegrationTest {
 
         // cycle out Streams instances as long as the test is running.
         while (driver.isAlive()) {
-            // take a nap
-            Thread.sleep(1000);
+			// take a nap
+			Thread.sleep(1000);
 
-            // add a new client
-            final SmokeTestClient smokeTestClient = new SmokeTestClient("streams-" + numClientsCreated++);
-            clients.add(smokeTestClient);
-            smokeTestClient.start(props);
+			// add a new client
+			final SmokeTestClient smokeTestClient = new SmokeTestClient("streams-" + numClientsCreated++);
+			clients.add(smokeTestClient);
+			smokeTestClient.start(props);
 
-            while (!clients.get(clients.size() - 1).started()) {
-                Thread.sleep(100);
-            }
+			// let the oldest client die of "natural causes"
+			if (clients.size() >= 3) {
+				final SmokeTestClient client = clients.remove(0);
 
-            // let the oldest client die of "natural causes"
-            if (clients.size() >= 3) {
-                clients.remove(0).closeAsync();
-            }
-        }
-        try {
-            // wait for verification to finish
-            driver.join();
+				client.closeAsync();
+				while (!client.closed()) {
+					Thread.sleep(100);
+				}
+			}
+		}
 
-
-        } finally {
-            // whether or not the assertions failed, tell all the streams instances to stop
-            for (final SmokeTestClient client : clients) {
-                client.closeAsync();
-            }
+		try {
+			// wait for verification to finish
+			driver.join();
+		} finally {
+			// whether or not the assertions failed, tell all the streams instances to stop
+			for (final SmokeTestClient client : clients) {
+				client.closeAsync();
+			}
 
             // then, wait for them to stop
             for (final SmokeTestClient client : clients) {
-                client.close();
-            }
+				while (!client.closed()) {
+					Thread.sleep(100);
+				}
+			}
         }
 
         // check to make sure that it actually succeeded
@@ -136,5 +156,4 @@ public class SmokeTestDriverIntegrationTest {
         }
         Assert.assertTrue(driver.result().result(), driver.result().passed());
     }
-
 }

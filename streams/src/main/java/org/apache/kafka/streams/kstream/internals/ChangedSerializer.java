@@ -21,32 +21,36 @@ import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.streams.errors.StreamsException;
 
 import java.nio.ByteBuffer;
+import java.util.Objects;
 
-public class ChangedSerializer<T> implements Serializer<Change<T>> {
+public class ChangedSerializer<T> implements Serializer<Change<T>>, WrappingNullableSerializer<Change<T>, Void, T> {
 
-    private static final int NEWFLAG_SIZE = 1;
+	private static final int NEWFLAG_SIZE = 1;
 
-    private Serializer<T> inner;
+	private Serializer<T> inner;
 
-    public ChangedSerializer(final Serializer<T> inner) {
-        this.inner = inner;
-    }
+	public ChangedSerializer(final Serializer<T> inner) {
+		this.inner = inner;
+	}
 
-    public Serializer<T> inner() {
-        return inner;
-    }
+	public Serializer<T> inner() {
+		return inner;
+	}
 
-    public void setInner(final Serializer<T> inner) {
-        this.inner = inner;
-    }
+	@Override
+	public void setIfUnset(final Serializer<Void> defaultKeySerializer, final Serializer<T> defaultValueSerializer) {
+		if (inner == null) {
+			inner = Objects.requireNonNull(defaultValueSerializer);
+		}
+	}
 
-    /**
-     * @throws StreamsException if both old and new values of data are null, or if
-     * both values are not null
-     */
-    @Override
-    public byte[] serialize(final String topic, final Headers headers, final Change<T> data) {
-        final byte[] serializedKey;
+	/**
+	 * @throws StreamsException if both old and new values of data are null, or if
+	 *                          both values are not null
+	 */
+	@Override
+	public byte[] serialize(final String topic, final Headers headers, final Change<T> data) {
+		final byte[] serializedKey;
 
         // only one of the old / new values would be not null
         if (data.newValue != null) {

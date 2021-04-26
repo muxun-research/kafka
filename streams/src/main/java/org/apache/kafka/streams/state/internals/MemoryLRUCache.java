@@ -20,6 +20,7 @@ import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateStore;
+import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.KeyValueStore;
 
@@ -68,24 +69,35 @@ public class MemoryLRUCache implements KeyValueStore<Bytes, byte[]> {
         this.listener = listener;
     }
 
-    @Override
-    public String name() {
-        return this.name;
-    }
+	@Override
+	public String name() {
+		return this.name;
+	}
 
-    @Override
-    public void init(final ProcessorContext context, final StateStore root) {
+	@Deprecated
+	@Override
+	public void init(final ProcessorContext context, final StateStore root) {
 
-        // register the store
-        context.register(root, (key, value) -> {
-            restoring = true;
-            put(Bytes.wrap(key), value);
-            restoring = false;
-        });
-    }
+		// register the store
+		context.register(root, (key, value) -> {
+			restoring = true;
+			put(Bytes.wrap(key), value);
+			restoring = false;
+		});
+	}
 
-    @Override
-    public boolean persistent() {
+	@Override
+	public void init(final StateStoreContext context, final StateStore root) {
+		// register the store
+		context.register(root, (key, value) -> {
+			restoring = true;
+			put(Bytes.wrap(key), value);
+			restoring = false;
+		});
+	}
+
+	@Override
+	public boolean persistent() {
         return false;
     }
 
@@ -132,33 +144,49 @@ public class MemoryLRUCache implements KeyValueStore<Bytes, byte[]> {
     public synchronized byte[] delete(final Bytes key) {
         Objects.requireNonNull(key);
         return this.map.remove(key);
-    }
+	}
 
-    /**
-     * @throws UnsupportedOperationException at every invocation
-     */
-    @Override
-    public KeyValueIterator<Bytes, byte[]> range(final Bytes from, final Bytes to) {
-        throw new UnsupportedOperationException("MemoryLRUCache does not support range() function.");
-    }
+	/**
+	 * @throws UnsupportedOperationException at every invocation
+	 */
+	@Override
+	public KeyValueIterator<Bytes, byte[]> range(final Bytes from, final Bytes to) {
+		throw new UnsupportedOperationException("MemoryLRUCache does not support range() function.");
+	}
 
-    /**
-     * @throws UnsupportedOperationException at every invocation
-     */
-    @Override
-    public KeyValueIterator<Bytes, byte[]> all() {
-        throw new UnsupportedOperationException("MemoryLRUCache does not support all() function.");
-    }
+	/**
+	 * @throws UnsupportedOperationException at every invocation
+	 */
+	@Override
+	public KeyValueIterator<Bytes, byte[]> reverseRange(final Bytes from, final Bytes to) {
+		throw new UnsupportedOperationException("MemoryLRUCache does not support reverseRange() function.");
+	}
 
-    @Override
-    public long approximateNumEntries() {
-        return this.map.size();
-    }
+	/**
+	 * @throws UnsupportedOperationException at every invocation
+	 */
+	@Override
+	public KeyValueIterator<Bytes, byte[]> all() {
+		throw new UnsupportedOperationException("MemoryLRUCache does not support all() function.");
+	}
 
-    @Override
-    public void flush() {
-        // do-nothing since it is in-memory
-    }
+	/**
+	 * @throws UnsupportedOperationException at every invocation
+	 */
+	@Override
+	public KeyValueIterator<Bytes, byte[]> reverseAll() {
+		throw new UnsupportedOperationException("MemoryLRUCache does not support reverseAll() function.");
+	}
+
+	@Override
+	public long approximateNumEntries() {
+		return this.map.size();
+	}
+
+	@Override
+	public void flush() {
+		// do-nothing since it is in-memory
+	}
 
     @Override
     public void close() {

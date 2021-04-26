@@ -18,10 +18,14 @@ package org.apache.kafka.connect.tools;
 
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.transforms.Cast;
+import org.apache.kafka.connect.transforms.DropHeaders;
 import org.apache.kafka.connect.transforms.ExtractField;
+import org.apache.kafka.connect.transforms.Filter;
 import org.apache.kafka.connect.transforms.Flatten;
+import org.apache.kafka.connect.transforms.HeaderFrom;
 import org.apache.kafka.connect.transforms.HoistField;
 import org.apache.kafka.connect.transforms.InsertField;
+import org.apache.kafka.connect.transforms.InsertHeader;
 import org.apache.kafka.connect.transforms.MaskField;
 import org.apache.kafka.connect.transforms.RegexRouter;
 import org.apache.kafka.connect.transforms.ReplaceField;
@@ -50,18 +54,22 @@ public class TransformationDoc {
 
     private static final List<DocInfo> TRANSFORMATIONS = Arrays.asList(
             new DocInfo(InsertField.class.getName(), InsertField.OVERVIEW_DOC, InsertField.CONFIG_DEF),
-            new DocInfo(ReplaceField.class.getName(), ReplaceField.OVERVIEW_DOC, ReplaceField.CONFIG_DEF),
-            new DocInfo(MaskField.class.getName(), MaskField.OVERVIEW_DOC, MaskField.CONFIG_DEF),
-            new DocInfo(ValueToKey.class.getName(), ValueToKey.OVERVIEW_DOC, ValueToKey.CONFIG_DEF),
-            new DocInfo(HoistField.class.getName(), HoistField.OVERVIEW_DOC, HoistField.CONFIG_DEF),
-            new DocInfo(ExtractField.class.getName(), ExtractField.OVERVIEW_DOC, ExtractField.CONFIG_DEF),
-            new DocInfo(SetSchemaMetadata.class.getName(), SetSchemaMetadata.OVERVIEW_DOC, SetSchemaMetadata.CONFIG_DEF),
-            new DocInfo(TimestampRouter.class.getName(), TimestampRouter.OVERVIEW_DOC, TimestampRouter.CONFIG_DEF),
-            new DocInfo(RegexRouter.class.getName(), RegexRouter.OVERVIEW_DOC, RegexRouter.CONFIG_DEF),
-            new DocInfo(Flatten.class.getName(), Flatten.OVERVIEW_DOC, Flatten.CONFIG_DEF),
-            new DocInfo(Cast.class.getName(), Cast.OVERVIEW_DOC, Cast.CONFIG_DEF),
-            new DocInfo(TimestampConverter.class.getName(), TimestampConverter.OVERVIEW_DOC, TimestampConverter.CONFIG_DEF)
-    );
+			new DocInfo(ReplaceField.class.getName(), ReplaceField.OVERVIEW_DOC, ReplaceField.CONFIG_DEF),
+			new DocInfo(MaskField.class.getName(), MaskField.OVERVIEW_DOC, MaskField.CONFIG_DEF),
+			new DocInfo(ValueToKey.class.getName(), ValueToKey.OVERVIEW_DOC, ValueToKey.CONFIG_DEF),
+			new DocInfo(HoistField.class.getName(), HoistField.OVERVIEW_DOC, HoistField.CONFIG_DEF),
+			new DocInfo(ExtractField.class.getName(), ExtractField.OVERVIEW_DOC, ExtractField.CONFIG_DEF),
+			new DocInfo(SetSchemaMetadata.class.getName(), SetSchemaMetadata.OVERVIEW_DOC, SetSchemaMetadata.CONFIG_DEF),
+			new DocInfo(TimestampRouter.class.getName(), TimestampRouter.OVERVIEW_DOC, TimestampRouter.CONFIG_DEF),
+			new DocInfo(RegexRouter.class.getName(), RegexRouter.OVERVIEW_DOC, RegexRouter.CONFIG_DEF),
+			new DocInfo(Flatten.class.getName(), Flatten.OVERVIEW_DOC, Flatten.CONFIG_DEF),
+			new DocInfo(Cast.class.getName(), Cast.OVERVIEW_DOC, Cast.CONFIG_DEF),
+			new DocInfo(TimestampConverter.class.getName(), TimestampConverter.OVERVIEW_DOC, TimestampConverter.CONFIG_DEF),
+			new DocInfo(Filter.class.getName(), Filter.OVERVIEW_DOC, Filter.CONFIG_DEF),
+			new DocInfo(InsertHeader.class.getName(), InsertHeader.OVERVIEW_DOC, InsertHeader.CONFIG_DEF),
+			new DocInfo(DropHeaders.class.getName(), DropHeaders.OVERVIEW_DOC, DropHeaders.CONFIG_DEF),
+			new DocInfo(HeaderFrom.class.getName(), HeaderFrom.OVERVIEW_DOC, HeaderFrom.CONFIG_DEF)
+	);
 
     private static void printTransformationHtml(PrintStream out, DocInfo docInfo) {
         out.println("<div id=\"" + docInfo.transformationName + "\">");
@@ -74,19 +82,19 @@ public class TransformationDoc {
 
         out.println("<p/>");
 
-        out.println(docInfo.configDef.toHtmlTable());
+		out.println(docInfo.configDef.toHtml(6, key -> docInfo.transformationName + "_" + key));
 
         out.println("</div>");
     }
 
-    private static void printHtml(PrintStream out) throws NoSuchFieldException, IllegalAccessException, InstantiationException {
-        for (final DocInfo docInfo : TRANSFORMATIONS) {
-            printTransformationHtml(out, docInfo);
-        }
-    }
+	private static void printHtml(PrintStream out) {
+		for (final DocInfo docInfo : TRANSFORMATIONS) {
+			printTransformationHtml(out, docInfo);
+		}
+	}
 
-    public static void main(String... args) throws Exception {
-        printHtml(System.out);
-    }
+	public static void main(String... args) {
+		printHtml(System.out);
+	}
 
 }

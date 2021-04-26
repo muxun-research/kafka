@@ -66,23 +66,20 @@ public class MockConnector extends Connector {
         this.config = config;
 
         if (CONNECTOR_FAILURE.equals(config.get(MOCK_MODE_KEY))) {
-            // Schedule this connector to raise an exception after some delay
+			// Schedule this connector to raise an exception after some delay
 
-            String delayMsString = config.get(DELAY_MS_KEY);
-            long delayMs = DEFAULT_FAILURE_DELAY_MS;
-            if (delayMsString != null)
-                delayMs = Long.parseLong(delayMsString);
+			String delayMsString = config.get(DELAY_MS_KEY);
+			long delayMs = DEFAULT_FAILURE_DELAY_MS;
+			if (delayMsString != null)
+				delayMs = Long.parseLong(delayMsString);
 
-            log.debug("Started MockConnector with failure delay of {} ms", delayMs);
-            executor = Executors.newSingleThreadScheduledExecutor();
-            executor.schedule(new Runnable() {
-                @Override
-                public void run() {
-                    log.debug("Triggering connector failure");
-                    context.raiseError(new RuntimeException());
-                }
-            }, delayMs, TimeUnit.MILLISECONDS);
-        }
+			log.debug("Started MockConnector with failure delay of {} ms", delayMs);
+			executor = Executors.newSingleThreadScheduledExecutor();
+			executor.schedule(() -> {
+				log.debug("Triggering connector failure");
+				context.raiseError(new RuntimeException());
+			}, delayMs, TimeUnit.MILLISECONDS);
+		}
     }
 
     @Override

@@ -58,11 +58,8 @@ public class ConsumerNetworkClient implements Closeable {
     // flag and the request completion queue below).
     private final Logger log;
     private final KafkaClient client;
-	/**
-	 * 缓存的没有发送的请求
-	 */
 	private final UnsentRequests unsent = new UnsentRequests();
-    private final Metadata metadata;
+	private final Metadata metadata;
     private final Time time;
     private final long retryBackoffMs;
     private final int maxPollTimeoutMs;
@@ -83,51 +80,56 @@ public class ConsumerNetworkClient implements Closeable {
     private final AtomicBoolean wakeup = new AtomicBoolean(false);
 
     public ConsumerNetworkClient(LogContext logContext,
-                                 KafkaClient client,
-                                 Metadata metadata,
-                                 Time time,
-                                 long retryBackoffMs,
-                                 int requestTimeoutMs,
-                                 int maxPollTimeoutMs) {
-        this.log = logContext.logger(ConsumerNetworkClient.class);
-        this.client = client;
-        this.metadata = metadata;
-        this.time = time;
-        this.retryBackoffMs = retryBackoffMs;
-        this.maxPollTimeoutMs = Math.min(maxPollTimeoutMs, MAX_POLL_TIMEOUT_MS);
-        this.requestTimeoutMs = requestTimeoutMs;
+								 KafkaClient client,
+								 Metadata metadata,
+								 Time time,
+								 long retryBackoffMs,
+								 int requestTimeoutMs,
+								 int maxPollTimeoutMs) {
+		this.log = logContext.logger(ConsumerNetworkClient.class);
+		this.client = client;
+		this.metadata = metadata;
+		this.time = time;
+		this.retryBackoffMs = retryBackoffMs;
+		this.maxPollTimeoutMs = Math.min(maxPollTimeoutMs, MAX_POLL_TIMEOUT_MS);
+		this.requestTimeoutMs = requestTimeoutMs;
 	}
 
-
-	/**
-	 * 在默认的等待时间内，发送请求
-     */
-    public RequestFuture<ClientResponse> send(Node node, AbstractRequest.Builder<?> requestBuilder) {
-        return send(node, requestBuilder, requestTimeoutMs);
+	public int defaultRequestTimeoutMs() {
+		return requestTimeoutMs;
 	}
 
 	/**
-	 * 发送一个新的请求，需要注意的是，请求不会真实的执行，直到poll()方法实例调用
-	 * 请求可能成功，可能失败
-	 * 使用future来包装发送结果，需要注意的是，不需要去在{@link ClientResponse}对象中刻意检查连接是否断开，因为它会自动抛出{@link DisconnectException}异常
-	 * @param node 请求发送的目的地
-	 * @param requestBuilder request payload载体
-	 * @param requestTimeoutMs 等待请求的最大时间，如果请求被取消，socket会以任何理由断开socket连接
-	 * @return 请求发送的结果
-     */
-    public RequestFuture<ClientResponse> send(Node node,
-                                              AbstractRequest.Builder<?> requestBuilder,
-                                              int requestTimeoutMs) {
-        long now = time.milliseconds();
-		// 创建请求完成处理器，并添加请求处理中
-        RequestFutureCompletionHandler completionHandler = new RequestFutureCompletionHandler();
-        ClientRequest clientRequest = client.newClientRequest(node.idString(), requestBuilder, now, true,
-                requestTimeoutMs, completionHandler);
-		// 向待发送的请求中添加发送请求
-        unsent.put(node, clientRequest);
+	 * Send a request with the default timeout. See {@link #send(Node, AbstractRequest.Builder, int)}.
+	 */
+	public RequestFuture<ClientResponse> send(Node node, AbstractRequest.Builder<?> requestBuilder) {
+		return send(node, requestBuilder, requestTimeoutMs);
+	}
 
-		// 当前client和在poll()方法向broker进行轮询的client是同一个ConsumerNetworkClient，唤醒client以便可以继续发送请求
-		// 请求和是发送是由client决定的，而非事件方法掉用决定的
+	/**
+	 * Send a new request. Note that the request is not actually transmitted on the
+	 * network until one of the {@link #poll(Timer)} variants is invoked. At this
+	 * point the request will either be transmitted successfully or will fail.
+	 * Use the returned future to obtain the result of the send. Note that there is no
+	 * need to check for disconnects explicitly on the {@link ClientResponse} object;
+	 * instead, the future will be failed with a {@link DisconnectException}.
+	 * @param node             The destination of the request
+	 * @param requestBuilder   A builder for the request payload
+	 * @param requestTimeoutMs Maximum time in milliseconds to await a response before disconnecting the socket and
+	 *                         cancelling the request. The request may be cancelled sooner if the socket disconnects
+	 *                         for any reason.
+	 * @return A future which indicates the result of the send.
+	 */
+	public RequestFuture<ClientResponse> send(Node node,
+											  AbstractRequest.Builder<?> requestBuilder,
+											  int requestTimeoutMs) {
+		long now = time.milliseconds();
+		RequestFutureCompletionHandler completionHandler = new RequestFutureCompletionHandler();
+		ClientRequest clientRequest = client.newClientRequest(node.idString(), requestBuilder, now, true,
+				requestTimeoutMs, completionHandler);
+		unsent.put(node, clientRequest);
+
+		// wakeup the client in case it is blocking in poll so that we can send the queued request
         client.wakeup();
         return completionHandler.future;
     }
@@ -286,35 +288,56 @@ public class ConsumerNetworkClient implements Closeable {
 
             // clean unsent requests collection to keep the map from growing indefinitely
             unsent.clean();
-        } finally {
-            lock.unlock();
-        }
+		} finally {
+			lock.unlock();
+		}
 
-        // called without the lock to avoid deadlock potential if handlers need to acquire locks
-        firePendingCompletedRequests();
+		// called without the lock to avoid deadlock potential if handlers need to acquire locks
+		firePendingCompletedRequests();
 
-        metadata.maybeThrowAnyException();
+		metadata.maybeThrowAnyException();
 	}
 
 	/**
-	 * 轮询网络IO，并立即返回，不会触发唤醒操作
-     */
-    public void pollNoWakeup() {
-        poll(time.timer(0), null, true);
-    }
+	 * Poll for network IO and return immediately. This will not trigger wakeups.
+	 */
+	public void pollNoWakeup() {
+		poll(time.timer(0), null, true);
+	}
 
-    /**
-     * Block until all pending requests from the given node have finished.
-     * @param node The node to await requests from
-     * @param timer Timer bounding how long this method can block
-     * @return true If all requests finished, false if the timeout expired first
-     */
-    public boolean awaitPendingRequests(Node node, Timer timer) {
-        while (hasPendingRequests(node) && timer.notExpired()) {
-            poll(timer);
-        }
-        return !hasPendingRequests(node);
-    }
+	/**
+	 * Poll for network IO in best-effort only trying to transmit the ready-to-send request
+	 * Do not check any pending requests or metadata errors so that no exception should ever
+	 * be thrown, also no wakeups be triggered and no interrupted exception either.
+	 */
+	public void transmitSends() {
+		Timer timer = time.timer(0);
+
+		// do not try to handle any disconnects, prev request failures, metadata exception etc;
+		// just try once and return immediately
+		lock.lock();
+		try {
+			// send all the requests we can send now
+			trySend(timer.currentTimeMs());
+
+			client.poll(0, timer.currentTimeMs());
+		} finally {
+			lock.unlock();
+		}
+	}
+
+	/**
+	 * Block until all pending requests from the given node have finished.
+	 * @param node  The node to await requests from
+	 * @param timer Timer bounding how long this method can block
+	 * @return true If all requests finished, false if the timeout expired first
+	 */
+	public boolean awaitPendingRequests(Node node, Timer timer) {
+		while (hasPendingRequests(node) && timer.notExpired()) {
+			poll(timer);
+		}
+		return !hasPendingRequests(node);
+	}
 
     /**
      * Get the count of pending requests to the given node. This includes both request that
@@ -421,34 +444,28 @@ public class ConsumerNetworkClient implements Closeable {
             while (true) {
                 Node node = pendingDisconnects.poll();
                 if (node == null)
-                    break;
+					break;
 
-                failUnsentRequests(node, DisconnectException.INSTANCE);
-                client.disconnect(node.idString());
-            }
-        } finally {
-            lock.unlock();
-        }
-    }
+				failUnsentRequests(node, DisconnectException.INSTANCE);
+				client.disconnect(node.idString());
+			}
+		} finally {
+			lock.unlock();
+		}
+	}
 
-	/**
-	 * 异步断开指定节点的连接
-	 * @param node 指定节点
-	 */
 	public void disconnectAsync(Node node) {
-		// 向需要挂起断开连接队列中，添加此节点
 		pendingDisconnects.offer(node);
-		// 唤起client，进行客户端请求
 		client.wakeup();
 	}
 
-    private void failExpiredRequests(long now) {
-        // clear all expired unsent requests and fail their corresponding futures
-        Collection<ClientRequest> expiredRequests = unsent.removeExpiredRequests(now);
-        for (ClientRequest request : expiredRequests) {
-            RequestFutureCompletionHandler handler = (RequestFutureCompletionHandler) request.callback();
-            handler.onFailure(new TimeoutException("Failed to send request after " + request.requestTimeoutMs() + " ms."));
-        }
+	private void failExpiredRequests(long now) {
+		// clear all expired unsent requests and fail their corresponding futures
+		Collection<ClientRequest> expiredRequests = unsent.removeExpiredRequests(now);
+		for (ClientRequest request : expiredRequests) {
+			RequestFutureCompletionHandler handler = (RequestFutureCompletionHandler) request.callback();
+			handler.onFailure(new TimeoutException("Failed to send request after " + request.requestTimeoutMs() + " ms."));
+		}
     }
 
     private void failUnsentRequests(Node node, RuntimeException e) {
@@ -595,39 +612,38 @@ public class ConsumerNetworkClient implements Closeable {
             this.response = response;
             pendingCompletion.add(this);
         }
-    }
+	}
 
-    /**
-	 * 在多线程环境下调用poll()方法，在调用poll()之前，可能已经满足了调用者的条件
-	 * 因此，我们引入了此接口，以便条件检查尽可能接近于poll()的调用，尤其是，在持有保护并发请求到ConsumerNetworkClient锁时，检查就将完成
-	 * 这意味着，如果回调必须获得其他锁，则实现必须在锁定顺序时非常小心
+	/**
+	 * When invoking poll from a multi-threaded environment, it is possible that the condition that
+	 * the caller is awaiting has already been satisfied prior to the invocation of poll. We therefore
+	 * introduce this interface to push the condition checking as close as possible to the invocation
+	 * of poll. In particular, the check will be done while holding the lock used to protect concurrent
+	 * access to {@link org.apache.kafka.clients.NetworkClient}, which means implementations must be
+	 * very careful about locking order if the callback must acquire additional locks.
      */
     public interface PollCondition {
-        /**
-		 * 判断调用是否需要等IO时间
-		 * @return 需要等待，返回true
-         */
+		/**
+		 * Return whether the caller is still awaiting an IO event.
+		 * @return true if so, false otherwise.
+		 */
         boolean shouldBlock();
-    }
+	}
 
-    /*
-     * A thread-safe helper class to hold requests per node that have not been sent yet
-     */
-    private final static class UnsentRequests {
-        private final ConcurrentMap<Node, ConcurrentLinkedQueue<ClientRequest>> unsent;
+	/*
+	 * A thread-safe helper class to hold requests per node that have not been sent yet
+	 */
+	private static final class UnsentRequests {
+		private final ConcurrentMap<Node, ConcurrentLinkedQueue<ClientRequest>> unsent;
 
-        private UnsentRequests() {
-            unsent = new ConcurrentHashMap<>();
-        }
+		private UnsentRequests() {
+			unsent = new ConcurrentHashMap<>();
+		}
 
-        public void put(Node node, ClientRequest request) {
-            // the lock protects the put from a concurrent removal of the queue for the node
-            synchronized (unsent) {
-                ConcurrentLinkedQueue<ClientRequest> requests = unsent.get(node);
-                if (requests == null) {
-                    requests = new ConcurrentLinkedQueue<>();
-                    unsent.put(node, requests);
-                }
+		public void put(Node node, ClientRequest request) {
+			// the lock protects the put from a concurrent removal of the queue for the node
+			synchronized (unsent) {
+				ConcurrentLinkedQueue<ClientRequest> requests = unsent.computeIfAbsent(node, key -> new ConcurrentLinkedQueue<>());
                 requests.add(request);
             }
         }

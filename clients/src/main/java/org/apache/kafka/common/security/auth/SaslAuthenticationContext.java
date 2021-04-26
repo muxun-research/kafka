@@ -16,36 +16,55 @@
  */
 package org.apache.kafka.common.security.auth;
 
+import javax.net.ssl.SSLSession;
 import javax.security.sasl.SaslServer;
-
 import java.net.InetAddress;
+import java.util.Optional;
 
 public class SaslAuthenticationContext implements AuthenticationContext {
-    private final SaslServer server;
-    private final SecurityProtocol securityProtocol;
-    private final InetAddress clientAddress;
-    private final String listenerName;
+	private final SaslServer server;
+	private final SecurityProtocol securityProtocol;
+	private final InetAddress clientAddress;
+	private final String listenerName;
+	private final Optional<SSLSession> sslSession;
 
-    public SaslAuthenticationContext(SaslServer server, SecurityProtocol securityProtocol, InetAddress clientAddress, String listenerName) {
-        this.server = server;
-        this.securityProtocol = securityProtocol;
-        this.clientAddress = clientAddress;
-        this.listenerName = listenerName;
-    }
+	public SaslAuthenticationContext(SaslServer server, SecurityProtocol securityProtocol, InetAddress clientAddress, String listenerName) {
+		this(server, securityProtocol, clientAddress, listenerName, Optional.empty());
+	}
 
-    public SaslServer server() {
-        return server;
-    }
+	public SaslAuthenticationContext(SaslServer server, SecurityProtocol securityProtocol,
+									 InetAddress clientAddress,
+									 String listenerName,
+									 Optional<SSLSession> sslSession) {
+		this.server = server;
+		this.securityProtocol = securityProtocol;
+		this.clientAddress = clientAddress;
+		this.listenerName = listenerName;
+		this.sslSession = sslSession;
+	}
 
-    @Override
-    public SecurityProtocol securityProtocol() {
-        return securityProtocol;
-    }
+	public SaslServer server() {
+		return server;
+	}
 
-    @Override
-    public InetAddress clientAddress() {
-        return clientAddress;
-    }
+	/**
+	 * Returns SSL session for the connection if security protocol is SASL_SSL. If SSL
+	 * mutual client authentication is enabled for the listener, peer principal can be
+	 * determined using {@link SSLSession#getPeerPrincipal()}.
+	 */
+	public Optional<SSLSession> sslSession() {
+		return sslSession;
+	}
+
+	@Override
+	public SecurityProtocol securityProtocol() {
+		return securityProtocol;
+	}
+
+	@Override
+	public InetAddress clientAddress() {
+		return clientAddress;
+	}
 
     @Override
     public String listenerName() {

@@ -16,30 +16,27 @@
  */
 package org.apache.kafka.common.requests;
 
-import java.nio.ByteBuffer;
-import java.util.Collections;
-import java.util.Map;
-
 import org.apache.kafka.common.message.ExpireDelegationTokenResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.Struct;
+
+import java.nio.ByteBuffer;
+import java.util.Map;
 
 public class ExpireDelegationTokenResponse extends AbstractResponse {
 
     private final ExpireDelegationTokenResponseData data;
 
     public ExpireDelegationTokenResponse(ExpireDelegationTokenResponseData data) {
-        this.data = data;
-    }
-
-    public ExpireDelegationTokenResponse(Struct struct, short version) {
-        this.data = new ExpireDelegationTokenResponseData(struct, version);
+		super(ApiKeys.EXPIRE_DELEGATION_TOKEN);
+		this.data = data;
     }
 
     public static ExpireDelegationTokenResponse parse(ByteBuffer buffer, short version) {
-        return new ExpireDelegationTokenResponse(ApiKeys.EXPIRE_DELEGATION_TOKEN.responseSchema(version).read(buffer), version);
-    }
+		return new ExpireDelegationTokenResponse(new ExpireDelegationTokenResponseData(new ByteBufferAccessor(buffer),
+				version));
+	}
 
     public Errors error() {
         return Errors.forCode(data.errorCode());
@@ -51,13 +48,13 @@ public class ExpireDelegationTokenResponse extends AbstractResponse {
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-        return Collections.singletonMap(error(), 1);
+		return errorCounts(error());
     }
 
-    @Override
-    protected Struct toStruct(short version) {
-        return data.toStruct(version);
-    }
+	@Override
+	public ExpireDelegationTokenResponseData data() {
+		return data;
+	}
 
     @Override
     public int throttleTimeMs() {

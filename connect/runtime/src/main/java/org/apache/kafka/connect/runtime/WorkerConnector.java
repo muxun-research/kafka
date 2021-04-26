@@ -18,16 +18,24 @@ package org.apache.kafka.connect.runtime;
 
 import org.apache.kafka.connect.connector.Connector;
 import org.apache.kafka.connect.connector.ConnectorContext;
-import org.apache.kafka.connect.runtime.ConnectMetrics.LiteralSupplier;
+import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.runtime.ConnectMetrics.MetricGroup;
-import org.apache.kafka.connect.sink.SinkConnector;
-import org.apache.kafka.connect.source.SourceConnector;
+import org.apache.kafka.connect.runtime.isolation.Plugins;
+import org.apache.kafka.connect.sink.SinkConnectorContext;
+import org.apache.kafka.connect.source.SourceConnectorContext;
+import org.apache.kafka.connect.storage.OffsetStorageReader;
+import org.apache.kafka.connect.util.Callback;
+import org.apache.kafka.connect.util.ConnectUtils;
+import org.apache.kafka.connect.util.LoggingContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Container for connectors which is responsible for managing their lifecycle (e.g. handling startup,
@@ -41,288 +49,478 @@ import java.util.Objects;
  *
  * Note that this class is NOT thread-safe.
  */
-public class WorkerConnector {
-    private static final Logger log = LoggerFactory.getLogger(WorkerConnector.class);
+public class WorkerConnector implements Runnable {
+	private static final Logger log = LoggerFactory.getLogger(WorkerConnector.class);
+	private static final String THREAD_NAME_PREFIX = "connector-thread-";
 
-    private enum State {
-        INIT,    // initial state before startup
-        STOPPED, // the connector has been stopped/paused.
-        STARTED, // the connector has been started/resumed.
-        FAILED,  // the connector has failed (no further transitions are possible after this state)
-    }
+	private enum State {
+		INIT,    // initial state before startup
+		STOPPED, // the connector has been stopped/paused.
+		STARTED, // the connector has been started/resumed.
+		FAILED,  // the connector has failed (no further transitions are possible after this state)
+	}
 
-    private final String connName;
-    private final ConnectorStatus.Listener statusListener;
-    private final ConnectorContext ctx;
-    private final Connector connector;
-    private final ConnectorMetricsGroup metrics;
+	private final String connName;
+	private final Map<String, String> config;
+	private final ConnectorStatus.Listener statusListener;
+	private final ClassLoader loader;
+	private final CloseableConnectorContext ctx;
+	private final Connector connector;
+	private final ConnectorMetricsGroup metrics;
+	private final AtomicReference<TargetState> pendingTargetStateChange;
+	private final AtomicReference<Callback<TargetState>> pendingStateChangeCallback;
+	private final CountDownLatch shutdownLatch;
+	private volatile boolean stopping;  // indicates whether the Worker has asked the connector to stop
+	private volatile boolean cancelled; // indicates whether the Worker has cancelled the connector (e.g. because of slow shutdown)
 
-    private Map<String, String> config;
-    private State state;
+	private State state;
+	private final OffsetStorageReader offsetStorageReader;
 
-    public WorkerConnector(String connName,
-                           Connector connector,
-                           ConnectorContext ctx,
-                           ConnectMetrics metrics,
-                           ConnectorStatus.Listener statusListener) {
-        this.connName = connName;
-        this.ctx = ctx;
-        this.connector = connector;
-        this.state = State.INIT;
-        this.metrics = new ConnectorMetricsGroup(metrics, AbstractStatus.State.UNASSIGNED, statusListener);
-        this.statusListener = this.metrics;
-    }
+	public WorkerConnector(String connName,
+						   Connector connector,
+						   ConnectorConfig connectorConfig,
+						   CloseableConnectorContext ctx,
+						   ConnectMetrics metrics,
+						   ConnectorStatus.Listener statusListener,
+						   OffsetStorageReader offsetStorageReader,
+						   ClassLoader loader) {
+		this.connName = connName;
+		this.config = connectorConfig.originalsStrings();
+		this.loader = loader;
+		this.ctx = ctx;
+		this.connector = connector;
+		this.state = State.INIT;
+		this.metrics = new ConnectorMetricsGroup(metrics, AbstractStatus.State.UNASSIGNED, statusListener);
+		this.statusListener = this.metrics;
+		this.offsetStorageReader = offsetStorageReader;
+		this.pendingTargetStateChange = new AtomicReference<>();
+		this.pendingStateChangeCallback = new AtomicReference<>();
+		this.shutdownLatch = new CountDownLatch(1);
+		this.stopping = false;
+		this.cancelled = false;
+	}
 
-    public void initialize(ConnectorConfig connectorConfig) {
-        try {
-            this.config = connectorConfig.originalsStrings();
-            log.debug("{} Initializing connector {} with config {}", this, connName, config);
-            if (isSinkConnector()) {
-                SinkConnectorConfig.validate(config);
-            }
+	public ClassLoader loader() {
+		return loader;
+	}
 
-            connector.initialize(new ConnectorContext() {
-                @Override
-                public void requestTaskReconfiguration() {
-                    ctx.requestTaskReconfiguration();
-                }
+	@Override
+	public void run() {
+		// Clear all MDC parameters, in case this thread is being reused
+		LoggingContext.clear();
 
-                @Override
-                public void raiseError(Exception e) {
-                    log.error("{} Connector raised an error", WorkerConnector.this, e);
-                    onFailure(e);
-                    ctx.raiseError(e);
-                }
-            });
-        } catch (Throwable t) {
-            log.error("{} Error initializing connector", this, t);
-            onFailure(t);
-        }
-    }
+		try (LoggingContext loggingContext = LoggingContext.forConnector(connName)) {
+			ClassLoader savedLoader = Plugins.compareAndSwapLoaders(loader);
+			String savedName = Thread.currentThread().getName();
+			try {
+				Thread.currentThread().setName(THREAD_NAME_PREFIX + connName);
+				doRun();
+			} finally {
+				Thread.currentThread().setName(savedName);
+				Plugins.compareAndSwapLoaders(savedLoader);
+			}
+		} finally {
+			// In the rare case of an exception being thrown outside the doRun() method, or an
+			// uncaught one being thrown from within it, mark the connector as shut down to avoid
+			// unnecessarily blocking and eventually timing out during awaitShutdown
+			shutdownLatch.countDown();
+		}
+	}
 
-    private boolean doStart() {
-        try {
-            switch (state) {
-                case STARTED:
-                    return false;
+	void doRun() {
+		initialize();
+		while (!stopping) {
+			TargetState newTargetState;
+			Callback<TargetState> stateChangeCallback;
+			synchronized (this) {
+				newTargetState = pendingTargetStateChange.getAndSet(null);
+				stateChangeCallback = pendingStateChangeCallback.getAndSet(null);
+			}
+			if (newTargetState != null && !stopping) {
+				doTransitionTo(newTargetState, stateChangeCallback);
+			}
+			synchronized (this) {
+				if (pendingTargetStateChange.get() != null || stopping) {
+					// An update occurred before we entered the synchronized block; no big deal,
+					// just start the loop again until we've handled everything
+				} else {
+					try {
+						wait();
+					} catch (InterruptedException e) {
+						// We'll pick up any potential state changes at the top of the loop
+					}
+				}
+			}
+		}
+		doShutdown();
+	}
 
-                case INIT:
-                case STOPPED:
-                    connector.start(config);
-                    this.state = State.STARTED;
-                    return true;
+	void initialize() {
+		try {
+			if (!isSourceConnector() && !isSinkConnector()) {
+				throw new ConnectException("Connector implementations must be a subclass of either SourceConnector or SinkConnector");
+			}
+			log.debug("{} Initializing connector {}", this, connName);
+			if (isSinkConnector()) {
+				SinkConnectorConfig.validate(config);
+				connector.initialize(new WorkerSinkConnectorContext());
+			} else {
+				connector.initialize(new WorkerSourceConnectorContext(offsetStorageReader));
+			}
+		} catch (Throwable t) {
+			log.error("{} Error initializing connector", this, t);
+			onFailure(t);
+		}
+	}
 
-                default:
-                    throw new IllegalArgumentException("Cannot start connector in state " + state);
-            }
-        } catch (Throwable t) {
-            log.error("{} Error while starting connector", this, t);
-            onFailure(t);
-            return false;
-        }
-    }
+	private boolean doStart() throws Throwable {
+		try {
+			switch (state) {
+				case STARTED:
+					return false;
 
-    private void onFailure(Throwable t) {
-        statusListener.onFailure(connName, t);
-        this.state = State.FAILED;
-    }
+				case INIT:
+				case STOPPED:
+					connector.start(config);
+					this.state = State.STARTED;
+					return true;
 
-    private void resume() {
-        if (doStart())
-            statusListener.onResume(connName);
-    }
+				default:
+					throw new IllegalArgumentException("Cannot start connector in state " + state);
+			}
+		} catch (Throwable t) {
+			log.error("{} Error while starting connector", this, t);
+			onFailure(t);
+			throw t;
+		}
+	}
 
-    private void start() {
-        if (doStart())
-            statusListener.onStartup(connName);
-    }
+	private void onFailure(Throwable t) {
+		statusListener.onFailure(connName, t);
+		this.state = State.FAILED;
+	}
 
-    public boolean isRunning() {
-        return state == State.STARTED;
-    }
+	private void resume() throws Throwable {
+		if (doStart())
+			statusListener.onResume(connName);
+	}
 
-    @SuppressWarnings("fallthrough")
-    private void pause() {
-        try {
-            switch (state) {
-                case STOPPED:
-                    return;
+	private void start() throws Throwable {
+		if (doStart())
+			statusListener.onStartup(connName);
+	}
 
-                case STARTED:
-                    connector.stop();
-                    // fall through
+	public boolean isRunning() {
+		return state == State.STARTED;
+	}
 
-                case INIT:
-                    statusListener.onPause(connName);
-                    this.state = State.STOPPED;
-                    break;
+	@SuppressWarnings("fallthrough")
+	private void pause() {
+		try {
+			switch (state) {
+				case STOPPED:
+					return;
 
-                default:
-                    throw new IllegalArgumentException("Cannot pause connector in state " + state);
-            }
-        } catch (Throwable t) {
-            log.error("{} Error while shutting down connector", this, t);
-            statusListener.onFailure(connName, t);
-            this.state = State.FAILED;
-        }
-    }
+				case STARTED:
+					connector.stop();
+					// fall through
 
-    public void shutdown() {
-        try {
-            if (state == State.STARTED)
-                connector.stop();
-            this.state = State.STOPPED;
-            statusListener.onShutdown(connName);
-        } catch (Throwable t) {
-            log.error("{} Error while shutting down connector", this, t);
-            this.state = State.FAILED;
-            statusListener.onFailure(connName, t);
-        } finally {
-            metrics.close();
-        }
-    }
+				case INIT:
+					statusListener.onPause(connName);
+					this.state = State.STOPPED;
+					break;
 
-    public void transitionTo(TargetState targetState) {
-        if (state == State.FAILED) {
-            log.warn("{} Cannot transition connector to {} since it has failed", this, targetState);
-            return;
-        }
+				default:
+					throw new IllegalArgumentException("Cannot pause connector in state " + state);
+			}
+		} catch (Throwable t) {
+			log.error("{} Error while shutting down connector", this, t);
+			statusListener.onFailure(connName, t);
+			this.state = State.FAILED;
+		}
+	}
 
-        log.debug("{} Transition connector to {}", this, targetState);
-        if (targetState == TargetState.PAUSED) {
-            pause();
-        } else if (targetState == TargetState.STARTED) {
-            if (state == State.INIT)
-                start();
-            else
-                resume();
-        } else {
-            throw new IllegalArgumentException("Unhandled target state " + targetState);
-        }
-    }
+	/**
+	 * Stop this connector. This method does not block, it only triggers shutdown. Use
+	 * #{@link #awaitShutdown} to block until completion.
+	 */
+	public synchronized void shutdown() {
+		log.info("Scheduled shutdown for {}", this);
+		stopping = true;
+		notify();
+	}
 
-    public boolean isSinkConnector() {
-        return SinkConnector.class.isAssignableFrom(connector.getClass());
-    }
+	void doShutdown() {
+		try {
+			TargetState preEmptedState = pendingTargetStateChange.getAndSet(null);
+			Callback<TargetState> stateChangeCallback = pendingStateChangeCallback.getAndSet(null);
+			if (stateChangeCallback != null) {
+				stateChangeCallback.onCompletion(
+						new ConnectException(
+								"Could not begin changing connector state to " + preEmptedState.name()
+										+ " as the connector has been scheduled for shutdown"),
+						null);
+			}
+			if (state == State.STARTED)
+				connector.stop();
+			this.state = State.STOPPED;
+			statusListener.onShutdown(connName);
+			log.info("Completed shutdown for {}", this);
+		} catch (Throwable t) {
+			log.error("{} Error while shutting down connector", this, t);
+			state = State.FAILED;
+			statusListener.onFailure(connName, t);
+		} finally {
+			ctx.close();
+			metrics.close();
+		}
+	}
 
-    public boolean isSourceConnector() {
-        return SourceConnector.class.isAssignableFrom(connector.getClass());
-    }
+	public synchronized void cancel() {
+		// Proactively update the status of the connector to UNASSIGNED since this connector
+		// instance is being abandoned and we won't update the status on its behalf any more
+		// after this since a new instance may be started soon
+		statusListener.onShutdown(connName);
+		ctx.close();
+		cancelled = true;
+	}
 
-    protected String connectorType() {
-        if (isSinkConnector())
-            return "sink";
-        if (isSourceConnector())
-            return "source";
-        return "unknown";
-    }
+	/**
+	 * Wait for this connector to finish shutting down.
+	 * @param timeoutMs time in milliseconds to await shutdown
+	 * @return true if successful, false if the timeout was reached
+	 */
+	public boolean awaitShutdown(long timeoutMs) {
+		try {
+			return shutdownLatch.await(timeoutMs, TimeUnit.MILLISECONDS);
+		} catch (InterruptedException e) {
+			return false;
+		}
+	}
 
-    public Connector connector() {
-        return connector;
-    }
+	public void transitionTo(TargetState targetState, Callback<TargetState> stateChangeCallback) {
+		Callback<TargetState> preEmptedStateChangeCallback;
+		TargetState preEmptedState;
+		synchronized (this) {
+			preEmptedStateChangeCallback = pendingStateChangeCallback.getAndSet(stateChangeCallback);
+			preEmptedState = pendingTargetStateChange.getAndSet(targetState);
+			notify();
+		}
+		if (preEmptedStateChangeCallback != null) {
+			preEmptedStateChangeCallback.onCompletion(
+					new ConnectException(
+							"Could not begin changing connector state to " + preEmptedState.name()
+									+ " before another request to change state was made;"
+									+ " the new request (which is to change the state to " + targetState.name()
+									+ ") has pre-empted this one"),
+					null
+			);
+		}
+	}
 
-    ConnectorMetricsGroup metrics() {
-        return metrics;
-    }
+	void doTransitionTo(TargetState targetState, Callback<TargetState> stateChangeCallback) {
+		if (state == State.FAILED) {
+			stateChangeCallback.onCompletion(
+					new ConnectException(this + " Cannot transition connector to " + targetState + " since it has failed"),
+					null);
+			return;
+		}
 
-    @Override
-    public String toString() {
-        return "WorkerConnector{" +
-                       "id=" + connName +
-                       '}';
-    }
+		try {
+			doTransitionTo(targetState);
+			stateChangeCallback.onCompletion(null, targetState);
+		} catch (Throwable t) {
+			stateChangeCallback.onCompletion(
+					new ConnectException(
+							"Failed to transition connector " + connName + " to state " + targetState,
+							t),
+					null);
+		}
+	}
 
-    class ConnectorMetricsGroup implements ConnectorStatus.Listener, AutoCloseable {
-        /**
-         * Use {@link AbstractStatus.State} since it has all of the states we want,
-         * unlike {@link WorkerConnector.State}.
-         */
-        private volatile AbstractStatus.State state;
-        private final MetricGroup metricGroup;
-        private final ConnectorStatus.Listener delegate;
+	private void doTransitionTo(TargetState targetState) throws Throwable {
+		log.debug("{} Transition connector to {}", this, targetState);
+		if (targetState == TargetState.PAUSED) {
+			pause();
+		} else if (targetState == TargetState.STARTED) {
+			if (state == State.INIT)
+				start();
+			else
+				resume();
+		} else {
+			throw new IllegalArgumentException("Unhandled target state " + targetState);
+		}
+	}
 
-        public ConnectorMetricsGroup(ConnectMetrics connectMetrics, AbstractStatus.State initialState, ConnectorStatus.Listener delegate) {
-            Objects.requireNonNull(connectMetrics);
-            Objects.requireNonNull(connector);
-            Objects.requireNonNull(initialState);
-            Objects.requireNonNull(delegate);
-            this.delegate = delegate;
-            this.state = initialState;
-            ConnectMetricsRegistry registry = connectMetrics.registry();
-            this.metricGroup = connectMetrics.group(registry.connectorGroupName(),
-                    registry.connectorTagName(), connName);
-            // prevent collisions by removing any previously created metrics in this group.
-            metricGroup.close();
+	public boolean isSinkConnector() {
+		return ConnectUtils.isSinkConnector(connector);
+	}
 
-            metricGroup.addImmutableValueMetric(registry.connectorType, connectorType());
-            metricGroup.addImmutableValueMetric(registry.connectorClass, connector.getClass().getName());
-            metricGroup.addImmutableValueMetric(registry.connectorVersion, connector.version());
-            metricGroup.addValueMetric(registry.connectorStatus, new LiteralSupplier<String>() {
-                @Override
-                public String metricValue(long now) {
-                    return state.toString().toLowerCase(Locale.getDefault());
-                }
-            });
-        }
+	public boolean isSourceConnector() {
+		return ConnectUtils.isSourceConnector(connector);
+	}
 
-        public void close() {
-            metricGroup.close();
-        }
+	protected String connectorType() {
+		if (isSinkConnector())
+			return "sink";
+		if (isSourceConnector())
+			return "source";
+		return "unknown";
+	}
 
-        @Override
-        public void onStartup(String connector) {
-            state = AbstractStatus.State.RUNNING;
-            delegate.onStartup(connector);
-        }
+	public Connector connector() {
+		return connector;
+	}
 
-        @Override
-        public void onShutdown(String connector) {
-            state = AbstractStatus.State.UNASSIGNED;
-            delegate.onShutdown(connector);
-        }
+	ConnectorMetricsGroup metrics() {
+		return metrics;
+	}
 
-        @Override
-        public void onPause(String connector) {
-            state = AbstractStatus.State.PAUSED;
-            delegate.onPause(connector);
-        }
+	@Override
+	public String toString() {
+		return "WorkerConnector{" +
+				"id=" + connName +
+				'}';
+	}
 
-        @Override
-        public void onResume(String connector) {
-            state = AbstractStatus.State.RUNNING;
-            delegate.onResume(connector);
-        }
+	class ConnectorMetricsGroup implements ConnectorStatus.Listener, AutoCloseable {
+		/**
+		 * Use {@link AbstractStatus.State} since it has all of the states we want,
+		 * unlike {@link WorkerConnector.State}.
+		 */
+		private volatile AbstractStatus.State state;
+		private final MetricGroup metricGroup;
+		private final ConnectorStatus.Listener delegate;
 
-        @Override
-        public void onFailure(String connector, Throwable cause) {
-            state = AbstractStatus.State.FAILED;
-            delegate.onFailure(connector, cause);
-        }
+		public ConnectorMetricsGroup(ConnectMetrics connectMetrics, AbstractStatus.State initialState, ConnectorStatus.Listener delegate) {
+			Objects.requireNonNull(connectMetrics);
+			Objects.requireNonNull(connector);
+			Objects.requireNonNull(initialState);
+			Objects.requireNonNull(delegate);
+			this.delegate = delegate;
+			this.state = initialState;
+			ConnectMetricsRegistry registry = connectMetrics.registry();
+			this.metricGroup = connectMetrics.group(registry.connectorGroupName(),
+					registry.connectorTagName(), connName);
+			// prevent collisions by removing any previously created metrics in this group.
+			metricGroup.close();
 
-        @Override
-        public void onDeletion(String connector) {
-            state = AbstractStatus.State.DESTROYED;
-            delegate.onDeletion(connector);
-        }
+			metricGroup.addImmutableValueMetric(registry.connectorType, connectorType());
+			metricGroup.addImmutableValueMetric(registry.connectorClass, connector.getClass().getName());
+			metricGroup.addImmutableValueMetric(registry.connectorVersion, connector.version());
+			metricGroup.addValueMetric(registry.connectorStatus, now -> state.toString().toLowerCase(Locale.getDefault()));
+		}
 
-        boolean isUnassigned() {
-            return state == AbstractStatus.State.UNASSIGNED;
-        }
+		public void close() {
+			metricGroup.close();
+		}
 
-        boolean isRunning() {
-            return state == AbstractStatus.State.RUNNING;
-        }
+		@Override
+		public void onStartup(String connector) {
+			state = AbstractStatus.State.RUNNING;
+			synchronized (this) {
+				if (!cancelled) {
+					delegate.onStartup(connector);
+				}
+			}
+		}
 
-        boolean isPaused() {
-            return state == AbstractStatus.State.PAUSED;
-        }
+		@Override
+		public void onShutdown(String connector) {
+			state = AbstractStatus.State.UNASSIGNED;
+			synchronized (this) {
+				if (!cancelled) {
+					delegate.onShutdown(connector);
+				}
+			}
+		}
 
-        boolean isFailed() {
-            return state == AbstractStatus.State.FAILED;
-        }
+		@Override
+		public void onPause(String connector) {
+			state = AbstractStatus.State.PAUSED;
+			synchronized (this) {
+				if (!cancelled) {
+					delegate.onPause(connector);
+				}
+			}
+		}
 
-        protected MetricGroup metricGroup() {
-            return metricGroup;
-        }
-    }
+		@Override
+		public void onResume(String connector) {
+			state = AbstractStatus.State.RUNNING;
+			synchronized (this) {
+				if (!cancelled) {
+					delegate.onResume(connector);
+				}
+			}
+		}
+
+		@Override
+		public void onFailure(String connector, Throwable cause) {
+			state = AbstractStatus.State.FAILED;
+			synchronized (this) {
+				if (!cancelled) {
+					delegate.onFailure(connector, cause);
+				}
+			}
+		}
+
+		@Override
+		public void onDeletion(String connector) {
+			state = AbstractStatus.State.DESTROYED;
+			delegate.onDeletion(connector);
+		}
+
+		boolean isUnassigned() {
+			return state == AbstractStatus.State.UNASSIGNED;
+		}
+
+		boolean isRunning() {
+			return state == AbstractStatus.State.RUNNING;
+		}
+
+		boolean isPaused() {
+			return state == AbstractStatus.State.PAUSED;
+		}
+
+		boolean isFailed() {
+			return state == AbstractStatus.State.FAILED;
+		}
+
+		protected MetricGroup metricGroup() {
+			return metricGroup;
+		}
+	}
+
+	private abstract class WorkerConnectorContext implements ConnectorContext {
+
+		@Override
+		public void requestTaskReconfiguration() {
+			WorkerConnector.this.ctx.requestTaskReconfiguration();
+		}
+
+		@Override
+		public void raiseError(Exception e) {
+			log.error("{} Connector raised an error", WorkerConnector.this, e);
+			onFailure(e);
+			WorkerConnector.this.ctx.raiseError(e);
+		}
+	}
+
+	private class WorkerSinkConnectorContext extends WorkerConnectorContext implements SinkConnectorContext {
+	}
+
+	private class WorkerSourceConnectorContext extends WorkerConnectorContext implements SourceConnectorContext {
+
+		private final OffsetStorageReader offsetStorageReader;
+
+		WorkerSourceConnectorContext(OffsetStorageReader offsetStorageReader) {
+			this.offsetStorageReader = offsetStorageReader;
+		}
+
+		@Override
+		public OffsetStorageReader offsetStorageReader() {
+			return offsetStorageReader;
+		}
+	}
 }

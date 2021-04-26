@@ -20,11 +20,10 @@ import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.message.HeartbeatRequestData;
 import org.apache.kafka.common.message.HeartbeatResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
-
 
 public class HeartbeatRequest extends AbstractRequest {
 
@@ -51,43 +50,29 @@ public class HeartbeatRequest extends AbstractRequest {
         }
     }
 
-    public final HeartbeatRequestData data;
+	private final HeartbeatRequestData data;
 
     private HeartbeatRequest(HeartbeatRequestData data, short version) {
         super(ApiKeys.HEARTBEAT, version);
         this.data = data;
     }
 
-    public HeartbeatRequest(Struct struct, short version) {
-        super(ApiKeys.HEARTBEAT, version);
-        this.data = new HeartbeatRequestData(struct, version);
-    }
-
     @Override
     public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-        HeartbeatResponseData response = new HeartbeatResponseData();
-        response.setErrorCode(Errors.forException(e).code());
-        short versionId = version();
-        switch (versionId) {
-            case 0:
-                return new HeartbeatResponse(response);
-            case 1:
-            case 2:
-            case 3:
-                response.setThrottleTimeMs(throttleTimeMs);
-                return new HeartbeatResponse(response);
-            default:
-                throw new IllegalArgumentException(String.format("Version %d is not valid. Valid versions for %s are 0 to %d",
-                        versionId, this.getClass().getSimpleName(), ApiKeys.HEARTBEAT.latestVersion()));
-        }
-    }
+		HeartbeatResponseData responseData = new HeartbeatResponseData().
+				setErrorCode(Errors.forException(e).code());
+		if (version() >= 1) {
+			responseData.setThrottleTimeMs(throttleTimeMs);
+		}
+		return new HeartbeatResponse(responseData);
+	}
 
     public static HeartbeatRequest parse(ByteBuffer buffer, short version) {
-        return new HeartbeatRequest(ApiKeys.HEARTBEAT.parseRequest(version, buffer), version);
+		return new HeartbeatRequest(new HeartbeatRequestData(new ByteBufferAccessor(buffer), version), version);
     }
 
-    @Override
-    protected Struct toStruct() {
-        return data.toStruct(version());
-    }
+	@Override
+	public HeartbeatRequestData data() {
+		return data;
+	}
 }

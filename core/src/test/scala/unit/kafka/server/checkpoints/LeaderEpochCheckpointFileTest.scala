@@ -20,13 +20,13 @@ import java.io.File
 
 import kafka.server.epoch.EpochEntry
 import kafka.utils.Logging
-import org.junit.Assert._
-import org.junit.Test
+import org.junit.jupiter.api.Assertions._
+import org.junit.jupiter.api.Test
 
 class LeaderEpochCheckpointFileTest extends Logging {
 
   @Test
-  def shouldPersistAndOverwriteAndReloadFile(): Unit ={
+  def shouldPersistAndOverwriteAndReloadFile(): Unit = {
     val file = File.createTempFile("temp-checkpoint-file", System.nanoTime().toString)
     file.deleteOnExit()
 

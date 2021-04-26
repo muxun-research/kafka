@@ -16,9 +16,9 @@
  */
 package org.apache.kafka.common.acl;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class AclOperationTest {
     private static class AclOperationTestInfo {
@@ -54,37 +54,36 @@ public class AclOperationTest {
     @Test
     public void testIsUnknown() throws Exception {
         for (AclOperationTestInfo info : INFOS) {
-            assertEquals(info.operation + " was supposed to have unknown == " + info.unknown,
-                info.unknown, info.operation.isUnknown());
-        }
+			assertEquals(info.unknown, info.operation.isUnknown(),
+					info.operation + " was supposed to have unknown == " + info.unknown);
+		}
     }
 
     @Test
     public void testCode() throws Exception {
         assertEquals(AclOperation.values().length, INFOS.length);
         for (AclOperationTestInfo info : INFOS) {
-            assertEquals(info.operation + " was supposed to have code == " + info.code,
-                info.code, info.operation.code());
-            assertEquals("AclOperation.fromCode(" + info.code + ") was supposed to be " +  info.operation,
-                info.operation, AclOperation.fromCode((byte) info.code));
-        }
+			assertEquals(info.code, info.operation.code(), info.operation + " was supposed to have code == " + info.code);
+			assertEquals(info.operation, AclOperation.fromCode((byte) info.code),
+					"AclOperation.fromCode(" + info.code + ") was supposed to be " + info.operation);
+		}
         assertEquals(AclOperation.UNKNOWN, AclOperation.fromCode((byte) 120));
     }
 
     @Test
     public void testName() throws Exception {
         for (AclOperationTestInfo info : INFOS) {
-            assertEquals("AclOperation.fromString(" + info.name + ") was supposed to be " +  info.operation,
-                info.operation, AclOperation.fromString(info.name));
-        }
+			assertEquals(info.operation, AclOperation.fromString(info.name),
+					"AclOperation.fromString(" + info.name + ") was supposed to be " + info.operation);
+		}
         assertEquals(AclOperation.UNKNOWN, AclOperation.fromString("something"));
     }
 
-    @Test
-    public void testExhaustive() throws Exception {
-        assertEquals(INFOS.length, AclOperation.values().length);
-        for (int i = 0; i < INFOS.length; i++) {
-            assertEquals(INFOS[i].operation, AclOperation.values()[i]);
-        }
-    }
+	@Test
+	public void testExhaustive() {
+		assertEquals(INFOS.length, AclOperation.values().length);
+		for (int i = 0; i < INFOS.length; i++) {
+			assertEquals(INFOS[i].operation, AclOperation.values()[i]);
+		}
+	}
 }

@@ -19,8 +19,8 @@ package org.apache.kafka.common.requests;
 import org.apache.kafka.common.message.LeaveGroupResponseData;
 import org.apache.kafka.common.message.LeaveGroupResponseData.MemberResponse;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
 import java.util.HashMap;
@@ -48,16 +48,18 @@ import java.util.Objects;
  */
 public class LeaveGroupResponse extends AbstractResponse {
 
-    public final LeaveGroupResponseData data;
+	private final LeaveGroupResponseData data;
 
     public LeaveGroupResponse(LeaveGroupResponseData data) {
-        this.data = data;
+		super(ApiKeys.LEAVE_GROUP);
+		this.data = data;
     }
 
     public LeaveGroupResponse(List<MemberResponse> memberResponses,
                               Errors topLevelError,
                               final int throttleTimeMs,
                               final short version) {
+		super(ApiKeys.LEAVE_GROUP);
         if (version <= 2) {
             // Populate member level error.
             final short errorCode = getError(topLevelError, memberResponses).code();
@@ -75,37 +77,32 @@ public class LeaveGroupResponse extends AbstractResponse {
         }
     }
 
-    public LeaveGroupResponse(Struct struct) {
-        short latestVersion = (short) (LeaveGroupResponseData.SCHEMAS.length - 1);
-        this.data = new LeaveGroupResponseData(struct, latestVersion);
-    }
-
-    public LeaveGroupResponse(Struct struct, short version) {
-        this.data = new LeaveGroupResponseData(struct, version);
-    }
-
     @Override
     public int throttleTimeMs() {
         return data.throttleTimeMs();
-    }
+	}
 
-    public List<MemberResponse> memberResponses() {
-        return data.members();
-    }
+	public List<MemberResponse> memberResponses() {
+		return data.members();
+	}
 
-    public Errors error() {
-        return getError(Errors.forCode(data.errorCode()), data.members());
-    }
+	public Errors error() {
+		return getError(Errors.forCode(data.errorCode()), data.members());
+	}
 
-    private static Errors getError(Errors topLevelError, List<MemberResponse> memberResponses) {
-        if (topLevelError != Errors.NONE) {
-            return topLevelError;
-        } else {
-            for (MemberResponse memberResponse : memberResponses) {
-                Errors memberError = Errors.forCode(memberResponse.errorCode());
-                if (memberError != Errors.NONE) {
-                    return memberError;
-                }
+	public Errors topLevelError() {
+		return Errors.forCode(data.errorCode());
+	}
+
+	private static Errors getError(Errors topLevelError, List<MemberResponse> memberResponses) {
+		if (topLevelError != Errors.NONE) {
+			return topLevelError;
+		} else {
+			for (MemberResponse memberResponse : memberResponses) {
+				Errors memberError = Errors.forCode(memberResponse.errorCode());
+				if (memberError != Errors.NONE) {
+					return memberError;
+				}
             }
             return Errors.NONE;
         }
@@ -113,45 +110,44 @@ public class LeaveGroupResponse extends AbstractResponse {
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-        Map<Errors, Integer> combinedErrorCounts = new HashMap<>();
-        // Top level error.
-        Errors topLevelError = Errors.forCode(data.errorCode());
-        if (topLevelError != Errors.NONE) {
-            updateErrorCounts(combinedErrorCounts, topLevelError);
-        }
+		Map<Errors, Integer> combinedErrorCounts = new HashMap<>();
+		// Top level error.
+		updateErrorCounts(combinedErrorCounts, Errors.forCode(data.errorCode()));
 
-        // Member level error.
-        for (MemberResponse memberResponse : data.members()) {
-            Errors memberError = Errors.forCode(memberResponse.errorCode());
-            if (memberError != Errors.NONE) {
-                updateErrorCounts(combinedErrorCounts, memberError);
-            }
-        }
-        return combinedErrorCounts;
-    }
+		// Member level error.
+		data.members().forEach(memberResponse -> {
+			updateErrorCounts(combinedErrorCounts, Errors.forCode(memberResponse.errorCode()));
+		});
+		return combinedErrorCounts;
+	}
 
-    @Override
-    public Struct toStruct(short version) {
-        return data.toStruct(version);
-    }
+	@Override
+	public LeaveGroupResponseData data() {
+		return data;
+	}
 
-    public static LeaveGroupResponse parse(ByteBuffer buffer, short versionId) {
-        return new LeaveGroupResponse(ApiKeys.LEAVE_GROUP.parseResponse(versionId, buffer), versionId);
-    }
+	public static LeaveGroupResponse parse(ByteBuffer buffer, short version) {
+		return new LeaveGroupResponse(new LeaveGroupResponseData(new ByteBufferAccessor(buffer), version));
+	}
 
-    @Override
-    public boolean shouldClientThrottle(short version) {
-        return version >= 2;
-    }
+	@Override
+	public boolean shouldClientThrottle(short version) {
+		return version >= 2;
+	}
 
-    @Override
-    public boolean equals(Object other) {
-        return other instanceof LeaveGroupResponse &&
-                   ((LeaveGroupResponse) other).data.equals(this.data);
-    }
+	@Override
+	public boolean equals(Object other) {
+		return other instanceof LeaveGroupResponse &&
+				((LeaveGroupResponse) other).data.equals(this.data);
+	}
 
-    @Override
-    public int hashCode() {
-        return Objects.hashCode(data);
-    }
+	@Override
+	public int hashCode() {
+		return Objects.hashCode(data);
+	}
+
+	@Override
+	public String toString() {
+		return data.toString();
+	}
 }

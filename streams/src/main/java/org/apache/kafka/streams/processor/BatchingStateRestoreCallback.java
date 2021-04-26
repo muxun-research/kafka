@@ -30,12 +30,15 @@ import java.util.Collection;
  */
 public interface BatchingStateRestoreCallback extends StateRestoreCallback {
 
-    /**
-     * Called to restore a number of records.  This method is called repeatedly until the {@link StateStore} is fulled
-     * restored.
-     *
-     * @param records the records to restore.
-     */
-    void restoreAll(Collection<KeyValue<byte[], byte[]>> records);
+	/**
+	 * Called to restore a number of records.  This method is called repeatedly until the {@link StateStore} is fulled
+	 * restored.
+	 * @param records the records to restore.
+	 */
+	void restoreAll(Collection<KeyValue<byte[], byte[]>> records);
 
+	@Override
+	default void restore(byte[] key, byte[] value) {
+		throw new UnsupportedOperationException();
+	}
 }

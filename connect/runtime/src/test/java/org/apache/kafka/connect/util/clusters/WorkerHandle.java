@@ -47,43 +47,57 @@ public class WorkerHandle {
      * @return the worker's handle
      */
     public static WorkerHandle start(String name, Map<String, String> workerProperties) {
-        return new WorkerHandle(name, new ConnectDistributed().startConnect(workerProperties));
-    }
+		return new WorkerHandle(name, new ConnectDistributed().startConnect(workerProperties));
+	}
 
-    /**
-     * Stop this worker.
-     */
-    public void stop() {
-        worker.stop();
-    }
+	/**
+	 * Stop this worker.
+	 */
+	public void stop() {
+		worker.stop();
+	}
 
-    /**
-     * Get the workers's name corresponding to this handle.
-     *
-     * @return the worker's name
-     */
-    public String name() {
-        return workerName;
-    }
+	/**
+	 * Determine if this worker is running.
+	 * @return true if the worker is running, or false otherwise
+	 */
+	public boolean isRunning() {
+		return worker.isRunning();
+	}
 
-    /**
-     * Get the workers's url that accepts requests to its REST endpoint.
-     *
-     * @return the worker's url
-     */
-    public URI url() {
-        return worker.restUrl();
-    }
+	/**
+	 * Get the workers's name corresponding to this handle.
+	 * @return the worker's name
+	 */
+	public String name() {
+		return workerName;
+	}
 
-    @Override
-    public String toString() {
-        return "WorkerHandle{" +
-                "workerName='" + workerName + '\'' +
-                "workerURL='" + worker.restUrl() + '\'' +
-                '}';
-    }
+	/**
+	 * Get the workers's url that accepts requests to its REST endpoint.
+	 * @return the worker's url
+	 */
+	public URI url() {
+		return worker.restUrl();
+	}
 
-    @Override
+	/**
+	 * Get the workers's url that accepts requests to its Admin REST endpoint.
+	 * @return the worker's admin url
+	 */
+	public URI adminUrl() {
+		return worker.adminUrl();
+	}
+
+	@Override
+	public String toString() {
+		return "WorkerHandle{" +
+				"workerName='" + workerName + '\'' +
+				"workerURL='" + worker.restUrl() + '\'' +
+				'}';
+	}
+
+	@Override
     public boolean equals(Object o) {
         if (this == o) {
             return true;

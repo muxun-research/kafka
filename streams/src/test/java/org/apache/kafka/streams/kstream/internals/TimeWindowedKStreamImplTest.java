@@ -27,12 +27,13 @@ import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.Grouped;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Materialized;
+import org.apache.kafka.streams.kstream.Named;
 import org.apache.kafka.streams.kstream.TimeWindowedKStream;
 import org.apache.kafka.streams.kstream.TimeWindows;
 import org.apache.kafka.streams.kstream.Windowed;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
 import org.apache.kafka.streams.state.WindowStore;
-import org.apache.kafka.streams.test.ConsumerRecordFactory;
+import org.apache.kafka.streams.TestInputTopic;
 import org.apache.kafka.test.MockAggregator;
 import org.apache.kafka.test.MockInitializer;
 import org.apache.kafka.test.MockProcessorSupplier;
@@ -49,12 +50,11 @@ import static java.time.Duration.ofMillis;
 import static java.time.Instant.ofEpochMilli;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.Assert.assertThrows;
 
 public class TimeWindowedKStreamImplTest {
     private static final String TOPIC = "input";
     private final StreamsBuilder builder = new StreamsBuilder();
-    private final ConsumerRecordFactory<String, String> recordFactory =
-        new ConsumerRecordFactory<>(new StringSerializer(), new StringSerializer());
     private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.String(), Serdes.String());
     private TimeWindowedKStream<String, String> windowedStream;
 
@@ -78,15 +78,15 @@ public class TimeWindowedKStreamImplTest {
             processData(driver);
         }
         assertThat(
-            supplier.theCapturedProcessor().lastValueAndTimestampPerKey
+				supplier.theCapturedProcessor().lastValueAndTimestampPerKey()
                 .get(new Windowed<>("1", new TimeWindow(0L, 500L))),
             equalTo(ValueAndTimestamp.make(2L, 15L)));
         assertThat(
-            supplier.theCapturedProcessor().lastValueAndTimestampPerKey
+				supplier.theCapturedProcessor().lastValueAndTimestampPerKey()
                 .get(new Windowed<>("2", new TimeWindow(500L, 1000L))),
             equalTo(ValueAndTimestamp.make(2L, 550L)));
         assertThat(
-            supplier.theCapturedProcessor().lastValueAndTimestampPerKey
+				supplier.theCapturedProcessor().lastValueAndTimestampPerKey()
                 .get(new Windowed<>("1", new TimeWindow(500L, 1000L))),
             equalTo(ValueAndTimestamp.make(1L, 500L)));
     }
@@ -103,15 +103,15 @@ public class TimeWindowedKStreamImplTest {
             processData(driver);
         }
         assertThat(
-            supplier.theCapturedProcessor().lastValueAndTimestampPerKey
+				supplier.theCapturedProcessor().lastValueAndTimestampPerKey()
                 .get(new Windowed<>("1", new TimeWindow(0L, 500L))),
             equalTo(ValueAndTimestamp.make("1+2", 15L)));
         assertThat(
-            supplier.theCapturedProcessor().lastValueAndTimestampPerKey
+				supplier.theCapturedProcessor().lastValueAndTimestampPerKey()
                 .get(new Windowed<>("2", new TimeWindow(500L, 1000L))),
             equalTo(ValueAndTimestamp.make("10+20", 550L)));
         assertThat(
-            supplier.theCapturedProcessor().lastValueAndTimestampPerKey
+				supplier.theCapturedProcessor().lastValueAndTimestampPerKey()
                 .get(new Windowed<>("1", new TimeWindow(500L, 1000L))),
             equalTo(ValueAndTimestamp.make("3", 500L)));
     }
@@ -131,15 +131,15 @@ public class TimeWindowedKStreamImplTest {
             processData(driver);
         }
         assertThat(
-            supplier.theCapturedProcessor().lastValueAndTimestampPerKey
+				supplier.theCapturedProcessor().lastValueAndTimestampPerKey()
                 .get(new Windowed<>("1", new TimeWindow(0L, 500L))),
             equalTo(ValueAndTimestamp.make("0+1+2", 15L)));
         assertThat(
-            supplier.theCapturedProcessor().lastValueAndTimestampPerKey
+				supplier.theCapturedProcessor().lastValueAndTimestampPerKey()
                 .get(new Windowed<>("2", new TimeWindow(500L, 1000L))),
             equalTo(ValueAndTimestamp.make("0+10+20", 550L)));
         assertThat(
-            supplier.theCapturedProcessor().lastValueAndTimestampPerKey
+				supplier.theCapturedProcessor().lastValueAndTimestampPerKey()
                 .get(new Windowed<>("1", new TimeWindow(500L, 1000L))),
             equalTo(ValueAndTimestamp.make("0+3", 500L)));
     }
@@ -244,71 +244,82 @@ public class TimeWindowedKStreamImplTest {
         }
     }
 
-    @Test(expected = NullPointerException.class)
+	@Test
     public void shouldThrowNullPointerOnAggregateIfInitializerIsNull() {
-        windowedStream.aggregate(null, MockAggregator.TOSTRING_ADDER);
+		assertThrows(NullPointerException.class, () -> windowedStream.aggregate(null, MockAggregator.TOSTRING_ADDER));
     }
 
-    @Test(expected = NullPointerException.class)
+	@Test
     public void shouldThrowNullPointerOnAggregateIfAggregatorIsNull() {
-        windowedStream.aggregate(MockInitializer.STRING_INIT, null);
+		assertThrows(NullPointerException.class, () -> windowedStream.aggregate(MockInitializer.STRING_INIT, null));
     }
 
-    @Test(expected = NullPointerException.class)
+	@Test
     public void shouldThrowNullPointerOnReduceIfReducerIsNull() {
-        windowedStream.reduce(null);
+		assertThrows(NullPointerException.class, () -> windowedStream.reduce(null));
     }
 
-    @Test(expected = NullPointerException.class)
+	@Test
     public void shouldThrowNullPointerOnMaterializedAggregateIfInitializerIsNull() {
-        windowedStream.aggregate(
-            null,
-            MockAggregator.TOSTRING_ADDER,
-            Materialized.as("store"));
+		assertThrows(NullPointerException.class, () -> windowedStream.aggregate(
+				null,
+				MockAggregator.TOSTRING_ADDER,
+				Materialized.as("store")));
     }
 
-    @Test(expected = NullPointerException.class)
+	@Test
     public void shouldThrowNullPointerOnMaterializedAggregateIfAggregatorIsNull() {
-        windowedStream.aggregate(
-            MockInitializer.STRING_INIT,
-            null,
-            Materialized.as("store"));
+		assertThrows(NullPointerException.class, () -> windowedStream.aggregate(
+				MockInitializer.STRING_INIT,
+				null,
+				Materialized.as("store")));
     }
 
-    @SuppressWarnings("unchecked")
-    @Test(expected = NullPointerException.class)
+	@SuppressWarnings("unchecked")
+	@Test
     public void shouldThrowNullPointerOnMaterializedAggregateIfMaterializedIsNull() {
-        windowedStream.aggregate(
-            MockInitializer.STRING_INIT,
-            MockAggregator.TOSTRING_ADDER,
-            (Materialized) null);
-    }
+		assertThrows(NullPointerException.class, () -> windowedStream.aggregate(
+				MockInitializer.STRING_INIT,
+				MockAggregator.TOSTRING_ADDER,
+				(Materialized) null));
+	}
 
-    @Test(expected = NullPointerException.class)
-    public void shouldThrowNullPointerOnMaterializedReduceIfReducerIsNull() {
-        windowedStream.reduce(
-            null,
-            Materialized.as("store"));
-    }
+	@Test
+	public void shouldThrowNullPointerOnMaterializedReduceIfReducerIsNull() {
+		assertThrows(NullPointerException.class, () -> windowedStream.reduce(
+				null,
+				Materialized.as("store")));
+	}
 
-    @Test(expected = NullPointerException.class)
-    public void shouldThrowNullPointerOnMaterializedReduceIfMaterializedIsNull() {
-        windowedStream.reduce(
-            MockReducer.STRING_ADDER,
-            null);
-    }
+	@Test
+	@SuppressWarnings("unchecked")
+	public void shouldThrowNullPointerOnMaterializedReduceIfMaterializedIsNull() {
+		assertThrows(NullPointerException.class, () -> windowedStream.reduce(
+				MockReducer.STRING_ADDER,
+				(Materialized) null));
+	}
 
-    @Test(expected = NullPointerException.class)
-    public void shouldThrowNullPointerOnCountIfMaterializedIsNull() {
-        windowedStream.count(null);
-    }
+	@Test
+	@SuppressWarnings("unchecked")
+	public void shouldThrowNullPointerOnMaterializedReduceIfNamedIsNull() {
+		assertThrows(NullPointerException.class, () -> windowedStream.reduce(
+				MockReducer.STRING_ADDER,
+				(Named) null));
+	}
 
-    private void processData(final TopologyTestDriver driver) {
-        driver.pipeInput(recordFactory.create(TOPIC, "1", "1", 10L));
-        driver.pipeInput(recordFactory.create(TOPIC, "1", "2", 15L));
-        driver.pipeInput(recordFactory.create(TOPIC, "1", "3", 500L));
-        driver.pipeInput(recordFactory.create(TOPIC, "2", "10", 550L));
-        driver.pipeInput(recordFactory.create(TOPIC, "2", "20", 500L));
-    }
+	@Test
+	public void shouldThrowNullPointerOnCountIfMaterializedIsNull() {
+		assertThrows(NullPointerException.class, () -> windowedStream.count((Materialized<String, Long, WindowStore<Bytes, byte[]>>) null));
+	}
+
+	private void processData(final TopologyTestDriver driver) {
+		final TestInputTopic<String, String> inputTopic =
+				driver.createInputTopic(TOPIC, new StringSerializer(), new StringSerializer());
+		inputTopic.pipeInput("1", "1", 10L);
+		inputTopic.pipeInput("1", "2", 15L);
+		inputTopic.pipeInput("1", "3", 500L);
+		inputTopic.pipeInput("2", "10", 550L);
+		inputTopic.pipeInput("2", "20", 500L);
+	}
 
 }

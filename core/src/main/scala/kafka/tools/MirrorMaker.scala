@@ -19,12 +19,11 @@ package kafka.tools
 
 import java.time.Duration
 import java.util
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
+import java.util.concurrent.CountDownLatch
 import java.util.regex.Pattern
 import java.util.{Collections, Properties}
 
-import com.yammer.metrics.core.Gauge
 import kafka.consumer.BaseConsumerRecord
 import kafka.metrics.KafkaMetricsGroup
 import kafka.utils._
@@ -37,45 +36,35 @@ import org.apache.kafka.common.serialization.{ByteArrayDeserializer, ByteArraySe
 import org.apache.kafka.common.utils.{Time, Utils}
 import org.apache.kafka.common.{KafkaException, TopicPartition}
 
-import scala.collection.JavaConverters._
+import scala.annotation.nowarn
+import scala.jdk.CollectionConverters._
 import scala.collection.mutable.HashMap
 import scala.util.control.ControlThrowable
 import scala.util.{Failure, Success, Try}
 
 /**
- * Mirror Maker有一下的结构：
- * - 有N个mirror maker线程，每个mirror maker线程都有一个分离的KafkaConsumer实例
- * - 所有的mirror maker现场共享同一个producer
- * - 每个mirro maker线程会周期性地刷新producer，提交所有的offset
- * @note    对于mirror maker，为了避免数据丢失，以下设置为默认设置：
- *       1. Producer使用下列配置：
- *          acks=all、delivery.timeout.ms=max integer、max.block.ms=max long、max.in.flight.requests.per.connection=1
- *       2. Consumer配置：
+ * The mirror maker has the following architecture:
+ * - There are N mirror maker threads, each of which is equipped with a separate KafkaConsumer instance.
+ * - All the mirror maker threads share one producer.
+ * - Each mirror maker thread periodically flushes the producer and then commits all offsets.
+ * @note For mirror maker, the following settings are set by default to make sure there is no data loss:
+ *       1. use producer with following settings
+ *          acks=all
+ *          delivery.timeout.ms=max integer
+ *          max.block.ms=max long
+ *          max.in.flight.requests.per.connection=1
+ *          2. Consumer Settings
  *          enable.auto.commit=false
- *       3. Mirror Maker设置
+ *          3. Mirror Maker Setting:
  *          abort.on.send.failure=true
  */
 object MirrorMaker extends Logging with KafkaMetricsGroup {
-  /**
-   * mirror maker进程是否处于正在关闭状态
-   */
-  private val isShuttingDown: AtomicBoolean = new AtomicBoolean(false)
-  /**
-   * 记录下mirror maker没有发送成功的消息数量
-   */
-  private val numDroppedMessages: AtomicInteger = new AtomicInteger(0)
-  /**
-   * mirror maker关联的Producer
-   */
+
   private[tools] var producer: MirrorMakerProducer = null
-  // Track the messages not successfully sent by mirror maker.
-  /**
-   * mirror maker线程数
-   */
   private var mirrorMakerThreads: Seq[MirrorMakerThread] = null
-  /**
-   * mirror maker消息处理器
-   */
+  private val isShuttingDown: AtomicBoolean = new AtomicBoolean(false)
+  // Track the messages not successfully sent by mirror maker.
+  private val numDroppedMessages: AtomicInteger = new AtomicInteger(0)
   private var messageHandler: MirrorMakerMessageHandler = null
   private var offsetCommitIntervalMs = 0
   private var abortOnSendFailure: Boolean = true
@@ -86,99 +75,66 @@ object MirrorMaker extends Logging with KafkaMetricsGroup {
   // If a message send failed after retries are exhausted. The offset of the messages will also be removed from
   // the unacked offset list to avoid offset commit being stuck on that offset. In this case, the offset of that
   // message was not really acked, but was skipped. This metric records the number of skipped offsets.
-  newGauge("MirrorMaker-numDroppedMessages",
-    new Gauge[Int] {
-      def value = numDroppedMessages.get()
-    })
+  newGauge("MirrorMaker-numDroppedMessages", () => numDroppedMessages.get())
 
-  /**
-   * Mirror Maker进程启动器
-   * @param args 启动参数
-   */
   def main(args: Array[String]): Unit = {
 
     info("Starting mirror maker")
     try {
-      // 根据启动参数构建内部MirrorMaker操作对象
       val opts = new MirrorMakerOptions(args)
-      // 命令行参数是否包含帮助、版本号信息
       CommandLineUtils.printHelpAndExitIfNeeded(opts, "This tool helps to continuously copy data between two Kafka clusters.")
-      // 校验参数
       opts.checkArgs()
     } catch {
       case ct: ControlThrowable => throw ct
       case t: Throwable =>
         error("Exception when starting mirror maker.", t)
     }
-    // 启动所有的mirror maker线程
+
     mirrorMakerThreads.foreach(_.start())
-    // 启动所有mirror maker线程的等待关闭任务
     mirrorMakerThreads.foreach(_.awaitShutdown())
   }
 
-  /**
-   * 为每个mirror maker线程创建Consumer
-   * @param numStreams              需要创建的mirror maker线程数量
-   * @param consumerConfigProps     Consumer配置属性
-   * @param customRebalanceListener Consumer重分配监听器
-   * @param whitelist               白名单
-   * @return 创建的Consumer列表
-   */
   def createConsumers(numStreams: Int,
                       consumerConfigProps: Properties,
                       customRebalanceListener: Option[ConsumerRebalanceListener],
                       whitelist: Option[String]): Seq[ConsumerWrapper] = {
-    // 默认关闭Consumer的自动提交功能
+    // Disable consumer auto offsets commit to prevent data loss.
     maybeSetDefaultProperty(consumerConfigProps, "enable.auto.commit", "false")
-    // 硬编码key和value的反序列化器
+    // Hardcode the deserializer to ByteArrayDeserializer
     consumerConfigProps.setProperty("key.deserializer", classOf[ByteArrayDeserializer].getName)
     consumerConfigProps.setProperty("value.deserializer", classOf[ByteArrayDeserializer].getName)
-    // 默认的client.id是group.id，默认将client.id设置为groupId-index来避免数据统计冲突
+    // The default client id is group id, we manually set client id to groupId-index to avoid metric collision
     val groupIdString = consumerConfigProps.getProperty("group.id")
     val consumers = (0 until numStreams) map { i =>
-      // 设置client.id并创建KafkaConsumer
       consumerConfigProps.setProperty("client.id", groupIdString + "-" + i.toString)
       new KafkaConsumer[Array[Byte], Array[Byte]](consumerConfigProps)
     }
-    // 白名单不能为空
     whitelist.getOrElse(throw new IllegalArgumentException("White list cannot be empty"))
-    // 将Consumer包装为ConsumerWrapper
     consumers.map(consumer => new ConsumerWrapper(consumer, customRebalanceListener, whitelist))
   }
 
-  /**
-   * 手动提交偏移量
-   * @param consumerWrapper 每个Consumer的包装类
-   */
   def commitOffsets(consumerWrapper: ConsumerWrapper): Unit = {
     if (!exitingOnSendFailure) {
-      // 重试次数
       var retry = 0
-      // 是否需要重试
       var retryNeeded = true
-      // 如果需要进行重试，则进入死循环
       while (retryNeeded) {
         trace("Committing offsets.")
         try {
-          // 手动提交offset
           consumerWrapper.commit()
-          // 记录最近一次成功提交的时间
           lastSuccessfulCommitTime = time.milliseconds
-          // 提交成功，不需要继续重试
           retryNeeded = false
         } catch {
           case e: WakeupException =>
-            // 仅有在关闭consumer时才会调用wakeup()方法
-            // 可以在提交的时候捕获这个异常，可以进行更安全的重试
-            // 也可以通过抛出这个异常来中断循环
+            // we only call wakeup() once to close the consumer,
+            // so if we catch it in commit we can safely retry
+            // and re-throw to break the loop
             commitOffsets(consumerWrapper)
             throw e
 
           case _: TimeoutException =>
-            // 提交超时异常，consumer线程停止工作100ms后继续重试
             Try(consumerWrapper.consumer.listTopics) match {
               case Success(visibleTopics) =>
-                consumerWrapper.offsets.retain((tp, _) => visibleTopics.containsKey(tp.topic))
+                consumerWrapper.offsets --= consumerWrapper.offsets.keySet.filter(tp => !visibleTopics.containsKey(tp.topic))
               case Failure(e) =>
                 warn("Failed to list all authorized topics after committing offsets timed out: ", e)
             }
@@ -190,7 +146,6 @@ object MirrorMaker extends Logging with KafkaMetricsGroup {
             Thread.sleep(100)
 
           case _: CommitFailedException =>
-            // 提交失败异常，不进行重试
             retryNeeded = false
             warn("Failed to commit offsets because the consumer group has rebalanced and assigned partitions to " +
               "another instance. If you see this regularly, it could indicate that you need to either increase " +
@@ -225,117 +180,17 @@ object MirrorMaker extends Logging with KafkaMetricsGroup {
       info("Property %s is overridden to %s - data loss or message reordering is possible.".format(propertyName, propertyValue))
   }
 
-  /**
-   * mirror maker线程
-   * @param consumerWrapper mirror maker关联的consumer
-   * @param threadId        线程ID
-   */
   class MirrorMakerThread(consumerWrapper: ConsumerWrapper,
                           val threadId: Int) extends Thread with Logging with KafkaMetricsGroup {
-    /**
-     * 统一线程名称
-     */
     private val threadName = "mirrormaker-thread-" + threadId
-    /**
-     * 线程关闭栅栏
-     */
     private val shutdownLatch: CountDownLatch = new CountDownLatch(1)
-    /**
-     * 上一次提交的时间戳
-     */
     private var lastOffsetCommitMs = System.currentTimeMillis()
-    /**
-     * mirror maker线程是否正在关闭
-     */
     @volatile private var shuttingDown: Boolean = false
     this.logIdent = "[%s] ".format(threadName)
 
-    /**
-     * 设置线程名称
-     */
     setName(threadName)
 
-    /**
-     * mirror maker线程任务执行
-     */
-    override def run(): Unit = {
-      info(s"Starting mirror maker thread $threadName")
-      try {
-        // 初始化关联的Consumer
-        consumerWrapper.init()
-
-        // 为了兼容旧版本的KafkaConsumer，此处需要两种循环
-        // 现在可以进行简化
-        // 对于新KafkaConsumer，hasData()方法总是返回true，但是轮询时没有拉取到数据，会抛出ConsumerTimeoutException异常
-        // 第一层循环即使在有异常的情况下，消费者线程还会进行轮询
-        // 对于旧消费者，hasData()方法可能返回false，第一层循环也要能保证获取到新的消息
-        // 没有发送失败和mirror maker线程没有关闭的情况下，进行双重循环
-        while (!exitingOnSendFailure && !shuttingDown) {
-          try {
-            while (!exitingOnSendFailure && !shuttingDown) {
-              // 从KafkaConsumer中接收消息
-              val data = consumerWrapper.receive()
-              if (data.value != null) {
-                trace("Sending message with value size %d and offset %d.".format(data.value.length, data.offset))
-              } else {
-                trace("Sending message with null value and offset %d.".format(data.offset))
-              }
-              // 通过MirrorMakerMessageHandler处理从KafkaConsumer中的消息
-              // 处理完成后，是List[ProduceRecord]类型，方便消费者进行发送
-              val records = messageHandler.handle(toBaseConsumerRecord(data))
-              // 遍历所有的Base
-              records.asScala.foreach(producer.send)
-              // 发送到KafkaProducer的缓冲区后，立即调用KakfaProducer#flush()方法，将消息写入新集群，并手动提交offset
-              maybeFlushAndCommitOffsets()
-            }
-          } catch {
-            case _: NoRecordsException =>
-              trace("Caught NoRecordsException, continue iteration.")
-            case _: WakeupException =>
-              trace("Caught WakeupException, continue iteration.")
-            case e: KafkaException if (shuttingDown || exitingOnSendFailure) =>
-              trace(s"Ignoring caught KafkaException during shutdown. sendFailure: $exitingOnSendFailure.", e)
-          }
-          // 可能会抛出异常，也进行一次KakfaProducer#flush()和手动提交offset
-          maybeFlushAndCommitOffsets()
-        }
-      } catch {
-        case t: Throwable =>
-          exitingOnSendFailure = true
-          fatal("Mirror maker thread failure due to ", t)
-      } finally {
-        CoreUtils.swallow({
-          info("Flushing producer.")
-          // 无论成功还是失败，都再次清空一次KafkaProducer的缓冲区，使消息及时送达到代理节点
-          producer.flush()
-
-          // 需要注意的是，如果flush()调用失败，这个commit会被跳过，这确保了不会丢失消息
-          info("Committing consumer offsets.")
-          // 手动提交offset
-          commitOffsets(consumerWrapper)
-        }, this)
-
-        info("Shutting down consumer connectors.")
-        // 调用KafkaConsumer的wakeup()方法，准备关闭KafkaConsumer
-        CoreUtils.swallow(consumerWrapper.wakeup(), this)
-        // 关闭KafkaConsumer
-        CoreUtils.swallow(consumerWrapper.close(), this)
-        // 关闭栅栏-1
-        shutdownLatch.countDown()
-        info("Mirror maker thread stopped")
-        // 如果是意外退出的，需要完全停止mirror maker
-        if (!isShuttingDown.get()) {
-          fatal("Mirror maker thread exited abnormally, stopping the whole mirror maker.")
-          sys.exit(-1)
-        }
-      }
-    }
-
-    /**
-     * 将ConsumerRecord转换为BaseConsumerRecord
-     * @param record 新KafkaConsumer的ConsumerRecord
-     * @return 旧版本客户端的BaseConsumerRecord
-     */
+    @nowarn("cat=deprecation")
     private def toBaseConsumerRecord(record: ConsumerRecord[Array[Byte], Array[Byte]]): BaseConsumerRecord =
       BaseConsumerRecord(record.topic,
         record.partition,
@@ -346,12 +201,63 @@ object MirrorMaker extends Logging with KafkaMetricsGroup {
         record.value,
         record.headers)
 
-    /**
-     * 可能需要调用KafkaProducer#flush()方法及手动提交offset
-     */
+    override def run(): Unit = {
+      info(s"Starting mirror maker thread $threadName")
+      try {
+        consumerWrapper.init()
+
+        // We needed two while loops due to the old consumer semantics, this can now be simplified
+        while (!exitingOnSendFailure && !shuttingDown) {
+          try {
+            while (!exitingOnSendFailure && !shuttingDown) {
+              val data = consumerWrapper.receive()
+              if (data.value != null) {
+                trace("Sending message with value size %d and offset %d.".format(data.value.length, data.offset))
+              } else {
+                trace("Sending message with null value and offset %d.".format(data.offset))
+              }
+              val records = messageHandler.handle(toBaseConsumerRecord(data))
+              records.forEach(producer.send)
+              maybeFlushAndCommitOffsets()
+            }
+          } catch {
+            case _: NoRecordsException =>
+              trace("Caught NoRecordsException, continue iteration.")
+            case _: WakeupException =>
+              trace("Caught WakeupException, continue iteration.")
+            case e: KafkaException if (shuttingDown || exitingOnSendFailure) =>
+              trace(s"Ignoring caught KafkaException during shutdown. sendFailure: $exitingOnSendFailure.", e)
+          }
+          maybeFlushAndCommitOffsets()
+        }
+      } catch {
+        case t: Throwable =>
+          exitingOnSendFailure = true
+          fatal("Mirror maker thread failure due to ", t)
+      } finally {
+        CoreUtils.swallow({
+          info("Flushing producer.")
+          producer.flush()
+
+          // note that this commit is skipped if flush() fails which ensures that we don't lose messages
+          info("Committing consumer offsets.")
+          commitOffsets(consumerWrapper)
+        }, this)
+
+        info("Shutting down consumer connectors.")
+        CoreUtils.swallow(consumerWrapper.wakeup(), this)
+        CoreUtils.swallow(consumerWrapper.close(), this)
+        shutdownLatch.countDown()
+        info("Mirror maker thread stopped")
+        // if it exits accidentally, stop the entire mirror maker
+        if (!isShuttingDown.get()) {
+          fatal("Mirror maker thread exited abnormally, stopping the whole mirror maker.")
+          sys.exit(-1)
+        }
+      }
+    }
+
     def maybeFlushAndCommitOffsets(): Unit = {
-      // 在超过了提交时间间隔的情况
-      // 用KafkaProducer#flush()方法及手动提交offset
       if (System.currentTimeMillis() - lastOffsetCommitMs > offsetCommitIntervalMs) {
         debug("Committing MirrorMaker state.")
         producer.flush()
@@ -396,13 +302,10 @@ object MirrorMaker extends Logging with KafkaMetricsGroup {
 
     def init(): Unit = {
       debug("Initiating consumer")
-      // 创建Consumer再平衡监听器
       val consumerRebalanceListener = new InternalRebalanceListener(this, customRebalanceListener)
-      // 遍历所有的白名单
       whitelistOpt.foreach { whitelist =>
         try {
-          // Consumer使用正则表达式和再平衡监听器订阅对应的主题
-          consumer.subscribe(Pattern.compile(Whitelist(whitelist).regex), consumerRebalanceListener)
+          consumer.subscribe(Pattern.compile(IncludeList(whitelist).regex), consumerRebalanceListener)
         } catch {
           case pse: RuntimeException =>
             error(s"Invalid expression syntax: $whitelist")
@@ -411,23 +314,18 @@ object MirrorMaker extends Logging with KafkaMetricsGroup {
       }
     }
 
-    /**
-     * 轮询获取消息
-     * @return
-     */
     def receive(): ConsumerRecord[Array[Byte], Array[Byte]] = {
-      // 没有消息的时候，调用消费者的轮询方法
       if (recordIter == null || !recordIter.hasNext) {
-        // 轮询1s，获取拉取的消息record集合
-        // 在这种场景下，数据在offsetCommitIntervalMs没有到达，并且offsetCommitIntervalMs要比轮询的等待时间要短
-        // 自上次轮询依赖，所有未提交的offset都会被延迟
-        // 使用1s作为轮询的等待时间来确保offsetCommitIntervalMs如果大于1s，将不会再提交offset中看到延迟
+        // In scenarios where data does not arrive within offsetCommitIntervalMs and
+        // offsetCommitIntervalMs is less than poll's timeout, offset commit will be delayed for any
+        // uncommitted record since last poll. Using one second as poll's timeout ensures that
+        // offsetCommitIntervalMs, of value greater than 1 second, does not see delays in offset
+        // commit.
         recordIter = consumer.poll(Duration.ofSeconds(1L)).iterator
-        // 没有拉取到record则抛出NoRecordsException异常
         if (!recordIter.hasNext)
           throw new NoRecordsException
       }
-      // 获取拉取回来的record内容，进行处理
+
       val record = recordIter.next()
       val tp = new TopicPartition(record.topic, record.partition)
 
@@ -515,10 +413,12 @@ object MirrorMaker extends Logging with KafkaMetricsGroup {
    * If message.handler.args is specified. A constructor that takes in a String as argument must exist.
    */
   trait MirrorMakerMessageHandler {
+    @nowarn("cat=deprecation")
     def handle(record: BaseConsumerRecord): util.List[ProducerRecord[Array[Byte], Array[Byte]]]
   }
 
   private[tools] object defaultMirrorMakerMessageHandler extends MirrorMakerMessageHandler {
+    @nowarn("cat=deprecation")
     override def handle(record: BaseConsumerRecord): util.List[ProducerRecord[Array[Byte], Array[Byte]]] = {
       val timestamp: java.lang.Long = if (record.timestamp == RecordBatch.NO_TIMESTAMP) null else record.timestamp
       Collections.singletonList(new ProducerRecord(record.topic, null, timestamp, record.key, record.value, record.headers))
@@ -618,11 +518,7 @@ object MirrorMaker extends Logging with KafkaMetricsGroup {
       offsetCommitIntervalMs = options.valueOf(offsetCommitIntervalMsOpt).intValue()
       val numStreams = options.valueOf(numStreamsOpt).intValue()
 
-      Runtime.getRuntime.addShutdownHook(new Thread("MirrorMakerShutdownHook") {
-        override def run(): Unit = {
-          cleanShutdown()
-        }
-      })
+      Exit.addShutdownHook("MirrorMakerShutdownHook", cleanShutdown())
 
       // create producer
       val producerProps = Utils.loadProps(options.valueOf(producerConfigOpt))
@@ -676,5 +572,4 @@ object MirrorMaker extends Logging with KafkaMetricsGroup {
       }
     }
   }
-
 }

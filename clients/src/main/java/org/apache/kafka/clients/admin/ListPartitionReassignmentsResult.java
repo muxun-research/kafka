@@ -30,9 +30,9 @@ import java.util.Map;
 public class ListPartitionReassignmentsResult {
     private final KafkaFuture<Map<TopicPartition, PartitionReassignment>> future;
 
-    public ListPartitionReassignmentsResult(KafkaFuture<Map<TopicPartition, PartitionReassignment>> reassignments) {
-        this.future = reassignments;
-    }
+    ListPartitionReassignmentsResult(KafkaFuture<Map<TopicPartition, PartitionReassignment>> reassignments) {
+		this.future = reassignments;
+	}
 
     /**
      * Return a future which yields a map containing each partition's reassignments

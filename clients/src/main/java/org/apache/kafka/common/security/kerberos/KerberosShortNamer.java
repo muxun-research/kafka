@@ -31,9 +31,9 @@ import java.util.regex.Pattern;
 public class KerberosShortNamer {
 
     /**
-     * A pattern for parsing a auth_to_local rule.
-     */
-    private static final Pattern RULE_PARSER = Pattern.compile("((DEFAULT)|((RULE:\\[(\\d*):([^\\]]*)](\\(([^)]*)\\))?(s/([^/]*)/([^/]*)/(g)?)?/?(L)?)))");
+	 * A pattern for parsing a auth_to_local rule.
+	 */
+	private static final Pattern RULE_PARSER = Pattern.compile("((DEFAULT)|((RULE:\\[(\\d*):([^\\]]*)](\\(([^)]*)\\))?(s/([^/]*)/([^/]*)/(g)?)?/?(L|U)?)))");
 
     /* Rules for the translation of the principal name into an operating system name */
     private final List<KerberosRule> principalToLocalRules;
@@ -59,14 +59,15 @@ public class KerberosShortNamer {
             if (matcher.group(2) != null) {
                 result.add(new KerberosRule(defaultRealm));
             } else {
-                result.add(new KerberosRule(defaultRealm,
-                        Integer.parseInt(matcher.group(5)),
-                        matcher.group(6),
-                        matcher.group(8),
-                        matcher.group(10),
-                        matcher.group(11),
-                        "g".equals(matcher.group(12)),
-                        "L".equals(matcher.group(13))));
+				result.add(new KerberosRule(defaultRealm,
+						Integer.parseInt(matcher.group(5)),
+						matcher.group(6),
+						matcher.group(8),
+						matcher.group(10),
+						matcher.group(11),
+						"g".equals(matcher.group(12)),
+						"L".equals(matcher.group(13)),
+						"U".equals(matcher.group(13))));
 
             }
         }

@@ -22,12 +22,11 @@ import org.apache.kafka.streams.KeyValue;
  * The {@code Predicate} interface represents a predicate (boolean-valued function) of a {@link KeyValue} pair.
  * This is a stateless record-by-record operation, i.e, {@link #test(Object, Object)} is invoked individually for each
  * record of a stream.
- *
  * @param <K> key type
  * @param <V> value type
  * @see KStream#filter(Predicate)
  * @see KStream#filterNot(Predicate)
- * @see KStream#branch(Predicate[])
+ * @see BranchedKStream#branch(Predicate)
  * @see KTable#filter(Predicate)
  * @see KTable#filterNot(Predicate)
  */

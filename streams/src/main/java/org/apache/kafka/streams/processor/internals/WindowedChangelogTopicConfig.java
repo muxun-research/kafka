@@ -30,7 +30,7 @@ import java.util.Objects;
 public class WindowedChangelogTopicConfig extends InternalTopicConfig {
     private static final Map<String, String> WINDOWED_STORE_CHANGELOG_TOPIC_DEFAULT_OVERRIDES;
     static {
-        final Map<String, String> tempTopicDefaultOverrides = new HashMap<>();
+        final Map<String, String> tempTopicDefaultOverrides = new HashMap<>(INTERNAL_TOPIC_DEFAULT_OVERRIDES);
         tempTopicDefaultOverrides.put(TopicConfig.CLEANUP_POLICY_CONFIG, TopicConfig.CLEANUP_POLICY_COMPACT + "," + TopicConfig.CLEANUP_POLICY_DELETE);
         WINDOWED_STORE_CHANGELOG_TOPIC_DEFAULT_OVERRIDES = Collections.unmodifiableMap(tempTopicDefaultOverrides);
     }
@@ -48,7 +48,8 @@ public class WindowedChangelogTopicConfig extends InternalTopicConfig {
      * @param additionalRetentionMs - added to retention to allow for clock drift etc
      * @return Properties to be used when creating the topic
      */
-    public Map<String, String> getProperties(final Map<String, String> defaultProperties, final long additionalRetentionMs) {
+	@Override
+	public Map<String, String> getProperties(final Map<String, String> defaultProperties, final long additionalRetentionMs) {
         // internal topic config overridden rule: library overrides < global config overrides < per-topic config overrides
         final Map<String, String> topicConfig = new HashMap<>(WINDOWED_STORE_CHANGELOG_TOPIC_DEFAULT_OVERRIDES);
 
@@ -84,22 +85,24 @@ public class WindowedChangelogTopicConfig extends InternalTopicConfig {
             return false;
         }
         final WindowedChangelogTopicConfig that = (WindowedChangelogTopicConfig) o;
-        return Objects.equals(name, that.name) &&
-                Objects.equals(topicConfigs, that.topicConfigs) &&
-                Objects.equals(retentionMs, that.retentionMs);
+		return Objects.equals(name, that.name) &&
+				Objects.equals(topicConfigs, that.topicConfigs) &&
+				Objects.equals(retentionMs, that.retentionMs) &&
+				Objects.equals(enforceNumberOfPartitions, that.enforceNumberOfPartitions);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(name, topicConfigs, retentionMs);
+		return Objects.hash(name, topicConfigs, retentionMs, enforceNumberOfPartitions);
     }
 
     @Override
     public String toString() {
         return "WindowedChangelogTopicConfig(" +
-                "name=" + name +
-                ", topicConfigs=" + topicConfigs +
-                ", retentionMs=" + retentionMs +
-                ")";
+				"name=" + name +
+				", topicConfigs=" + topicConfigs +
+				", retentionMs=" + retentionMs +
+				", enforceNumberOfPartitions=" + enforceNumberOfPartitions +
+				")";
     }
 }

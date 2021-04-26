@@ -16,14 +16,17 @@
  */
 package org.apache.kafka.common.record;
 
-import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.CorruptRecordException;
+import org.apache.kafka.common.message.LeaderChangeMessage;
+import org.apache.kafka.common.network.TransferableChannel;
 import org.apache.kafka.common.record.MemoryRecords.RecordFilter.BatchRetention;
 import org.apache.kafka.common.utils.AbstractIterator;
+import org.apache.kafka.common.utils.BufferSupplier;
 import org.apache.kafka.common.utils.ByteBufferOutputStream;
 import org.apache.kafka.common.utils.CloseableIterator;
 import org.apache.kafka.common.utils.Time;
+import org.apache.kafka.common.utils.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,75 +35,60 @@ import java.nio.ByteBuffer;
 import java.nio.channels.GatheringByteChannel;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 
 /**
- * 一个Records的基于ByteBuffer的实现，也就是真正存储消息的对象
- * 它仅用于读操作，或者修改已经就位存在的record batches buffer
- * 使用MemoryRecordsBuilder创建一个新buffer
- * 或者使用builder()的变体，也可以创建一个新buffer
+ * A {@link Records} implementation backed by a ByteBuffer. This is used only for reading or
+ * modifying in-place an existing buffer of record batches. To create a new buffer see {@link MemoryRecordsBuilder},
+ * or one of the {@link #builder(ByteBuffer, byte, CompressionType, TimestampType, long)} variants.
  */
 public class MemoryRecords extends AbstractRecords {
     private static final Logger log = LoggerFactory.getLogger(MemoryRecords.class);
     public static final MemoryRecords EMPTY = MemoryRecords.readableRecords(ByteBuffer.allocate(0));
-	/**
-	 * 一个用于存储一条Record的NIO buffer
-	 */
+
     private final ByteBuffer buffer;
-	/**
-	 * MutableRecordBatch迭代器
-	 */
+
     private final Iterable<MutableRecordBatch> batches = this::batchIterator;
 
     private int validBytes = -1;
 
-	/**
-	 * 创建一个可写的MemoryRecords
-	 */
-    private MemoryRecords(ByteBuffer buffer) {
-        Objects.requireNonNull(buffer, "buffer should not be null");
-        this.buffer = buffer;
-    }
-
-    @Override
-    public int sizeInBytes() {
-        return buffer.limit();
+	// Construct a writable memory records
+	private MemoryRecords(ByteBuffer buffer) {
+		Objects.requireNonNull(buffer, "buffer should not be null");
+		this.buffer = buffer;
 	}
 
-	/**
-	 * 写入到channel中
-	 */
 	@Override
-	public long writeTo(GatheringByteChannel channel, long position, int length) throws IOException {
+	public int sizeInBytes() {
+		return buffer.limit();
+	}
+
+	@Override
+	public long writeTo(TransferableChannel channel, long position, int length) throws IOException {
 		if (position > Integer.MAX_VALUE)
 			throw new IllegalArgumentException("position should not be greater than Integer.MAX_VALUE: " + position);
 		if (position + length > buffer.limit())
 			throw new IllegalArgumentException("position+length should not be greater than buffer.limit(), position: "
 					+ position + ", length: " + length + ", buffer.limit(): " + buffer.limit());
 
-		int pos = (int) position;
-		ByteBuffer dup = buffer.duplicate();
-		dup.position(pos);
-		dup.limit(pos + length);
-		return channel.write(dup);
+		return Utils.tryWriteTo(channel, (int) position, length, buffer);
 	}
 
 	/**
-	 * 将所有的记录全部写入到指定的channel中，包括没写满的部分
-	 * @param channel 写入的channel
-	 * @return 写入的字节数
-	 * @throws IOException IO异常
-     */
-    public int writeFullyTo(GatheringByteChannel channel) throws IOException {
-        buffer.mark();
-        int written = 0;
-        while (written < sizeInBytes())
-            written += channel.write(buffer);
-        buffer.reset();
-        return written;
-    }
+	 * Write all records to the given channel (including partial records).
+	 * @param channel The channel to write to
+	 * @return The number of bytes written
+	 * @throws IOException For any IO errors writing to the channel
+	 */
+	public int writeFullyTo(GatheringByteChannel channel) throws IOException {
+		buffer.mark();
+		int written = 0;
+		while (written < sizeInBytes())
+			written += channel.write(buffer);
+		buffer.reset();
+		return written;
+	}
 
     /**
      * The total number of bytes in this message set not including any partial, trailing messages. This
@@ -289,35 +277,10 @@ public class MemoryRecords extends AbstractRecords {
 
     @Override
     public String toString() {
-        StringBuilder builder = new StringBuilder();
-        builder.append('[');
-
-        Iterator<MutableRecordBatch> batchIterator = batches.iterator();
-        while (batchIterator.hasNext()) {
-            RecordBatch batch = batchIterator.next();
-            try (CloseableIterator<Record> recordsIterator = batch.streamingIterator(BufferSupplier.create())) {
-                while (recordsIterator.hasNext()) {
-                    Record record = recordsIterator.next();
-                    appendRecordToStringBuilder(builder, record.toString());
-                    if (recordsIterator.hasNext())
-                        builder.append(", ");
-                }
-            } catch (KafkaException e) {
-                appendRecordToStringBuilder(builder, "CORRUPTED");
-            }
-            if (batchIterator.hasNext())
-                builder.append(", ");
-        }
-        builder.append(']');
-        return builder.toString();
-    }
-
-    private void appendRecordToStringBuilder(StringBuilder builder, String recordAsString) {
-        builder.append('(')
-            .append("record=")
-            .append(recordAsString)
-            .append(")");
-    }
+		return "MemoryRecords(size=" + sizeInBytes() +
+				", buffer=" + buffer +
+				")";
+	}
 
     @Override
     public boolean equals(Object o) {
@@ -662,16 +625,45 @@ public class MemoryRecords extends AbstractRecords {
     }
 
     public static void writeEndTransactionalMarker(ByteBuffer buffer, long initialOffset, long timestamp,
-                                                   int partitionLeaderEpoch, long producerId, short producerEpoch,
-                                                   EndTransactionMarker marker) {
-        boolean isTransactional = true;
-        boolean isControlBatch = true;
-        MemoryRecordsBuilder builder = new MemoryRecordsBuilder(buffer, RecordBatch.CURRENT_MAGIC_VALUE, CompressionType.NONE,
-                TimestampType.CREATE_TIME, initialOffset, timestamp, producerId, producerEpoch,
-                RecordBatch.NO_SEQUENCE, isTransactional, isControlBatch, partitionLeaderEpoch,
-                buffer.capacity());
-        builder.appendEndTxnMarker(timestamp, marker);
-        builder.close();
-    }
+												   int partitionLeaderEpoch, long producerId, short producerEpoch,
+												   EndTransactionMarker marker) {
+		boolean isTransactional = true;
+		MemoryRecordsBuilder builder = new MemoryRecordsBuilder(buffer, RecordBatch.CURRENT_MAGIC_VALUE, CompressionType.NONE,
+				TimestampType.CREATE_TIME, initialOffset, timestamp, producerId, producerEpoch,
+				RecordBatch.NO_SEQUENCE, isTransactional, true, partitionLeaderEpoch,
+				buffer.capacity());
+		builder.appendEndTxnMarker(timestamp, marker);
+		builder.close();
+	}
+
+	public static MemoryRecords withLeaderChangeMessage(
+			long initialOffset,
+			long timestamp,
+			int leaderEpoch,
+			LeaderChangeMessage leaderChangeMessage
+	) {
+		// To avoid calling message toStruct multiple times, we supply a fixed message size
+		// for leader change, as it happens rare and the buffer could still grow if not sufficient in
+		// certain edge cases.
+		ByteBuffer buffer = ByteBuffer.allocate(256);
+		writeLeaderChangeMessage(buffer, initialOffset, timestamp, leaderEpoch, leaderChangeMessage);
+		buffer.flip();
+		return MemoryRecords.readableRecords(buffer);
+	}
+
+	private static void writeLeaderChangeMessage(ByteBuffer buffer,
+												 long initialOffset,
+												 long timestamp,
+												 int leaderEpoch,
+												 LeaderChangeMessage leaderChangeMessage) {
+		MemoryRecordsBuilder builder = new MemoryRecordsBuilder(
+				buffer, RecordBatch.CURRENT_MAGIC_VALUE, CompressionType.NONE,
+				TimestampType.CREATE_TIME, initialOffset, timestamp,
+				RecordBatch.NO_PRODUCER_ID, RecordBatch.NO_PRODUCER_EPOCH, RecordBatch.NO_SEQUENCE,
+				false, true, leaderEpoch, buffer.capacity()
+		);
+		builder.appendLeaderChangeMessage(timestamp, leaderChangeMessage);
+		builder.close();
+	}
 
 }

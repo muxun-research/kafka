@@ -17,11 +17,13 @@
 package org.apache.kafka.streams.kstream.internals;
 
 import java.util.Iterator;
+import java.util.Set;
 
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.kstream.Transformer;
 import org.apache.kafka.streams.kstream.TransformerSupplier;
 import org.apache.kafka.streams.processor.ProcessorContext;
+import org.apache.kafka.streams.state.StoreBuilder;
 import org.easymock.EasyMock;
 import org.easymock.EasyMockSupport;
 import org.junit.Before;
@@ -37,7 +39,8 @@ public class TransformerSupplierAdapterTest extends EasyMockSupport {
 
     private ProcessorContext context;
     private Transformer<String, String, KeyValue<Integer, Integer>> transformer;
-    private TransformerSupplier<String, String, KeyValue<Integer, Integer>> transformerSupplier;
+	private TransformerSupplier<String, String, KeyValue<Integer, Integer>> transformerSupplier;
+	private Set<StoreBuilder<?>> stores;
 
     final String key = "Hello";
     final String value = "World";
@@ -46,7 +49,8 @@ public class TransformerSupplierAdapterTest extends EasyMockSupport {
     public void before() {
         context = mock(ProcessorContext.class);
         transformer = mock(Transformer.class);
-        transformerSupplier = mock(TransformerSupplier.class);
+		transformerSupplier = mock(TransformerSupplier.class);
+		stores = mock(Set.class);
     }
 
     @Test
@@ -64,26 +68,37 @@ public class TransformerSupplierAdapterTest extends EasyMockSupport {
     }
 
     @Test
-    public void shouldCallCloseOfAdapteeTransformer() {
-        EasyMock.expect(transformerSupplier.get()).andReturn(transformer);
-        transformer.close();
-        replayAll();
+	public void shouldCallCloseOfAdapteeTransformer() {
+		EasyMock.expect(transformerSupplier.get()).andReturn(transformer);
+		transformer.close();
+		replayAll();
 
-        final TransformerSupplierAdapter<String, String, Integer, Integer> adapter =
-            new TransformerSupplierAdapter<>(transformerSupplier);
-        final Transformer<String, String, Iterable<KeyValue<Integer, Integer>>> adaptedTransformer = adapter.get();
-        adaptedTransformer.close();
+		final TransformerSupplierAdapter<String, String, Integer, Integer> adapter =
+				new TransformerSupplierAdapter<>(transformerSupplier);
+		final Transformer<String, String, Iterable<KeyValue<Integer, Integer>>> adaptedTransformer = adapter.get();
+		adaptedTransformer.close();
 
-        verifyAll();
-    }
+		verifyAll();
+	}
 
-    @Test
-    public void shouldCallTransformOfAdapteeTransformerAndReturnSingletonIterable() {
-        EasyMock.expect(transformerSupplier.get()).andReturn(transformer);
-        EasyMock.expect(transformer.transform(key, value)).andReturn(KeyValue.pair(0, 1));
-        replayAll();
+	@Test
+	public void shouldCallStoresOfAdapteeTransformerSupplier() {
+		EasyMock.expect(transformerSupplier.stores()).andReturn(stores);
+		replayAll();
 
-        final TransformerSupplierAdapter<String, String, Integer, Integer> adapter =
+		final TransformerSupplierAdapter<String, String, Integer, Integer> adapter =
+				new TransformerSupplierAdapter<>(transformerSupplier);
+		adapter.stores();
+		verifyAll();
+	}
+
+	@Test
+	public void shouldCallTransformOfAdapteeTransformerAndReturnSingletonIterable() {
+		EasyMock.expect(transformerSupplier.get()).andReturn(transformer);
+		EasyMock.expect(transformer.transform(key, value)).andReturn(KeyValue.pair(0, 1));
+		replayAll();
+
+		final TransformerSupplierAdapter<String, String, Integer, Integer> adapter =
             new TransformerSupplierAdapter<>(transformerSupplier);
         final Transformer<String, String, Iterable<KeyValue<Integer, Integer>>> adaptedTransformer = adapter.get();
         final Iterator<KeyValue<Integer, Integer>> iterator = adaptedTransformer.transform(key, value).iterator();

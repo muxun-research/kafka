@@ -17,10 +17,9 @@
 package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.message.DeleteTopicsResponseData;
-import org.apache.kafka.common.message.DeleteTopicsResponseData.DeletableTopicResult;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
 import java.util.HashMap;
@@ -29,29 +28,21 @@ import java.util.Map;
 
 public class DeleteTopicsResponse extends AbstractResponse {
 
-    /**
-     * Possible error codes:
-     *
-     * REQUEST_TIMED_OUT(7)
-     * INVALID_TOPIC_EXCEPTION(17)
-     * TOPIC_AUTHORIZATION_FAILED(29)
-     * NOT_CONTROLLER(41)
-     * INVALID_REQUEST(42)
-     * TOPIC_DELETION_DISABLED(73)
-     */
-    private DeleteTopicsResponseData data;
+	/**
+	 * Possible error codes:
+	 * <p>
+	 * REQUEST_TIMED_OUT(7)
+	 * INVALID_TOPIC_EXCEPTION(17)
+	 * TOPIC_AUTHORIZATION_FAILED(29)
+	 * NOT_CONTROLLER(41)
+	 * INVALID_REQUEST(42)
+	 * TOPIC_DELETION_DISABLED(73)
+	 */
+	private final DeleteTopicsResponseData data;
 
     public DeleteTopicsResponse(DeleteTopicsResponseData data) {
-        this.data = data;
-    }
-
-    public DeleteTopicsResponse(Struct struct, short version) {
-        this.data = new DeleteTopicsResponseData(struct, version);
-    }
-
-    @Override
-    protected Struct toStruct(short version) {
-        return data.toStruct(version);
+		super(ApiKeys.DELETE_TOPICS);
+		this.data = data;
     }
 
     @Override
@@ -59,22 +50,22 @@ public class DeleteTopicsResponse extends AbstractResponse {
         return data.throttleTimeMs();
     }
 
+	@Override
     public DeleteTopicsResponseData data() {
         return data;
     }
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-        HashMap<Errors, Integer> counts = new HashMap<>();
-        for (DeletableTopicResult result : data.responses()) {
-            Errors error = Errors.forCode(result.errorCode());
-            counts.put(error, counts.getOrDefault(error, 0) + 1);
-        }
-        return counts;
-    }
+		HashMap<Errors, Integer> counts = new HashMap<>();
+		data.responses().forEach(result ->
+				updateErrorCounts(counts, Errors.forCode(result.errorCode()))
+		);
+		return counts;
+	}
 
     public static DeleteTopicsResponse parse(ByteBuffer buffer, short version) {
-        return new DeleteTopicsResponse(ApiKeys.DELETE_TOPICS.parseResponse(version, buffer), version);
+		return new DeleteTopicsResponse(new DeleteTopicsResponseData(new ByteBufferAccessor(buffer), version));
     }
 
     @Override

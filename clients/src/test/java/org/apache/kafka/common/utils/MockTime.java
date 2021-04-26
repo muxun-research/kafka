@@ -28,18 +28,18 @@ import java.util.function.Supplier;
  */
 public class MockTime implements Time {
 
-    interface MockTimeListener {
-        void tick();
-    }
+	public interface Listener {
+		void onTimeUpdated();
+	}
 
-    /**
-     * Listeners which are waiting for time changes.
-     */
-    private final CopyOnWriteArrayList<MockTimeListener> listeners = new CopyOnWriteArrayList<>();
+	/**
+	 * Listeners which are waiting for time changes.
+	 */
+	private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
 
-    private final long autoTickMs;
+	private final long autoTickMs;
 
-    // Values from `nanoTime` and `currentTimeMillis` are not comparable, so we store them separately to allow tests
+	// Values from `nanoTime` and `currentTimeMillis` are not comparable, so we store them separately to allow tests
     // using this class to detect bugs where this is incorrectly assumed to be true
     private final AtomicLong timeMs;
     private final AtomicLong highResTimeNs;
@@ -58,9 +58,9 @@ public class MockTime implements Time {
         this.autoTickMs = autoTickMs;
     }
 
-    public void addListener(MockTimeListener listener) {
-        listeners.add(listener);
-    }
+	public void addListener(Listener listener) {
+		listeners.add(listener);
+	}
 
     @Override
     public long milliseconds() {
@@ -88,11 +88,11 @@ public class MockTime implements Time {
 
     @Override
     public void waitObject(Object obj, Supplier<Boolean> condition, long deadlineMs) throws InterruptedException {
-        MockTimeListener listener = () -> {
-            synchronized (obj) {
-                obj.notify();
-            }
-        };
+		Listener listener = () -> {
+			synchronized (obj) {
+				obj.notify();
+			}
+		};
         listeners.add(listener);
         try {
             synchronized (obj) {
@@ -119,8 +119,8 @@ public class MockTime implements Time {
     }
 
     private void tick() {
-        for (MockTimeListener listener : listeners) {
-            listener.tick();
-        }
-    }
+		for (Listener listener : listeners) {
+			listener.onTimeUpdated();
+		}
+	}
 }

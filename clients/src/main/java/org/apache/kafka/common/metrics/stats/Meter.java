@@ -16,13 +16,13 @@
  */
 package org.apache.kafka.common.metrics.stats;
 
-import java.util.Arrays;
-import java.util.List;
-import java.util.concurrent.TimeUnit;
-
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.metrics.CompoundStat;
 import org.apache.kafka.common.metrics.MetricConfig;
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 
 /**
@@ -72,14 +72,24 @@ public class Meter implements CompoundStat {
     public List<NamedMeasurable> stats() {
         return Arrays.asList(
             new NamedMeasurable(totalMetricName, total),
-            new NamedMeasurable(rateMetricName, rate));
-    }
+				new NamedMeasurable(rateMetricName, rate));
+	}
 
-    @Override
-    public void record(MetricConfig config, double value, long timeMs) {
-        rate.record(config, value, timeMs);
-        // Total metrics with Count stat should record 1.0 (as recorded in the count)
-        double totalValue = (rate.stat instanceof WindowedCount) ? 1.0 : value;
-        total.record(config, totalValue, timeMs);
-    }
+	@Override
+	public void record(MetricConfig config, double value, long timeMs) {
+		rate.record(config, value, timeMs);
+		// Total metrics with Count stat should record 1.0 (as recorded in the count)
+		double totalValue = (rate.stat instanceof WindowedCount) ? 1.0 : value;
+		total.record(config, totalValue, timeMs);
+	}
+
+	@Override
+	public String toString() {
+		return "Meter(" +
+				"rate=" + rate +
+				", total=" + total +
+				", rateMetricName=" + rateMetricName +
+				", totalMetricName=" + totalMetricName +
+				')';
+	}
 }

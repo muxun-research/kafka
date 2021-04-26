@@ -20,6 +20,7 @@ import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.TaskId;
+import org.apache.kafka.streams.processor.internals.Task.TaskType;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
 import org.apache.kafka.streams.state.internals.ThreadCache;
 import org.junit.Before;
@@ -39,22 +40,25 @@ public class ProcessorContextTest {
 
     @Before
     public void prepare() {
-        final StreamsConfig streamsConfig = mock(StreamsConfig.class);
-        expect(streamsConfig.getString(StreamsConfig.APPLICATION_ID_CONFIG)).andReturn("add-id");
-        expect(streamsConfig.defaultValueSerde()).andReturn(Serdes.ByteArray());
-        expect(streamsConfig.defaultKeySerde()).andReturn(Serdes.ByteArray());
-        replay(streamsConfig);
+		final StreamsConfig streamsConfig = mock(StreamsConfig.class);
+		expect(streamsConfig.getString(StreamsConfig.APPLICATION_ID_CONFIG)).andReturn("add-id");
+		expect(streamsConfig.defaultValueSerde()).andReturn(Serdes.ByteArray());
+		expect(streamsConfig.defaultKeySerde()).andReturn(Serdes.ByteArray());
 
-        context = new ProcessorContextImpl(
-            mock(TaskId.class),
-            mock(StreamTask.class),
-            streamsConfig,
-            mock(RecordCollector.class),
-            mock(ProcessorStateManager.class),
-            mock(StreamsMetricsImpl.class),
-            mock(ThreadCache.class)
-        );
-    }
+		final ProcessorStateManager stateManager = mock(ProcessorStateManager.class);
+		expect(stateManager.taskType()).andStubReturn(TaskType.ACTIVE);
+
+		replay(streamsConfig, stateManager);
+
+		context = new ProcessorContextImpl(
+				mock(TaskId.class),
+				streamsConfig,
+				stateManager,
+				mock(StreamsMetricsImpl.class),
+				mock(ThreadCache.class)
+		);
+		((InternalProcessorContext) context).transitionToActive(mock(StreamTask.class), null, null);
+	}
 
     @Test
     public void shouldNotAllowToScheduleZeroMillisecondPunctuation() {

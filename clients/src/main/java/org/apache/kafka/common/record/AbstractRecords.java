@@ -62,9 +62,9 @@ public abstract class AbstractRecords implements Records {
     }
 
     @Override
-    public RecordsSend toSend(String destination) {
-        return new DefaultRecordsSend(destination, this);
-    }
+	public DefaultRecordsSend<Records> toSend() {
+		return new DefaultRecordsSend<>(this);
+	}
 
     private Iterator<Record> recordsIterator() {
         return new AbstractIterator<Record>() {

@@ -52,139 +52,168 @@ import java.util.regex.Pattern;
  *   separated by spaces.
  */
 public class OffsetCheckpoint {
-    private static final Logger LOG = LoggerFactory.getLogger(OffsetCheckpoint.class);
+	private static final Logger LOG = LoggerFactory.getLogger(OffsetCheckpoint.class);
 
-    private static final Pattern WHITESPACE_MINIMUM_ONCE = Pattern.compile("\\s+");
+	private static final Pattern WHITESPACE_MINIMUM_ONCE = Pattern.compile("\\s+");
 
-    private static final int VERSION = 0;
+	private static final int VERSION = 0;
 
-    private final File file;
-    private final Object lock;
+	// Use a negative sentinel when we don't know the offset instead of skipping it to distinguish it from dirty state
+	// and use -4 as the -1 sentinel may be taken by some producer errors and -2 in the
+	// subscription means that the state is used by an active task and hence caught-up and
+	// -3 is also used in the subscription.
+	public static final long OFFSET_UNKNOWN = -4L;
 
-    public OffsetCheckpoint(final File file) {
-        this.file = file;
-        lock = new Object();
-    }
+	private final File file;
+	private final Object lock;
 
-    /**
-     * @throws IOException if any file operation fails with an IO exception
-     */
-    public void write(final Map<TopicPartition, Long> offsets) throws IOException {
-        // if there is no offsets, skip writing the file to save disk IOs
-        if (offsets.isEmpty()) {
-            return;
-        }
+	public OffsetCheckpoint(final File file) {
+		this.file = file;
+		lock = new Object();
+	}
 
-        synchronized (lock) {
-            // write to temp file and then swap with the existing file
-            final File temp = new File(file.getAbsolutePath() + ".tmp");
-            LOG.trace("Writing tmp checkpoint file {}", temp.getAbsolutePath());
+	/**
+	 * Write the given offsets to the checkpoint file. All offsets should be non-negative.
+	 * @throws IOException if any file operation fails with an IO exception
+	 */
+	public void write(final Map<TopicPartition, Long> offsets) throws IOException {
+		// if there are no offsets, skip writing the file to save disk IOs
+		// but make sure to delete the existing file if one exists
+		if (offsets.isEmpty()) {
+			Utils.delete(file);
+			return;
+		}
 
-            final FileOutputStream fileOutputStream = new FileOutputStream(temp);
-            try (final BufferedWriter writer = new BufferedWriter(
-                    new OutputStreamWriter(fileOutputStream, StandardCharsets.UTF_8))) {
-                writeIntLine(writer, VERSION);
-                writeIntLine(writer, offsets.size());
+		synchronized (lock) {
+			// write to temp file and then swap with the existing file
+			final File temp = new File(file.getAbsolutePath() + ".tmp");
+			LOG.trace("Writing tmp checkpoint file {}", temp.getAbsolutePath());
 
-                for (final Map.Entry<TopicPartition, Long> entry : offsets.entrySet()) {
-                    writeEntry(writer, entry.getKey(), entry.getValue());
-                }
+			final FileOutputStream fileOutputStream = new FileOutputStream(temp);
+			try (final BufferedWriter writer = new BufferedWriter(
+					new OutputStreamWriter(fileOutputStream, StandardCharsets.UTF_8))) {
+				writeIntLine(writer, VERSION);
+				writeIntLine(writer, offsets.size());
 
-                writer.flush();
-                fileOutputStream.getFD().sync();
-            }
+				for (final Map.Entry<TopicPartition, Long> entry : offsets.entrySet()) {
+					final TopicPartition tp = entry.getKey();
+					final Long offset = entry.getValue();
+					if (isValid(offset)) {
+						writeEntry(writer, tp, offset);
+					} else {
+						LOG.error("Received offset={} to write to checkpoint file for {}", offset, tp);
+						throw new IllegalStateException("Attempted to write a negative offset to the checkpoint file");
+					}
+				}
 
-            LOG.trace("Swapping tmp checkpoint file {} {}", temp.toPath(), file.toPath());
-            Utils.atomicMoveWithFallback(temp.toPath(), file.toPath());
-        }
-    }
+				writer.flush();
+				fileOutputStream.getFD().sync();
+			}
 
-    /**
-     * @throws IOException if file write operations failed with any IO exception
-     */
-    private void writeIntLine(final BufferedWriter writer,
-                              final int number) throws IOException {
-        writer.write(Integer.toString(number));
-        writer.newLine();
-    }
+			LOG.trace("Swapping tmp checkpoint file {} {}", temp.toPath(), file.toPath());
+			Utils.atomicMoveWithFallback(temp.toPath(), file.toPath());
+		}
+	}
 
-    /**
-     * @throws IOException if file write operations failed with any IO exception
-     */
-    private void writeEntry(final BufferedWriter writer,
-                            final TopicPartition part,
-                            final long offset) throws IOException {
-        writer.write(part.topic());
-        writer.write(' ');
-        writer.write(Integer.toString(part.partition()));
-        writer.write(' ');
-        writer.write(Long.toString(offset));
-        writer.newLine();
-    }
+	/**
+	 * @throws IOException if file write operations failed with any IO exception
+	 */
+	static void writeIntLine(final BufferedWriter writer,
+							 final int number) throws IOException {
+		writer.write(Integer.toString(number));
+		writer.newLine();
+	}
+
+	/**
+	 * @throws IOException if file write operations failed with any IO exception
+	 */
+	static void writeEntry(final BufferedWriter writer,
+						   final TopicPartition part,
+						   final long offset) throws IOException {
+		writer.write(part.topic());
+		writer.write(' ');
+		writer.write(Integer.toString(part.partition()));
+		writer.write(' ');
+		writer.write(Long.toString(offset));
+		writer.newLine();
+	}
 
 
-    /**
-     * @throws IOException if any file operation fails with an IO exception
-     * @throws IllegalArgumentException if the offset checkpoint version is unknown
-     */
-    public Map<TopicPartition, Long> read() throws IOException {
-        synchronized (lock) {
-            try (final BufferedReader reader = Files.newBufferedReader(file.toPath())) {
-                final int version = readInt(reader);
-                switch (version) {
-                    case 0:
-                        final int expectedSize = readInt(reader);
-                        final Map<TopicPartition, Long> offsets = new HashMap<>();
-                        String line = reader.readLine();
-                        while (line != null) {
-                            final String[] pieces = WHITESPACE_MINIMUM_ONCE.split(line);
-                            if (pieces.length != 3) {
-                                throw new IOException(
-                                    String.format("Malformed line in offset checkpoint file: '%s'.", line));
-                            }
+	/**
+	 * Reads the offsets from the local checkpoint file, skipping any negative offsets it finds.
+	 *
+	 * @throws IOException if any file operation fails with an IO exception
+	 * @throws IllegalArgumentException if the offset checkpoint version is unknown
+	 */
+	public Map<TopicPartition, Long> read() throws IOException {
+		synchronized (lock) {
+			try (final BufferedReader reader = Files.newBufferedReader(file.toPath())) {
+				final int version = readInt(reader);
+				switch (version) {
+					case 0:
+						int expectedSize = readInt(reader);
+						final Map<TopicPartition, Long> offsets = new HashMap<>();
+						String line = reader.readLine();
+						while (line != null) {
+							final String[] pieces = WHITESPACE_MINIMUM_ONCE.split(line);
+							if (pieces.length != 3) {
+								throw new IOException(
+										String.format("Malformed line in offset checkpoint file: '%s'.", line));
+							}
 
-                            final String topic = pieces[0];
-                            final int partition = Integer.parseInt(pieces[1]);
-                            final long offset = Long.parseLong(pieces[2]);
-                            offsets.put(new TopicPartition(topic, partition), offset);
-                            line = reader.readLine();
-                        }
-                        if (offsets.size() != expectedSize) {
-                            throw new IOException(
-                                String.format("Expected %d entries but found only %d", expectedSize, offsets.size()));
-                        }
-                        return offsets;
+							final String topic = pieces[0];
+							final int partition = Integer.parseInt(pieces[1]);
+							final TopicPartition tp = new TopicPartition(topic, partition);
+							final long offset = Long.parseLong(pieces[2]);
+							if (isValid(offset)) {
+								offsets.put(tp, offset);
+							} else {
+								LOG.warn("Read offset={} from checkpoint file for {}", offset, tp);
+								--expectedSize;
+							}
 
-                    default:
-                        throw new IllegalArgumentException("Unknown offset checkpoint version: " + version);
-                }
-            } catch (final NoSuchFileException e) {
-                return Collections.emptyMap();
-            }
-        }
-    }
+							line = reader.readLine();
+						}
+						if (offsets.size() != expectedSize) {
+							throw new IOException(
+									String.format("Expected %d entries but found only %d", expectedSize, offsets.size()));
+						}
+						return offsets;
 
-    /**
-     * @throws IOException if file read ended prematurely
-     */
-    private int readInt(final BufferedReader reader) throws IOException {
-        final String line = reader.readLine();
-        if (line == null) {
-            throw new EOFException("File ended prematurely.");
-        }
-        return Integer.parseInt(line);
-    }
+					default:
+						throw new IllegalArgumentException("Unknown offset checkpoint version: " + version);
+				}
+			} catch (final NoSuchFileException e) {
+				return Collections.emptyMap();
+			}
+		}
+	}
 
-    /**
-     * @throws IOException if there is any IO exception during delete
-     */
-    public void delete() throws IOException {
-        Files.deleteIfExists(file.toPath());
-    }
+	/**
+	 * @throws IOException if file read ended prematurely
+	 */
+	private int readInt(final BufferedReader reader) throws IOException {
+		final String line = reader.readLine();
+		if (line == null) {
+			throw new EOFException("File ended prematurely.");
+		}
+		return Integer.parseInt(line);
+	}
 
-    @Override
-    public String toString() {
-        return file.getAbsolutePath();
-    }
+	/**
+	 * @throws IOException if there is any IO exception during delete
+	 */
+	public void delete() throws IOException {
+		Files.deleteIfExists(file.toPath());
+	}
+
+	@Override
+	public String toString() {
+		return file.getAbsolutePath();
+	}
+
+	private boolean isValid(final long offset) {
+		return offset >= 0L || offset == OFFSET_UNKNOWN;
+	}
 
 }

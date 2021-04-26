@@ -30,10 +30,9 @@ import java.util.Collection;
 public class CreateAclsOptions extends AbstractOptions<CreateAclsOptions> {
 
     /**
-     * Set the request timeout in milliseconds for this operation or {@code null} if the default request timeout for the
-     * AdminClient should be used.
-     *
-     */
+	 * Set the timeout in milliseconds for this operation or {@code null} if the default api timeout for the
+	 * AdminClient should be used.
+	 */
     // This method is retained to keep binary compatibility with 0.11
     public CreateAclsOptions timeoutMs(Integer timeoutMs) {
         this.timeoutMs = timeoutMs;

@@ -24,8 +24,9 @@ from kafkatest.services.kafka import KafkaService, config_property
 from kafkatest.services.connect import ConnectDistributedService, VerifiableSource, VerifiableSink, ConnectRestError, MockSink, MockSource
 from kafkatest.services.console_consumer import ConsoleConsumer
 from kafkatest.services.security.security_config import SecurityConfig
-from kafkatest.version import DEV_BRANCH, LATEST_0_11_0, LATEST_0_10_2, LATEST_0_10_1, LATEST_0_10_0, LATEST_0_9, LATEST_0_8_2, KafkaVersion
+from kafkatest.version import DEV_BRANCH, LATEST_2_3, LATEST_2_2, LATEST_2_1, LATEST_2_0, LATEST_1_1, LATEST_1_0, LATEST_0_11_0, LATEST_0_10_2, LATEST_0_10_1, LATEST_0_10_0, LATEST_0_9, LATEST_0_8_2, KafkaVersion
 
+from functools import reduce
 from collections import Counter, namedtuple
 import itertools
 import json
@@ -54,7 +55,7 @@ class ConnectDistributedTest(Test):
     STATUS_REPLICATION_FACTOR = "1"
     STATUS_PARTITIONS = "1"
     SCHEDULED_REBALANCE_MAX_DELAY_MS = "60000"
-    CONNECT_PROTOCOL="compatible"
+    CONNECT_PROTOCOL="sessioned"
 
     # Since tasks can be assigned to any node and we're testing with files, we need to make sure the content is the same
     # across all nodes.
@@ -157,7 +158,7 @@ class ConnectDistributedTest(Test):
         return self._task_has_state(task_id, status, 'RUNNING')
 
     @cluster(num_nodes=5)
-    @matrix(connect_protocol=['compatible', 'eager'])
+    @matrix(connect_protocol=['sessioned', 'compatible', 'eager'])
     def test_restart_failed_connector(self, connect_protocol):
         self.CONNECT_PROTOCOL = connect_protocol
         self.setup_services()
@@ -176,7 +177,7 @@ class ConnectDistributedTest(Test):
                    err_msg="Failed to see connector transition to the RUNNING state")
 
     @cluster(num_nodes=5)
-    @matrix(connector_type=['source', 'sink'], connect_protocol=['compatible', 'eager'])
+    @matrix(connector_type=['source', 'sink'], connect_protocol=['sessioned', 'compatible', 'eager'])
     def test_restart_failed_task(self, connector_type, connect_protocol):
         self.CONNECT_PROTOCOL = connect_protocol
         self.setup_services()
@@ -201,7 +202,7 @@ class ConnectDistributedTest(Test):
                    err_msg="Failed to see task transition to the RUNNING state")
 
     @cluster(num_nodes=5)
-    @matrix(connect_protocol=['compatible', 'eager'])
+    @matrix(connect_protocol=['sessioned', 'compatible', 'eager'])
     def test_pause_and_resume_source(self, connect_protocol):
         """
         Verify that source connectors stop producing records when paused and begin again after
@@ -242,7 +243,7 @@ class ConnectDistributedTest(Test):
                    err_msg="Failed to produce messages after resuming source connector")
 
     @cluster(num_nodes=5)
-    @matrix(connect_protocol=['compatible', 'eager'])
+    @matrix(connect_protocol=['sessioned', 'compatible', 'eager'])
     def test_pause_and_resume_sink(self, connect_protocol):
         """
         Verify that sink connectors stop consuming records when paused and begin again after
@@ -290,7 +291,7 @@ class ConnectDistributedTest(Test):
                    err_msg="Failed to consume messages after resuming sink connector")
 
     @cluster(num_nodes=5)
-    @matrix(connect_protocol=['compatible', 'eager'])
+    @matrix(connect_protocol=['sessioned', 'compatible', 'eager'])
     def test_pause_state_persistent(self, connect_protocol):
         """
         Verify that paused state is preserved after a cluster restart.
@@ -311,18 +312,13 @@ class ConnectDistributedTest(Test):
 
         self.cc.restart()
 
-        if connect_protocol == 'compatible':
-            timeout_sec = 120
-        else:
-            timeout_sec = 30
-
         # we should still be paused after restarting
         for node in self.cc.nodes:
-            wait_until(lambda: self.is_paused(self.source, node), timeout_sec=timeout_sec,
+            wait_until(lambda: self.is_paused(self.source, node), timeout_sec=120,
                        err_msg="Failed to see connector startup in PAUSED state")
 
     @cluster(num_nodes=6)
-    @matrix(security_protocol=[SecurityConfig.PLAINTEXT, SecurityConfig.SASL_SSL], connect_protocol=['compatible', 'eager'])
+    @matrix(security_protocol=[SecurityConfig.PLAINTEXT, SecurityConfig.SASL_SSL], connect_protocol=['sessioned', 'compatible', 'eager'])
     def test_file_source_and_sink(self, security_protocol, connect_protocol):
         """
         Tests that a basic file connector works across clean rolling bounces. This validates that the connector is
@@ -350,17 +346,12 @@ class ConnectDistributedTest(Test):
         # only processing new data.
         self.cc.restart()
 
-        if connect_protocol == 'compatible':
-            timeout_sec = 150
-        else:
-            timeout_sec = 70
-
         for node in self.cc.nodes:
             node.account.ssh("echo -e -n " + repr(self.SECOND_INPUTS) + " >> " + self.INPUT_FILE)
-        wait_until(lambda: self._validate_file_output(self.FIRST_INPUT_LIST + self.SECOND_INPUT_LIST), timeout_sec=timeout_sec, err_msg="Sink output file never converged to the same state as the input file")
+        wait_until(lambda: self._validate_file_output(self.FIRST_INPUT_LIST + self.SECOND_INPUT_LIST), timeout_sec=150, err_msg="Sink output file never converged to the same state as the input file")
 
     @cluster(num_nodes=6)
-    @matrix(clean=[True, False], connect_protocol=['compatible', 'eager'])
+    @matrix(clean=[True, False], connect_protocol=['sessioned', 'compatible', 'eager'])
     def test_bounce(self, clean, connect_protocol):
         """
         Validates that source and sink tasks that run continuously and produce a predictable sequence of messages
@@ -397,8 +388,22 @@ class ConnectDistributedTest(Test):
                 # through the test.
                 time.sleep(15)
 
+        # Wait at least scheduled.rebalance.max.delay.ms to expire and rebalance
+        time.sleep(60)
 
+        # Allow the connectors to startup, recover, and exit cleanly before
+        # ending the test. It's possible for the source connector to make
+        # uncommitted progress, and for the sink connector to read messages that
+        # have not been committed yet, and fail a later assertion.
+        wait_until(lambda: self.is_running(self.source), timeout_sec=30,
+                   err_msg="Failed to see connector transition to the RUNNING state")
+        time.sleep(15)
         self.source.stop()
+        # Ensure that the sink connector has an opportunity to read all
+        # committed messages from the source connector.
+        wait_until(lambda: self.is_running(self.sink), timeout_sec=30,
+                   err_msg="Failed to see connector transition to the RUNNING state")
+        time.sleep(15)
         self.sink.stop()
         self.cc.stop()
 
@@ -416,11 +421,11 @@ class ConnectDistributedTest(Test):
             src_seqnos = [msg['seqno'] for msg in src_messages if msg['task'] == task]
             # Every seqno up to the largest one we ever saw should appear. Each seqno should only appear once because clean
             # bouncing should commit on rebalance.
-            src_seqno_max = max(src_seqnos)
+            src_seqno_max = max(src_seqnos) if len(src_seqnos) else 0
             self.logger.debug("Max source seqno: %d", src_seqno_max)
             src_seqno_counts = Counter(src_seqnos)
             missing_src_seqnos = sorted(set(range(src_seqno_max)).difference(set(src_seqnos)))
-            duplicate_src_seqnos = sorted([seqno for seqno,count in src_seqno_counts.iteritems() if count > 1])
+            duplicate_src_seqnos = sorted(seqno for seqno,count in src_seqno_counts.items() if count > 1)
 
             if missing_src_seqnos:
                 self.logger.error("Missing source sequence numbers for task " + str(task))
@@ -436,11 +441,11 @@ class ConnectDistributedTest(Test):
             sink_seqnos = [msg['seqno'] for msg in sink_messages if msg['task'] == task]
             # Every seqno up to the largest one we ever saw should appear. Each seqno should only appear once because
             # clean bouncing should commit on rebalance.
-            sink_seqno_max = max(sink_seqnos)
+            sink_seqno_max = max(sink_seqnos) if len(sink_seqnos) else 0
             self.logger.debug("Max sink seqno: %d", sink_seqno_max)
             sink_seqno_counts = Counter(sink_seqnos)
             missing_sink_seqnos = sorted(set(range(sink_seqno_max)).difference(set(sink_seqnos)))
-            duplicate_sink_seqnos = sorted([seqno for seqno,count in sink_seqno_counts.iteritems() if count > 1])
+            duplicate_sink_seqnos = sorted(seqno for seqno,count in iter(sink_seqno_counts.items()) if count > 1)
 
             if missing_sink_seqnos:
                 self.logger.error("Missing sink sequence numbers for task " + str(task))
@@ -470,7 +475,7 @@ class ConnectDistributedTest(Test):
         assert success, "Found validation errors:\n" + "\n  ".join(errors)
 
     @cluster(num_nodes=6)
-    @matrix(connect_protocol=['compatible', 'eager'])
+    @matrix(connect_protocol=['sessioned', 'compatible', 'eager'])
     def test_transformations(self, connect_protocol):
         self.CONNECT_PROTOCOL = connect_protocol
         self.setup_services(timestamp_type='CreateTime')
@@ -527,12 +532,29 @@ class ConnectDistributedTest(Test):
             assert obj['payload'][ts_fieldname] == ts
 
     @cluster(num_nodes=5)
+    @parametrize(broker_version=str(DEV_BRANCH), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='sessioned')
+    @parametrize(broker_version=str(LATEST_0_11_0), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='sessioned')
+    @parametrize(broker_version=str(LATEST_0_10_2), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='sessioned')
+    @parametrize(broker_version=str(LATEST_0_10_1), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='sessioned')
+    @parametrize(broker_version=str(LATEST_0_10_0), auto_create_topics=True, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='sessioned')
     @parametrize(broker_version=str(DEV_BRANCH), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='compatible')
+    @parametrize(broker_version=str(LATEST_2_3), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='compatible')
+    @parametrize(broker_version=str(LATEST_2_2), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='compatible')
+    @parametrize(broker_version=str(LATEST_2_1), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='compatible')
+    @parametrize(broker_version=str(LATEST_2_0), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='compatible')
+    @parametrize(broker_version=str(LATEST_1_1), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='compatible')
+    @parametrize(broker_version=str(LATEST_1_0), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='compatible')
     @parametrize(broker_version=str(LATEST_0_11_0), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='compatible')
     @parametrize(broker_version=str(LATEST_0_10_2), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='compatible')
     @parametrize(broker_version=str(LATEST_0_10_1), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='compatible')
     @parametrize(broker_version=str(LATEST_0_10_0), auto_create_topics=True, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='compatible')
     @parametrize(broker_version=str(DEV_BRANCH), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='eager')
+    @parametrize(broker_version=str(LATEST_2_3), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='eager')
+    @parametrize(broker_version=str(LATEST_2_2), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='eager')
+    @parametrize(broker_version=str(LATEST_2_1), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='eager')
+    @parametrize(broker_version=str(LATEST_2_0), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='eager')
+    @parametrize(broker_version=str(LATEST_1_1), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='eager')
+    @parametrize(broker_version=str(LATEST_1_0), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='eager')
     @parametrize(broker_version=str(LATEST_0_11_0), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='eager')
     @parametrize(broker_version=str(LATEST_0_10_2), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='eager')
     @parametrize(broker_version=str(LATEST_0_10_1), auto_create_topics=False, security_protocol=SecurityConfig.PLAINTEXT, connect_protocol='eager')

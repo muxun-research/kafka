@@ -26,7 +26,7 @@ import org.apache.kafka.streams.TopologyTestDriver;
 import org.apache.kafka.streams.TopologyWrapper;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KTable;
-import org.apache.kafka.streams.test.ConsumerRecordFactory;
+import org.apache.kafka.streams.TestInputTopic;
 import org.apache.kafka.test.MockProcessor;
 import org.apache.kafka.test.MockProcessorSupplier;
 import org.apache.kafka.test.MockValueJoiner;
@@ -35,6 +35,8 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
@@ -45,36 +47,38 @@ import java.util.Set;
 import static org.junit.Assert.assertEquals;
 
 public class KStreamKTableLeftJoinTest {
-    private final static KeyValueTimestamp[] EMPTY = new KeyValueTimestamp[0];
+	private final static KeyValueTimestamp[] EMPTY = new KeyValueTimestamp[0];
 
-    private final String streamTopic = "streamTopic";
-    private final String tableTopic = "tableTopic";
-    private final ConsumerRecordFactory<Integer, String> recordFactory =
-        new ConsumerRecordFactory<>(new IntegerSerializer(), new StringSerializer(), 0L);
-    private final int[] expectedKeys = {0, 1, 2, 3};
+	private final String streamTopic = "streamTopic";
+	private final String tableTopic = "tableTopic";
+	private TestInputTopic<Integer, String> inputStreamTopic;
+	private TestInputTopic<Integer, String> inputTableTopic;
+	private final int[] expectedKeys = {0, 1, 2, 3};
 
-    private TopologyTestDriver driver;
-    private MockProcessor<Integer, String> processor;
-    private StreamsBuilder builder;
+	private TopologyTestDriver driver;
+	private MockProcessor<Integer, String> processor;
+	private StreamsBuilder builder;
 
-    @Before
-    public void setUp() {
-        builder = new StreamsBuilder();
+	@Before
+	public void setUp() {
+		builder = new StreamsBuilder();
 
         final KStream<Integer, String> stream;
-        final KTable<Integer, String> table;
+		final KTable<Integer, String> table;
 
-        final MockProcessorSupplier<Integer, String> supplier = new MockProcessorSupplier<>();
-        final Consumed<Integer, String> consumed = Consumed.with(Serdes.Integer(), Serdes.String());
-        stream = builder.stream(streamTopic, consumed);
-        table = builder.table(tableTopic, consumed);
-        stream.leftJoin(table, MockValueJoiner.TOSTRING_JOINER).process(supplier);
+		final MockProcessorSupplier<Integer, String> supplier = new MockProcessorSupplier<>();
+		final Consumed<Integer, String> consumed = Consumed.with(Serdes.Integer(), Serdes.String());
+		stream = builder.stream(streamTopic, consumed);
+		table = builder.table(tableTopic, consumed);
+		stream.leftJoin(table, MockValueJoiner.TOSTRING_JOINER).process(supplier);
 
-        final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.Integer(), Serdes.String());
-        driver = new TopologyTestDriver(builder.build(), props);
+		final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.Integer(), Serdes.String());
+		driver = new TopologyTestDriver(builder.build(), props);
+		inputStreamTopic = driver.createInputTopic(streamTopic, new IntegerSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+		inputTableTopic = driver.createInputTopic(tableTopic, new IntegerSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
 
-        processor = supplier.theCapturedProcessor();
-    }
+		processor = supplier.theCapturedProcessor();
+	}
 
     @After
     public void cleanup() {
@@ -83,24 +87,23 @@ public class KStreamKTableLeftJoinTest {
 
     private void pushToStream(final int messageCount, final String valuePrefix) {
         for (int i = 0; i < messageCount; i++) {
-            driver.pipeInput(recordFactory.create(streamTopic, expectedKeys[i], valuePrefix + expectedKeys[i], i));
+			inputStreamTopic.pipeInput(expectedKeys[i], valuePrefix + expectedKeys[i], i);
         }
     }
 
     private void pushToTable(final int messageCount, final String valuePrefix) {
         final Random r = new Random(System.currentTimeMillis());
         for (int i = 0; i < messageCount; i++) {
-            driver.pipeInput(recordFactory.create(
-                tableTopic,
-                expectedKeys[i],
-                valuePrefix + expectedKeys[i],
-                r.nextInt(Integer.MAX_VALUE)));
+			inputTableTopic.pipeInput(
+					expectedKeys[i],
+					valuePrefix + expectedKeys[i],
+					r.nextInt(Integer.MAX_VALUE));
         }
     }
 
     private void pushNullValueToTable(final int messageCount) {
         for (int i = 0; i < messageCount; i++) {
-            driver.pipeInput(recordFactory.create(tableTopic, expectedKeys[i], null));
+			inputTableTopic.pipeInput(expectedKeys[i], null);
         }
     }
 

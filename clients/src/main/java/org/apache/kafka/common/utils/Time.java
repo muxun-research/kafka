@@ -60,17 +60,15 @@ public interface Time {
     void sleep(long ms);
 
     /**
-     * Wait for a condition using the monitor of a given object. This avoids the implicit
-     * dependence on system time when calling {@link Object#wait()}.
-     *
-     * @param obj The object that will be waited with {@link Object#wait()}. Note that it is the responsibility
-     *      of the caller to call notify on this object when the condition is satisfied.
-     * @param condition The condition we are awaiting
-     * @param timeoutMs How long to wait in milliseconds
-     *
-     * @throws org.apache.kafka.common.errors.TimeoutException if the timeout expires before the condition is satisfied
-     */
-    void waitObject(Object obj, Supplier<Boolean> condition, long timeoutMs) throws InterruptedException;
+	 * Wait for a condition using the monitor of a given object. This avoids the implicit
+	 * dependence on system time when calling {@link Object#wait()}.
+	 * @param obj        The object that will be waited with {@link Object#wait()}. Note that it is the responsibility
+	 *                   of the caller to call notify on this object when the condition is satisfied.
+	 * @param condition  The condition we are awaiting
+	 * @param deadlineMs The deadline timestamp at which to raise a timeout error
+	 * @throws org.apache.kafka.common.errors.TimeoutException if the timeout expires before the condition is satisfied
+	 */
+	void waitObject(Object obj, Supplier<Boolean> condition, long deadlineMs) throws InterruptedException;
 
     /**
      * Get a timer which is bound to this time instance and expires after the given timeout

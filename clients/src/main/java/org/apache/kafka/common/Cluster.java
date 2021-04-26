@@ -41,19 +41,12 @@ public final class Cluster {
 	private final Set<String> internalTopics;
 	private final Node controller;
 	private final Map<TopicPartition, PartitionInfo> partitionsByTopicPartition;
-	/**
-	 * key: topicName
-	 * value: topic的partition列表
-	 */
 	private final Map<String, List<PartitionInfo>> partitionsByTopic;
-	/**
-	 * key: topicName
-	 * value: topic可用的partition集合
-	 */
 	private final Map<String, List<PartitionInfo>> availablePartitionsByTopic;
 	private final Map<Integer, List<PartitionInfo>> partitionsByNode;
 	private final Map<Integer, Node> nodesById;
 	private final ClusterResource clusterResource;
+	private final Map<String, Uuid> topicIds;
 
 	/**
 	 * Create a new cluster with the given id, nodes and partitions
@@ -65,7 +58,7 @@ public final class Cluster {
 				   Collection<PartitionInfo> partitions,
 				   Set<String> unauthorizedTopics,
 				   Set<String> internalTopics) {
-		this(clusterId, false, nodes, partitions, unauthorizedTopics, Collections.emptySet(), internalTopics, null);
+		this(clusterId, false, nodes, partitions, unauthorizedTopics, Collections.emptySet(), internalTopics, null, Collections.emptyMap());
 	}
 
 	/**
@@ -79,7 +72,7 @@ public final class Cluster {
 				   Set<String> unauthorizedTopics,
 				   Set<String> internalTopics,
 				   Node controller) {
-		this(clusterId, false, nodes, partitions, unauthorizedTopics, Collections.emptySet(), internalTopics, controller);
+		this(clusterId, false, nodes, partitions, unauthorizedTopics, Collections.emptySet(), internalTopics, controller, Collections.emptyMap());
 	}
 
 	/**
@@ -94,7 +87,23 @@ public final class Cluster {
 				   Set<String> invalidTopics,
 				   Set<String> internalTopics,
 				   Node controller) {
-		this(clusterId, false, nodes, partitions, unauthorizedTopics, invalidTopics, internalTopics, controller);
+		this(clusterId, false, nodes, partitions, unauthorizedTopics, invalidTopics, internalTopics, controller, Collections.emptyMap());
+	}
+
+	/**
+	 * Create a new cluster with the given id, nodes, partitions and topicIds
+	 * @param nodes      The nodes in the cluster
+	 * @param partitions Information about a subset of the topic-partitions this cluster hosts
+	 */
+	public Cluster(String clusterId,
+				   Collection<Node> nodes,
+				   Collection<PartitionInfo> partitions,
+				   Set<String> unauthorizedTopics,
+				   Set<String> invalidTopics,
+				   Set<String> internalTopics,
+				   Node controller,
+				   Map<String, Uuid> topicIds) {
+		this(clusterId, false, nodes, partitions, unauthorizedTopics, invalidTopics, internalTopics, controller, topicIds);
 	}
 
 	private Cluster(String clusterId,
@@ -104,7 +113,8 @@ public final class Cluster {
 					Set<String> unauthorizedTopics,
 					Set<String> invalidTopics,
 					Set<String> internalTopics,
-					Node controller) {
+					Node controller,
+					Map<String, Uuid> topicIds) {
 		this.isBootstrapConfigured = isBootstrapConfigured;
 		this.clusterResource = new ClusterResource(clusterId);
 		// make a randomized, unmodifiable copy of the nodes
@@ -130,18 +140,15 @@ public final class Cluster {
 		Map<String, List<PartitionInfo>> tmpPartitionsByTopic = new HashMap<>();
 		for (PartitionInfo p : partitions) {
 			tmpPartitionsByTopicPartition.put(new TopicPartition(p.topic(), p.partition()), p);
-			List<PartitionInfo> partitionsForTopic = tmpPartitionsByTopic.get(p.topic());
-			if (partitionsForTopic == null) {
-				partitionsForTopic = new ArrayList<>();
-				tmpPartitionsByTopic.put(p.topic(), partitionsForTopic);
-			}
-			partitionsForTopic.add(p);
-			if (p.leader() != null) {
-				// The broker guarantees that if a partition has a non-null leader, it is one of the brokers returned
-				// in the metadata response
-				List<PartitionInfo> partitionsForNode = Objects.requireNonNull(tmpPartitionsByNode.get(p.leader().id()));
-				partitionsForNode.add(p);
-			}
+			tmpPartitionsByTopic.computeIfAbsent(p.topic(), topic -> new ArrayList<>()).add(p);
+
+			// The leader may not be known
+			if (p.leader() == null || p.leader().isEmpty())
+				continue;
+
+			// If it is known, its node information should be available
+			List<PartitionInfo> partitionsForNode = Objects.requireNonNull(tmpPartitionsByNode.get(p.leader().id()));
+			partitionsForNode.add(p);
 		}
 
 		// Update the values of `tmpPartitionsByNode` to contain unmodifiable lists
@@ -176,6 +183,7 @@ public final class Cluster {
 		this.partitionsByTopic = Collections.unmodifiableMap(tmpPartitionsByTopic);
 		this.availablePartitionsByTopic = Collections.unmodifiableMap(tmpAvailablePartitionsByTopic);
 		this.partitionsByNode = Collections.unmodifiableMap(tmpPartitionsByNode);
+		this.topicIds = Collections.unmodifiableMap(topicIds);
 
 		this.unauthorizedTopics = Collections.unmodifiableSet(unauthorizedTopics);
 		this.invalidTopics = Collections.unmodifiableSet(invalidTopics);
@@ -202,7 +210,7 @@ public final class Cluster {
 		for (InetSocketAddress address : addresses)
 			nodes.add(new Node(nodeId--, address.getHostString(), address.getPort()));
 		return new Cluster(null, true, nodes, new ArrayList<>(0),
-				Collections.emptySet(), Collections.emptySet(), Collections.emptySet(), null);
+				Collections.emptySet(), Collections.emptySet(), Collections.emptySet(), null, Collections.emptyMap());
 	}
 
 	/**
@@ -224,9 +232,9 @@ public final class Cluster {
 	}
 
 	/**
-	 * Get the node by the node id (or null if no such node exists)
+	 * Get the node by the node id (or null if the node is not online or does not exist)
 	 * @param id The id of the node
-	 * @return The node, or null if no such node exists
+	 * @return The node, or null if the node is not online or does not exist
 	 */
 	public Node nodeById(int id) {
 		return this.nodesById.get(id);
@@ -261,56 +269,54 @@ public final class Cluster {
 	}
 
 	/**
-	 * 获取指定的分区的元数据
-	 * @param topicPartition 指定的topic分区
-	 * @return 指定topic分区的元数据，如果没有此分区，返回null
+	 * Get the metadata for the specified partition
+	 * @param topicPartition The topic and partition to fetch info for
+	 * @return The metadata about the given topic and partition, or null if none is found
 	 */
 	public PartitionInfo partition(TopicPartition topicPartition) {
 		return partitionsByTopicPartition.get(topicPartition);
 	}
 
 	/**
-	 * 获取指定topic的所有partition信息
-	 * @param topic 指定的topic
-	 * @return 指定topic的所有partition信息
+	 * Get the list of partitions for this topic
+	 * @param topic The topic name
+	 * @return A list of partitions
 	 */
 	public List<PartitionInfo> partitionsForTopic(String topic) {
 		return partitionsByTopic.getOrDefault(topic, Collections.emptyList());
 	}
 
 	/**
-	 * 获取指定topic的partition的总数量
-	 * @param topic 指定的topic
-	 * @return 指定topic的partition的总数量
+	 * Get the number of partitions for the given topic.
+	 * @param topic The topic to get the number of partitions for
+	 * @return The number of partitions or null if there is no corresponding metadata
 	 */
 	public Integer partitionCountForTopic(String topic) {
-		// 获取指定topic的所有partition信息
 		List<PartitionInfo> partitions = this.partitionsByTopic.get(topic);
-		// 返回当前topic的partition的总数量
 		return partitions == null ? null : partitions.size();
 	}
 
 	/**
-	 * 获取指定topic的可用partition的列表
-	 * @param topic 指定的topic
-	 * @return 指定topic的可用partition的列表
+	 * Get the list of available partitions for this topic
+	 * @param topic The topic name
+	 * @return A list of partitions
 	 */
 	public List<PartitionInfo> availablePartitionsForTopic(String topic) {
 		return availablePartitionsByTopic.getOrDefault(topic, Collections.emptyList());
 	}
 
 	/**
-	 * 获取主节点为指定节点的partition列表
-	 * @param nodeId 节点ID
-	 * @return 主节点为指定节点的partition列表
+	 * Get the list of partitions whose leader is this node
+	 * @param nodeId The node id
+	 * @return A list of partitions
 	 */
 	public List<PartitionInfo> partitionsForNode(int nodeId) {
 		return partitionsByNode.getOrDefault(nodeId, Collections.emptyList());
 	}
 
 	/**
-	 * 获取所有的topic
-	 * @return topic集合
+	 * Get all topics.
+	 * @return a set of all topics
 	 */
 	public Set<String> topics() {
 		return partitionsByTopic.keySet();
@@ -338,6 +344,14 @@ public final class Cluster {
 
 	public Node controller() {
 		return controller;
+	}
+
+	public Collection<Uuid> topicIds() {
+		return topicIds.values();
+	}
+
+	public Uuid topicId(String topic) {
+		return topicIds.getOrDefault(topic, Uuid.ZERO_UUID);
 	}
 
 	@Override

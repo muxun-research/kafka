@@ -23,12 +23,14 @@ import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigDef.Importance;
 import org.apache.kafka.common.config.ConfigDef.Type;
+import org.apache.kafka.common.config.SecurityConfig;
 import org.apache.kafka.common.metrics.Sensor;
 
 import java.util.Map;
 import java.util.Set;
 
 import static org.apache.kafka.common.config.ConfigDef.Range.atLeast;
+import static org.apache.kafka.common.config.ConfigDef.Range.between;
 import static org.apache.kafka.common.config.ConfigDef.ValidString.in;
 
 /**
@@ -59,25 +61,39 @@ public class AdminClientConfig extends AbstractConfig {
      * <code>reconnect.backoff.max.ms</code>
      */
     public static final String RECONNECT_BACKOFF_MAX_MS_CONFIG = CommonClientConfigs.RECONNECT_BACKOFF_MAX_MS_CONFIG;
-    private static final String RECONNECT_BACKOFF_MAX_MS_DOC = CommonClientConfigs.RECONNECT_BACKOFF_MAX_MS_DOC;
+	private static final String RECONNECT_BACKOFF_MAX_MS_DOC = CommonClientConfigs.RECONNECT_BACKOFF_MAX_MS_DOC;
 
-    /**
-     * <code>retry.backoff.ms</code>
-     */
-    public static final String RETRY_BACKOFF_MS_CONFIG = CommonClientConfigs.RETRY_BACKOFF_MS_CONFIG;
-    private static final String RETRY_BACKOFF_MS_DOC = "The amount of time to wait before attempting to " +
-                "retry a failed request. This avoids repeatedly sending requests in a tight loop under " +
-                "some failure scenarios.";
+	/**
+	 * <code>retry.backoff.ms</code>
+	 */
+	public static final String RETRY_BACKOFF_MS_CONFIG = CommonClientConfigs.RETRY_BACKOFF_MS_CONFIG;
+	private static final String RETRY_BACKOFF_MS_DOC = "The amount of time to wait before attempting to " +
+			"retry a failed request. This avoids repeatedly sending requests in a tight loop under " +
+			"some failure scenarios.";
 
-    /** <code>connections.max.idle.ms</code> */
-    public static final String CONNECTIONS_MAX_IDLE_MS_CONFIG = CommonClientConfigs.CONNECTIONS_MAX_IDLE_MS_CONFIG;
-    private static final String CONNECTIONS_MAX_IDLE_MS_DOC = CommonClientConfigs.CONNECTIONS_MAX_IDLE_MS_DOC;
+	/**
+	 * <code>socket.connection.setup.timeout.ms</code>
+	 */
+	public static final String SOCKET_CONNECTION_SETUP_TIMEOUT_MS_CONFIG = CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MS_CONFIG;
 
-    /** <code>request.timeout.ms</code> */
-    public static final String REQUEST_TIMEOUT_MS_CONFIG = CommonClientConfigs.REQUEST_TIMEOUT_MS_CONFIG;
-    private static final String REQUEST_TIMEOUT_MS_DOC = CommonClientConfigs.REQUEST_TIMEOUT_MS_DOC;
+	/**
+	 * <code>socket.connection.setup.timeout.max.ms</code>
+	 */
+	public static final String SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_CONFIG = CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_CONFIG;
 
-    public static final String CLIENT_ID_CONFIG = CommonClientConfigs.CLIENT_ID_CONFIG;
+	/**
+	 * <code>connections.max.idle.ms</code>
+	 */
+	public static final String CONNECTIONS_MAX_IDLE_MS_CONFIG = CommonClientConfigs.CONNECTIONS_MAX_IDLE_MS_CONFIG;
+	private static final String CONNECTIONS_MAX_IDLE_MS_DOC = CommonClientConfigs.CONNECTIONS_MAX_IDLE_MS_DOC;
+
+	/**
+	 * <code>request.timeout.ms</code>
+	 */
+	public static final String REQUEST_TIMEOUT_MS_CONFIG = CommonClientConfigs.REQUEST_TIMEOUT_MS_CONFIG;
+	private static final String REQUEST_TIMEOUT_MS_DOC = CommonClientConfigs.REQUEST_TIMEOUT_MS_DOC;
+
+	public static final String CLIENT_ID_CONFIG = CommonClientConfigs.CLIENT_ID_CONFIG;
     private static final String CLIENT_ID_DOC = CommonClientConfigs.CLIENT_ID_DOC;
 
     public static final String METADATA_MAX_AGE_CONFIG = CommonClientConfigs.METADATA_MAX_AGE_CONFIG;
@@ -96,26 +112,33 @@ public class AdminClientConfig extends AbstractConfig {
     private static final String METRICS_NUM_SAMPLES_DOC = CommonClientConfigs.METRICS_NUM_SAMPLES_DOC;
 
     public static final String METRICS_SAMPLE_WINDOW_MS_CONFIG = CommonClientConfigs.METRICS_SAMPLE_WINDOW_MS_CONFIG;
-    private static final String METRICS_SAMPLE_WINDOW_MS_DOC = CommonClientConfigs.METRICS_SAMPLE_WINDOW_MS_DOC;
+	private static final String METRICS_SAMPLE_WINDOW_MS_DOC = CommonClientConfigs.METRICS_SAMPLE_WINDOW_MS_DOC;
 
-    public static final String METRICS_RECORDING_LEVEL_CONFIG = CommonClientConfigs.METRICS_RECORDING_LEVEL_CONFIG;
+	public static final String METRICS_RECORDING_LEVEL_CONFIG = CommonClientConfigs.METRICS_RECORDING_LEVEL_CONFIG;
 
-    public static final String SECURITY_PROTOCOL_CONFIG = CommonClientConfigs.SECURITY_PROTOCOL_CONFIG;
-    public static final String DEFAULT_SECURITY_PROTOCOL = CommonClientConfigs.DEFAULT_SECURITY_PROTOCOL;
-    private static final String SECURITY_PROTOCOL_DOC = CommonClientConfigs.SECURITY_PROTOCOL_DOC;
-    private static final String METRICS_RECORDING_LEVEL_DOC = CommonClientConfigs.METRICS_RECORDING_LEVEL_DOC;
+	public static final String SECURITY_PROTOCOL_CONFIG = CommonClientConfigs.SECURITY_PROTOCOL_CONFIG;
+	public static final String DEFAULT_SECURITY_PROTOCOL = CommonClientConfigs.DEFAULT_SECURITY_PROTOCOL;
+	private static final String SECURITY_PROTOCOL_DOC = CommonClientConfigs.SECURITY_PROTOCOL_DOC;
+	private static final String METRICS_RECORDING_LEVEL_DOC = CommonClientConfigs.METRICS_RECORDING_LEVEL_DOC;
 
-    public static final String RETRIES_CONFIG = CommonClientConfigs.RETRIES_CONFIG;
+	public static final String RETRIES_CONFIG = CommonClientConfigs.RETRIES_CONFIG;
+	public static final String DEFAULT_API_TIMEOUT_MS_CONFIG = CommonClientConfigs.DEFAULT_API_TIMEOUT_MS_CONFIG;
 
-    static {
-        CONFIG = new ConfigDef().define(BOOTSTRAP_SERVERS_CONFIG,
-                                        Type.LIST,
-                                        Importance.HIGH,
-                                        BOOTSTRAP_SERVERS_DOC)
-                                .define(CLIENT_ID_CONFIG, Type.STRING, "", Importance.MEDIUM, CLIENT_ID_DOC)
-                                .define(METADATA_MAX_AGE_CONFIG, Type.LONG, 5 * 60 * 1000, atLeast(0), Importance.LOW, METADATA_MAX_AGE_DOC)
-                                .define(SEND_BUFFER_CONFIG, Type.INT, 128 * 1024, atLeast(-1), Importance.MEDIUM, SEND_BUFFER_DOC)
-                                .define(RECEIVE_BUFFER_CONFIG, Type.INT, 64 * 1024, atLeast(-1), Importance.MEDIUM, RECEIVE_BUFFER_DOC)
+	/**
+	 * <code>security.providers</code>
+	 */
+	public static final String SECURITY_PROVIDERS_CONFIG = SecurityConfig.SECURITY_PROVIDERS_CONFIG;
+	private static final String SECURITY_PROVIDERS_DOC = SecurityConfig.SECURITY_PROVIDERS_DOC;
+
+	static {
+		CONFIG = new ConfigDef().define(BOOTSTRAP_SERVERS_CONFIG,
+				Type.LIST,
+				Importance.HIGH,
+				BOOTSTRAP_SERVERS_DOC)
+				.define(CLIENT_ID_CONFIG, Type.STRING, "", Importance.MEDIUM, CLIENT_ID_DOC)
+				.define(METADATA_MAX_AGE_CONFIG, Type.LONG, 5 * 60 * 1000, atLeast(0), Importance.LOW, METADATA_MAX_AGE_DOC)
+				.define(SEND_BUFFER_CONFIG, Type.INT, 128 * 1024, atLeast(-1), Importance.MEDIUM, SEND_BUFFER_DOC)
+				.define(RECEIVE_BUFFER_CONFIG, Type.INT, 64 * 1024, atLeast(-1), Importance.MEDIUM, RECEIVE_BUFFER_DOC)
                                 .define(RECONNECT_BACKOFF_MS_CONFIG,
                                         Type.LONG,
                                         50L,
@@ -129,28 +152,44 @@ public class AdminClientConfig extends AbstractConfig {
                                         Importance.LOW,
                                         RECONNECT_BACKOFF_MAX_MS_DOC)
                                 .define(RETRY_BACKOFF_MS_CONFIG,
-                                        Type.LONG,
-                                        100L,
-                                        atLeast(0L),
-                                        Importance.LOW,
-                                        RETRY_BACKOFF_MS_DOC)
-                                .define(REQUEST_TIMEOUT_MS_CONFIG,
-                                        Type.INT,
-                                        120000,
-                                        atLeast(0),
-                                        Importance.MEDIUM,
-                                        REQUEST_TIMEOUT_MS_DOC)
-                                .define(CONNECTIONS_MAX_IDLE_MS_CONFIG,
-                                        Type.LONG,
-                                        5 * 60 * 1000,
-                                        Importance.MEDIUM,
-                                        CONNECTIONS_MAX_IDLE_MS_DOC)
-                                .define(RETRIES_CONFIG,
-                                        Type.INT,
-                                        5,
-                                        atLeast(0),
-                                        Importance.LOW,
-                                        CommonClientConfigs.RETRIES_DOC)
+										Type.LONG,
+										100L,
+										atLeast(0L),
+										Importance.LOW,
+										RETRY_BACKOFF_MS_DOC)
+				.define(REQUEST_TIMEOUT_MS_CONFIG,
+						Type.INT,
+						30000,
+						atLeast(0),
+						Importance.MEDIUM,
+						REQUEST_TIMEOUT_MS_DOC)
+				.define(SOCKET_CONNECTION_SETUP_TIMEOUT_MS_CONFIG,
+						Type.LONG,
+						CommonClientConfigs.DEFAULT_SOCKET_CONNECTION_SETUP_TIMEOUT_MS,
+						Importance.MEDIUM,
+						CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MS_DOC)
+				.define(SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_CONFIG,
+						Type.LONG,
+						CommonClientConfigs.DEFAULT_SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS,
+						Importance.MEDIUM,
+						CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_DOC)
+				.define(CONNECTIONS_MAX_IDLE_MS_CONFIG,
+						Type.LONG,
+						5 * 60 * 1000,
+						Importance.MEDIUM,
+						CONNECTIONS_MAX_IDLE_MS_DOC)
+				.define(RETRIES_CONFIG,
+						Type.INT,
+						Integer.MAX_VALUE,
+						between(0, Integer.MAX_VALUE),
+						Importance.LOW,
+						CommonClientConfigs.RETRIES_DOC)
+				.define(DEFAULT_API_TIMEOUT_MS_CONFIG,
+						Type.INT,
+						60000,
+						atLeast(0),
+						Importance.MEDIUM,
+						CommonClientConfigs.DEFAULT_API_TIMEOUT_MS_DOC)
                                 .define(METRICS_SAMPLE_WINDOW_MS_CONFIG,
                                         Type.LONG,
                                         30000,
@@ -159,21 +198,25 @@ public class AdminClientConfig extends AbstractConfig {
                                         METRICS_SAMPLE_WINDOW_MS_DOC)
                                 .define(METRICS_NUM_SAMPLES_CONFIG, Type.INT, 2, atLeast(1), Importance.LOW, METRICS_NUM_SAMPLES_DOC)
                                 .define(METRIC_REPORTER_CLASSES_CONFIG, Type.LIST, "", Importance.LOW, METRIC_REPORTER_CLASSES_DOC)
-                                .define(METRICS_RECORDING_LEVEL_CONFIG,
-                                        Type.STRING,
-                                        Sensor.RecordingLevel.INFO.toString(),
-                                        in(Sensor.RecordingLevel.INFO.toString(), Sensor.RecordingLevel.DEBUG.toString()),
-                                        Importance.LOW,
-                                        METRICS_RECORDING_LEVEL_DOC)
-                                .define(CLIENT_DNS_LOOKUP_CONFIG,
-                                        Type.STRING,
-                                        ClientDnsLookup.DEFAULT.toString(),
-                                        in(ClientDnsLookup.DEFAULT.toString(),
-                                           ClientDnsLookup.USE_ALL_DNS_IPS.toString(),
-                                           ClientDnsLookup.RESOLVE_CANONICAL_BOOTSTRAP_SERVERS_ONLY.toString()),
-                                        Importance.MEDIUM,
-                                        CLIENT_DNS_LOOKUP_DOC)
-                                // security support
+				.define(METRICS_RECORDING_LEVEL_CONFIG,
+						Type.STRING,
+						Sensor.RecordingLevel.INFO.toString(),
+						in(Sensor.RecordingLevel.INFO.toString(), Sensor.RecordingLevel.DEBUG.toString(), Sensor.RecordingLevel.TRACE.toString()),
+						Importance.LOW,
+						METRICS_RECORDING_LEVEL_DOC)
+				.define(CLIENT_DNS_LOOKUP_CONFIG,
+						Type.STRING,
+						ClientDnsLookup.USE_ALL_DNS_IPS.toString(),
+						in(ClientDnsLookup.USE_ALL_DNS_IPS.toString(),
+								ClientDnsLookup.RESOLVE_CANONICAL_BOOTSTRAP_SERVERS_ONLY.toString()),
+						Importance.MEDIUM,
+						CLIENT_DNS_LOOKUP_DOC)
+				// security support
+				.define(SECURITY_PROVIDERS_CONFIG,
+						Type.STRING,
+						null,
+						Importance.LOW,
+						SECURITY_PROVIDERS_DOC)
                                 .define(SECURITY_PROTOCOL_CONFIG,
                                         Type.STRING,
                                         DEFAULT_SECURITY_PROTOCOL,
@@ -205,7 +248,7 @@ public class AdminClientConfig extends AbstractConfig {
     }
 
     public static void main(String[] args) {
-        System.out.println(CONFIG.toHtmlTable());
+		System.out.println(CONFIG.toHtml(4, config -> "adminclientconfigs_" + config));
     }
 
 }

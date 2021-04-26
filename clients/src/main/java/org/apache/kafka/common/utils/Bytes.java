@@ -131,27 +131,52 @@ public class Bytes implements Comparable<Bytes> {
             int ch = b[i] & 0xFF;
             if (ch >= ' ' && ch <= '~' && ch != '\\') {
                 result.append((char) ch);
-            } else {
-                result.append("\\x");
-                result.append(HEX_CHARS_UPPER[ch / 0x10]);
-                result.append(HEX_CHARS_UPPER[ch % 0x10]);
-            }
-        }
-        return result.toString();
-    }
+			} else {
+				result.append("\\x");
+				result.append(HEX_CHARS_UPPER[ch / 0x10]);
+				result.append(HEX_CHARS_UPPER[ch % 0x10]);
+			}
+		}
+		return result.toString();
+	}
 
-    /**
-     * A byte array comparator based on lexicographic ordering.
-     */
-    public final static ByteArrayComparator BYTES_LEXICO_COMPARATOR = new LexicographicByteArrayComparator();
+	/**
+	 * Increment the underlying byte array by adding 1. Throws an IndexOutOfBoundsException if incrementing would cause
+	 * the underlying input byte array to overflow.
+	 * @param input - The byte array to increment
+	 * @return A new copy of the incremented byte array.
+	 */
+	public static Bytes increment(Bytes input) throws IndexOutOfBoundsException {
+		byte[] inputArr = input.get();
+		byte[] ret = new byte[inputArr.length];
+		int carry = 1;
+		for (int i = inputArr.length - 1; i >= 0; i--) {
+			if (inputArr[i] == (byte) 0xFF && carry == 1) {
+				ret[i] = (byte) 0x00;
+			} else {
+				ret[i] = (byte) (inputArr[i] + carry);
+				carry = 0;
+			}
+		}
+		if (carry == 0) {
+			return wrap(ret);
+		} else {
+			throw new IndexOutOfBoundsException();
+		}
+	}
 
-    public interface ByteArrayComparator extends Comparator<byte[]>, Serializable {
+	/**
+	 * A byte array comparator based on lexicograpic ordering.
+	 */
+	public final static ByteArrayComparator BYTES_LEXICO_COMPARATOR = new LexicographicByteArrayComparator();
 
-        int compare(final byte[] buffer1, int offset1, int length1,
-                    final byte[] buffer2, int offset2, int length2);
-    }
+	public interface ByteArrayComparator extends Comparator<byte[]>, Serializable {
 
-    private static class LexicographicByteArrayComparator implements ByteArrayComparator {
+		int compare(final byte[] buffer1, int offset1, int length1,
+					final byte[] buffer2, int offset2, int length2);
+	}
+
+	private static class LexicographicByteArrayComparator implements ByteArrayComparator {
 
         @Override
         public int compare(byte[] buffer1, byte[] buffer2) {

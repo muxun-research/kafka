@@ -19,19 +19,23 @@ package org.apache.kafka.streams.processor.internals;
 import org.apache.kafka.streams.processor.To;
 
 public class ToInternal extends To {
-    public ToInternal() {
-        super(To.all());
-    }
+	public ToInternal() {
+		super(To.all());
+	}
 
-    public void update(final To to) {
-        super.update(to);
-    }
+	public ToInternal(final To to) {
+		super(to);
+	}
 
-    public boolean hasTimestamp() {
-        return timestamp != -1;
-    }
+	public void update(final To to) {
+		super.update(to);
+	}
 
-    public long timestamp() {
+	public boolean hasTimestamp() {
+		return timestamp != -1;
+	}
+
+	public long timestamp() {
         return timestamp;
     }
 

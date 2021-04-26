@@ -24,18 +24,19 @@ import org.apache.kafka.streams.kstream.KTable;
 import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.kstream.SessionWindows;
 import org.apache.kafka.streams.kstream.TimeWindows;
-import org.apache.kafka.streams.processor.Processor;
-import org.apache.kafka.streams.processor.ProcessorContext;
-import org.apache.kafka.streams.processor.ProcessorSupplier;
 import org.apache.kafka.streams.processor.RecordContext;
 import org.apache.kafka.streams.processor.TopicNameExtractor;
+import org.apache.kafka.streams.processor.api.Processor;
+import org.apache.kafka.streams.processor.api.ProcessorContext;
+import org.apache.kafka.streams.processor.api.ProcessorSupplier;
+import org.apache.kafka.streams.processor.api.Record;
 import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.internals.KeyValueStoreBuilder;
+import org.apache.kafka.test.MockApiProcessorSupplier;
 import org.apache.kafka.test.MockKeyValueStore;
 import org.apache.kafka.test.MockProcessorSupplier;
-import org.apache.kafka.test.TestUtils;
 import org.easymock.EasyMock;
 import org.junit.Assert;
 import org.junit.Test;
@@ -43,7 +44,6 @@ import org.junit.Test;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.Properties;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -51,83 +51,85 @@ import static java.time.Duration.ofMillis;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.fail;
 
 public class TopologyTest {
 
-    private final StoreBuilder storeBuilder = EasyMock.createNiceMock(StoreBuilder.class);
-    private final KeyValueStoreBuilder globalStoreBuilder = EasyMock.createNiceMock(KeyValueStoreBuilder.class);
-    private final Topology topology = new Topology();
-    private final InternalTopologyBuilder.TopologyDescription expectedDescription = new InternalTopologyBuilder.TopologyDescription();
+	private final StoreBuilder<MockKeyValueStore> storeBuilder = EasyMock.createNiceMock(StoreBuilder.class);
+	private final KeyValueStoreBuilder<?, ?> globalStoreBuilder = EasyMock.createNiceMock(KeyValueStoreBuilder.class);
+	private final Topology topology = new Topology();
+	private final InternalTopologyBuilder.TopologyDescription expectedDescription = new InternalTopologyBuilder.TopologyDescription();
 
-    @Test(expected = NullPointerException.class)
-    public void shouldNotAllowNullNameWhenAddingSourceWithTopic() {
-        topology.addSource((String) null, "topic");
+	@Test
+	public void shouldNotAllowNullNameWhenAddingSourceWithTopic() {
+		assertThrows(NullPointerException.class, () -> topology.addSource((String) null, "topic"));
+	}
+
+	@Test
+	public void shouldNotAllowNullNameWhenAddingSourceWithPattern() {
+		assertThrows(NullPointerException.class, () -> topology.addSource(null, Pattern.compile(".*")));
     }
 
-    @Test(expected = NullPointerException.class)
-    public void shouldNotAllowNullNameWhenAddingSourceWithPattern() {
-        topology.addSource(null, Pattern.compile(".*"));
-    }
-
-    @Test(expected = NullPointerException.class)
+	@Test
     public void shouldNotAllowNullTopicsWhenAddingSoureWithTopic() {
-        topology.addSource("source", (String[]) null);
+		assertThrows(NullPointerException.class, () -> topology.addSource("source", (String[]) null));
     }
 
-    @Test(expected = NullPointerException.class)
+	@Test
     public void shouldNotAllowNullTopicsWhenAddingSourceWithPattern() {
-        topology.addSource("source", (Pattern) null);
+		assertThrows(NullPointerException.class, () -> topology.addSource("source", (Pattern) null));
     }
 
-    @Test(expected = TopologyException.class)
+	@Test
     public void shouldNotAllowZeroTopicsWhenAddingSource() {
-        topology.addSource("source");
+		assertThrows(TopologyException.class, () -> topology.addSource("source"));
     }
 
-    @Test(expected = NullPointerException.class)
+	@Test
     public void shouldNotAllowNullNameWhenAddingProcessor() {
-        topology.addProcessor(null, () -> new MockProcessorSupplier().get());
+		assertThrows(NullPointerException.class, () -> topology.addProcessor(null, () -> new MockApiProcessorSupplier<>().get()));
     }
 
-    @Test(expected = NullPointerException.class)
+	@Test
     public void shouldNotAllowNullProcessorSupplierWhenAddingProcessor() {
-        topology.addProcessor("name", null);
-    }
+		assertThrows(NullPointerException.class, () -> topology.addProcessor("name",
+				(ProcessorSupplier<Object, Object, Object, Object>) null));
+	}
 
-    @Test(expected = NullPointerException.class)
+	@Test
     public void shouldNotAllowNullNameWhenAddingSink() {
-        topology.addSink(null, "topic");
+		assertThrows(NullPointerException.class, () -> topology.addSink(null, "topic"));
     }
 
-    @Test(expected = NullPointerException.class)
+	@Test
     public void shouldNotAllowNullTopicWhenAddingSink() {
-        topology.addSink("name", (String) null);
+		assertThrows(NullPointerException.class, () -> topology.addSink("name", (String) null));
     }
 
-    @Test(expected = NullPointerException.class)
+	@Test
     public void shouldNotAllowNullTopicChooserWhenAddingSink() {
-        topology.addSink("name", (TopicNameExtractor<Object, Object>) null);
+		assertThrows(NullPointerException.class, () -> topology.addSink("name", (TopicNameExtractor<Object, Object>) null));
     }
 
-    @Test(expected = NullPointerException.class)
+	@Test
     public void shouldNotAllowNullProcessorNameWhenConnectingProcessorAndStateStores() {
-        topology.connectProcessorAndStateStores(null, "store");
+		assertThrows(NullPointerException.class, () -> topology.connectProcessorAndStateStores(null, "store"));
     }
 
-    @Test(expected = NullPointerException.class)
+	@Test
     public void shouldNotAllowNullStoreNameWhenConnectingProcessorAndStateStores() {
-        topology.connectProcessorAndStateStores("processor", (String[]) null);
+		assertThrows(NullPointerException.class, () -> topology.connectProcessorAndStateStores("processor", (String[]) null));
     }
 
-    @Test(expected = TopologyException.class)
+	@Test
     public void shouldNotAllowZeroStoreNameWhenConnectingProcessorAndStateStores() {
-        topology.connectProcessorAndStateStores("processor");
+		assertThrows(TopologyException.class, () -> topology.connectProcessorAndStateStores("processor"));
     }
 
-    @Test(expected = NullPointerException.class)
+	@Test
     public void shouldNotAddNullStateStoreSupplier() {
-        topology.addStateStore(null);
+		assertThrows(NullPointerException.class, () -> topology.addStateStore(null));
     }
 
     @Test
@@ -168,11 +170,11 @@ public class TopologyTest {
 
     @Test
     public void shouldNotAllowToAddProcessorWithSameName() {
-        topology.addSource("source", "topic-1");
-        topology.addProcessor("processor", new MockProcessorSupplier(), "source");
+		topology.addSource("source", "topic-1");
+		topology.addProcessor("processor", new MockApiProcessorSupplier<>(), "source");
         try {
-            topology.addProcessor("processor", new MockProcessorSupplier(), "source");
-            fail("Should throw TopologyException for duplicate processor name");
+			topology.addProcessor("processor", new MockApiProcessorSupplier<>(), "source");
+			fail("Should throw TopologyException for duplicate processor name");
         } catch (final TopologyException expected) { }
     }
 
@@ -180,8 +182,8 @@ public class TopologyTest {
     public void shouldNotAllowToAddProcessorWithEmptyParents() {
         topology.addSource("source", "topic-1");
         try {
-            topology.addProcessor("processor", new MockProcessorSupplier());
-            fail("Should throw TopologyException for processor without at least one parent node");
+			topology.addProcessor("processor", new MockApiProcessorSupplier<>());
+			fail("Should throw TopologyException for processor without at least one parent node");
         } catch (final TopologyException expected) { }
     }
 
@@ -189,19 +191,19 @@ public class TopologyTest {
     public void shouldNotAllowToAddProcessorWithNullParents() {
         topology.addSource("source", "topic-1");
         try {
-            topology.addProcessor("processor", new MockProcessorSupplier(), (String) null);
-            fail("Should throw NullPointerException for processor when null parent names are provided");
+			topology.addProcessor("processor", new MockApiProcessorSupplier<>(), (String) null);
+			fail("Should throw NullPointerException for processor when null parent names are provided");
         } catch (final NullPointerException expected) { }
     }
 
-    @Test(expected = TopologyException.class)
+	@Test
     public void shouldFailOnUnknownSource() {
-        topology.addProcessor("processor", new MockProcessorSupplier(), "source");
+		assertThrows(TopologyException.class, () -> topology.addProcessor("processor", new MockApiProcessorSupplier<>(), "source"));
     }
 
-    @Test(expected = TopologyException.class)
+	@Test
     public void shouldFailIfNodeIsItsOwnParent() {
-        topology.addProcessor("processor", new MockProcessorSupplier(), "processor");
+		assertThrows(TopologyException.class, () -> topology.addProcessor("processor", new MockApiProcessorSupplier<>(), "processor"));
     }
 
     @Test
@@ -216,8 +218,8 @@ public class TopologyTest {
 
     @Test
     public void shouldNotAllowToAddSinkWithEmptyParents() {
-        topology.addSource("source", "topic-1");
-        topology.addProcessor("processor", new MockProcessorSupplier(), "source");
+		topology.addSource("source", "topic-1");
+		topology.addProcessor("processor", new MockApiProcessorSupplier<>(), "source");
         try {
             topology.addSink("sink", "topic-2");
             fail("Should throw TopologyException for sink without at least one parent node");
@@ -226,22 +228,22 @@ public class TopologyTest {
 
     @Test
     public void shouldNotAllowToAddSinkWithNullParents() {
-        topology.addSource("source", "topic-1");
-        topology.addProcessor("processor", new MockProcessorSupplier(), "source");
+		topology.addSource("source", "topic-1");
+		topology.addProcessor("processor", new MockApiProcessorSupplier<>(), "source");
         try {
             topology.addSink("sink", "topic-2", (String) null);
             fail("Should throw NullPointerException for sink when null parent names are provided");
         } catch (final NullPointerException expected) { }
     }
 
-    @Test(expected = TopologyException.class)
+	@Test
     public void shouldFailWithUnknownParent() {
-        topology.addSink("sink", "topic-2", "source");
+		assertThrows(TopologyException.class, () -> topology.addSink("sink", "topic-2", "source"));
     }
 
-    @Test(expected = TopologyException.class)
+	@Test
     public void shouldFailIfSinkIsItsOwnParent() {
-        topology.addSink("sink", "topic-2", "sink");
+		assertThrows(TopologyException.class, () -> topology.addSink("sink", "topic-2", "sink"));
     }
 
     @Test
@@ -254,11 +256,11 @@ public class TopologyTest {
         } catch (final TopologyException expected) { }
     }
 
-    @Test(expected = TopologyException.class)
+	@Test
     public void shouldNotAllowToAddStateStoreToNonExistingProcessor() {
         mockStoreBuilder();
-        EasyMock.replay(storeBuilder);
-        topology.addStateStore(storeBuilder, "no-such-processor");
+		EasyMock.replay(storeBuilder);
+		assertThrows(TopologyException.class, () -> topology.addStateStore(storeBuilder, "no-such-processor"));
     }
 
     @Test
@@ -290,30 +292,57 @@ public class TopologyTest {
         EasyMock.expect(storeBuilder.loggingEnabled()).andReturn(false);
     }
 
-    @Test
-    public void shouldNotAllowToAddStoreWithSameName() {
-        mockStoreBuilder();
-        EasyMock.replay(storeBuilder);
-        topology.addStateStore(storeBuilder);
-        try {
-            topology.addStateStore(storeBuilder);
-            fail("Should have thrown TopologyException for duplicate store name");
-        } catch (final TopologyException expected) { }
-    }
+	@Test
+	public void shouldNotAllowToAddStoreWithSameNameAndDifferentInstance() {
+		mockStoreBuilder();
+		EasyMock.replay(storeBuilder);
+		topology.addStateStore(storeBuilder);
 
-    @Test
-    public void shouldThrowOnUnassignedStateStoreAccess() {
-        final String sourceNodeName = "source";
-        final String goodNodeName = "goodGuy";
-        final String badNodeName = "badGuy";
+		final StoreBuilder otherStoreBuilder = EasyMock.createNiceMock(StoreBuilder.class);
+		EasyMock.expect(otherStoreBuilder.name()).andReturn("store").anyTimes();
+		EasyMock.expect(otherStoreBuilder.logConfig()).andReturn(Collections.emptyMap());
+		EasyMock.expect(otherStoreBuilder.loggingEnabled()).andReturn(false);
+		EasyMock.replay(otherStoreBuilder);
+		try {
+			topology.addStateStore(otherStoreBuilder);
+			fail("Should have thrown TopologyException for same store name with different StoreBuilder");
+		} catch (final TopologyException expected) {
+		}
+	}
 
-        final Properties config = new Properties();
-        config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "host:1");
-        config.put(StreamsConfig.APPLICATION_ID_CONFIG, "appId");
-        config.put(StreamsConfig.STATE_DIR_CONFIG, TestUtils.tempDirectory().getAbsolutePath());
-        mockStoreBuilder();
-        EasyMock.expect(storeBuilder.build()).andReturn(new MockKeyValueStore("store", false));
-        EasyMock.replay(storeBuilder);
+	@Test
+	public void shouldAllowToShareStoreUsingSameStoreBuilder() {
+		mockStoreBuilder();
+		EasyMock.replay(storeBuilder);
+
+		topology.addSource("source", "topic-1");
+
+		topology.addProcessor("processor-1", new MockProcessorSupplierProvidingStore<>(storeBuilder), "source");
+		topology.addProcessor("processor-2", new MockProcessorSupplierProvidingStore<>(storeBuilder), "source");
+	}
+
+	private static class MockProcessorSupplierProvidingStore<K, V> extends MockApiProcessorSupplier<K, V, Void, Void> {
+		private final StoreBuilder<MockKeyValueStore> storeBuilder;
+
+		public MockProcessorSupplierProvidingStore(final StoreBuilder<MockKeyValueStore> storeBuilder) {
+			this.storeBuilder = storeBuilder;
+		}
+
+		@Override
+		public Set<StoreBuilder<?>> stores() {
+			return Collections.singleton(storeBuilder);
+		}
+	}
+
+	@Test
+	public void shouldThrowOnUnassignedStateStoreAccess() {
+		final String sourceNodeName = "source";
+		final String goodNodeName = "goodGuy";
+		final String badNodeName = "badGuy";
+
+		mockStoreBuilder();
+		EasyMock.expect(storeBuilder.build()).andReturn(new MockKeyValueStore("store", false));
+		EasyMock.replay(storeBuilder);
         topology
             .addSource(sourceNodeName, "topic")
             .addProcessor(goodNodeName, new LocalMockProcessorSupplier(), sourceNodeName)
@@ -323,8 +352,8 @@ public class TopologyTest {
             .addProcessor(badNodeName, new LocalMockProcessorSupplier(), sourceNodeName);
 
         try {
-            new TopologyTestDriver(topology, config);
-            fail("Should have thrown StreamsException");
+			new TopologyTestDriver(topology);
+			fail("Should have thrown StreamsException");
         } catch (final StreamsException e) {
             final String error = e.toString();
             final String expectedMessage = "org.apache.kafka.streams.errors.StreamsException: failed to initialize processor " + badNodeName;
@@ -333,38 +362,37 @@ public class TopologyTest {
         }
     }
 
-    private static class LocalMockProcessorSupplier implements ProcessorSupplier {
-        final static String STORE_NAME = "store";
+	private static class LocalMockProcessorSupplier implements ProcessorSupplier<Object, Object, Object, Object> {
+		final static String STORE_NAME = "store";
 
-        @Override
-        public Processor get() {
-            return new Processor() {
-                @Override
-                public void init(final ProcessorContext context) {
-                    context.getStateStore(STORE_NAME);
-                }
+		@Override
+		public Processor<Object, Object, Object, Object> get() {
+			return new Processor<Object, Object, Object, Object>() {
+				@Override
+				public void init(final ProcessorContext<Object, Object> context) {
+					context.getStateStore(STORE_NAME);
+				}
 
-                @Override
-                public void process(final Object key, final Object value) { }
+				@Override
+				public void process(final Record<Object, Object> record) {
+				}
+			};
+		}
+	}
 
-                @Override
-                public void close() { }
-            };
-        }
-    }
-
-    @Test(expected = TopologyException.class)
-    public void shouldNotAllowToAddGlobalStoreWithSourceNameEqualsProcessorName() {
-        EasyMock.expect(globalStoreBuilder.name()).andReturn("anyName").anyTimes();
-        EasyMock.replay(globalStoreBuilder);
-        topology.addGlobalStore(
-            globalStoreBuilder,
-            "sameName",
-            null,
-            null,
-            "anyTopicName",
-            "sameName",
-            new MockProcessorSupplier());
+	@Deprecated // testing old PAPI
+	@Test
+	public void shouldNotAllowToAddGlobalStoreWithSourceNameEqualsProcessorName() {
+		EasyMock.expect(globalStoreBuilder.name()).andReturn("anyName").anyTimes();
+		EasyMock.replay(globalStoreBuilder);
+		assertThrows(TopologyException.class, () -> topology.addGlobalStore(
+				globalStoreBuilder,
+				"sameName",
+				null,
+				null,
+				"anyTopicName",
+				"sameName",
+				new MockProcessorSupplier<>()));
     }
 
     @Test
@@ -374,17 +402,17 @@ public class TopologyTest {
 
     @Test
     public void sinkShouldReturnNullTopicWithDynamicRouting() {
-        final TopologyDescription.Sink expectedSinkNode =
-            new InternalTopologyBuilder.Sink("sink", (key, value, record) -> record.topic() + "-" + key);
+		final TopologyDescription.Sink expectedSinkNode =
+				new InternalTopologyBuilder.Sink<>("sink", (key, value, record) -> record.topic() + "-" + key);
 
         assertThat(expectedSinkNode.topic(), equalTo(null));
     }
 
     @Test
     public void sinkShouldReturnTopicNameExtractorWithDynamicRouting() {
-        final TopicNameExtractor topicNameExtractor = (key, value, record) -> record.topic() + "-" + key;
-        final TopologyDescription.Sink expectedSinkNode =
-            new InternalTopologyBuilder.Sink("sink", topicNameExtractor);
+		final TopicNameExtractor<?, ?> topicNameExtractor = (key, value, record) -> record.topic() + "-" + key;
+		final TopologyDescription.Sink expectedSinkNode =
+				new InternalTopologyBuilder.Sink<>("sink", topicNameExtractor);
 
         assertThat(expectedSinkNode.topicNameExtractor(), equalTo(topicNameExtractor));
     }
@@ -397,7 +425,8 @@ public class TopologyTest {
             new InternalTopologyBuilder.Subtopology(0,
                 Collections.singleton(expectedSourceNode)));
 
-        assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe().hashCode(), equalTo(expectedDescription.hashCode()));
     }
 
     @Test
@@ -408,7 +437,8 @@ public class TopologyTest {
             new InternalTopologyBuilder.Subtopology(0,
                 Collections.singleton(expectedSourceNode)));
 
-        assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe().hashCode(), equalTo(expectedDescription.hashCode()));
     }
 
     @Test
@@ -419,7 +449,8 @@ public class TopologyTest {
             new InternalTopologyBuilder.Subtopology(0,
                 Collections.singleton(expectedSourceNode)));
 
-        assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe().hashCode(), equalTo(expectedDescription.hashCode()));
     }
 
     @Test
@@ -439,7 +470,8 @@ public class TopologyTest {
             new InternalTopologyBuilder.Subtopology(2,
                 Collections.singleton(expectedSourceNode3)));
 
-        assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe().hashCode(), equalTo(expectedDescription.hashCode()));
     }
 
     @Test
@@ -452,7 +484,8 @@ public class TopologyTest {
         allNodes.add(expectedProcessorNode);
         expectedDescription.addSubtopology(new InternalTopologyBuilder.Subtopology(0, allNodes));
 
-        assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe().hashCode(), equalTo(expectedDescription.hashCode()));
     }
 
     @Test
@@ -467,7 +500,8 @@ public class TopologyTest {
         allNodes.add(expectedProcessorNode);
         expectedDescription.addSubtopology(new InternalTopologyBuilder.Subtopology(0, allNodes));
 
-        assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe().hashCode(), equalTo(expectedDescription.hashCode()));
     }
 
 
@@ -483,7 +517,8 @@ public class TopologyTest {
         allNodes.add(expectedProcessorNode);
         expectedDescription.addSubtopology(new InternalTopologyBuilder.Subtopology(0, allNodes));
 
-        assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe().hashCode(), equalTo(expectedDescription.hashCode()));
     }
 
     @Test
@@ -498,7 +533,8 @@ public class TopologyTest {
         allNodes.add(expectedProcessorNode2);
         expectedDescription.addSubtopology(new InternalTopologyBuilder.Subtopology(0, allNodes));
 
-        assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe().hashCode(), equalTo(expectedDescription.hashCode()));
     }
 
     @Test
@@ -513,7 +549,8 @@ public class TopologyTest {
         allNodes.add(expectedProcessorNode);
         expectedDescription.addSubtopology(new InternalTopologyBuilder.Subtopology(0, allNodes));
 
-        assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe().hashCode(), equalTo(expectedDescription.hashCode()));
     }
 
     @Test
@@ -542,7 +579,8 @@ public class TopologyTest {
         allNodes3.add(expectedProcessorNode3);
         expectedDescription.addSubtopology(new InternalTopologyBuilder.Subtopology(2, allNodes3));
 
-        assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe().hashCode(), equalTo(expectedDescription.hashCode()));
     }
 
     @Test
@@ -571,7 +609,8 @@ public class TopologyTest {
         allNodes3.add(expectedSinkNode3);
         expectedDescription.addSubtopology(new InternalTopologyBuilder.Subtopology(2, allNodes3));
 
-        assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe().hashCode(), equalTo(expectedDescription.hashCode()));
     }
 
     @Test
@@ -602,7 +641,8 @@ public class TopologyTest {
         allNodes.add(expectedSinkNode);
         expectedDescription.addSubtopology(new InternalTopologyBuilder.Subtopology(0, allNodes));
 
-        assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe().hashCode(), equalTo(expectedDescription.hashCode()));
     }
 
     @Test
@@ -632,20 +672,23 @@ public class TopologyTest {
         allNodes.add(expectedProcessorNode3);
         expectedDescription.addSubtopology(new InternalTopologyBuilder.Subtopology(0, allNodes));
 
-        assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe().hashCode(), equalTo(expectedDescription.hashCode()));
     }
 
     @Test
     public void shouldDescribeGlobalStoreTopology() {
         addGlobalStoreToTopologyAndExpectedDescription("globalStore", "source", "globalTopic", "processor", 0);
-        assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe().hashCode(), equalTo(expectedDescription.hashCode()));
     }
 
     @Test
     public void shouldDescribeMultipleGlobalStoreTopology() {
         addGlobalStoreToTopologyAndExpectedDescription("globalStore1", "source1", "globalTopic1", "processor1", 0);
         addGlobalStoreToTopologyAndExpectedDescription("globalStore2", "source2", "globalTopic2", "processor2", 1);
-        assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe(), equalTo(expectedDescription));
+		assertThat(topology.describe().hashCode(), equalTo(expectedDescription.hashCode()));
     }
 
     @Test
@@ -987,8 +1030,8 @@ public class TopologyTest {
                 "      --> KTABLE-MAPVALUES-0000000004\n" +
                 "      <-- KSTREAM-SOURCE-0000000001\n" +
                 // previously, this was
-                //   Processor: KTABLE-MAPVALUES-0000000004 (stores: [KTABLE-MAPVALUES-STATE-STORE-0000000003]
-                // but we added a change not to materialize non-queriable stores. This change shouldn't break compatibility.
+					//   Processor: KTABLE-MAPVALUES-0000000004 (stores: [KTABLE-MAPVALUES-STATE-STORE-0000000003]
+					// but we added a change not to materialize non-queryable stores. This change shouldn't break compatibility.
                 "    Processor: KTABLE-MAPVALUES-0000000004 (stores: [])\n" +
                 "      --> none\n" +
                 "      <-- KTABLE-SOURCE-0000000002\n" +
@@ -1054,8 +1097,8 @@ public class TopologyTest {
                 "      --> KTABLE-FILTER-0000000004\n" +
                 "      <-- KSTREAM-SOURCE-0000000001\n" +
                 // Previously, this was
-                //   Processor: KTABLE-FILTER-0000000004 (stores: [KTABLE-FILTER-STATE-STORE-0000000003]
-                // but we added a change not to materialize non-queriable stores. This change shouldn't break compatibility.
+					//   Processor: KTABLE-FILTER-0000000004 (stores: [KTABLE-FILTER-STATE-STORE-0000000003]
+					// but we added a change not to materialize non-queryable stores. This change shouldn't break compatibility.
                 "    Processor: KTABLE-FILTER-0000000004 (stores: [])\n" +
                 "      --> none\n" +
                 "      <-- KTABLE-SOURCE-0000000002\n" +
@@ -1075,25 +1118,39 @@ public class TopologyTest {
                 "   Sub-topology: 0\n" +
                 "    Source: KSTREAM-SOURCE-0000000001 (topics: [input-topic])\n" +
                 "      --> KTABLE-SOURCE-0000000002\n" +
-                "    Processor: KTABLE-SOURCE-0000000002 (stores: [])\n" +
-                "      --> KTABLE-FILTER-0000000003\n" +
-                "      <-- KSTREAM-SOURCE-0000000001\n" +
-                "    Processor: KTABLE-FILTER-0000000003 (stores: [store-name])\n" +
-                "      --> none\n" +
-                "      <-- KTABLE-SOURCE-0000000002\n" +
-                "\n",
-            describe.toString());
-    }
+					"    Processor: KTABLE-SOURCE-0000000002 (stores: [])\n" +
+					"      --> KTABLE-FILTER-0000000003\n" +
+					"      <-- KSTREAM-SOURCE-0000000001\n" +
+					"    Processor: KTABLE-FILTER-0000000003 (stores: [store-name])\n" +
+					"      --> none\n" +
+					"      <-- KTABLE-SOURCE-0000000002\n" +
+					"\n",
+				describe.toString());
+	}
 
-    private TopologyDescription.Source addSource(final String sourceName,
-                                                 final String... sourceTopic) {
-        topology.addSource(null, sourceName, null, null, null, sourceTopic);
-        final StringBuilder allSourceTopics = new StringBuilder(sourceTopic[0]);
-        for (int i = 1; i < sourceTopic.length; ++i) {
-            allSourceTopics.append(", ").append(sourceTopic[i]);
-        }
-        return new InternalTopologyBuilder.Source(sourceName, new HashSet<>(Arrays.asList(sourceTopic)), null);
-    }
+	@Test
+	public void topologyWithStaticTopicNameExtractorShouldRespectEqualHashcodeContract() {
+		final Topology topologyA = topologyWithStaticTopicName();
+		final Topology topologyB = topologyWithStaticTopicName();
+		assertThat(topologyA.describe(), equalTo(topologyB.describe()));
+		assertThat(topologyA.describe().hashCode(), equalTo(topologyB.describe().hashCode()));
+	}
+
+	private Topology topologyWithStaticTopicName() {
+		final StreamsBuilder builder = new StreamsBuilder();
+		builder.stream("from-topic-name").to("to-topic-name");
+		return builder.build();
+	}
+
+	private TopologyDescription.Source addSource(final String sourceName,
+												 final String... sourceTopic) {
+		topology.addSource(null, sourceName, null, null, null, sourceTopic);
+		final StringBuilder allSourceTopics = new StringBuilder(sourceTopic[0]);
+		for (int i = 1; i < sourceTopic.length; ++i) {
+			allSourceTopics.append(", ").append(sourceTopic[i]);
+		}
+		return new InternalTopologyBuilder.Source(sourceName, new HashSet<>(Arrays.asList(sourceTopic)), null);
+	}
 
     private TopologyDescription.Source addSource(final String sourceName,
                                                  final Pattern sourcePattern) {
@@ -1127,10 +1184,10 @@ public class TopologyTest {
             parentNames[i] = parents[i].name();
         }
 
-        topology.addProcessor(processorName, new MockProcessorSupplier(), parentNames);
+		topology.addProcessor(processorName, new MockApiProcessorSupplier<>(), parentNames);
         if (newStores) {
             for (final String store : storeNames) {
-                final StoreBuilder storeBuilder = EasyMock.createNiceMock(StoreBuilder.class);
+				final StoreBuilder<?> storeBuilder = EasyMock.createNiceMock(StoreBuilder.class);
                 EasyMock.expect(storeBuilder.name()).andReturn(store).anyTimes();
                 EasyMock.replay(storeBuilder);
                 topology.addStateStore(storeBuilder, processorName);
@@ -1169,31 +1226,32 @@ public class TopologyTest {
         return expectedSinkNode;
     }
 
-    private void addGlobalStoreToTopologyAndExpectedDescription(final String globalStoreName,
-                                                                final String sourceName,
-                                                                final String globalTopicName,
-                                                                final String processorName,
-                                                                final int id) {
-        final KeyValueStoreBuilder globalStoreBuilder = EasyMock.createNiceMock(KeyValueStoreBuilder.class);
-        EasyMock.expect(globalStoreBuilder.name()).andReturn(globalStoreName).anyTimes();
-        EasyMock.replay(globalStoreBuilder);
-        topology.addGlobalStore(
-            globalStoreBuilder,
-            sourceName,
-            null,
-            null,
-            null,
-            globalTopicName,
-            processorName,
-            new MockProcessorSupplier());
+	@Deprecated // testing old PAPI
+	private void addGlobalStoreToTopologyAndExpectedDescription(final String globalStoreName,
+																final String sourceName,
+																final String globalTopicName,
+																final String processorName,
+																final int id) {
+		final KeyValueStoreBuilder<?, ?> globalStoreBuilder = EasyMock.createNiceMock(KeyValueStoreBuilder.class);
+		EasyMock.expect(globalStoreBuilder.name()).andReturn(globalStoreName).anyTimes();
+		EasyMock.replay(globalStoreBuilder);
+		topology.addGlobalStore(
+				globalStoreBuilder,
+				sourceName,
+				null,
+				null,
+				null,
+				globalTopicName,
+				processorName,
+				new MockProcessorSupplier<>());
 
-        final TopologyDescription.GlobalStore expectedGlobalStore = new InternalTopologyBuilder.GlobalStore(
-            sourceName,
-            processorName,
-            globalStoreName,
-            globalTopicName,
-            id);
+		final TopologyDescription.GlobalStore expectedGlobalStore = new InternalTopologyBuilder.GlobalStore(
+				sourceName,
+				processorName,
+				globalStoreName,
+				globalTopicName,
+				id);
 
-        expectedDescription.addGlobalStore(expectedGlobalStore);
-    }
+		expectedDescription.addGlobalStore(expectedGlobalStore);
+	}
 }

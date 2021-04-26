@@ -23,10 +23,13 @@ import org.apache.kafka.common.KafkaException;
  */
 public class SchemaException extends KafkaException {
 
-    private static final long serialVersionUID = 1L;
+	private static final long serialVersionUID = 1L;
 
-    public SchemaException(String message) {
-        super(message);
-    }
+	public SchemaException(String message) {
+		super(message);
+	}
 
+	public SchemaException(String message, Throwable cause) {
+		super(message, cause);
+	}
 }

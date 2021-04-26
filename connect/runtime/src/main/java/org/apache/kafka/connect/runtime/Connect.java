@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.connect.runtime;
 
+import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.connect.runtime.rest.RestServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,8 +48,8 @@ public class Connect {
 
     public void start() {
         try {
-            log.info("Kafka Connect starting");
-            Runtime.getRuntime().addShutdownHook(shutdownHook);
+			log.info("Kafka Connect starting");
+			Exit.addShutdownHook("connect-shutdown-hook", shutdownHook);
 
             herder.start();
             rest.initializeResources(herder);
@@ -73,30 +74,38 @@ public class Connect {
         } finally {
             stopLatch.countDown();
         }
-    }
+	}
 
-    public void awaitStop() {
-        try {
-            stopLatch.await();
-        } catch (InterruptedException e) {
-            log.error("Interrupted waiting for Kafka Connect to shutdown");
-        }
-    }
+	public void awaitStop() {
+		try {
+			stopLatch.await();
+		} catch (InterruptedException e) {
+			log.error("Interrupted waiting for Kafka Connect to shutdown");
+		}
+	}
 
-    // Visible for testing
-    public URI restUrl() {
-        return rest.serverUrl();
-    }
+	public boolean isRunning() {
+		return herder.isRunning();
+	}
 
-    private class ShutdownHook extends Thread {
-        @Override
-        public void run() {
-            try {
-                startLatch.await();
-                Connect.this.stop();
-            } catch (InterruptedException e) {
-                log.error("Interrupted in shutdown hook while waiting for Kafka Connect startup to finish");
-            }
+	// Visible for testing
+	public URI restUrl() {
+		return rest.serverUrl();
+	}
+
+	public URI adminUrl() {
+		return rest.adminUrl();
+	}
+
+	private class ShutdownHook extends Thread {
+		@Override
+		public void run() {
+			try {
+				startLatch.await();
+				Connect.this.stop();
+			} catch (InterruptedException e) {
+				log.error("Interrupted in shutdown hook while waiting for Kafka Connect startup to finish");
+			}
         }
     }
 }

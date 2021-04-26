@@ -17,15 +17,14 @@
 
 package kafka.server
 
-import kafka.network.SocketServer
+import java.util.Collections
+
 import kafka.utils._
 import org.apache.kafka.common.message.DeleteTopicsRequestData
-import org.apache.kafka.common.protocol.{ApiKeys, Errors}
+import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.requests.{DeleteTopicsRequest, DeleteTopicsResponse}
-import org.junit.Assert._
-import org.junit.Test
-
-import java.util.Collections
+import org.junit.jupiter.api.Assertions._
+import org.junit.jupiter.api.Test
 
 class DeleteTopicsRequestWithDeletionDisabledTest extends BaseRequestTest {
 
@@ -51,16 +50,15 @@ class DeleteTopicsRequestWithDeletionDisabledTest extends BaseRequestTest {
     assertEquals(Errors.TOPIC_DELETION_DISABLED.code, response.data.responses.find(topic).errorCode)
 
     val v2request = new DeleteTopicsRequest.Builder(
-        new DeleteTopicsRequestData()
+      new DeleteTopicsRequestData()
         .setTopicNames(Collections.singletonList(topic))
         .setTimeoutMs(1000)).build(2)
     val v2response = sendDeleteTopicsRequest(v2request)
     assertEquals(Errors.INVALID_REQUEST.code, v2response.data.responses.find(topic).errorCode)
   }
 
-  private def sendDeleteTopicsRequest(request: DeleteTopicsRequest, socketServer: SocketServer = controllerSocketServer): DeleteTopicsResponse = {
-    val response = connectAndSend(request, ApiKeys.DELETE_TOPICS, socketServer)
-    DeleteTopicsResponse.parse(response, request.version)
+  private def sendDeleteTopicsRequest(request: DeleteTopicsRequest): DeleteTopicsResponse = {
+    connectAndReceive[DeleteTopicsResponse](request, destination = controllerSocketServer)
   }
 
 }

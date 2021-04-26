@@ -17,13 +17,12 @@
 package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.message.AddPartitionsToTxnRequestData;
+import org.apache.kafka.common.message.AddPartitionsToTxnRequestData.AddPartitionsToTxnTopic;
+import org.apache.kafka.common.message.AddPartitionsToTxnRequestData.AddPartitionsToTxnTopicCollection;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.ArrayOf;
-import org.apache.kafka.common.protocol.types.Field;
-import org.apache.kafka.common.protocol.types.Schema;
-import org.apache.kafka.common.protocol.types.Struct;
-import org.apache.kafka.common.utils.CollectionUtils;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -31,150 +30,102 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.kafka.common.protocol.CommonFields.PRODUCER_EPOCH;
-import static org.apache.kafka.common.protocol.CommonFields.PRODUCER_ID;
-import static org.apache.kafka.common.protocol.CommonFields.TOPIC_NAME;
-import static org.apache.kafka.common.protocol.CommonFields.TRANSACTIONAL_ID;
-import static org.apache.kafka.common.protocol.types.Type.INT32;
-
 public class AddPartitionsToTxnRequest extends AbstractRequest {
-    private static final String TOPICS_KEY_NAME = "topics";
-    private static final String PARTITIONS_KEY_NAME = "partitions";
 
-    private static final Schema ADD_PARTITIONS_TO_TXN_REQUEST_V0 = new Schema(
-            TRANSACTIONAL_ID,
-            PRODUCER_ID,
-            PRODUCER_EPOCH,
-            new Field(TOPICS_KEY_NAME, new ArrayOf(new Schema(
-                    TOPIC_NAME,
-                    new Field(PARTITIONS_KEY_NAME, new ArrayOf(INT32)))),
-                    "The partitions to add to the transaction."));
+	private final AddPartitionsToTxnRequestData data;
 
-    /**
-     * The version number is bumped to indicate that on quota violation brokers send out responses before throttling.
-     */
-    private static final Schema ADD_PARTITIONS_TO_TXN_REQUEST_V1 = ADD_PARTITIONS_TO_TXN_REQUEST_V0;
+	private List<TopicPartition> cachedPartitions = null;
 
-    public static Schema[] schemaVersions() {
-        return new Schema[]{ADD_PARTITIONS_TO_TXN_REQUEST_V0, ADD_PARTITIONS_TO_TXN_REQUEST_V1};
-    }
+	public static class Builder extends AbstractRequest.Builder<AddPartitionsToTxnRequest> {
+		public final AddPartitionsToTxnRequestData data;
 
-    public static class Builder extends AbstractRequest.Builder<AddPartitionsToTxnRequest> {
-        private final String transactionalId;
-        private final long producerId;
-        private final short producerEpoch;
-        private final List<TopicPartition> partitions;
+		public Builder(final AddPartitionsToTxnRequestData data) {
+			super(ApiKeys.ADD_PARTITIONS_TO_TXN);
+			this.data = data;
+		}
 
-        public Builder(String transactionalId, long producerId, short producerEpoch, List<TopicPartition> partitions) {
-            super(ApiKeys.ADD_PARTITIONS_TO_TXN);
-            this.transactionalId = transactionalId;
-            this.producerId = producerId;
-            this.producerEpoch = producerEpoch;
-            this.partitions = partitions;
-        }
+		public Builder(final String transactionalId,
+					   final long producerId,
+					   final short producerEpoch,
+					   final List<TopicPartition> partitions) {
+			super(ApiKeys.ADD_PARTITIONS_TO_TXN);
 
-        @Override
-        public AddPartitionsToTxnRequest build(short version) {
-            return new AddPartitionsToTxnRequest(version, transactionalId, producerId, producerEpoch, partitions);
-        }
+			Map<String, List<Integer>> partitionMap = new HashMap<>();
+			for (TopicPartition topicPartition : partitions) {
+				String topicName = topicPartition.topic();
 
-        public List<TopicPartition> partitions() {
-            return partitions;
-        }
+				partitionMap.compute(topicName, (key, subPartitions) -> {
+					if (subPartitions == null) {
+						subPartitions = new ArrayList<>();
+					}
+					subPartitions.add(topicPartition.partition());
+					return subPartitions;
+				});
+			}
 
-        @Override
-        public String toString() {
-            StringBuilder bld = new StringBuilder();
-            bld.append("(type=AddPartitionsToTxnRequest").
-                    append(", transactionalId=").append(transactionalId).
-                    append(", producerId=").append(producerId).
-                    append(", producerEpoch=").append(producerEpoch).
-                    append(", partitions=").append(partitions).
-                    append(")");
-            return bld.toString();
-        }
-    }
+			AddPartitionsToTxnTopicCollection topics = new AddPartitionsToTxnTopicCollection();
+			for (Map.Entry<String, List<Integer>> partitionEntry : partitionMap.entrySet()) {
+				topics.add(new AddPartitionsToTxnTopic()
+						.setName(partitionEntry.getKey())
+						.setPartitions(partitionEntry.getValue()));
+			}
 
-    private final String transactionalId;
-    private final long producerId;
-    private final short producerEpoch;
-    private final List<TopicPartition> partitions;
+			this.data = new AddPartitionsToTxnRequestData()
+					.setTransactionalId(transactionalId)
+					.setProducerId(producerId)
+					.setProducerEpoch(producerEpoch)
+					.setTopics(topics);
+		}
 
-    private AddPartitionsToTxnRequest(short version, String transactionalId, long producerId, short producerEpoch,
-                                      List<TopicPartition> partitions) {
-        super(ApiKeys.ADD_PARTITIONS_TO_TXN, version);
-        this.transactionalId = transactionalId;
-        this.producerId = producerId;
-        this.producerEpoch = producerEpoch;
-        this.partitions = partitions;
-    }
+		@Override
+		public AddPartitionsToTxnRequest build(short version) {
+			return new AddPartitionsToTxnRequest(data, version);
+		}
 
-    public AddPartitionsToTxnRequest(Struct struct, short version) {
-        super(ApiKeys.ADD_PARTITIONS_TO_TXN, version);
-        this.transactionalId = struct.get(TRANSACTIONAL_ID);
-        this.producerId = struct.get(PRODUCER_ID);
-        this.producerEpoch = struct.get(PRODUCER_EPOCH);
+		static List<TopicPartition> getPartitions(AddPartitionsToTxnRequestData data) {
+			List<TopicPartition> partitions = new ArrayList<>();
+			for (AddPartitionsToTxnTopic topicCollection : data.topics()) {
+				for (Integer partition : topicCollection.partitions()) {
+					partitions.add(new TopicPartition(topicCollection.name(), partition));
+				}
+			}
+			return partitions;
+		}
 
-        List<TopicPartition> partitions = new ArrayList<>();
-        Object[] topicPartitionsArray = struct.getArray(TOPICS_KEY_NAME);
-        for (Object topicPartitionObj : topicPartitionsArray) {
-            Struct topicPartitionStruct = (Struct) topicPartitionObj;
-            String topic = topicPartitionStruct.get(TOPIC_NAME);
-            for (Object partitionObj : topicPartitionStruct.getArray(PARTITIONS_KEY_NAME)) {
-                partitions.add(new TopicPartition(topic, (Integer) partitionObj));
-            }
-        }
-        this.partitions = partitions;
-    }
+		@Override
+		public String toString() {
+			return data.toString();
+		}
+	}
 
-    public String transactionalId() {
-        return transactionalId;
-    }
-
-    public long producerId() {
-        return producerId;
-    }
-
-    public short producerEpoch() {
-        return producerEpoch;
-    }
+	public AddPartitionsToTxnRequest(final AddPartitionsToTxnRequestData data, short version) {
+		super(ApiKeys.ADD_PARTITIONS_TO_TXN, version);
+		this.data = data;
+	}
 
     public List<TopicPartition> partitions() {
-        return partitions;
-    }
+		if (cachedPartitions != null) {
+			return cachedPartitions;
+		}
+		cachedPartitions = Builder.getPartitions(data);
+		return cachedPartitions;
+	}
 
-    @Override
-    protected Struct toStruct() {
-        Struct struct = new Struct(ApiKeys.ADD_PARTITIONS_TO_TXN.requestSchema(version()));
-        struct.set(TRANSACTIONAL_ID, transactionalId);
-        struct.set(PRODUCER_ID, producerId);
-        struct.set(PRODUCER_EPOCH, producerEpoch);
-
-        Map<String, List<Integer>> mappedPartitions = CollectionUtils.groupPartitionsByTopic(partitions);
-        Object[] partitionsArray = new Object[mappedPartitions.size()];
-        int i = 0;
-        for (Map.Entry<String, List<Integer>> topicAndPartitions : mappedPartitions.entrySet()) {
-            Struct topicPartitionsStruct = struct.instance(TOPICS_KEY_NAME);
-            topicPartitionsStruct.set(TOPIC_NAME, topicAndPartitions.getKey());
-            topicPartitionsStruct.set(PARTITIONS_KEY_NAME, topicAndPartitions.getValue().toArray());
-            partitionsArray[i++] = topicPartitionsStruct;
-        }
-
-        struct.set(TOPICS_KEY_NAME, partitionsArray);
-        return struct;
-    }
+	@Override
+	public AddPartitionsToTxnRequestData data() {
+		return data;
+	}
 
     @Override
     public AddPartitionsToTxnResponse getErrorResponse(int throttleTimeMs, Throwable e) {
         final HashMap<TopicPartition, Errors> errors = new HashMap<>();
-        for (TopicPartition partition : partitions) {
-            errors.put(partition, Errors.forException(e));
-        }
+		for (TopicPartition partition : partitions()) {
+			errors.put(partition, Errors.forException(e));
+		}
         return new AddPartitionsToTxnResponse(throttleTimeMs, errors);
     }
 
     public static AddPartitionsToTxnRequest parse(ByteBuffer buffer, short version) {
-        return new AddPartitionsToTxnRequest(ApiKeys.ADD_PARTITIONS_TO_TXN.parseRequest(version, buffer), version);
+		return new AddPartitionsToTxnRequest(new AddPartitionsToTxnRequestData(new ByteBufferAccessor(buffer), version), version);
     }
-
 }

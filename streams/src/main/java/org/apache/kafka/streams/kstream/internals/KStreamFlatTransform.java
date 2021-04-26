@@ -23,29 +23,37 @@ import org.apache.kafka.streams.processor.AbstractProcessor;
 import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.ProcessorSupplier;
+import org.apache.kafka.streams.state.StoreBuilder;
+
+import java.util.Set;
 
 public class KStreamFlatTransform<KIn, VIn, KOut, VOut> implements ProcessorSupplier<KIn, VIn> {
 
     private final TransformerSupplier<? super KIn, ? super VIn, Iterable<KeyValue<KOut, VOut>>> transformerSupplier;
 
-    public KStreamFlatTransform(final TransformerSupplier<? super KIn, ? super VIn, Iterable<KeyValue<KOut, VOut>>> transformerSupplier) {
-        this.transformerSupplier = transformerSupplier;
-    }
+	public KStreamFlatTransform(final TransformerSupplier<? super KIn, ? super VIn, Iterable<KeyValue<KOut, VOut>>> transformerSupplier) {
+		this.transformerSupplier = transformerSupplier;
+	}
 
-    @Override
-    public Processor<KIn, VIn> get() {
-        return new KStreamFlatTransformProcessor<>(transformerSupplier.get());
-    }
+	@Override
+	public Processor<KIn, VIn> get() {
+		return new KStreamFlatTransformProcessor<>(transformerSupplier.get());
+	}
 
-    public static class KStreamFlatTransformProcessor<KIn, VIn, KOut, VOut> extends AbstractProcessor<KIn, VIn> {
+	@Override
+	public Set<StoreBuilder<?>> stores() {
+		return transformerSupplier.stores();
+	}
 
-        private final Transformer<? super KIn, ? super VIn, Iterable<KeyValue<KOut, VOut>>> transformer;
+	public static class KStreamFlatTransformProcessor<KIn, VIn, KOut, VOut> extends AbstractProcessor<KIn, VIn> {
 
-        public KStreamFlatTransformProcessor(final Transformer<? super KIn, ? super VIn, Iterable<KeyValue<KOut, VOut>>> transformer) {
-            this.transformer = transformer;
-        }
+		private final Transformer<? super KIn, ? super VIn, Iterable<KeyValue<KOut, VOut>>> transformer;
 
-        @Override
+		public KStreamFlatTransformProcessor(final Transformer<? super KIn, ? super VIn, Iterable<KeyValue<KOut, VOut>>> transformer) {
+			this.transformer = transformer;
+		}
+
+		@Override
         public void init(final ProcessorContext context) {
             super.init(context);
             transformer.init(context);

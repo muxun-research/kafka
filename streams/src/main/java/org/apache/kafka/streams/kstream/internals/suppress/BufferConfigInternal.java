@@ -18,32 +18,38 @@ package org.apache.kafka.streams.kstream.internals.suppress;
 
 import org.apache.kafka.streams.kstream.Suppressed;
 
+import java.util.Map;
+
 import static org.apache.kafka.streams.kstream.internals.suppress.BufferFullStrategy.SHUT_DOWN;
 
-abstract class BufferConfigInternal<BC extends Suppressed.BufferConfig<BC>> implements Suppressed.BufferConfig<BC> {
-    public abstract long maxRecords();
+public abstract class BufferConfigInternal<BC extends Suppressed.BufferConfig<BC>> implements Suppressed.BufferConfig<BC> {
+	public abstract long maxRecords();
 
-    public abstract long maxBytes();
+	public abstract long maxBytes();
 
-    @SuppressWarnings("unused")
-    public abstract BufferFullStrategy bufferFullStrategy();
+	@SuppressWarnings("unused")
+	public abstract BufferFullStrategy bufferFullStrategy();
 
-    @Override
-    public Suppressed.StrictBufferConfig withNoBound() {
-        return new StrictBufferConfigImpl(
+	@Override
+	public Suppressed.StrictBufferConfig withNoBound() {
+		return new StrictBufferConfigImpl(
             Long.MAX_VALUE,
             Long.MAX_VALUE,
             SHUT_DOWN // doesn't matter, given the bounds
         );
     }
 
-    @Override
-    public Suppressed.StrictBufferConfig shutDownWhenFull() {
-        return new StrictBufferConfigImpl(maxRecords(), maxBytes(), SHUT_DOWN);
-    }
+	@Override
+	public Suppressed.StrictBufferConfig shutDownWhenFull() {
+		return new StrictBufferConfigImpl(maxRecords(), maxBytes(), SHUT_DOWN);
+	}
 
-    @Override
-    public Suppressed.EagerBufferConfig emitEarlyWhenFull() {
-        return new EagerBufferConfigImpl(maxRecords(), maxBytes());
-    }
+	@Override
+	public Suppressed.EagerBufferConfig emitEarlyWhenFull() {
+		return new EagerBufferConfigImpl(maxRecords(), maxBytes());
+	}
+
+	public abstract boolean isLoggingEnabled();
+
+	public abstract Map<String, String> getLogConfig();
 }

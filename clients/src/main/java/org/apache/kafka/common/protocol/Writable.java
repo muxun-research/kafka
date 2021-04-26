@@ -17,55 +17,50 @@
 
 package org.apache.kafka.common.protocol;
 
-import java.nio.charset.StandardCharsets;
+import org.apache.kafka.common.Uuid;
+import org.apache.kafka.common.record.BaseRecords;
+import org.apache.kafka.common.record.MemoryRecords;
+
+import java.nio.ByteBuffer;
 
 public interface Writable {
-    void writeByte(byte val);
-    void writeShort(short val);
-    void writeInt(int val);
-    void writeLong(long val);
-    void writeArray(byte[] arr);
+	void writeByte(byte val);
 
-    /**
-     * Write a nullable byte array delimited by a four-byte length prefix.
-     */
-    default void writeNullableBytes(byte[] arr) {
-        if (arr == null) {
-            writeInt(-1);
-        } else {
-            writeBytes(arr);
-        }
-    }
+	void writeShort(short val);
 
-    /**
-     * Write a byte array delimited by a four-byte length prefix.
-     */
-    default void writeBytes(byte[] arr) {
-        writeInt(arr.length);
-        writeArray(arr);
-    }
+	void writeInt(int val);
 
-    /**
-     * Write a nullable string delimited by a two-byte length prefix.
-     */
-    default void writeNullableString(String string) {
-        if (string == null) {
-            writeShort((short) -1);
-        } else {
-            writeString(string);
-        }
-    }
+	void writeLong(long val);
 
-    /**
-     * Write a string delimited by a two-byte length prefix.
-     */
-    default void writeString(String string) {
-        byte[] arr = string.getBytes(StandardCharsets.UTF_8);
-        if (arr.length > Short.MAX_VALUE) {
-            throw new RuntimeException("Can't store string longer than " +
-                Short.MAX_VALUE);
-        }
-        writeShort((short) arr.length);
-        writeArray(arr);
-    }
+	void writeDouble(double val);
+
+	void writeByteArray(byte[] arr);
+
+	void writeUnsignedVarint(int i);
+
+	void writeByteBuffer(ByteBuffer buf);
+
+	void writeVarint(int i);
+
+	void writeVarlong(long i);
+
+	default void writeRecords(BaseRecords records) {
+		if (records instanceof MemoryRecords) {
+			MemoryRecords memRecords = (MemoryRecords) records;
+			writeByteBuffer(memRecords.buffer());
+		} else {
+			throw new UnsupportedOperationException("Unsupported record type " + records.getClass());
+		}
+	}
+
+	default void writeUuid(Uuid uuid) {
+		writeLong(uuid.getMostSignificantBits());
+		writeLong(uuid.getLeastSignificantBits());
+	}
+
+	default void writeUnsignedShort(int i) {
+		// The setter functions in the generated code prevent us from setting
+		// ints outside the valid range of a short.
+		writeShort((short) i);
+	}
 }

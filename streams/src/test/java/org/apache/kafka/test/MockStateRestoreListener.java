@@ -18,67 +18,61 @@
 package org.apache.kafka.test;
 
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.streams.KeyValue;
-import org.apache.kafka.streams.processor.AbstractNotifyingRestoreCallback;
+import org.apache.kafka.streams.processor.StateRestoreListener;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
-public class MockStateRestoreListener extends AbstractNotifyingRestoreCallback {
+public class MockStateRestoreListener implements StateRestoreListener {
 
-    // verifies store name called for each state
-    public final Map<String, String> storeNameCalledStates = new HashMap<>();
-    public final List<KeyValue<byte[], byte[]>> restored = new ArrayList<>();
-    public long restoreStartOffset;
-    public long restoreEndOffset;
-    public long restoredBatchOffset;
-    public long numBatchRestored;
-    public long totalNumRestored;
-    public TopicPartition restoreTopicPartition;
+	// verifies store name called for each state
+	public final Map<String, String> storeNameCalledStates = new HashMap<>();
+	public long restoreStartOffset;
+	public long restoreEndOffset;
+	public long restoredBatchOffset;
+	public long numBatchRestored;
+	public long totalNumRestored;
+	public TopicPartition restoreTopicPartition;
 
     public static final String RESTORE_START = "restore_start";
     public static final String RESTORE_BATCH = "restore_batch";
     public static final String RESTORE_END = "restore_end";
 
-    @Override
-    public void restore(final byte[] key, final byte[] value) {
-        restored.add(KeyValue.pair(key, value));
-    }
+	@Override
+	public void onRestoreStart(final TopicPartition topicPartition,
+							   final String storeName,
+							   final long startingOffset,
+							   final long endingOffset) {
+		restoreTopicPartition = topicPartition;
+		storeNameCalledStates.put(RESTORE_START, storeName);
+		restoreStartOffset = startingOffset;
+		restoreEndOffset = endingOffset;
+	}
 
-    @Override
-    public void onRestoreStart(final TopicPartition topicPartition, final String storeName,
-                               final long startingOffset, final long endingOffset) {
-        restoreTopicPartition = topicPartition;
-        storeNameCalledStates.put(RESTORE_START, storeName);
-        restoreStartOffset = startingOffset;
-        restoreEndOffset = endingOffset;
-    }
+	@Override
+	public void onBatchRestored(final TopicPartition topicPartition,
+								final String storeName,
+								final long batchEndOffset,
+								final long numRestored) {
+		restoreTopicPartition = topicPartition;
+		storeNameCalledStates.put(RESTORE_BATCH, storeName);
+		restoredBatchOffset = batchEndOffset;
+		numBatchRestored = numRestored;
+	}
 
-    @Override
-    public void onBatchRestored(final TopicPartition topicPartition, final String storeName,
-                                final long batchEndOffset, final long numRestored) {
-        restoreTopicPartition = topicPartition;
-        storeNameCalledStates.put(RESTORE_BATCH, storeName);
-        restoredBatchOffset = batchEndOffset;
-        numBatchRestored = numRestored;
-
-    }
-
-    @Override
-    public void onRestoreEnd(final TopicPartition topicPartition, final String storeName,
-                             final long totalRestored) {
-        restoreTopicPartition = topicPartition;
-        storeNameCalledStates.put(RESTORE_END, storeName);
-        totalNumRestored = totalRestored;
-    }
+	@Override
+	public void onRestoreEnd(final TopicPartition topicPartition,
+							 final String storeName,
+							 final long totalRestored) {
+		restoreTopicPartition = topicPartition;
+		storeNameCalledStates.put(RESTORE_END, storeName);
+		totalNumRestored = totalRestored;
+	}
 
     @Override
     public String toString() {
         return "MockStateRestoreListener{" +
                "storeNameCalledStates=" + storeNameCalledStates +
-               ", restored=" + restored +
                ", restoreStartOffset=" + restoreStartOffset +
                ", restoreEndOffset=" + restoreEndOffset +
                ", restoredBatchOffset=" + restoredBatchOffset +

@@ -47,17 +47,22 @@ public class InvalidTopicException extends ApiException {
         invalidTopics = new HashSet<>();
     }
 
-    public InvalidTopicException(Throwable cause) {
-        super(cause);
-        invalidTopics = new HashSet<>();
-    }
+	public InvalidTopicException(Throwable cause) {
+		super(cause);
+		invalidTopics = new HashSet<>();
+	}
 
-    public InvalidTopicException(Set<String> invalidTopics) {
-        super("Invalid topics: " + invalidTopics);
-        this.invalidTopics = invalidTopics;
-    }
+	public InvalidTopicException(Set<String> invalidTopics) {
+		super("Invalid topics: " + invalidTopics);
+		this.invalidTopics = invalidTopics;
+	}
 
-    public Set<String> invalidTopics() {
-        return invalidTopics;
-    }
+	public InvalidTopicException(String message, Set<String> invalidTopics) {
+		super(message);
+		this.invalidTopics = invalidTopics;
+	}
+
+	public Set<String> invalidTopics() {
+		return invalidTopics;
+	}
 }

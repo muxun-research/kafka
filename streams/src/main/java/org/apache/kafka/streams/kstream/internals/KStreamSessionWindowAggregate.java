@@ -24,13 +24,11 @@ import org.apache.kafka.streams.kstream.Initializer;
 import org.apache.kafka.streams.kstream.Merger;
 import org.apache.kafka.streams.kstream.SessionWindows;
 import org.apache.kafka.streams.kstream.Windowed;
-import org.apache.kafka.streams.kstream.internals.metrics.Sensors;
 import org.apache.kafka.streams.processor.AbstractProcessor;
 import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.internals.InternalProcessorContext;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
-import org.apache.kafka.streams.processor.internals.metrics.ThreadMetrics;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.SessionStore;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
@@ -40,14 +38,17 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 
-public class KStreamSessionWindowAggregate<K, V, Agg> implements KStreamAggProcessorSupplier<K, Windowed<K>, V, Agg> {
-    private static final Logger LOG = LoggerFactory.getLogger(KStreamSessionWindowAggregate.class);
+import static org.apache.kafka.streams.processor.internals.metrics.TaskMetrics.droppedRecordsSensorOrLateRecordDropSensor;
+import static org.apache.kafka.streams.processor.internals.metrics.TaskMetrics.droppedRecordsSensorOrSkippedRecordsSensor;
 
-    private final String storeName;
-    private final SessionWindows windows;
-    private final Initializer<Agg> initializer;
-    private final Aggregator<? super K, ? super V, Agg> aggregator;
-    private final Merger<? super K, Agg> sessionMerger;
+public class KStreamSessionWindowAggregate<K, V, Agg> implements KStreamAggProcessorSupplier<K, Windowed<K>, V, Agg> {
+	private static final Logger LOG = LoggerFactory.getLogger(KStreamSessionWindowAggregate.class);
+
+	private final String storeName;
+	private final SessionWindows windows;
+	private final Initializer<Agg> initializer;
+	private final Aggregator<? super K, ? super V, Agg> aggregator;
+	private final Merger<? super K, Agg> sessionMerger;
 
     private boolean sendOldValues = false;
 
@@ -83,33 +84,38 @@ public class KStreamSessionWindowAggregate<K, V, Agg> implements KStreamAggProce
         private SessionTupleForwarder<K, Agg> tupleForwarder;
         private StreamsMetricsImpl metrics;
         private InternalProcessorContext internalProcessorContext;
-        private Sensor lateRecordDropSensor;
-        private Sensor skippedRecordsSensor;
-        private long observedStreamTime = ConsumerRecord.NO_TIMESTAMP;
+		private Sensor lateRecordDropSensor;
+		private Sensor droppedRecordsSensor;
+		private long observedStreamTime = ConsumerRecord.NO_TIMESTAMP;
 
         @SuppressWarnings("unchecked")
         @Override
         public void init(final ProcessorContext context) {
-            super.init(context);
-            internalProcessorContext = (InternalProcessorContext) context;
-            metrics = (StreamsMetricsImpl) context.metrics();
-            lateRecordDropSensor = Sensors.lateRecordDropSensor(internalProcessorContext);
-            skippedRecordsSensor = ThreadMetrics.skipRecordSensor(metrics);
-
-            store = (SessionStore<K, Agg>) context.getStateStore(storeName);
-            tupleForwarder = new SessionTupleForwarder<>(store, context, new SessionCacheFlushListener<>(context), sendOldValues);
-        }
+			super.init(context);
+			internalProcessorContext = (InternalProcessorContext) context;
+			metrics = (StreamsMetricsImpl) context.metrics();
+			final String threadId = Thread.currentThread().getName();
+			lateRecordDropSensor = droppedRecordsSensorOrLateRecordDropSensor(
+					threadId,
+					context.taskId().toString(),
+					internalProcessorContext.currentNode().name(),
+					metrics
+			);
+			droppedRecordsSensor = droppedRecordsSensorOrSkippedRecordsSensor(threadId, context.taskId().toString(), metrics);
+			store = (SessionStore<K, Agg>) context.getStateStore(storeName);
+			tupleForwarder = new SessionTupleForwarder<>(store, context, new SessionCacheFlushListener<>(context), sendOldValues);
+		}
 
         @Override
         public void process(final K key, final V value) {
             // if the key is null, we do not need proceed aggregating
             // the record with the table
             if (key == null) {
-                LOG.warn(
-                    "Skipping record due to null key. value=[{}] topic=[{}] partition=[{}] offset=[{}]",
-                    value, context().topic(), context().partition(), context().offset()
-                );
-                skippedRecordsSensor.record();
+				LOG.warn(
+						"Skipping record due to null key. value=[{}] topic=[{}] partition=[{}] offset=[{}]",
+						value, context().topic(), context().partition(), context().offset()
+				);
+				droppedRecordsSensor.record();
                 return;
             }
 
@@ -138,17 +144,17 @@ public class KStreamSessionWindowAggregate<K, V, Agg> implements KStreamAggProce
             }
 
             if (mergedWindow.end() < closeTime) {
-                LOG.debug(
-                    "Skipping record for expired window. " +
-                        "key=[{}] " +
-                        "topic=[{}] " +
-                        "partition=[{}] " +
-                        "offset=[{}] " +
-                        "timestamp=[{}] " +
-                        "window=[{},{}] " +
-                        "expiration=[{}] " +
-                        "streamTime=[{}]",
-                    key,
+				LOG.warn(
+						"Skipping record for expired window. " +
+								"key=[{}] " +
+								"topic=[{}] " +
+								"partition=[{}] " +
+								"offset=[{}] " +
+								"timestamp=[{}] " +
+								"window=[{},{}] " +
+								"expiration=[{}] " +
+								"streamTime=[{}]",
+						key,
                     context().topic(),
                     context().partition(),
                     context().offset(),
@@ -210,10 +216,6 @@ public class KStreamSessionWindowAggregate<K, V, Agg> implements KStreamAggProce
             return ValueAndTimestamp.make(
                 store.fetchSession(key.key(), key.window().start(), key.window().end()),
                 key.window().end());
-        }
-
-        @Override
-        public void close() {
         }
     }
 

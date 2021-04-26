@@ -23,21 +23,36 @@ import java.util.Collection;
 
 /**
  * Options for {@link Admin#deleteTopics(Collection)}.
- *
+ * <p>
  * The API of this class is evolving, see {@link Admin} for details.
  */
 @InterfaceStability.Evolving
 public class DeleteTopicsOptions extends AbstractOptions<DeleteTopicsOptions> {
 
-    /**
-     * Set the request timeout in milliseconds for this operation or {@code null} if the default request timeout for the
-     * AdminClient should be used.
-     *
-     */
-    // This method is retained to keep binary compatibility with 0.11
-    public DeleteTopicsOptions timeoutMs(Integer timeoutMs) {
-        this.timeoutMs = timeoutMs;
-        return this;
-    }
+	private boolean retryOnQuotaViolation = true;
 
+	/**
+	 * Set the timeout in milliseconds for this operation or {@code null} if the default api timeout for the
+	 * AdminClient should be used.
+	 */
+	// This method is retained to keep binary compatibility with 0.11
+	public DeleteTopicsOptions timeoutMs(Integer timeoutMs) {
+		this.timeoutMs = timeoutMs;
+		return this;
+	}
+
+	/**
+	 * Set to true if quota violation should be automatically retried.
+	 */
+	public DeleteTopicsOptions retryOnQuotaViolation(boolean retryOnQuotaViolation) {
+		this.retryOnQuotaViolation = retryOnQuotaViolation;
+		return this;
+	}
+
+	/**
+	 * Returns true if quota violation should be automatically retried.
+	 */
+	public boolean shouldRetryOnQuotaViolation() {
+		return retryOnQuotaViolation;
+	}
 }

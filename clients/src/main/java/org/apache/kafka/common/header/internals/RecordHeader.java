@@ -16,33 +16,37 @@
  */
 package org.apache.kafka.common.header.internals;
 
+import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.utils.Utils;
+
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Objects;
 
-import org.apache.kafka.common.header.Header;
-import org.apache.kafka.common.utils.Utils;
-
 public class RecordHeader implements Header {
-    private final String key;
-    private ByteBuffer valueBuffer;
-    private byte[] value;
+	private ByteBuffer keyBuffer;
+	private String key;
+	private ByteBuffer valueBuffer;
+	private byte[] value;
 
-    public RecordHeader(String key, byte[] value) {
-        Objects.requireNonNull(key, "Null header keys are not permitted");
-        this.key = key;
-        this.value = value;
-    }
+	public RecordHeader(String key, byte[] value) {
+		Objects.requireNonNull(key, "Null header keys are not permitted");
+		this.key = key;
+		this.value = value;
+	}
 
-    public RecordHeader(String key, ByteBuffer valueBuffer) {
-        Objects.requireNonNull(key, "Null header keys are not permitted");
-        this.key = key;
-        this.valueBuffer = valueBuffer;
-    }
-    
-    public String key() {
-        return key;
-    }
+	public RecordHeader(ByteBuffer keyBuffer, ByteBuffer valueBuffer) {
+		this.keyBuffer = Objects.requireNonNull(keyBuffer, "Null header keys are not permitted");
+		this.valueBuffer = valueBuffer;
+	}
+
+	public String key() {
+		if (key == null) {
+			key = Utils.utf8(keyBuffer, keyBuffer.remaining());
+			keyBuffer = null;
+		}
+		return key;
+	}
 
     public byte[] value() {
         if (value == null && valueBuffer != null) {
@@ -60,20 +64,20 @@ public class RecordHeader implements Header {
             return false;
 
         RecordHeader header = (RecordHeader) o;
-        return Objects.equals(key, header.key) &&
-               Arrays.equals(value(), header.value());
+		return Objects.equals(key(), header.key()) &&
+				Arrays.equals(value(), header.value());
     }
 
     @Override
     public int hashCode() {
-        int result = key != null ? key.hashCode() : 0;
+		int result = key().hashCode();
         result = 31 * result + Arrays.hashCode(value());
         return result;
     }
 
     @Override
     public String toString() {
-        return "RecordHeader(key = " + key + ", value = " + Arrays.toString(value()) + ")";
+		return "RecordHeader(key = " + key() + ", value = " + Arrays.toString(value()) + ")";
     }
 
 }

@@ -18,11 +18,11 @@ package org.apache.kafka.common.network;
 
 import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
+import org.apache.kafka.common.security.auth.KafkaPrincipalSerde;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.Collections;
-import java.util.List;
+import java.util.Optional;
 
 /**
  * Authentication for Channel
@@ -42,25 +42,30 @@ public interface Authenticator extends Closeable {
     /**
      * Perform any processing related to authentication failure. This is invoked when the channel is about to be closed
      * because of an {@link AuthenticationException} thrown from a prior {@link #authenticate()} call.
-     * @throws IOException if read/write fails due to an I/O error
-     */
-    default void handleAuthenticationFailure() throws IOException {
-    }
+	 * @throws IOException if read/write fails due to an I/O error
+	 */
+	default void handleAuthenticationFailure() throws IOException {
+	}
 
-    /**
-     * Returns Principal using PrincipalBuilder
-     */
-    KafkaPrincipal principal();
+	/**
+	 * Returns Principal using PrincipalBuilder
+	 */
+	KafkaPrincipal principal();
 
-    /**
-     * returns true if authentication is complete otherwise returns false;
-     */
-    boolean complete();
+	/**
+	 * Returns the serializer/deserializer interface for principal
+	 */
+	Optional<KafkaPrincipalSerde> principalSerde();
 
-    /**
-     * Begins re-authentication. Uses transportLayer to read or write tokens as is
-     * done for {@link #authenticate()}. For security protocols PLAINTEXT and SSL,
-     * this is a no-op since re-authentication does not apply/is not supported,
+	/**
+	 * returns true if authentication is complete otherwise returns false;
+	 */
+	boolean complete();
+
+	/**
+	 * Begins re-authentication. Uses transportLayer to read or write tokens as is
+	 * done for {@link #authenticate()}. For security protocols PLAINTEXT and SSL,
+	 * this is a no-op since re-authentication does not apply/is not supported,
      * respectively. For SASL_PLAINTEXT and SASL_SSL, this performs a SASL
      * authentication. Any in-flight responses from prior requests can/will be read
      * and collected for later processing as required. There must not be partially
@@ -130,21 +135,22 @@ public interface Authenticator extends Closeable {
         return null;
     }
 
-    /**
-     * Return the (always non-null but possibly empty) client-side
-     * {@link NetworkReceive} responses that arrived during re-authentication that
-     * are unrelated to re-authentication, if any. These correspond to requests sent
-     * prior to the beginning of re-authentication; the requests were made when the
-     * channel was successfully authenticated, and the responses arrived during the
-     * re-authentication process.
-     * 
-     * @return the (always non-null but possibly empty) client-side
-     *         {@link NetworkReceive} responses that arrived during
-     *         re-authentication that are unrelated to re-authentication, if any
-     */
-    default List<NetworkReceive> getAndClearResponsesReceivedDuringReauthentication() {
-        return Collections.emptyList();
-    }
+	/**
+	 * Return the next (always non-null but possibly empty) client-side
+	 * {@link NetworkReceive} response that arrived during re-authentication that
+	 * is unrelated to re-authentication, if any. These correspond to requests sent
+	 * prior to the beginning of re-authentication; the requests were made when the
+	 * channel was successfully authenticated, and the responses arrived during the
+	 * re-authentication process. The response returned is removed from the authenticator's
+	 * queue. Responses of requests sent after completion of re-authentication are
+	 * processed only when the authenticator response queue is empty.
+	 * @return the (always non-null but possibly empty) client-side
+	 * {@link NetworkReceive} response that arrived during
+	 * re-authentication that is unrelated to re-authentication, if any
+	 */
+	default Optional<NetworkReceive> pollResponseReceivedDuringReauthentication() {
+		return Optional.empty();
+	}
     
     /**
      * Return true if this is a server-side authenticator and the connected client

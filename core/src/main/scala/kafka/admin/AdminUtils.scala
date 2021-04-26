@@ -17,12 +17,11 @@
 
 package kafka.admin
 
-import java.util.Random
-
 import kafka.utils.Logging
 import org.apache.kafka.common.errors.{InvalidPartitionsException, InvalidReplicationFactorException}
 
-import collection.{Map, mutable, _}
+import java.util.Random
+import scala.collection.{Map, mutable, _}
 
 object AdminUtils extends Logging {
   val rand = new Random
@@ -211,7 +210,7 @@ object AdminUtils extends Logging {
     */
   private[admin] def getRackAlternatedBrokerList(brokerRackMap: Map[Int, String]): IndexedSeq[Int] = {
     val brokersIteratorByRack = getInverseMap(brokerRackMap).map { case (rack, brokers) =>
-      (rack, brokers.toIterator)
+      (rack, brokers.iterator)
     }
     val racks = brokersIteratorByRack.keys.toArray.sorted
     val result = new mutable.ArrayBuffer[Int]

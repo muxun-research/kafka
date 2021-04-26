@@ -22,15 +22,18 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Objects;
 
-public final class BufferValue {
-    private static final int NULL_VALUE_SENTINEL = -1;
-    private static final int OLD_PREV_DUPLICATE_VALUE_SENTINEL = -2;
-    private final byte[] priorValue;
-    private final byte[] oldValue;
-    private final byte[] newValue;
-    private final ProcessorRecordContext recordContext;
+import static org.apache.kafka.common.utils.Utils.getNullableArray;
+import static org.apache.kafka.common.utils.Utils.getNullableSizePrefixedArray;
 
-    BufferValue(final byte[] priorValue,
+public final class BufferValue {
+	private static final int NULL_VALUE_SENTINEL = -1;
+	private static final int OLD_PREV_DUPLICATE_VALUE_SENTINEL = -2;
+	private final byte[] priorValue;
+	private final byte[] oldValue;
+	private final byte[] newValue;
+	private final ProcessorRecordContext recordContext;
+
+	BufferValue(final byte[] priorValue,
                 final byte[] oldValue,
                 final byte[] newValue,
                 final ProcessorRecordContext recordContext) {
@@ -67,33 +70,19 @@ public final class BufferValue {
     static BufferValue deserialize(final ByteBuffer buffer) {
         final ProcessorRecordContext context = ProcessorRecordContext.deserialize(buffer);
 
-        final byte[] priorValue = extractValue(buffer);
+		final byte[] priorValue = getNullableSizePrefixedArray(buffer);
 
         final byte[] oldValue;
         final int oldValueLength = buffer.getInt();
-        if (oldValueLength == NULL_VALUE_SENTINEL) {
-            oldValue = null;
-        } else if (oldValueLength == OLD_PREV_DUPLICATE_VALUE_SENTINEL) {
-            oldValue = priorValue;
-        } else {
-            oldValue = new byte[oldValueLength];
-            buffer.get(oldValue);
-        }
+		if (oldValueLength == OLD_PREV_DUPLICATE_VALUE_SENTINEL) {
+			oldValue = priorValue;
+		} else {
+			oldValue = getNullableArray(buffer, oldValueLength);
+		}
 
-        final byte[] newValue = extractValue(buffer);
+		final byte[] newValue = getNullableSizePrefixedArray(buffer);
 
         return new BufferValue(priorValue, oldValue, newValue, context);
-    }
-
-    private static byte[] extractValue(final ByteBuffer buffer) {
-        final int valueLength = buffer.getInt();
-        if (valueLength == NULL_VALUE_SENTINEL) {
-            return null;
-        } else {
-            final byte[] value = new byte[valueLength];
-            buffer.get(value);
-            return value;
-        }
     }
 
     ByteBuffer serialize(final int endPadding) {
@@ -118,14 +107,14 @@ public final class BufferValue {
 
         addValue(buffer, priorValue);
 
-        if (oldValue == null) {
-            buffer.putInt(NULL_VALUE_SENTINEL);
-        } else if (priorValue == oldValue) {
-            buffer.putInt(OLD_PREV_DUPLICATE_VALUE_SENTINEL);
-        } else {
-            buffer.putInt(sizeOfOldValue);
-            buffer.put(oldValue);
-        }
+		if (oldValue == null) {
+			buffer.putInt(NULL_VALUE_SENTINEL);
+		} else if (Arrays.equals(priorValue, oldValue)) {
+			buffer.putInt(OLD_PREV_DUPLICATE_VALUE_SENTINEL);
+		} else {
+			buffer.putInt(sizeOfOldValue);
+			buffer.put(oldValue);
+		}
 
         addValue(buffer, newValue);
 

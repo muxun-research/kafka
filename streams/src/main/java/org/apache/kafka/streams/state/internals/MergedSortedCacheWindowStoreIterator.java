@@ -31,9 +31,10 @@ class MergedSortedCacheWindowStoreIterator extends AbstractMergedSortedCacheStor
 
 
     MergedSortedCacheWindowStoreIterator(final PeekingKeyValueIterator<Bytes, LRUCacheEntry> cacheIterator,
-                                         final KeyValueIterator<Long, byte[]> storeIterator) {
-        super(cacheIterator, storeIterator);
-    }
+										 final KeyValueIterator<Long, byte[]> storeIterator,
+										 final boolean forward) {
+		super(cacheIterator, storeIterator, forward);
+	}
 
     @Override
     public KeyValue<Long, byte[]> deserializeStorePair(final KeyValue<Long, byte[]> pair) {

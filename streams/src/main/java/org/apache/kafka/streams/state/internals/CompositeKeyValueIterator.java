@@ -50,11 +50,10 @@ class CompositeKeyValueIterator<K, V, StoreType> implements KeyValueIterator<K, 
 
     @Override
     public boolean hasNext() {
-        while ((current == null || !current.hasNext())
-                && storeIterator.hasNext()) {
-            close();
-            current = nextIteratorFunction.apply(storeIterator.next());
-        }
+        while ((current == null || !current.hasNext()) && storeIterator.hasNext()) {
+			close();
+			current = nextIteratorFunction.apply(storeIterator.next());
+		}
         return current != null && current.hasNext();
     }
 

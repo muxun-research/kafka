@@ -30,6 +30,7 @@ import java.util.Map;
 public class CreatePartitionsOptions extends AbstractOptions<CreatePartitionsOptions> {
 
     private boolean validateOnly = false;
+	private boolean retryOnQuotaViolation = true;
 
     public CreatePartitionsOptions() {
     }
@@ -38,14 +39,29 @@ public class CreatePartitionsOptions extends AbstractOptions<CreatePartitionsOpt
      * Return true if the request should be validated without creating new partitions.
      */
     public boolean validateOnly() {
-        return validateOnly;
-    }
+		return validateOnly;
+	}
 
-    /**
-     * Set to true if the request should be validated without creating new partitions.
-     */
-    public CreatePartitionsOptions validateOnly(boolean validateOnly) {
-        this.validateOnly = validateOnly;
-        return this;
-    }
+	/**
+	 * Set to true if the request should be validated without creating new partitions.
+	 */
+	public CreatePartitionsOptions validateOnly(boolean validateOnly) {
+		this.validateOnly = validateOnly;
+		return this;
+	}
+
+	/**
+	 * Set to true if quota violation should be automatically retried.
+	 */
+	public CreatePartitionsOptions retryOnQuotaViolation(boolean retryOnQuotaViolation) {
+		this.retryOnQuotaViolation = retryOnQuotaViolation;
+		return this;
+	}
+
+	/**
+	 * Returns true if quota violation should be automatically retried.
+	 */
+	public boolean shouldRetryOnQuotaViolation() {
+		return retryOnQuotaViolation;
+	}
 }

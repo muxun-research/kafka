@@ -16,6 +16,23 @@
  */
 package org.apache.kafka.common.security.oauthbearer.internals.unsecured;
 
+import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.config.ConfigException;
+import org.apache.kafka.common.security.auth.AuthenticateCallbackHandler;
+import org.apache.kafka.common.security.auth.SaslExtensions;
+import org.apache.kafka.common.security.auth.SaslExtensionsCallback;
+import org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule;
+import org.apache.kafka.common.security.oauthbearer.OAuthBearerTokenCallback;
+import org.apache.kafka.common.security.oauthbearer.internals.OAuthBearerClientInitialResponse;
+import org.apache.kafka.common.utils.Time;
+import org.apache.kafka.common.utils.Utils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.security.auth.callback.Callback;
+import javax.security.auth.callback.UnsupportedCallbackException;
+import javax.security.auth.login.AppConfigurationEntry;
+import javax.security.sasl.SaslException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -30,23 +47,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import javax.security.auth.callback.Callback;
-import javax.security.auth.callback.UnsupportedCallbackException;
-import javax.security.auth.login.AppConfigurationEntry;
-import javax.security.sasl.SaslException;
-
-import org.apache.kafka.common.KafkaException;
-import org.apache.kafka.common.config.ConfigException;
-import org.apache.kafka.common.security.auth.AuthenticateCallbackHandler;
-import org.apache.kafka.common.security.auth.SaslExtensionsCallback;
-import org.apache.kafka.common.security.auth.SaslExtensions;
-import org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule;
-import org.apache.kafka.common.security.oauthbearer.OAuthBearerTokenCallback;
-import org.apache.kafka.common.security.oauthbearer.internals.OAuthBearerClientInitialResponse;
-import org.apache.kafka.common.utils.Time;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * A {@code CallbackHandler} that recognizes {@link OAuthBearerTokenCallback}
@@ -190,15 +190,11 @@ public class OAuthBearerUnsecuredLoginCallbackHandler implements AuthenticateCal
         if (moduleOptions.keySet().stream().noneMatch(name -> !name.startsWith(EXTENSION_PREFIX))) {
             throw new OAuthBearerConfigException("Extensions provided in login context without a token");
         }
-        String principalClaimNameValue = optionValue(PRINCIPAL_CLAIM_NAME_OPTION);
-        String principalClaimName = principalClaimNameValue != null && !principalClaimNameValue.trim().isEmpty()
-                ? principalClaimNameValue.trim()
-                : DEFAULT_PRINCIPAL_CLAIM_NAME;
-        String scopeClaimNameValue = optionValue(SCOPE_CLAIM_NAME_OPTION);
-        String scopeClaimName = scopeClaimNameValue != null && !scopeClaimNameValue.trim().isEmpty()
-                ? scopeClaimNameValue.trim()
-                : DEFAULT_SCOPE_CLAIM_NAME;
-        String headerJson = "{" + claimOrHeaderJsonText("alg", "none") + "}";
+		String principalClaimNameValue = optionValue(PRINCIPAL_CLAIM_NAME_OPTION);
+		String principalClaimName = Utils.isBlank(principalClaimNameValue) ? DEFAULT_PRINCIPAL_CLAIM_NAME : principalClaimNameValue.trim();
+		String scopeClaimNameValue = optionValue(SCOPE_CLAIM_NAME_OPTION);
+		String scopeClaimName = Utils.isBlank(scopeClaimNameValue) ? DEFAULT_SCOPE_CLAIM_NAME : scopeClaimNameValue.trim();
+		String headerJson = "{" + claimOrHeaderJsonText("alg", "none") + "}";
         String lifetimeSecondsValueToUse = optionValue(LIFETIME_SECONDS_OPTION, DEFAULT_LIFETIME_SECONDS_ONE_HOUR);
         String claimsJson;
         try {

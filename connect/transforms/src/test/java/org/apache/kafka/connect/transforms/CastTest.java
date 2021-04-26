@@ -20,64 +20,72 @@ package org.apache.kafka.connect.transforms;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.connect.data.Decimal;
 import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.Schema.Type;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.connect.data.Time;
 import org.apache.kafka.connect.data.Timestamp;
 import org.apache.kafka.connect.data.Values;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.source.SourceRecord;
-import org.junit.After;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class CastTest {
-    private final Cast<SourceRecord> xformKey = new Cast.Key<>();
-    private final Cast<SourceRecord> xformValue = new Cast.Value<>();
-    private static final long MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
+	private final Cast<SourceRecord> xformKey = new Cast.Key<>();
+	private final Cast<SourceRecord> xformValue = new Cast.Value<>();
+	private static final long MILLIS_PER_HOUR = TimeUnit.HOURS.toMillis(1);
+	private static final long MILLIS_PER_DAY = TimeUnit.DAYS.toMillis(1);
 
-    @After
-    public void teardown() {
-        xformKey.close();
-        xformValue.close();
+	@AfterEach
+	public void teardown() {
+		xformKey.close();
+		xformValue.close();
+	}
+
+	@Test
+	public void testConfigEmpty() {
+		assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "")));
     }
 
-    @Test(expected = ConfigException.class)
-    public void testConfigEmpty() {
-        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, ""));
-    }
-
-    @Test(expected = ConfigException.class)
+	@Test
     public void testConfigInvalidSchemaType() {
-        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:faketype"));
+		assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:faketype")));
     }
 
-    @Test(expected = ConfigException.class)
+	@Test
     public void testConfigInvalidTargetType() {
-        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:array"));
+		assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:array")));
     }
 
-    @Test(expected = ConfigException.class)
+	@Test
     public void testUnsupportedTargetType() {
-        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:bytes"));
+		assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:bytes")));
     }
 
-    @Test(expected = ConfigException.class)
+	@Test
     public void testConfigInvalidMap() {
-        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int8:extra"));
+		assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int8:extra")));
     }
 
-    @Test(expected = ConfigException.class)
+	@Test
     public void testConfigMixWholeAndFieldTransformation() {
-        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int8,int32"));
+		assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int8,int32")));
     }
 
     @Test
@@ -312,85 +320,194 @@ public class CastTest {
 
         assertNull(transformed.valueSchema());
         assertEquals("42", transformed.value());
-    }
+	}
 
-    @Test(expected = DataException.class)
-    public void castWholeRecordValueSchemalessUnsupportedType() {
-        xformValue.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "int8"));
-        xformValue.apply(new SourceRecord(null, null, "topic", 0, null, Collections.singletonList("foo")));
-    }
+	@Test
+	public void castWholeRecordValueSchemalessUnsupportedType() {
+		xformValue.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "int8"));
+		assertThrows(DataException.class,
+				() -> xformValue.apply(new SourceRecord(null, null, "topic", 0,
+						null, Collections.singletonList("foo"))));
+	}
 
+	@Test
+	public void castLogicalToPrimitive() {
+		List<String> specParts = Arrays.asList(
+				"date_to_int32:int32",  // Cast to underlying representation
+				"timestamp_to_int64:int64",  // Cast to underlying representation
+				"time_to_int64:int64",  // Cast to wider datatype than underlying representation
+				"decimal_to_int32:int32",  // Cast to narrower datatype with data loss
+				"timestamp_to_float64:float64",  // loss of precision casting to double
+				"null_timestamp_to_int32:int32"
+		);
 
-    @Test
-    public void castFieldsWithSchema() {
-        Date day = new Date(MILLIS_PER_DAY);
-        xformValue.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "int8:int16,int16:int32,int32:int64,int64:boolean,float32:float64,float64:boolean,boolean:int8,string:int32,bigdecimal:string,date:string,optional:int32"));
+		Date day = new Date(MILLIS_PER_DAY);
+		xformValue.configure(Collections.singletonMap(Cast.SPEC_CONFIG,
+				String.join(",", specParts)));
 
-        // Include an optional fields and fields with defaults to validate their values are passed through properly
-        SchemaBuilder builder = SchemaBuilder.struct();
-        builder.field("int8", Schema.INT8_SCHEMA);
-        builder.field("int16", Schema.OPTIONAL_INT16_SCHEMA);
-        builder.field("int32", SchemaBuilder.int32().defaultValue(2).build());
-        builder.field("int64", Schema.INT64_SCHEMA);
-        builder.field("float32", Schema.FLOAT32_SCHEMA);
-        // Default value here ensures we correctly convert default values
-        builder.field("float64", SchemaBuilder.float64().defaultValue(-1.125).build());
-        builder.field("boolean", Schema.BOOLEAN_SCHEMA);
-        builder.field("string", Schema.STRING_SCHEMA);
-        builder.field("bigdecimal", Decimal.schema(new BigDecimal(42).scale()));
-        builder.field("date", Timestamp.SCHEMA);
-        builder.field("optional", Schema.OPTIONAL_FLOAT32_SCHEMA);
-        builder.field("timestamp", Timestamp.SCHEMA);
-        Schema supportedTypesSchema = builder.build();
+		SchemaBuilder builder = SchemaBuilder.struct();
+		builder.field("date_to_int32", org.apache.kafka.connect.data.Date.SCHEMA);
+		builder.field("timestamp_to_int64", Timestamp.SCHEMA);
+		builder.field("time_to_int64", Time.SCHEMA);
+		builder.field("decimal_to_int32", Decimal.schema(new BigDecimal((long) Integer.MAX_VALUE + 1).scale()));
+		builder.field("timestamp_to_float64", Timestamp.SCHEMA);
+		builder.field("null_timestamp_to_int32", Timestamp.builder().optional().build());
 
-        Struct recordValue = new Struct(supportedTypesSchema);
-        recordValue.put("int8", (byte) 8);
-        recordValue.put("int16", (short) 16);
-        recordValue.put("int32", 32);
-        recordValue.put("int64", (long) 64);
-        recordValue.put("float32", 32.f);
-        recordValue.put("float64", -64.);
-        recordValue.put("boolean", true);
-        recordValue.put("bigdecimal", new BigDecimal(42));
-        recordValue.put("date", day);
-        recordValue.put("string", "42");
-        recordValue.put("timestamp", new Date(0));
-        // optional field intentionally omitted
+		Schema supportedTypesSchema = builder.build();
 
-        SourceRecord transformed = xformValue.apply(new SourceRecord(null, null, "topic", 0,
-                supportedTypesSchema, recordValue));
+		Struct recordValue = new Struct(supportedTypesSchema);
+		recordValue.put("date_to_int32", day);
+		recordValue.put("timestamp_to_int64", new Date(0));
+		recordValue.put("time_to_int64", new Date(1));
+		recordValue.put("decimal_to_int32", new BigDecimal((long) Integer.MAX_VALUE + 1));
+		recordValue.put("timestamp_to_float64", new Date(Long.MAX_VALUE));
+		recordValue.put("null_timestamp_to_int32", null);
 
-        assertEquals((short) 8, ((Struct) transformed.value()).get("int8"));
-        assertTrue(((Struct) transformed.value()).schema().field("int16").schema().isOptional());
-        assertEquals(16, ((Struct) transformed.value()).get("int16"));
-        assertEquals((long) 32, ((Struct) transformed.value()).get("int32"));
-        assertEquals(2L, ((Struct) transformed.value()).schema().field("int32").schema().defaultValue());
-        assertEquals(true, ((Struct) transformed.value()).get("int64"));
-        assertEquals(32., ((Struct) transformed.value()).get("float32"));
-        assertEquals(true, ((Struct) transformed.value()).get("float64"));
-        assertEquals(true, ((Struct) transformed.value()).schema().field("float64").schema().defaultValue());
-        assertEquals((byte) 1, ((Struct) transformed.value()).get("boolean"));
-        assertEquals(42, ((Struct) transformed.value()).get("string"));
-        assertEquals("42", ((Struct) transformed.value()).get("bigdecimal"));
-        assertEquals(Values.dateFormatFor(day).format(day), ((Struct) transformed.value()).get("date"));
-        assertEquals(new Date(0), ((Struct) transformed.value()).get("timestamp"));
-        assertNull(((Struct) transformed.value()).get("optional"));
+		SourceRecord transformed = xformValue.apply(
+				new SourceRecord(null, null, "topic", 0,
+						supportedTypesSchema, recordValue));
 
-        Schema transformedSchema = ((Struct) transformed.value()).schema();
-        assertEquals(Schema.INT16_SCHEMA.type(), transformedSchema.field("int8").schema().type());
-        assertEquals(Schema.OPTIONAL_INT32_SCHEMA.type(), transformedSchema.field("int16").schema().type());
-        assertEquals(Schema.INT64_SCHEMA.type(), transformedSchema.field("int32").schema().type());
-        assertEquals(Schema.BOOLEAN_SCHEMA.type(), transformedSchema.field("int64").schema().type());
-        assertEquals(Schema.FLOAT64_SCHEMA.type(), transformedSchema.field("float32").schema().type());
-        assertEquals(Schema.BOOLEAN_SCHEMA.type(), transformedSchema.field("float64").schema().type());
-        assertEquals(Schema.INT8_SCHEMA.type(), transformedSchema.field("boolean").schema().type());
-        assertEquals(Schema.INT32_SCHEMA.type(), transformedSchema.field("string").schema().type());
-        assertEquals(Schema.STRING_SCHEMA.type(), transformedSchema.field("bigdecimal").schema().type());
-        assertEquals(Schema.STRING_SCHEMA.type(), transformedSchema.field("date").schema().type());
-        assertEquals(Schema.OPTIONAL_INT32_SCHEMA.type(), transformedSchema.field("optional").schema().type());
-        // The following fields are not changed
-        assertEquals(Timestamp.SCHEMA.type(), transformedSchema.field("timestamp").schema().type());
-    }
+		assertEquals(1, ((Struct) transformed.value()).get("date_to_int32"));
+		assertEquals(0L, ((Struct) transformed.value()).get("timestamp_to_int64"));
+		assertEquals(1L, ((Struct) transformed.value()).get("time_to_int64"));
+		assertEquals(Integer.MIN_VALUE, ((Struct) transformed.value()).get("decimal_to_int32"));
+		assertEquals(9.223372036854776E18, ((Struct) transformed.value()).get("timestamp_to_float64"));
+		assertNull(((Struct) transformed.value()).get("null_timestamp_to_int32"));
+
+		Schema transformedSchema = ((Struct) transformed.value()).schema();
+		assertEquals(Type.INT32, transformedSchema.field("date_to_int32").schema().type());
+		assertEquals(Type.INT64, transformedSchema.field("timestamp_to_int64").schema().type());
+		assertEquals(Type.INT64, transformedSchema.field("time_to_int64").schema().type());
+		assertEquals(Type.INT32, transformedSchema.field("decimal_to_int32").schema().type());
+		assertEquals(Type.FLOAT64, transformedSchema.field("timestamp_to_float64").schema().type());
+		assertEquals(Type.INT32, transformedSchema.field("null_timestamp_to_int32").schema().type());
+	}
+
+	@Test
+	public void castLogicalToString() {
+		Date date = new Date(MILLIS_PER_DAY);
+		Date time = new Date(MILLIS_PER_HOUR);
+		Date timestamp = new Date();
+
+		xformValue.configure(Collections.singletonMap(Cast.SPEC_CONFIG,
+				"date:string,decimal:string,time:string,timestamp:string"));
+
+		SchemaBuilder builder = SchemaBuilder.struct();
+		builder.field("date", org.apache.kafka.connect.data.Date.SCHEMA);
+		builder.field("decimal", Decimal.schema(new BigDecimal(1982).scale()));
+		builder.field("time", Time.SCHEMA);
+		builder.field("timestamp", Timestamp.SCHEMA);
+
+		Schema supportedTypesSchema = builder.build();
+
+		Struct recordValue = new Struct(supportedTypesSchema);
+		recordValue.put("date", date);
+		recordValue.put("decimal", new BigDecimal(1982));
+		recordValue.put("time", time);
+		recordValue.put("timestamp", timestamp);
+
+		SourceRecord transformed = xformValue.apply(
+				new SourceRecord(null, null, "topic", 0,
+						supportedTypesSchema, recordValue));
+
+		assertEquals(Values.dateFormatFor(date).format(date), ((Struct) transformed.value()).get("date"));
+		assertEquals("1982", ((Struct) transformed.value()).get("decimal"));
+		assertEquals(Values.dateFormatFor(time).format(time), ((Struct) transformed.value()).get("time"));
+		assertEquals(Values.dateFormatFor(timestamp).format(timestamp), ((Struct) transformed.value()).get("timestamp"));
+
+		Schema transformedSchema = ((Struct) transformed.value()).schema();
+		assertEquals(Type.STRING, transformedSchema.field("date").schema().type());
+		assertEquals(Type.STRING, transformedSchema.field("decimal").schema().type());
+		assertEquals(Type.STRING, transformedSchema.field("time").schema().type());
+		assertEquals(Type.STRING, transformedSchema.field("timestamp").schema().type());
+	}
+
+	@Test
+	public void castFieldsWithSchema() {
+		Date day = new Date(MILLIS_PER_DAY);
+		byte[] byteArray = new byte[]{(byte) 0xFE, (byte) 0xDC, (byte) 0xBA, (byte) 0x98, 0x76, 0x54, 0x32, 0x10};
+		ByteBuffer byteBuffer = ByteBuffer.wrap(Arrays.copyOf(byteArray, byteArray.length));
+
+		xformValue.configure(Collections.singletonMap(Cast.SPEC_CONFIG,
+				"int8:int16,int16:int32,int32:int64,int64:boolean,float32:float64,float64:boolean,boolean:int8,string:int32,bigdecimal:string,date:string,optional:int32,bytes:string,byteArray:string"));
+
+		// Include an optional fields and fields with defaults to validate their values are passed through properly
+		SchemaBuilder builder = SchemaBuilder.struct();
+		builder.field("int8", Schema.INT8_SCHEMA);
+		builder.field("int16", Schema.OPTIONAL_INT16_SCHEMA);
+		builder.field("int32", SchemaBuilder.int32().defaultValue(2).build());
+		builder.field("int64", Schema.INT64_SCHEMA);
+		builder.field("float32", Schema.FLOAT32_SCHEMA);
+		// Default value here ensures we correctly convert default values
+		builder.field("float64", SchemaBuilder.float64().defaultValue(-1.125).build());
+		builder.field("boolean", Schema.BOOLEAN_SCHEMA);
+		builder.field("string", Schema.STRING_SCHEMA);
+		builder.field("bigdecimal", Decimal.schema(new BigDecimal(42).scale()));
+		builder.field("date", org.apache.kafka.connect.data.Date.SCHEMA);
+		builder.field("optional", Schema.OPTIONAL_FLOAT32_SCHEMA);
+		builder.field("timestamp", Timestamp.SCHEMA);
+		builder.field("bytes", Schema.BYTES_SCHEMA);
+		builder.field("byteArray", Schema.BYTES_SCHEMA);
+
+		Schema supportedTypesSchema = builder.build();
+
+		Struct recordValue = new Struct(supportedTypesSchema);
+		recordValue.put("int8", (byte) 8);
+		recordValue.put("int16", (short) 16);
+		recordValue.put("int32", 32);
+		recordValue.put("int64", (long) 64);
+		recordValue.put("float32", 32.f);
+		recordValue.put("float64", -64.);
+		recordValue.put("boolean", true);
+		recordValue.put("bigdecimal", new BigDecimal(42));
+		recordValue.put("date", day);
+		recordValue.put("string", "42");
+		recordValue.put("timestamp", new Date(0));
+		recordValue.put("bytes", byteBuffer);
+		recordValue.put("byteArray", byteArray);
+
+		// optional field intentionally omitted
+
+		SourceRecord transformed = xformValue.apply(new SourceRecord(null, null, "topic", 0,
+				supportedTypesSchema, recordValue));
+
+		assertEquals((short) 8, ((Struct) transformed.value()).get("int8"));
+		assertTrue(((Struct) transformed.value()).schema().field("int16").schema().isOptional());
+		assertEquals(16, ((Struct) transformed.value()).get("int16"));
+		assertEquals((long) 32, ((Struct) transformed.value()).get("int32"));
+		assertEquals(2L, ((Struct) transformed.value()).schema().field("int32").schema().defaultValue());
+		assertEquals(true, ((Struct) transformed.value()).get("int64"));
+		assertEquals(32., ((Struct) transformed.value()).get("float32"));
+		assertEquals(true, ((Struct) transformed.value()).get("float64"));
+		assertEquals(true, ((Struct) transformed.value()).schema().field("float64").schema().defaultValue());
+		assertEquals((byte) 1, ((Struct) transformed.value()).get("boolean"));
+		assertEquals(42, ((Struct) transformed.value()).get("string"));
+		assertEquals("42", ((Struct) transformed.value()).get("bigdecimal"));
+		assertEquals(Values.dateFormatFor(day).format(day), ((Struct) transformed.value()).get("date"));
+		assertEquals(new Date(0), ((Struct) transformed.value()).get("timestamp"));
+		assertEquals("/ty6mHZUMhA=", ((Struct) transformed.value()).get("bytes"));
+		assertEquals("/ty6mHZUMhA=", ((Struct) transformed.value()).get("byteArray"));
+
+		assertNull(((Struct) transformed.value()).get("optional"));
+
+		Schema transformedSchema = ((Struct) transformed.value()).schema();
+		assertEquals(Schema.INT16_SCHEMA.type(), transformedSchema.field("int8").schema().type());
+		assertEquals(Schema.OPTIONAL_INT32_SCHEMA.type(), transformedSchema.field("int16").schema().type());
+		assertEquals(Schema.INT64_SCHEMA.type(), transformedSchema.field("int32").schema().type());
+		assertEquals(Schema.BOOLEAN_SCHEMA.type(), transformedSchema.field("int64").schema().type());
+		assertEquals(Schema.FLOAT64_SCHEMA.type(), transformedSchema.field("float32").schema().type());
+		assertEquals(Schema.BOOLEAN_SCHEMA.type(), transformedSchema.field("float64").schema().type());
+		assertEquals(Schema.INT8_SCHEMA.type(), transformedSchema.field("boolean").schema().type());
+		assertEquals(Schema.INT32_SCHEMA.type(), transformedSchema.field("string").schema().type());
+		assertEquals(Schema.STRING_SCHEMA.type(), transformedSchema.field("bigdecimal").schema().type());
+		assertEquals(Schema.STRING_SCHEMA.type(), transformedSchema.field("date").schema().type());
+		assertEquals(Schema.OPTIONAL_INT32_SCHEMA.type(), transformedSchema.field("optional").schema().type());
+		assertEquals(Schema.STRING_SCHEMA.type(), transformedSchema.field("bytes").schema().type());
+		assertEquals(Schema.STRING_SCHEMA.type(), transformedSchema.field("byteArray").schema().type());
+
+		// The following fields are not changed
+		assertEquals(Timestamp.SCHEMA.type(), transformedSchema.field("timestamp").schema().type());
+	}
 
     @SuppressWarnings("unchecked")
     @Test

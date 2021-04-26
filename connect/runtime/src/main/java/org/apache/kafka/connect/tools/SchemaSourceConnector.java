@@ -48,11 +48,11 @@ public class SchemaSourceConnector extends SourceConnector {
     @Override
     public List<Map<String, String>> taskConfigs(int maxTasks) {
         ArrayList<Map<String, String>> configs = new ArrayList<>();
-        for (Integer i = 0; i < maxTasks; i++) {
-            Map<String, String> props = new HashMap<>(config);
-            props.put(SchemaSourceTask.ID_CONFIG, i.toString());
-            configs.add(props);
-        }
+        for (int i = 0; i < maxTasks; i++) {
+			Map<String, String> props = new HashMap<>(config);
+			props.put(SchemaSourceTask.ID_CONFIG, String.valueOf(i));
+			configs.add(props);
+		}
         return configs;
     }
 

@@ -17,15 +17,16 @@
 package org.apache.kafka.common.record;
 
 import org.apache.kafka.common.errors.CorruptRecordException;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
 import java.util.Iterator;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class ByteBufferLogInputStreamTest {
 
@@ -54,7 +55,7 @@ public class ByteBufferLogInputStreamTest {
         assertFalse(iterator.hasNext());
     }
 
-    @Test(expected = CorruptRecordException.class)
+	@Test
     public void iteratorRaisesOnTooSmallRecords() {
         ByteBuffer buffer = ByteBuffer.allocate(1024);
         MemoryRecordsBuilder builder = MemoryRecords.builder(buffer, CompressionType.NONE, TimestampType.CREATE_TIME, 0L);
@@ -73,11 +74,11 @@ public class ByteBufferLogInputStreamTest {
         buffer.putInt(position + DefaultRecordBatch.LENGTH_OFFSET, 9);
 
         ByteBufferLogInputStream logInputStream = new ByteBufferLogInputStream(buffer, Integer.MAX_VALUE);
-        assertNotNull(logInputStream.nextBatch());
-        logInputStream.nextBatch();
+		assertNotNull(logInputStream.nextBatch());
+		assertThrows(CorruptRecordException.class, logInputStream::nextBatch);
     }
 
-    @Test(expected = CorruptRecordException.class)
+	@Test
     public void iteratorRaisesOnInvalidMagic() {
         ByteBuffer buffer = ByteBuffer.allocate(1024);
         MemoryRecordsBuilder builder = MemoryRecords.builder(buffer, CompressionType.NONE, TimestampType.CREATE_TIME, 0L);
@@ -96,28 +97,26 @@ public class ByteBufferLogInputStreamTest {
         buffer.put(position + DefaultRecordBatch.MAGIC_OFFSET, (byte) 37);
 
         ByteBufferLogInputStream logInputStream = new ByteBufferLogInputStream(buffer, Integer.MAX_VALUE);
-        assertNotNull(logInputStream.nextBatch());
-        logInputStream.nextBatch();
+		assertNotNull(logInputStream.nextBatch());
+		assertThrows(CorruptRecordException.class, logInputStream::nextBatch);
     }
 
-    @Test(expected = CorruptRecordException.class)
+	@Test
     public void iteratorRaisesOnTooLargeRecords() {
         ByteBuffer buffer = ByteBuffer.allocate(1024);
         MemoryRecordsBuilder builder = MemoryRecords.builder(buffer, CompressionType.NONE, TimestampType.CREATE_TIME, 0L);
         builder.append(15L, "a".getBytes(), "1".getBytes());
-        builder.append(20L, "b".getBytes(), "2".getBytes());
         builder.close();
 
         builder = MemoryRecords.builder(buffer, CompressionType.NONE, TimestampType.CREATE_TIME, 2L);
         builder.append(30L, "c".getBytes(), "3".getBytes());
         builder.append(40L, "d".getBytes(), "4".getBytes());
         builder.close();
-
         buffer.flip();
 
-        ByteBufferLogInputStream logInputStream = new ByteBufferLogInputStream(buffer, 25);
-        assertNotNull(logInputStream.nextBatch());
-        logInputStream.nextBatch();
+		ByteBufferLogInputStream logInputStream = new ByteBufferLogInputStream(buffer, 60);
+		assertNotNull(logInputStream.nextBatch());
+		assertThrows(CorruptRecordException.class, logInputStream::nextBatch);
     }
 
 }

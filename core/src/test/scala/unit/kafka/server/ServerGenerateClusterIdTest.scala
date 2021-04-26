@@ -18,19 +18,20 @@ package kafka.server
 
 import java.io.File
 
-import kafka.common.{InconsistentBrokerMetadataException, InconsistentClusterIdException}
-
-import scala.concurrent._
-import ExecutionContext.Implicits._
-import scala.concurrent.duration._
-import kafka.utils.TestUtils
-import kafka.zk.ZooKeeperTestHarness
-import org.junit.Assert._
-import org.junit.{After, Before, Test}
-import org.scalatest.Assertions.assertThrows
-import org.apache.kafka.test.TestUtils.isValidClusterId
 
 import scala.collection.Seq
+import scala.concurrent._
+import scala.concurrent.duration._
+import ExecutionContext.Implicits._
+
+import kafka.common.{InconsistentBrokerMetadataException, InconsistentClusterIdException}
+import kafka.utils.TestUtils
+import kafka.zk.ZooKeeperTestHarness
+
+import org.junit.jupiter.api.Assertions._
+import org.junit.jupiter.api.{AfterEach, BeforeEach, Test}
+import org.apache.kafka.test.TestUtils.isValidClusterId
+
 
 class ServerGenerateClusterIdTest extends ZooKeeperTestHarness {
   var config1: KafkaConfig = null
@@ -39,7 +40,7 @@ class ServerGenerateClusterIdTest extends ZooKeeperTestHarness {
   var servers: Seq[KafkaServer] = Seq()
   val brokerMetaPropsFile = "meta.properties"
 
-  @Before
+  @BeforeEach
   override def setUp(): Unit = {
     super.setUp()
     config1 = KafkaConfig.fromProps(TestUtils.createBrokerConfig(1, zkConnect))
@@ -47,7 +48,7 @@ class ServerGenerateClusterIdTest extends ZooKeeperTestHarness {
     config3 = KafkaConfig.fromProps(TestUtils.createBrokerConfig(3, zkConnect))
   }
 
-  @After
+  @AfterEach
   override def tearDown(): Unit = {
     TestUtils.shutdownServers(servers)
     super.tearDown()
@@ -59,7 +60,7 @@ class ServerGenerateClusterIdTest extends ZooKeeperTestHarness {
     // Make sure that the cluster id doesn't exist yet.
     assertFalse(zkClient.getClusterId.isDefined)
 
-    var server1 = TestUtils.createServer(config1)
+    var server1 = TestUtils.createServer(config1, threadNamePrefix = Option(this.getClass.getName))
     servers = Seq(server1)
 
     // Validate the cluster id
@@ -73,7 +74,7 @@ class ServerGenerateClusterIdTest extends ZooKeeperTestHarness {
     assertEquals(zkClient.getClusterId, Some(clusterIdOnFirstBoot))
 
     // Restart the server check to confirm that it uses the clusterId generated previously
-    server1 = TestUtils.createServer(config1)
+    server1 = TestUtils.createServer(config1, threadNamePrefix = Option(this.getClass.getName))
     servers = Seq(server1)
 
     val clusterIdOnSecondBoot = server1.clusterId
@@ -85,18 +86,18 @@ class ServerGenerateClusterIdTest extends ZooKeeperTestHarness {
     assertTrue(zkClient.getClusterId.isDefined)
     assertEquals(zkClient.getClusterId, Some(clusterIdOnFirstBoot))
 
-    TestUtils.verifyNonDaemonThreadsStatus(this.getClass.getName)
+    TestUtils.assertNoNonDaemonThreads(this.getClass.getName)
   }
 
   @Test
   def testAutoGenerateClusterIdForKafkaClusterSequential(): Unit = {
-    val server1 = TestUtils.createServer(config1)
+    val server1 = TestUtils.createServer(config1, threadNamePrefix = Option(this.getClass.getName))
     val clusterIdFromServer1 = server1.clusterId
 
-    val server2 = TestUtils.createServer(config2)
+    val server2 = TestUtils.createServer(config2, threadNamePrefix = Option(this.getClass.getName))
     val clusterIdFromServer2 = server2.clusterId
 
-    val server3 = TestUtils.createServer(config3)
+    val server3 = TestUtils.createServer(config3, threadNamePrefix = Option(this.getClass.getName))
     val clusterIdFromServer3 = server3.clusterId
     servers = Seq(server1, server2, server3)
 
@@ -115,12 +116,12 @@ class ServerGenerateClusterIdTest extends ZooKeeperTestHarness {
 
     servers.foreach(_.shutdown())
 
-    TestUtils.verifyNonDaemonThreadsStatus(this.getClass.getName)
+    TestUtils.assertNoNonDaemonThreads(this.getClass.getName)
   }
 
   @Test
   def testAutoGenerateClusterIdForKafkaClusterParallel(): Unit = {
-    val firstBoot = Future.traverse(Seq(config1, config2, config3))(config => Future(TestUtils.createServer(config)))
+    val firstBoot = Future.traverse(Seq(config1, config2, config3))(config => Future(TestUtils.createServer(config, threadNamePrefix = Option(this.getClass.getName))))
     servers = Await.result(firstBoot, 100 second)
     val Seq(server1, server2, server3) = servers
 
@@ -142,13 +143,13 @@ class ServerGenerateClusterIdTest extends ZooKeeperTestHarness {
 
     servers.foreach(_.shutdown())
 
-    TestUtils.verifyNonDaemonThreadsStatus(this.getClass.getName)
+    TestUtils.assertNoNonDaemonThreads(this.getClass.getName)
   }
 
   @Test
   def testConsistentClusterIdFromZookeeperAndFromMetaProps() = {
     // Check at the first boot
-    val server = TestUtils.createServer(config1)
+    val server = TestUtils.createServer(config1, threadNamePrefix = Option(this.getClass.getName))
     val clusterId = server.clusterId
 
     assertTrue(verifyBrokerMetadata(server.config.logDirs, clusterId))
@@ -163,7 +164,7 @@ class ServerGenerateClusterIdTest extends ZooKeeperTestHarness {
 
     server.shutdown()
 
-    TestUtils.verifyNonDaemonThreadsStatus(this.getClass.getName)
+    TestUtils.assertNoNonDaemonThreads(this.getClass.getName)
   }
 
   @Test
@@ -173,13 +174,11 @@ class ServerGenerateClusterIdTest extends ZooKeeperTestHarness {
     val server = new KafkaServer(config1, threadNamePrefix = Option(this.getClass.getName))
 
     // Startup fails
-    assertThrows[InconsistentClusterIdException] {
-      server.startup()
-    }
+    assertThrows(classOf[InconsistentClusterIdException], () => server.startup())
 
     server.shutdown()
 
-    TestUtils.verifyNonDaemonThreadsStatus(this.getClass.getName)
+    TestUtils.assertNoNonDaemonThreads(this.getClass.getName)
   }
 
   @Test
@@ -199,13 +198,11 @@ class ServerGenerateClusterIdTest extends ZooKeeperTestHarness {
     val server = new KafkaServer(config, threadNamePrefix = Option(this.getClass.getName))
 
     // Startup fails
-    assertThrows[InconsistentBrokerMetadataException] {
-      server.startup()
-    }
+    assertThrows(classOf[InconsistentBrokerMetadataException], () => server.startup())
 
     server.shutdown()
 
-    TestUtils.verifyNonDaemonThreadsStatus(this.getClass.getName)
+    TestUtils.assertNoNonDaemonThreads(this.getClass.getName)
   }
 
   def forgeBrokerMetadata(logDirs: Seq[String], brokerId: Int, clusterId: String): Unit = {
@@ -217,7 +214,7 @@ class ServerGenerateClusterIdTest extends ZooKeeperTestHarness {
   def forgeBrokerMetadata(logDir: String, brokerId: Int, clusterId: String): Unit = {
     val checkpoint = new BrokerMetadataCheckpoint(
       new File(logDir + File.separator + brokerMetaPropsFile))
-    checkpoint.write(BrokerMetadata(brokerId, Option(clusterId)))
+    checkpoint.write(ZkMetaProperties(clusterId, brokerId).toProperties)
   }
 
   def verifyBrokerMetadata(logDirs: Seq[String], clusterId: String): Boolean = {
@@ -225,11 +222,13 @@ class ServerGenerateClusterIdTest extends ZooKeeperTestHarness {
       val brokerMetadataOpt = new BrokerMetadataCheckpoint(
         new File(logDir + File.separator + brokerMetaPropsFile)).read()
       brokerMetadataOpt match {
-        case Some(brokerMetadata) =>
-          if (brokerMetadata.clusterId.isDefined && brokerMetadata.clusterId.get != clusterId) return false
+        case Some(properties) =>
+          val brokerMetadata = new RawMetaProperties(properties)
+          if (brokerMetadata.clusterId.exists(_ != clusterId)) return false
         case _ => return false
       }
     }
     true
   }
+
 }

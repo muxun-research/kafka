@@ -16,15 +16,17 @@
  */
 package org.apache.kafka.common.metrics.stats;
 
+import java.util.Arrays;
+
 public class Histogram {
 
-    private final BinScheme binScheme;
-    private final float[] hist;
-    private double count;
+	private final BinScheme binScheme;
+	private final float[] hist;
+	private double count;
 
-    public Histogram(BinScheme binScheme) {
-        this.hist = new float[binScheme.bins()];
-        this.count = 0.0f;
+	public Histogram(BinScheme binScheme) {
+		this.hist = new float[binScheme.bins()];
+		this.count = 0.0f;
         this.binScheme = binScheme;
     }
 
@@ -55,9 +57,8 @@ public class Histogram {
     }
 
     public void clear() {
-        for (int i = 0; i < this.hist.length; i++)
-            this.hist[i] = 0.0f;
-        this.count = 0;
+		Arrays.fill(this.hist, 0.0f);
+		this.count = 0;
     }
 
     @Override
@@ -156,10 +157,7 @@ public class Histogram {
             if (binNumber < MIN_BIN_NUMBER) {
                 return MIN_BIN_NUMBER;
             }
-            if (binNumber > maxBinNumber) {
-                return maxBinNumber;
-            }
-            return binNumber;
+			return Math.min(binNumber, maxBinNumber);
         }
     }
 

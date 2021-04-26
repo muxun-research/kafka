@@ -136,8 +136,8 @@ object StateChangeLogMerger extends Logging {
      * 4. Flush the output buffer at the end. (The buffer will also be automatically flushed every K bytes.)
      */
     val pqueue = new mutable.PriorityQueue[LineIterator]()(dateBasedOrdering)
-    val output: OutputStream = new BufferedOutputStream(System.out, 1024*1024)
-    val lineIterators = files.map(scala.io.Source.fromFile(_).getLines)
+    val output: OutputStream = new BufferedOutputStream(System.out, 1024 * 1024)
+    val lineIterators = files.map(scala.io.Source.fromFile(_).getLines())
     var lines: List[LineIterator] = List()
 
     for (itr <- lineIterators) {
@@ -166,7 +166,7 @@ object StateChangeLogMerger extends Logging {
    */
   def getNextLine(itr: Iterator[String]): LineIterator = {
     while (itr != null && itr.hasNext) {
-      val nextLine = itr.next
+      val nextLine = itr.next()
       dateRegex.findFirstIn(nextLine).foreach { d =>
         val date = dateFormat.parse(d)
         if ((date.equals(startDate) || date.after(startDate)) && (date.equals(endDate) || date.before(endDate))) {

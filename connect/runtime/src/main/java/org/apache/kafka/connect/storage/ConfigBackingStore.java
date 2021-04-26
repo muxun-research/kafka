@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.connect.storage;
 
+import org.apache.kafka.connect.runtime.SessionKey;
 import org.apache.kafka.connect.runtime.TargetState;
 import org.apache.kafka.connect.runtime.distributed.ClusterConfigState;
 import org.apache.kafka.connect.util.ConnectorTaskId;
@@ -78,25 +79,27 @@ public interface ConfigBackingStore {
      * @param timeout max time to wait for the refresh to complete
      * @param unit unit of timeout
      * @throws TimeoutException if the timeout expires before the refresh has completed
-     */
-    void refresh(long timeout, TimeUnit unit) throws TimeoutException;
+	 */
+	void refresh(long timeout, TimeUnit unit) throws TimeoutException;
 
-    /**
-     * Transition a connector to a new target state (e.g. paused).
-     * @param connector name of the connector
-     * @param state the state to transition to
-     */
-    void putTargetState(String connector, TargetState state);
+	/**
+	 * Transition a connector to a new target state (e.g. paused).
+	 * @param connector name of the connector
+	 * @param state     the state to transition to
+	 */
+	void putTargetState(String connector, TargetState state);
 
-    /**
-     * Set an update listener to get notifications when there are config/target state
-     * changes.
-     * @param listener non-null listener
-     */
-    void setUpdateListener(UpdateListener listener);
+	void putSessionKey(SessionKey sessionKey);
 
-    interface UpdateListener {
-        /**
+	/**
+	 * Set an update listener to get notifications when there are config/target state
+	 * changes.
+	 * @param listener non-null listener
+	 */
+	void setUpdateListener(UpdateListener listener);
+
+	interface UpdateListener {
+		/**
          * Invoked when a connector configuration has been removed
          * @param connector name of the connector
          */
@@ -108,17 +111,23 @@ public interface ConfigBackingStore {
          */
         void onConnectorConfigUpdate(String connector);
 
-        /**
-         * Invoked when task configs are updated.
-         * @param tasks all the tasks whose configs have been updated
-         */
-        void onTaskConfigUpdate(Collection<ConnectorTaskId> tasks);
+		/**
+		 * Invoked when task configs are updated.
+		 * @param tasks all the tasks whose configs have been updated
+		 */
+		void onTaskConfigUpdate(Collection<ConnectorTaskId> tasks);
 
-        /**
-         * Invoked when the user has set a new target state (e.g. paused)
-         * @param connector name of the connector
-         */
-        void onConnectorTargetStateChange(String connector);
-    }
+		/**
+		 * Invoked when the user has set a new target state (e.g. paused)
+		 * @param connector name of the connector
+		 */
+		void onConnectorTargetStateChange(String connector);
+
+		/**
+		 * Invoked when the leader has distributed a new session key
+		 * @param sessionKey the {@link SessionKey session key}
+		 */
+		void onSessionKeyUpdate(SessionKey sessionKey);
+	}
 
 }

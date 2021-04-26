@@ -21,7 +21,6 @@ import java.util.concurrent._
 import java.util.concurrent.atomic._
 import java.util.concurrent.locks.{Lock, ReentrantLock}
 
-import com.yammer.metrics.core.Gauge
 import kafka.metrics.KafkaMetricsGroup
 import kafka.utils.CoreUtils.inLock
 import kafka.utils._
@@ -31,63 +30,45 @@ import scala.collection._
 import scala.collection.mutable.ListBuffer
 
 /**
- * 延迟操作
- * 一个操作需要进行延迟处理
+ * An operation whose processing needs to be delayed for at most the given delayMs. For example
+ * a delayed produce operation could be waiting for specified number of acks; or
+ * a delayed fetch operation could be waiting for a given number of bytes to accumulate.
  *
- * 在逻辑上，一个延迟操作完成的任务生命在onComplete()方法中，而且只会被调用一次
- * 如果一个操作完成了，isCompleted()会返回true
- * onComplete()可以被forceComplete()在等待时间后但是操作还没有完成的情况下强制触发
- * 或者通过tryComplete()方法，首先校验当前操作是否可以完成，然后再调用forceComplete()方法
+ * The logic upon completing a delayed operation is defined in onComplete() and will be called exactly once.
+ * Once an operation is completed, isCompleted() will return true. onComplete() can be triggered by either
+ * forceComplete(), which forces calling onComplete() after delayMs if the operation is not yet completed,
+ * or tryComplete(), which first checks if the operation can be completed or not now, and if yes calls
+ * forceComplete().
  *
- * DelayedOperation子类需要同时提供onComplete()或者tryComplete()的实现
+ * A subclass of DelayedOperation needs to provide an implementation of both onComplete() and tryComplete().
+ *
+ * Noted that if you add a future delayed operation that calls ReplicaManager.appendRecords() in onComplete()
+ * like DelayedJoin, you must be aware that this operation's onExpiration() needs to call actionQueue.tryCompleteAction().
  */
 abstract class DelayedOperation(override val delayMs: Long,
                                 lockOpt: Option[Lock] = None)
   extends TimerTask with Logging {
 
   private val completed = new AtomicBoolean(false)
-  private val tryCompletePending = new AtomicBoolean(false)
   // Visible for testing
   private[server] val lock: Lock = lockOpt.getOrElse(new ReentrantLock)
 
-  /**
-   * 当延迟的操作到期并因此被强制完成时执行回调
-   */
-  def onExpiration(): Unit
-
-  /**
-   * 一个完成任务的进程，需要在子类中实现，并且只会在forceComplete()中调用一次
-   */
-  def onComplete(): Unit
-
-  /**
-   * 尝试完成延迟操作，首先需要检查当前是否可完成
-   * 如果可完成，则调用forceComplete()完成任务，并返回true
-   * 其他情况，返回false
-   * 需要在子类中实现
-   */
-  def tryComplete(): Boolean
-
   /*
-   * run()方法声明了一个用于执行等待的任务
-   */
-  override def run(): Unit = {
-    if (forceComplete())
-      onExpiration()
-  }
-
-  /*
-   * 强制完成延迟的操作，如果还没有完成，函数可以在以下情况下被触发
-   * 1. 操作已经在tryComplete()方法中被验证可以完成
-   * 2. 操作已经失效，需要立即完成
-   * 如果调用者完成了任务，返回true
-   * 需要注意的是，存在并发下完成任务的情况，但是仅有第一个线程可以完成任务，并返回true，其他线程将会返回false
+   * Force completing the delayed operation, if not already completed.
+   * This function can be triggered when
+   *
+   * 1. The operation has been verified to be completable inside tryComplete()
+   * 2. The operation has expired and hence needs to be completed right now
+   *
+   * Return true iff the operation is completed by the caller: note that
+   * concurrent threads can try to complete the same operation, but only
+   * the first thread will succeed in completing the operation and return
+   * true, others will still return false
    */
   def forceComplete(): Boolean = {
     if (completed.compareAndSet(false, true)) {
-      // 取消等待计时器
+      // cancel the timeout timer
       cancel()
-      // 完成任务
       onComplete()
       true
     } else {
@@ -96,35 +77,56 @@ abstract class DelayedOperation(override val delayMs: Long,
   }
 
   /**
-   * tryComplete()的线程安全的变体，用于仅在可以占有锁的情况下，尝试完成，不会进行阻塞
-   * 确保每次maybeTryComplete()都会在至少一次tryComplete()调用之后调用，知道操作真正完成
+   * Check if the delayed operation is already completed
    */
-  private[server] def maybeTryComplete(): Boolean = {
-    var retry = false
-    var done = false
-    do {
-      if (lock.tryLock()) {
-        try {
-          tryCompletePending.set(false)
-          done = tryComplete()
-        } finally {
-          lock.unlock()
-        }
-        // 当前已经占有了锁，另一个线程调用了maybeTryComplete()并设置了tryCompletePending，就需要进行重试
-        retry = tryCompletePending.get()
-      } else {
-        // 另一线程占有了锁，如果已经设置了tryCompletePending并且当前线程尝试获取锁失败了，那么持有锁的线程就会保证看到标识，并进行重试
-        // 否则，应该设置标识并在当前线程上重试，因为持有锁的线程可能已经释放了锁，并返回设置标识的时间
-        retry = !tryCompletePending.getAndSet(true)
-      }
-    } while (!isCompleted && retry)
-    done
+  def isCompleted: Boolean = completed.get()
+
+  /**
+   * Call-back to execute when a delayed operation gets expired and hence forced to complete.
+   */
+  def onExpiration(): Unit
+
+  /**
+   * Process for completing an operation; This function needs to be defined
+   * in subclasses and will be called exactly once in forceComplete()
+   */
+  def onComplete(): Unit
+
+  /**
+   * Try to complete the delayed operation by first checking if the operation
+   * can be completed by now. If yes execute the completion logic by calling
+   * forceComplete() and return true iff forceComplete returns true; otherwise return false
+   *
+   * This function needs to be defined in subclasses
+   */
+  def tryComplete(): Boolean
+
+  /**
+   * Thread-safe variant of tryComplete() and call extra function if first tryComplete returns false
+   * @param f else function to be executed after first tryComplete returns false
+   * @return result of tryComplete
+   */
+  private[server] def safeTryCompleteOrElse(f: => Unit): Boolean = inLock(lock) {
+    if (tryComplete()) true
+    else {
+      f
+      // last completion check
+      tryComplete()
+    }
   }
 
   /**
-   * 检查当前任务是否已完成
+   * Thread-safe variant of tryComplete()
    */
-  def isCompleted: Boolean = completed.get()
+  private[server] def safeTryComplete(): Boolean = inLock(lock)(tryComplete())
+
+  /*
+   * run() method defines a task that is executed on timeout
+   */
+  override def run(): Unit = {
+    if (forceComplete())
+      onExpiration()
+  }
 }
 
 object DelayedOperationPurgatory {
@@ -179,31 +181,20 @@ final class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: Stri
   private val expirationReaper = new ExpiredOperationReaper()
 
   private val metricsTags = Map("delayedOperation" -> purgatoryName)
-
-  newGauge(
-    "PurgatorySize",
-    new Gauge[Int] {
-      def value: Int = watched
-    },
-    metricsTags
-  )
-
-  newGauge(
-    "NumDelayedOperations",
-    new Gauge[Int] {
-      def value: Int = numDelayed
-    },
-    metricsTags
-  )
+  newGauge("PurgatorySize", () => watched, metricsTags)
+  newGauge("NumDelayedOperations", () => numDelayed, metricsTags)
 
   if (reaperEnabled)
     expirationReaper.start()
 
   /**
-   * 检查延迟操作是否可以完成，如果还不能完成，继续基于给定观察key继续观察
-   * 需要注意的是，一个延迟操作可以同时被多个key观察，当延迟任务添加到等待集合中后，可能会完成该操作，但并不是所有的key。
-   * 这种情况下，延迟操作，延迟操作会被认为已经完成，并且不会添加到观察者列表
-   * 过期处理线程将会从该延迟操作的任何观察者列表中删除此操作
+   * Check if the operation can be completed, if not watch it based on the given watch keys
+   *
+   * Note that a delayed operation can be watched on multiple keys. It is possible that
+   * an operation is completed after it has been added to the watch list for some, but
+   * not all of the keys. In this case, the operation is considered completed and won't
+   * be added to the watch list of the remaining keys. The expiration reaper thread will
+   * remove this operation from any watcher list in which the operation exists.
    * @param operation the delayed operation to be checked
    * @param watchKeys keys for bookkeeping the operation
    * @return true iff the delayed operations can be completed by the caller
@@ -211,41 +202,45 @@ final class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: Stri
   def tryCompleteElseWatch(operation: T, watchKeys: Seq[Any]): Boolean = {
     assert(watchKeys.nonEmpty, "The watch key list can't be empty")
 
-    // tryComplete()的消耗和key的数量有关系，为每个key调用tryComplete()在很多key的情况下是非常耗费资源的
-    // 相反，可以这样检查，调用tryComplete()，如果延迟操作还没有完成，我们仅把延迟操作添加到所有的key中
-    // 接着再次调用tryComplete()，这一次，如果延迟操作还没有完成，延迟操作已经在所有的key的观察者列表中，并且保证不会错过未来任何的触发事件
-    // 如果延迟操作在两次tryComplete()调用之间完成，并不代表不需要添加观察，然而，这并不是一个严重的问题，因为失效检查线程会定期扫描清理
+    // The cost of tryComplete() is typically proportional to the number of keys. Calling tryComplete() for each key is
+    // going to be expensive if there are many keys. Instead, we do the check in the following way through safeTryCompleteOrElse().
+    // If the operation is not completed, we just add the operation to all keys. Then we call tryComplete() again. At
+    // this time, if the operation is still not completed, we are guaranteed that it won't miss any future triggering
+    // event since the operation is already on the watcher list for all keys.
+    //
+    // ==============[story about lock]==============
+    // Through safeTryCompleteOrElse(), we hold the operation's lock while adding the operation to watch list and doing
+    // the tryComplete() check. This is to avoid a potential deadlock between the callers to tryCompleteElseWatch() and
+    // checkAndComplete(). For example, the following deadlock can happen if the lock is only held for the final tryComplete()
+    // 1) thread_a holds readlock of stateLock from TransactionStateManager
+    // 2) thread_a is executing tryCompleteElseWatch()
+    // 3) thread_a adds op to watch list
+    // 4) thread_b requires writelock of stateLock from TransactionStateManager (blocked by thread_a)
+    // 5) thread_c calls checkAndComplete() and holds lock of op
+    // 6) thread_c is waiting readlock of stateLock to complete op (blocked by thread_b)
+    // 7) thread_a is waiting lock of op to call the final tryComplete() (blocked by thread_c)
+    //
+    // Note that even with the current approach, deadlocks could still be introduced. For example,
+    // 1) thread_a calls tryCompleteElseWatch() and gets lock of op
+    // 2) thread_a adds op to watch list
+    // 3) thread_a calls op#tryComplete and tries to require lock_b
+    // 4) thread_b holds lock_b and calls checkAndComplete()
+    // 5) thread_b sees op from watch list
+    // 6) thread_b needs lock of op
+    // To avoid the above scenario, we recommend DelayedOperationPurgatory.checkAndComplete() be called without holding
+    // any exclusive lock. Since DelayedOperationPurgatory.checkAndComplete() completes delayed operations asynchronously,
+    // holding a exclusive lock to make the call is often unnecessary.
+    if (operation.safeTryCompleteOrElse {
+      watchKeys.foreach(key => watchForOperation(key, operation))
+      if (watchKeys.nonEmpty) estimatedTotalOperations.incrementAndGet()
+    }) return true
 
-    // 当前线程是可以执行延迟操作的唯一线程，因此，不带锁的tryComplete()是线程安全的
-    var isCompletedByMe = operation.tryComplete()
-    if (isCompletedByMe)
-      return true
-
-    var watchCreated = false
-    for(key <- watchKeys) {
-      // 如果延迟操作已经完成，停止添加到剩余的观察者列表中
-      if (operation.isCompleted)
-        return false
-      // 否则继续添加到观察者列表中
-      watchForOperation(key, operation)
-      // 修改创建观察标识
-      if (!watchCreated) {
-        watchCreated = true
-        // 延迟操作计数器+1
-        estimatedTotalOperations.incrementAndGet()
-      }
-    }
-    // 尝试当前线程是否可以完成延迟操作
-    isCompletedByMe = operation.maybeTryComplete()
-    if (isCompletedByMe)
-      return true
-
-    // 如果现在还不能完成，并且添加到了观察列表中，同时也添加到失效队列中
+    // if it cannot be completed by now and hence is watched, add to the expire queue also
     if (!operation.isCompleted) {
       if (timerEnabled)
         timeoutTimer.add(operation)
       if (operation.isCompleted) {
-        // 如果延迟操作已经完成，取消计时器
+        // cancel the timer task
         operation.cancel()
       }
     }
@@ -254,20 +249,18 @@ final class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: Stri
   }
 
   /**
-   * 指定的key是否有一些延迟的操作需要完成，如果有，完成它们
-   * @return 完成的项目数量
+   * Check if some delayed operations can be completed with the given watch key,
+   * and if yes complete them.
+   * @return the number of completed operations during this process
    */
   def checkAndComplete(key: Any): Int = {
     val wl = watcherList(key)
-    // 需要完成在同步状态下获取watcher
     val watchers = inLock(wl.watchersLock) { wl.watchersByKey.get(key) }
     val numCompleted = if (watchers == null)
       0
     else
-    // 完成watcher任务
       watchers.tryCompleteWatched()
     debug(s"Request key $key unblocked $numCompleted $purgatoryName operations")
-    // 返回完成的任务数量
     numCompleted
   }
 
@@ -300,8 +293,8 @@ final class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: Stri
   }
 
   /*
-   * 将延迟操作添加到观察者列表中
-   * 需要注意的是，需要使用占有removeWatchersLock锁来避免延迟操作添加到已经移除的观察者列表中
+   * Return the watch list of the given key, note that we need to
+   * grab the removeWatchersLock to avoid the operation being added to a removed watcher list
    */
   private def watchForOperation(key: Any, operation: T): Unit = {
     val wl = watcherList(key)
@@ -334,6 +327,8 @@ final class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: Stri
     if (reaperEnabled)
       expirationReaper.shutdown()
     timeoutTimer.shutdown()
+    removeMetric("PurgatorySize", metricsTags)
+    removeMetric("NumDelayedOperations", metricsTags)
   }
 
   /**
@@ -362,7 +357,7 @@ final class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: Stri
         if (curr.isCompleted) {
           // another thread has completed this operation, just remove it
           iter.remove()
-        } else if (curr.maybeTryComplete()) {
+        } else if (curr.safeTryComplete()) {
           iter.remove()
           completed += 1
         }

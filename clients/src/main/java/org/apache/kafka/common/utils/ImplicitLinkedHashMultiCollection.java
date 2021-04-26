@@ -25,21 +25,21 @@ import java.util.List;
 /**
  * A memory-efficient hash multiset which tracks the order of insertion of elements.
  * See org.apache.kafka.common.utils.ImplicitLinkedHashCollection for implementation details.
- *
- * This class is a multi-set because it allows multiple elements to be inserted that are
- * equal to each other.
- *
+ * <p>
+ * This class is a multi-set because it allows multiple elements to be inserted that
+ * have equivalent keys.
+ * <p>
  * We use reference equality when adding elements to the set.  A new element A can
  * be added if there is no existing element B such that A == B.  If an element B
- * exists such that A.equals(B), A will still be added.
- *
+ * exists such that A.elementKeysAreEqual(B), A will still be added.
+ * <p>
  * When deleting an element A from the set, we will try to delete the element B such
  * that A == B.  If no such element can be found, we will try to delete an element B
- * such that A.equals(B).
- *
+ * such that A.elementKeysAreEqual(B).
+ * <p>
  * contains() and find() are unchanged from the base class-- they will look for element
- * based on object equality, not reference equality.
- *
+ * based on object equality via elementKeysAreEqual, not reference equality.
+ * <p>
  * This multiset does not allow null elements.  It does not have internal synchronization.
  */
 public class ImplicitLinkedHashMultiCollection<E extends ImplicitLinkedHashCollection.Element>
@@ -98,26 +98,26 @@ public class ImplicitLinkedHashMultiCollection<E extends ImplicitLinkedHashColle
         int bestSlot = INVALID_INDEX;
         for (int seen = 0; seen < elements.length; seen++) {
             Element element = elements[slot];
-            if (element == null) {
-                return bestSlot;
-            }
-            if (key == element) {
-                return slot;
-            } else if (key.equals(element)) {
-                bestSlot = slot;
+			if (element == null) {
+				return bestSlot;
+			}
+			if (key == element) {
+				return slot;
+			} else if (element.elementKeysAreEqual(key)) {
+				bestSlot = slot;
             }
             slot = (slot + 1) % elements.length;
         }
         return INVALID_INDEX;
-    }
+	}
 
-    /**
-     * Returns all of the elements e in the collection such that
-     * key.equals(e) and key.hashCode() == e.hashCode().
-     *
-     * @param key       The element to match.
-     *
-     * @return          All of the matching elements.
+	/**
+	 * Returns all of the elements e in the collection such that
+	 * key.elementKeysAreEqual(e) and key.hashCode() == e.hashCode().
+	 *
+	 * @param key       The element to match.
+	 *
+	 * @return All of the matching elements.
      */
     final public List<E> findAll(E key) {
         if (key == null || size() == 0) {
@@ -127,13 +127,13 @@ public class ImplicitLinkedHashMultiCollection<E extends ImplicitLinkedHashColle
         int slot = slot(elements, key);
         for (int seen = 0; seen < elements.length; seen++) {
             Element element = elements[slot];
-            if (element == null) {
-                break;
-            }
-            if (key.equals(element)) {
-                @SuppressWarnings("unchecked")
-                E result = (E) elements[slot];
-                results.add(result);
+			if (element == null) {
+				break;
+			}
+			if (key.elementKeysAreEqual(element)) {
+				@SuppressWarnings("unchecked")
+				E result = (E) elements[slot];
+				results.add(result);
             }
             slot = (slot + 1) % elements.length;
         }

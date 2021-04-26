@@ -16,11 +16,11 @@
  */
 package org.apache.kafka.common.metrics.stats;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import org.apache.kafka.common.metrics.MeasurableStat;
 import org.apache.kafka.common.metrics.MetricConfig;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A SampledStat records a single scalar value measured over one or more samples. Each sample is recorded over a
@@ -29,7 +29,7 @@ import org.apache.kafka.common.metrics.MetricConfig;
  * <p>
  * All the samples are combined to produce the measurement. When a window is complete the oldest sample is cleared and
  * recycled to begin recording the next sample.
- * 
+ *
  * Subclasses of this class define different statistics measured using this basic pattern.
  */
 public abstract class SampledStat implements MeasurableStat {
@@ -39,8 +39,8 @@ public abstract class SampledStat implements MeasurableStat {
     protected List<Sample> samples;
 
     public SampledStat(double initialValue) {
-        this.initialValue = initialValue;
-        this.samples = new ArrayList<Sample>(2);
+		this.initialValue = initialValue;
+		this.samples = new ArrayList<>(2);
     }
 
     @Override
@@ -83,25 +83,34 @@ public abstract class SampledStat implements MeasurableStat {
 
     public Sample oldest(long now) {
         if (samples.size() == 0)
-            this.samples.add(newSample(now));
-        Sample oldest = this.samples.get(0);
-        for (int i = 1; i < this.samples.size(); i++) {
-            Sample curr = this.samples.get(i);
-            if (curr.lastWindowMs < oldest.lastWindowMs)
-                oldest = curr;
-        }
-        return oldest;
-    }
+			this.samples.add(newSample(now));
+		Sample oldest = this.samples.get(0);
+		for (int i = 1; i < this.samples.size(); i++) {
+			Sample curr = this.samples.get(i);
+			if (curr.lastWindowMs < oldest.lastWindowMs)
+				oldest = curr;
+		}
+		return oldest;
+	}
 
-    protected abstract void update(Sample sample, MetricConfig config, double value, long timeMs);
+	@Override
+	public String toString() {
+		return "SampledStat(" +
+				"initialValue=" + initialValue +
+				", current=" + current +
+				", samples=" + samples +
+				')';
+	}
 
-    public abstract double combine(List<Sample> samples, MetricConfig config, long now);
+	protected abstract void update(Sample sample, MetricConfig config, double value, long timeMs);
 
-    /* Timeout any windows that have expired in the absence of any events */
-    protected void purgeObsoleteSamples(MetricConfig config, long now) {
-        long expireAge = config.samples() * config.timeWindowMs();
-        for (Sample sample : samples) {
-            if (now - sample.lastWindowMs >= expireAge)
+	public abstract double combine(List<Sample> samples, MetricConfig config, long now);
+
+	/* Timeout any windows that have expired in the absence of any events */
+	protected void purgeObsoleteSamples(MetricConfig config, long now) {
+		long expireAge = config.samples() * config.timeWindowMs();
+		for (Sample sample : samples) {
+			if (now - sample.lastWindowMs >= expireAge)
                 sample.reset(now);
         }
     }
@@ -119,15 +128,25 @@ public abstract class SampledStat implements MeasurableStat {
             this.value = initialValue;
         }
 
-        public void reset(long now) {
-            this.eventCount = 0;
-            this.lastWindowMs = now;
-            this.value = initialValue;
-        }
+		public void reset(long now) {
+			this.eventCount = 0;
+			this.lastWindowMs = now;
+			this.value = initialValue;
+		}
 
-        public boolean isComplete(long timeMs, MetricConfig config) {
-            return timeMs - lastWindowMs >= config.timeWindowMs() || eventCount >= config.eventWindow();
-        }
-    }
+		public boolean isComplete(long timeMs, MetricConfig config) {
+			return timeMs - lastWindowMs >= config.timeWindowMs() || eventCount >= config.eventWindow();
+		}
+
+		@Override
+		public String toString() {
+			return "Sample(" +
+					"value=" + value +
+					", eventCount=" + eventCount +
+					", lastWindowMs=" + lastWindowMs +
+					", initialValue=" + initialValue +
+					')';
+		}
+	}
 
 }

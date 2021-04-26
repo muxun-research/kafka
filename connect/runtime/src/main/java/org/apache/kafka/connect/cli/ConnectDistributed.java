@@ -36,12 +36,14 @@ import org.apache.kafka.connect.storage.KafkaOffsetBackingStore;
 import org.apache.kafka.connect.storage.KafkaStatusBackingStore;
 import org.apache.kafka.connect.storage.StatusBackingStore;
 import org.apache.kafka.connect.util.ConnectUtils;
+import org.apache.kafka.connect.util.SharedTopicAdmin;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -92,44 +94,52 @@ public class ConnectDistributed {
         plugins.compareAndSwapWithDelegatingLoader();
         DistributedConfig config = new DistributedConfig(workerProps);
 
-        String kafkaClusterId = ConnectUtils.lookupKafkaClusterId(config);
-        log.debug("Kafka cluster ID: {}", kafkaClusterId);
+		String kafkaClusterId = ConnectUtils.lookupKafkaClusterId(config);
+		log.debug("Kafka cluster ID: {}", kafkaClusterId);
 
-        RestServer rest = new RestServer(config);
-        rest.initializeServer();
+		RestServer rest = new RestServer(config);
+		rest.initializeServer();
 
-        URI advertisedUrl = rest.advertisedUrl();
-        String workerId = advertisedUrl.getHost() + ":" + advertisedUrl.getPort();
+		URI advertisedUrl = rest.advertisedUrl();
+		String workerId = advertisedUrl.getHost() + ":" + advertisedUrl.getPort();
 
-        KafkaOffsetBackingStore offsetBackingStore = new KafkaOffsetBackingStore();
-        offsetBackingStore.configure(config);
+		// Create the admin client to be shared by all backing stores.
+		Map<String, Object> adminProps = new HashMap<>(config.originals());
+		ConnectUtils.addMetricsContextProperties(adminProps, config, kafkaClusterId);
+		SharedTopicAdmin sharedAdmin = new SharedTopicAdmin(adminProps);
 
-        ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy = plugins.newPlugin(
-                config.getString(WorkerConfig.CONNECTOR_CLIENT_POLICY_CLASS_CONFIG),
-                config, ConnectorClientConfigOverridePolicy.class);
+		KafkaOffsetBackingStore offsetBackingStore = new KafkaOffsetBackingStore(sharedAdmin);
+		offsetBackingStore.configure(config);
 
-        Worker worker = new Worker(workerId, time, plugins, config, offsetBackingStore, connectorClientConfigOverridePolicy);
-        WorkerConfigTransformer configTransformer = worker.configTransformer();
+		ConnectorClientConfigOverridePolicy connectorClientConfigOverridePolicy = plugins.newPlugin(
+				config.getString(WorkerConfig.CONNECTOR_CLIENT_POLICY_CLASS_CONFIG),
+				config, ConnectorClientConfigOverridePolicy.class);
 
-        Converter internalValueConverter = worker.getInternalValueConverter();
-        StatusBackingStore statusBackingStore = new KafkaStatusBackingStore(time, internalValueConverter);
-        statusBackingStore.configure(config);
+		Worker worker = new Worker(workerId, time, plugins, config, offsetBackingStore, connectorClientConfigOverridePolicy);
+		WorkerConfigTransformer configTransformer = worker.configTransformer();
 
-        ConfigBackingStore configBackingStore = new KafkaConfigBackingStore(
-                internalValueConverter,
-                config,
-                configTransformer);
+		Converter internalValueConverter = worker.getInternalValueConverter();
+		StatusBackingStore statusBackingStore = new KafkaStatusBackingStore(time, internalValueConverter, sharedAdmin);
+		statusBackingStore.configure(config);
 
-        DistributedHerder herder = new DistributedHerder(config, time, worker,
-                kafkaClusterId, statusBackingStore, configBackingStore,
-                advertisedUrl.toString(), connectorClientConfigOverridePolicy);
+		ConfigBackingStore configBackingStore = new KafkaConfigBackingStore(
+				internalValueConverter,
+				config,
+				configTransformer,
+				sharedAdmin);
 
-        final Connect connect = new Connect(herder, rest);
-        log.info("Kafka Connect distributed worker initialization took {}ms", time.hiResClockMs() - initStart);
-        try {
-            connect.start();
-        } catch (Exception e) {
-            log.error("Failed to start Connect", e);
+		// Pass the shared admin to the distributed herder as an additional AutoCloseable object that should be closed when the
+		// herder is stopped. This is easier than having to track and own the lifecycle ourselves.
+		DistributedHerder herder = new DistributedHerder(config, time, worker,
+				kafkaClusterId, statusBackingStore, configBackingStore,
+				advertisedUrl.toString(), connectorClientConfigOverridePolicy, sharedAdmin);
+
+		final Connect connect = new Connect(herder, rest);
+		log.info("Kafka Connect distributed worker initialization took {}ms", time.hiResClockMs() - initStart);
+		try {
+			connect.start();
+		} catch (Exception e) {
+			log.error("Failed to start Connect", e);
             connect.stop();
             Exit.exit(3);
         }

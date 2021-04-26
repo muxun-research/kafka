@@ -21,6 +21,7 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.ConfigException;
+import org.apache.kafka.common.config.TopicConfig;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -33,20 +34,26 @@ import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.DataException;
+import org.apache.kafka.connect.runtime.SessionKey;
 import org.apache.kafka.connect.runtime.TargetState;
 import org.apache.kafka.connect.runtime.WorkerConfig;
 import org.apache.kafka.connect.runtime.WorkerConfigTransformer;
 import org.apache.kafka.connect.runtime.distributed.ClusterConfigState;
 import org.apache.kafka.connect.runtime.distributed.DistributedConfig;
 import org.apache.kafka.connect.util.Callback;
+import org.apache.kafka.connect.util.ConnectUtils;
 import org.apache.kafka.connect.util.ConnectorTaskId;
 import org.apache.kafka.connect.util.KafkaBasedLog;
+import org.apache.kafka.connect.util.SharedTopicAdmin;
 import org.apache.kafka.connect.util.TopicAdmin;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.crypto.spec.SecretKeySpec;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -56,6 +63,7 @@ import java.util.TreeSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * <p>
@@ -166,77 +174,96 @@ public class KafkaConfigBackingStore implements ConfigBackingStore {
 
     public static final String TASK_PREFIX = "task-";
 
-    public static String TASK_KEY(ConnectorTaskId taskId) {
-        return TASK_PREFIX + taskId.connector() + "-" + taskId.task();
-    }
+	public static String TASK_KEY(ConnectorTaskId taskId) {
+		return TASK_PREFIX + taskId.connector() + "-" + taskId.task();
+	}
 
-    public static final String COMMIT_TASKS_PREFIX = "commit-";
+	public static final String COMMIT_TASKS_PREFIX = "commit-";
 
-    public static String COMMIT_TASKS_KEY(String connectorName) {
-        return COMMIT_TASKS_PREFIX + connectorName;
-    }
+	public static String COMMIT_TASKS_KEY(String connectorName) {
+		return COMMIT_TASKS_PREFIX + connectorName;
+	}
 
-    // Note that while using real serialization for values as we have here, but ad hoc string serialization for keys,
-    // isn't ideal, we use this approach because it avoids any potential problems with schema evolution or
-    // converter/serializer changes causing keys to change. We need to absolutely ensure that the keys remain precisely
-    // the same.
-    public static final Schema CONNECTOR_CONFIGURATION_V0 = SchemaBuilder.struct()
-            .field("properties", SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.OPTIONAL_STRING_SCHEMA).build())
-            .build();
-    public static final Schema TASK_CONFIGURATION_V0 = CONNECTOR_CONFIGURATION_V0;
-    public static final Schema CONNECTOR_TASKS_COMMIT_V0 = SchemaBuilder.struct()
-            .field("tasks", Schema.INT32_SCHEMA)
-            .build();
-    public static final Schema TARGET_STATE_V0 = SchemaBuilder.struct()
-            .field("state", Schema.STRING_SCHEMA)
-            .build();
+	public static final String SESSION_KEY_KEY = "session-key";
 
-    private static final long READ_TO_END_TIMEOUT_MS = 30000;
+	// Note that while using real serialization for values as we have here, but ad hoc string serialization for keys,
+	// isn't ideal, we use this approach because it avoids any potential problems with schema evolution or
+	// converter/serializer changes causing keys to change. We need to absolutely ensure that the keys remain precisely
+	// the same.
+	public static final Schema CONNECTOR_CONFIGURATION_V0 = SchemaBuilder.struct()
+			.field("properties", SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.OPTIONAL_STRING_SCHEMA).build())
+			.build();
+	public static final Schema TASK_CONFIGURATION_V0 = CONNECTOR_CONFIGURATION_V0;
+	public static final Schema CONNECTOR_TASKS_COMMIT_V0 = SchemaBuilder.struct()
+			.field("tasks", Schema.INT32_SCHEMA)
+			.build();
+	public static final Schema TARGET_STATE_V0 = SchemaBuilder.struct()
+			.field("state", Schema.STRING_SCHEMA)
+			.build();
+	// The key is logically a byte array, but we can't use the JSON converter to (de-)serialize that without a schema.
+	// So instead, we base 64-encode it before serializing and decode it after deserializing.
+	public static final Schema SESSION_KEY_V0 = SchemaBuilder.struct()
+			.field("key", Schema.STRING_SCHEMA)
+			.field("algorithm", Schema.STRING_SCHEMA)
+			.field("creation-timestamp", Schema.INT64_SCHEMA)
+			.build();
 
-    private final Object lock;
-    private final Converter converter;
-    private volatile boolean started;
-    // Although updateListener is not final, it's guaranteed to be visible to any thread after its
-    // initialization as long as we always read the volatile variable "started" before we access the listener.
-    private UpdateListener updateListener;
+	private static final long READ_TO_END_TIMEOUT_MS = 30000;
 
-    private final String topic;
-    // Data is passed to the log already serialized. We use a converter to handle translating to/from generic Connect
-    // format to serialized form
-    private final KafkaBasedLog<String, byte[]> configLog;
-    // Connector -> # of tasks
-    private final Map<String, Integer> connectorTaskCounts = new HashMap<>();
-    // Connector and task configs: name or id -> config map
-    private final Map<String, Map<String, String>> connectorConfigs = new HashMap<>();
-    private final Map<ConnectorTaskId, Map<String, String>> taskConfigs = new HashMap<>();
+	private final Object lock;
+	private final Converter converter;
+	private volatile boolean started;
+	// Although updateListener is not final, it's guaranteed to be visible to any thread after its
+	// initialization as long as we always read the volatile variable "started" before we access the listener.
+	private UpdateListener updateListener;
 
-    // Set of connectors where we saw a task commit with an incomplete set of task config updates, indicating the data
-    // is in an inconsistent state and we cannot safely use them until they have been refreshed.
-    private final Set<String> inconsistent = new HashSet<>();
-    // The most recently read offset. This does not take into account deferred task updates/commits, so we may have
-    // outstanding data to be applied.
-    private volatile long offset;
+	private final String topic;
+	// Data is passed to the log already serialized. We use a converter to handle translating to/from generic Connect
+	// format to serialized form
+	private final KafkaBasedLog<String, byte[]> configLog;
+	// Connector -> # of tasks
+	private final Map<String, Integer> connectorTaskCounts = new HashMap<>();
+	// Connector and task configs: name or id -> config map
+	private final Map<String, Map<String, String>> connectorConfigs = new HashMap<>();
+	private final Map<ConnectorTaskId, Map<String, String>> taskConfigs = new HashMap<>();
+	private final Supplier<TopicAdmin> topicAdminSupplier;
+	private SharedTopicAdmin ownTopicAdmin;
 
-    // Connector -> Map[ConnectorTaskId -> Configs]
-    private final Map<String, Map<ConnectorTaskId, Map<String, String>>> deferredTaskUpdates = new HashMap<>();
+	// Set of connectors where we saw a task commit with an incomplete set of task config updates, indicating the data
+	// is in an inconsistent state and we cannot safely use them until they have been refreshed.
+	private final Set<String> inconsistent = new HashSet<>();
+	// The most recently read offset. This does not take into account deferred task updates/commits, so we may have
+	// outstanding data to be applied.
+	private volatile long offset;
+	// The most recently read session key, to use for validating internal REST requests.
+	private volatile SessionKey sessionKey;
 
-    private final Map<String, TargetState> connectorTargetStates = new HashMap<>();
+	// Connector -> Map[ConnectorTaskId -> Configs]
+	private final Map<String, Map<ConnectorTaskId, Map<String, String>>> deferredTaskUpdates = new HashMap<>();
 
-    private final WorkerConfigTransformer configTransformer;
+	private final Map<String, TargetState> connectorTargetStates = new HashMap<>();
 
-    public KafkaConfigBackingStore(Converter converter, WorkerConfig config, WorkerConfigTransformer configTransformer) {
-        this.lock = new Object();
-        this.started = false;
-        this.converter = converter;
-        this.offset = -1;
+	private final WorkerConfigTransformer configTransformer;
 
-        this.topic = config.getString(DistributedConfig.CONFIG_TOPIC_CONFIG);
-        if (this.topic == null || this.topic.trim().length() == 0)
-            throw new ConfigException("Must specify topic for connector configuration.");
+	@Deprecated
+	public KafkaConfigBackingStore(Converter converter, WorkerConfig config, WorkerConfigTransformer configTransformer) {
+		this(converter, config, configTransformer, null);
+	}
 
-        configLog = setupAndCreateKafkaBasedLog(this.topic, config);
-        this.configTransformer = configTransformer;
-    }
+	public KafkaConfigBackingStore(Converter converter, WorkerConfig config, WorkerConfigTransformer configTransformer, Supplier<TopicAdmin> adminSupplier) {
+		this.lock = new Object();
+		this.started = false;
+		this.converter = converter;
+		this.offset = -1;
+		this.topicAdminSupplier = adminSupplier;
+
+		this.topic = config.getString(DistributedConfig.CONFIG_TOPIC_CONFIG);
+		if (this.topic == null || this.topic.trim().length() == 0)
+			throw new ConfigException("Must specify topic for connector configuration.");
+
+		configLog = setupAndCreateKafkaBasedLog(this.topic, config);
+		this.configTransformer = configTransformer;
+	}
 
     @Override
     public void setUpdateListener(UpdateListener listener) {
@@ -245,20 +272,36 @@ public class KafkaConfigBackingStore implements ConfigBackingStore {
 
     @Override
     public void start() {
-        log.info("Starting KafkaConfigBackingStore");
-        // Before startup, callbacks are *not* invoked. You can grab a snapshot after starting -- just take care that
-        // updates can continue to occur in the background
-        configLog.start();
-        started = true;
-        log.info("Started KafkaConfigBackingStore");
-    }
+		log.info("Starting KafkaConfigBackingStore");
+		// Before startup, callbacks are *not* invoked. You can grab a snapshot after starting -- just take care that
+		// updates can continue to occur in the background
+		configLog.start();
+
+		int partitionCount = configLog.partitionCount();
+		if (partitionCount > 1) {
+			String msg = String.format("Topic '%s' supplied via the '%s' property is required "
+							+ "to have a single partition in order to guarantee consistency of "
+							+ "connector configurations, but found %d partitions.",
+					topic, DistributedConfig.CONFIG_TOPIC_CONFIG, partitionCount);
+			throw new ConfigException(msg);
+		}
+
+		started = true;
+		log.info("Started KafkaConfigBackingStore");
+	}
 
     @Override
     public void stop() {
-        log.info("Closing KafkaConfigBackingStore");
-        configLog.stop();
-        log.info("Closed KafkaConfigBackingStore");
-    }
+		log.info("Closing KafkaConfigBackingStore");
+		try {
+			configLog.stop();
+		} finally {
+			if (ownTopicAdmin != null) {
+				ownTopicAdmin.close();
+			}
+		}
+		log.info("Closed KafkaConfigBackingStore");
+	}
 
     /**
      * Get a snapshot of the current state of the cluster.
@@ -266,17 +309,18 @@ public class KafkaConfigBackingStore implements ConfigBackingStore {
     @Override
     public ClusterConfigState snapshot() {
         synchronized (lock) {
-            // Doing a shallow copy of the data is safe here because the complex nested data that is copied should all be
-            // immutable configs
-            return new ClusterConfigState(
-                    offset,
-                    new HashMap<>(connectorTaskCounts),
-                    new HashMap<>(connectorConfigs),
-                    new HashMap<>(connectorTargetStates),
-                    new HashMap<>(taskConfigs),
-                    new HashSet<>(inconsistent),
-                    configTransformer
-            );
+			// Only a shallow copy is performed here; in order to avoid accidentally corrupting the worker's view
+			// of the config topic, any nested structures should be copied before making modifications
+			return new ClusterConfigState(
+					offset,
+					sessionKey,
+					new HashMap<>(connectorTaskCounts),
+					new HashMap<>(connectorConfigs),
+					new HashMap<>(connectorTargetStates),
+					new HashMap<>(taskConfigs),
+					new HashSet<>(inconsistent),
+					configTransformer
+			);
         }
     }
 
@@ -400,51 +444,87 @@ public class KafkaConfigBackingStore implements ConfigBackingStore {
         }
     }
 
-    @Override
-    public void putTargetState(String connector, TargetState state) {
-        Struct connectTargetState = new Struct(TARGET_STATE_V0);
-        connectTargetState.put("state", state.name());
-        byte[] serializedTargetState = converter.fromConnectData(topic, TARGET_STATE_V0, connectTargetState);
-        log.debug("Writing target state {} for connector {}", state, connector);
-        configLog.send(TARGET_STATE_KEY(connector), serializedTargetState);
-    }
+	@Override
+	public void putTargetState(String connector, TargetState state) {
+		Struct connectTargetState = new Struct(TARGET_STATE_V0);
+		connectTargetState.put("state", state.name());
+		byte[] serializedTargetState = converter.fromConnectData(topic, TARGET_STATE_V0, connectTargetState);
+		log.debug("Writing target state {} for connector {}", state, connector);
+		configLog.send(TARGET_STATE_KEY(connector), serializedTargetState);
+	}
 
-    // package private for testing
-    KafkaBasedLog<String, byte[]> setupAndCreateKafkaBasedLog(String topic, final WorkerConfig config) {
-        Map<String, Object> originals = config.originals();
-        Map<String, Object> producerProps = new HashMap<>(originals);
-        producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
-        producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
-        producerProps.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, Integer.MAX_VALUE);
-        Map<String, Object> consumerProps = new HashMap<>(originals);
-        consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+	@Override
+	public void putSessionKey(SessionKey sessionKey) {
+		log.debug("Distributing new session key");
+		Struct sessionKeyStruct = new Struct(SESSION_KEY_V0);
+		sessionKeyStruct.put("key", Base64.getEncoder().encodeToString(sessionKey.key().getEncoded()));
+		sessionKeyStruct.put("algorithm", sessionKey.key().getAlgorithm());
+		sessionKeyStruct.put("creation-timestamp", sessionKey.creationTimestamp());
+		byte[] serializedSessionKey = converter.fromConnectData(topic, SESSION_KEY_V0, sessionKeyStruct);
+		try {
+			configLog.send(SESSION_KEY_KEY, serializedSessionKey);
+			configLog.readToEnd().get(READ_TO_END_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+		} catch (InterruptedException | ExecutionException | TimeoutException e) {
+			log.error("Failed to write session key to Kafka: ", e);
+			throw new ConnectException("Error writing session key to Kafka", e);
+		}
+	}
 
-        Map<String, Object> adminProps = new HashMap<>(originals);
-        NewTopic topicDescription = TopicAdmin.defineTopic(topic).
-                compacted().
-                partitions(1).
-                replicationFactor(config.getShort(DistributedConfig.CONFIG_STORAGE_REPLICATION_FACTOR_CONFIG)).
-                build();
+	// package private for testing
+	KafkaBasedLog<String, byte[]> setupAndCreateKafkaBasedLog(String topic, final WorkerConfig config) {
+		String clusterId = ConnectUtils.lookupKafkaClusterId(config);
+		Map<String, Object> originals = config.originals();
+		Map<String, Object> producerProps = new HashMap<>(originals);
+		producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+		producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+		producerProps.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, Integer.MAX_VALUE);
+		ConnectUtils.addMetricsContextProperties(producerProps, config, clusterId);
 
-        return createKafkaBasedLog(topic, producerProps, consumerProps, new ConsumeCallback(), topicDescription, adminProps);
-    }
+		Map<String, Object> consumerProps = new HashMap<>(originals);
+		consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+		consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+		ConnectUtils.addMetricsContextProperties(consumerProps, config, clusterId);
 
-    private KafkaBasedLog<String, byte[]> createKafkaBasedLog(String topic, Map<String, Object> producerProps,
-                                                              Map<String, Object> consumerProps,
-                                                              Callback<ConsumerRecord<String, byte[]>> consumedCallback,
-                                                              final NewTopic topicDescription, final Map<String, Object> adminProps) {
-        Runnable createTopics = new Runnable() {
-            @Override
-            public void run() {
-                log.debug("Creating admin client to manage Connect internal config topic");
-                try (TopicAdmin admin = new TopicAdmin(adminProps)) {
-                    admin.createTopics(topicDescription);
-                }
-            }
-        };
-        return new KafkaBasedLog<>(topic, producerProps, consumerProps, consumedCallback, Time.SYSTEM, createTopics);
-    }
+		Map<String, Object> adminProps = new HashMap<>(originals);
+		ConnectUtils.addMetricsContextProperties(adminProps, config, clusterId);
+		Supplier<TopicAdmin> adminSupplier;
+		if (topicAdminSupplier != null) {
+			adminSupplier = topicAdminSupplier;
+		} else {
+			// Create our own topic admin supplier that we'll close when we're stopped
+			ownTopicAdmin = new SharedTopicAdmin(adminProps);
+			adminSupplier = ownTopicAdmin;
+		}
+		Map<String, Object> topicSettings = config instanceof DistributedConfig
+				? ((DistributedConfig) config).configStorageTopicSettings()
+				: Collections.emptyMap();
+		NewTopic topicDescription = TopicAdmin.defineTopic(topic)
+				.config(topicSettings) // first so that we override user-supplied settings as needed
+				.compacted()
+				.partitions(1)
+				.replicationFactor(config.getShort(DistributedConfig.CONFIG_STORAGE_REPLICATION_FACTOR_CONFIG))
+				.build();
+
+		return createKafkaBasedLog(topic, producerProps, consumerProps, new ConsumeCallback(), topicDescription, adminSupplier);
+	}
+
+	private KafkaBasedLog<String, byte[]> createKafkaBasedLog(String topic, Map<String, Object> producerProps,
+															  Map<String, Object> consumerProps,
+															  Callback<ConsumerRecord<String, byte[]>> consumedCallback,
+															  final NewTopic topicDescription, Supplier<TopicAdmin> adminSupplier) {
+		java.util.function.Consumer<TopicAdmin> createTopics = admin -> {
+			log.debug("Creating admin client to manage Connect internal config topic");
+			// Create the topic if it doesn't exist
+			Set<String> newTopics = admin.createTopics(topicDescription);
+			if (!newTopics.contains(topic)) {
+				// It already existed, so check that the topic cleanup policy is compact only and not delete
+				log.debug("Using admin client to check cleanup policy of '{}' topic is '{}'", topic, TopicConfig.CLEANUP_POLICY_COMPACT);
+				admin.verifyTopicCleanupPolicyOnlyCompact(topic,
+						DistributedConfig.CONFIG_TOPIC_CONFIG, "connector configurations");
+			}
+		};
+		return new KafkaBasedLog<>(topic, producerProps, consumerProps, adminSupplier, consumedCallback, Time.SYSTEM, createTopics);
+	}
 
     @SuppressWarnings("unchecked")
     private class ConsumeCallback implements Callback<ConsumerRecord<String, byte[]>> {
@@ -513,11 +593,13 @@ public class KafkaConfigBackingStore implements ConfigBackingStore {
                 boolean removed = false;
                 synchronized (lock) {
                     if (value.value() == null) {
-                        // Connector deletion will be written as a null value
-                        log.info("Successfully processed removal of connector '{}'", connectorName);
-                        connectorConfigs.remove(connectorName);
-                        removed = true;
-                    } else {
+						// Connector deletion will be written as a null value
+						log.info("Successfully processed removal of connector '{}'", connectorName);
+						connectorConfigs.remove(connectorName);
+						connectorTaskCounts.remove(connectorName);
+						taskConfigs.keySet().removeIf(taskId -> taskId.connector().equals(connectorName));
+						removed = true;
+					} else {
                         // Connector configs can be applied and callbacks invoked immediately
                         if (!(value.value() instanceof Map)) {
                             log.error("Found configuration for connector '{}' in wrong format: {}", record.key(), value.value().getClass());
@@ -574,70 +656,107 @@ public class KafkaConfigBackingStore implements ConfigBackingStore {
                     log.debug("Storing new config for task {}; this will wait for a commit message before the new config will take effect.", taskId);
                     deferred.put(taskId, (Map<String, String>) newTaskConfig);
                 }
-            } else if (record.key().startsWith(COMMIT_TASKS_PREFIX)) {
-                String connectorName = record.key().substring(COMMIT_TASKS_PREFIX.length());
-                List<ConnectorTaskId> updatedTasks = new ArrayList<>();
-                synchronized (lock) {
-                    // Apply any outstanding deferred task updates for the given connector. Note that just because we
-                    // encounter a commit message does not mean it will result in consistent output. In particular due to
-                    // compaction, there may be cases where . For example if we have the following sequence of writes:
-                    //
-                    // 1. Write connector "foo"'s config
-                    // 2. Write connector "foo", task 1's config <-- compacted
-                    // 3. Write connector "foo", task 2's config
-                    // 4. Write connector "foo" task commit message
-                    // 5. Write connector "foo", task 1's config
-                    // 6. Write connector "foo", task 2's config
-                    // 7. Write connector "foo" task commit message
-                    //
-                    // then when a new worker starts up, if message 2 had been compacted, then when message 4 is applied
-                    // "foo" will not have a complete set of configs. Only when message 7 is applied will the complete
-                    // configuration be available. Worse, if the leader died while writing messages 5, 6, and 7 such that
-                    // only 5 was written, then there may be nothing that will finish writing the configs and get the
-                    // log back into a consistent state.
-                    //
-                    // It is expected that the user of this class (i.e., the Herder) will take the necessary action to
-                    // resolve this (i.e., get the connector to recommit its configuration). This inconsistent state is
-                    // exposed in the snapshots provided via ClusterConfigState so they are easy to handle.
-                    if (!(value.value() instanceof Map)) { // Schema-less, so we get maps instead of structs
-                        log.error("Ignoring connector tasks configuration commit for connector '{}' because it is in the wrong format: {}", connectorName, value.value());
-                        return;
-                    }
-                    Map<ConnectorTaskId, Map<String, String>> deferred = deferredTaskUpdates.get(connectorName);
+			} else if (record.key().startsWith(COMMIT_TASKS_PREFIX)) {
+				String connectorName = record.key().substring(COMMIT_TASKS_PREFIX.length());
+				List<ConnectorTaskId> updatedTasks = new ArrayList<>();
+				synchronized (lock) {
+					// Apply any outstanding deferred task updates for the given connector. Note that just because we
+					// encounter a commit message does not mean it will result in consistent output. In particular due to
+					// compaction, there may be cases where . For example if we have the following sequence of writes:
+					//
+					// 1. Write connector "foo"'s config
+					// 2. Write connector "foo", task 1's config <-- compacted
+					// 3. Write connector "foo", task 2's config
+					// 4. Write connector "foo" task commit message
+					// 5. Write connector "foo", task 1's config
+					// 6. Write connector "foo", task 2's config
+					// 7. Write connector "foo" task commit message
+					//
+					// then when a new worker starts up, if message 2 had been compacted, then when message 4 is applied
+					// "foo" will not have a complete set of configs. Only when message 7 is applied will the complete
+					// configuration be available. Worse, if the leader died while writing messages 5, 6, and 7 such that
+					// only 5 was written, then there may be nothing that will finish writing the configs and get the
+					// log back into a consistent state.
+					//
+					// It is expected that the user of this class (i.e., the Herder) will take the necessary action to
+					// resolve this (i.e., get the connector to recommit its configuration). This inconsistent state is
+					// exposed in the snapshots provided via ClusterConfigState so they are easy to handle.
+					if (!(value.value() instanceof Map)) { // Schema-less, so we get maps instead of structs
+						log.error("Ignoring connector tasks configuration commit for connector '{}' because it is in the wrong format: {}", connectorName, value.value());
+						return;
+					}
+					Map<ConnectorTaskId, Map<String, String>> deferred = deferredTaskUpdates.get(connectorName);
 
-                    int newTaskCount = intValue(((Map<String, Object>) value.value()).get("tasks"));
+					int newTaskCount = intValue(((Map<String, Object>) value.value()).get("tasks"));
 
-                    // Validate the configs we're supposed to update to ensure we're getting a complete configuration
-                    // update of all tasks that are expected based on the number of tasks in the commit message.
-                    Set<Integer> taskIdSet = taskIds(connectorName, deferred);
-                    if (!completeTaskIdSet(taskIdSet, newTaskCount)) {
-                        // Given the logic for writing commit messages, we should only hit this condition due to compacted
-                        // historical data, in which case we would not have applied any updates yet and there will be no
-                        // task config data already committed for the connector, so we shouldn't have to clear any data
-                        // out. All we need to do is add the flag marking it inconsistent.
-                        log.debug("We have an incomplete set of task configs for connector '{}' probably due to compaction. So we are not doing anything with the new configuration.", connectorName);
-                        inconsistent.add(connectorName);
-                    } else {
-                        if (deferred != null) {
-                            taskConfigs.putAll(deferred);
-                            updatedTasks.addAll(taskConfigs.keySet());
-                        }
-                        inconsistent.remove(connectorName);
-                    }
-                    // Always clear the deferred entries, even if we didn't apply them. If they represented an inconsistent
-                    // update, then we need to see a completely fresh set of configs after this commit message, so we don't
-                    // want any of these outdated configs
-                    if (deferred != null)
-                        deferred.clear();
+					// Validate the configs we're supposed to update to ensure we're getting a complete configuration
+					// update of all tasks that are expected based on the number of tasks in the commit message.
+					Set<Integer> taskIdSet = taskIds(connectorName, deferred);
+					if (!completeTaskIdSet(taskIdSet, newTaskCount)) {
+						// Given the logic for writing commit messages, we should only hit this condition due to compacted
+						// historical data, in which case we would not have applied any updates yet and there will be no
+						// task config data already committed for the connector, so we shouldn't have to clear any data
+						// out. All we need to do is add the flag marking it inconsistent.
+						log.debug("We have an incomplete set of task configs for connector '{}' probably due to compaction. So we are not doing anything with the new configuration.", connectorName);
+						inconsistent.add(connectorName);
+					} else {
+						if (deferred != null) {
+							taskConfigs.putAll(deferred);
+							updatedTasks.addAll(deferred.keySet());
+						}
+						inconsistent.remove(connectorName);
+					}
+					// Always clear the deferred entries, even if we didn't apply them. If they represented an inconsistent
+					// update, then we need to see a completely fresh set of configs after this commit message, so we don't
+					// want any of these outdated configs
+					if (deferred != null)
+						deferred.clear();
 
-                    connectorTaskCounts.put(connectorName, newTaskCount);
-                }
+					connectorTaskCounts.put(connectorName, newTaskCount);
+				}
 
-                if (started)
-                    updateListener.onTaskConfigUpdate(updatedTasks);
-            } else {
-                log.error("Discarding config update record with invalid key: {}", record.key());
-            }
+				if (started)
+					updateListener.onTaskConfigUpdate(updatedTasks);
+			} else if (record.key().equals(SESSION_KEY_KEY)) {
+				if (value.value() == null) {
+					log.error("Ignoring session key because it is unexpectedly null");
+					return;
+				}
+				if (!(value.value() instanceof Map)) {
+					log.error("Ignoring session key because the value is not a Map but is {}", value.value().getClass());
+					return;
+				}
+
+				Map<String, Object> valueAsMap = (Map<String, Object>) value.value();
+
+				Object sessionKey = valueAsMap.get("key");
+				if (!(sessionKey instanceof String)) {
+					log.error("Invalid data for session key 'key' field should be a String but is {}", sessionKey.getClass());
+					return;
+				}
+				byte[] key = Base64.getDecoder().decode((String) sessionKey);
+
+				Object keyAlgorithm = valueAsMap.get("algorithm");
+				if (!(keyAlgorithm instanceof String)) {
+					log.error("Invalid data for session key 'algorithm' field should be a String but it is {}", keyAlgorithm.getClass());
+					return;
+				}
+
+				Object creationTimestamp = valueAsMap.get("creation-timestamp");
+				if (!(creationTimestamp instanceof Long)) {
+					log.error("Invalid data for session key 'creation-timestamp' field should be a long but it is {}", creationTimestamp.getClass());
+					return;
+				}
+				KafkaConfigBackingStore.this.sessionKey = new SessionKey(
+						new SecretKeySpec(key, (String) keyAlgorithm),
+						(long) creationTimestamp
+				);
+
+				if (started)
+					updateListener.onSessionKeyUpdate(KafkaConfigBackingStore.this.sessionKey);
+			} else {
+				log.error("Discarding config update record with invalid key: {}", record.key());
+			}
         }
 
     }

@@ -21,8 +21,8 @@
 package kafka.metrics
 
 import kafka.utils.{CoreUtils, VerifiableProperties}
-import java.util.concurrent.atomic.AtomicBoolean
 
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.Seq
 import scala.collection.mutable.ArrayBuffer
 
@@ -55,12 +55,12 @@ object KafkaMetricsReporter {
   val ReporterStarted: AtomicBoolean = new AtomicBoolean(false)
   private var reporters: ArrayBuffer[KafkaMetricsReporter] = null
 
-  def startReporters (verifiableProps: VerifiableProperties): Seq[KafkaMetricsReporter] = {
+  def startReporters(verifiableProps: VerifiableProperties): Seq[KafkaMetricsReporter] = {
     ReporterStarted synchronized {
       if (!ReporterStarted.get()) {
         reporters = ArrayBuffer[KafkaMetricsReporter]()
         val metricsConfig = new KafkaMetricsConfig(verifiableProps)
-        if(metricsConfig.reporters.nonEmpty) {
+        if (metricsConfig.reporters.nonEmpty) {
           metricsConfig.reporters.foreach(reporterType => {
             val reporter = CoreUtils.createObject[KafkaMetricsReporter](reporterType)
             reporter.init(verifiableProps)

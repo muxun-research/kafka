@@ -17,9 +17,10 @@
 
 package kafka.serializer
 
-import java.nio.ByteBuffer
-
 import kafka.utils.VerifiableProperties
+
+import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
 
 /**
  * A decoder is a method of turning byte arrays into objects.
@@ -44,9 +45,9 @@ class DefaultDecoder(props: VerifiableProperties = null) extends Decoder[Array[B
 class StringDecoder(props: VerifiableProperties = null) extends Decoder[String] {
   val encoding =
     if(props == null)
-      "UTF8"
+      StandardCharsets.UTF_8.name()
     else
-      props.getString("serializer.encoding", "UTF8")
+      props.getString("serializer.encoding", StandardCharsets.UTF_8.name())
 
   def fromBytes(bytes: Array[Byte]): String = {
     new String(bytes, encoding)

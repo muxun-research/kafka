@@ -16,9 +16,9 @@
 -->
 
 <script id="design-template" type="text/x-handlebars-template">
-    <h3><a id="majordesignelements" href="#majordesignelements">4.1 Motivation</a></h3>
+    <h3 class="anchor-heading"><a id="majordesignelements" class="anchor-link"></a><a href="#majordesignelements">4.1 Motivation</a></h3>
     <p>
-    We designed Kafka to be able to act as a unified platform for handling all the real-time data feeds <a href="#introduction">a large company might have</a>. To do this we had to think through a fairly broad set of use cases.
+        We designed Kafka to be able to act as a unified platform for handling all the real-time data feeds <a href="#introduction">a large company might have</a>. To do this we had to think through a fairly broad set of use cases.
     <p>
     It would have to have high-throughput to support high volume event streams such as real-time log aggregation.
     <p>
@@ -30,9 +30,9 @@
     <p>
     Finally in cases where the stream is fed into other data systems for serving, we knew the system would have to be able to guarantee fault-tolerance in the presence of machine failures.
     <p>
-    Supporting these uses led us to a design with a number of unique elements, more akin to a database log than a traditional messaging system. We will outline some elements of the design in the following sections.
+        Supporting these uses led us to a design with a number of unique elements, more akin to a database log than a traditional messaging system. We will outline some elements of the design in the following sections.
 
-    <h3><a id="persistence" href="#persistence">4.2 Persistence</a></h3>
+    <h3 class="anchor-heading"><a id="persistence" class="anchor-link"></a><a href="#persistence">4.2 Persistence</a></h3>
     <h4><a id="design_filesystem" href="#design_filesystem">Don't fear the filesystem!</a></h4>
     <p>
     Kafka relies heavily on the filesystem for storing and caching messages. There is a general perception that "disks are slow" which makes people skeptical that a persistent structure can offer competitive performance.
@@ -64,28 +64,28 @@
     This suggests a design which is very simple: rather than maintain as much as possible in-memory and flush it all out to the filesystem in a panic when we run out of space, we invert that. All data is immediately
     written to a persistent log on the filesystem without necessarily flushing to disk. In effect this just means that it is transferred into the kernel's pagecache.
     <p>
-    This style of pagecache-centric design is described in an <a href="http://varnish-cache.org/wiki/ArchitectNotes">article</a> on the design of Varnish here (along with a healthy dose of arrogance).
+        This style of pagecache-centric design is described in an <a href="http://varnish-cache.org/wiki/ArchitectNotes">article</a> on the design of Varnish here (along with a healthy dose of arrogance).
 
-    <h4><a id="design_constanttime" href="#design_constanttime">Constant Time Suffices</a></h4>
+    <h4 class="anchor-heading"><a id="design_constanttime" class="anchor-link"></a><a href="#design_constanttime">Constant Time Suffices</a></h4>
     <p>
-    The persistent data structure used in messaging systems are often a per-consumer queue with an associated BTree or other general-purpose random access data structures to maintain metadata about messages.
-    BTrees are the most versatile data structure available, and make it possible to support a wide variety of transactional and non-transactional semantics in the messaging system.
-    They do come with a fairly high cost, though: Btree operations are O(log N). Normally O(log N) is considered essentially equivalent to constant time, but this is not true for disk operations.
-    Disk seeks come at 10 ms a pop, and each disk can do only one seek at a time so parallelism is limited. Hence even a handful of disk seeks leads to very high overhead.
-    Since storage systems mix very fast cached operations with very slow physical disk operations, the observed performance of tree structures is often superlinear as data increases with fixed cache--i.e. doubling
-    your data makes things much worse than twice as slow.
+        The persistent data structure used in messaging systems are often a per-consumer queue with an associated BTree or other general-purpose random access data structures to maintain metadata about messages.
+        BTrees are the most versatile data structure available, and make it possible to support a wide variety of transactional and non-transactional semantics in the messaging system.
+        They do come with a fairly high cost, though: Btree operations are O(log N). Normally O(log N) is considered essentially equivalent to constant time, but this is not true for disk operations.
+        Disk seeks come at 10 ms a pop, and each disk can do only one seek at a time so parallelism is limited. Hence even a handful of disk seeks leads to very high overhead.
+        Since storage systems mix very fast cached operations with very slow physical disk operations, the observed performance of tree structures is often superlinear as data increases with fixed cache--i.e. doubling
+        your data makes things much worse than twice as slow.
     <p>
     Intuitively a persistent queue could be built on simple reads and appends to files as is commonly the case with logging solutions. This structure has the advantage that all operations are O(1) and reads do not
     block writes or each other. This has obvious performance advantages since the performance is completely decoupled from the data size&mdash;one server can now take full advantage of a number of cheap,
     low-rotational speed 1+TB SATA drives. Though they have poor seek performance, these drives have acceptable performance for large reads and writes and come at 1/3 the price and 3x the capacity.
     <p>
-    Having access to virtually unlimited disk space without any performance penalty means that we can provide some features not usually found in a messaging system. For example, in Kafka, instead of attempting to
-    delete messages as soon as they are consumed, we can retain messages for a relatively long period (say a week). This leads to a great deal of flexibility for consumers, as we will describe.
+        Having access to virtually unlimited disk space without any performance penalty means that we can provide some features not usually found in a messaging system. For example, in Kafka, instead of attempting to
+        delete messages as soon as they are consumed, we can retain messages for a relatively long period (say a week). This leads to a great deal of flexibility for consumers, as we will describe.
 
-    <h3><a id="maximizingefficiency" href="#maximizingefficiency">4.3 Efficiency</a></h3>
+    <h3 class="anchor-heading"><a id="maximizingefficiency" class="anchor-link"></a><a href="#maximizingefficiency">4.3 Efficiency</a></h3>
     <p>
-    We have put significant effort into efficiency. One of our primary use cases is handling web activity data, which is very high volume: each page view may generate dozens of writes. Furthermore, we assume each
-    message published is read by at least one consumer (often many), hence we strive to make consumption as cheap as possible.
+        We have put significant effort into efficiency. One of our primary use cases is handling web activity data, which is very high volume: each page view may generate dozens of writes. Furthermore, we assume each
+        message published is read by at least one consumer (often many), hence we strive to make consumption as cheap as possible.
     <p>
     We have also found, from experience building and running a number of similar systems, that efficiency is a key to effective multi-tenant operations. If the downstream infrastructure service can easily become a
     bottleneck due to a small bump in usage by the application, such small changes will often create problems. By being very fast we help ensure that the application will tip-over under load before the infrastructure.
@@ -125,54 +125,54 @@
     <p>
     This combination of pagecache and sendfile means that on a Kafka cluster where the consumers are mostly caught up you will see no read activity on the disks whatsoever as they will be serving data entirely from cache.
     <p>
-    For more background on the sendfile and zero-copy support in Java, see this <a href="https://developer.ibm.com/articles/j-zerocopy/">article</a>.
+        For more background on the sendfile and zero-copy support in Java, see this <a href="https://developer.ibm.com/articles/j-zerocopy/">article</a>.
 
-    <h4><a id="design_compression" href="#design_compression">End-to-end Batch Compression</a></h4>
+    <h4 class="anchor-heading"><a id="design_compression" class="anchor-link"></a><a href="#design_compression">End-to-end Batch Compression</a></h4>
     <p>
-    In some cases the bottleneck is actually not CPU or disk but network bandwidth. This is particularly true for a data pipeline that needs to send messages between data centers over a wide-area network. Of course,
-    the user can always compress its messages one at a time without any support needed from Kafka, but this can lead to very poor compression ratios as much of the redundancy is due to repetition between messages of
-    the same type (e.g. field names in JSON or user agents in web logs or common string values). Efficient compression requires compressing multiple messages together rather than compressing each message individually.
+        In some cases the bottleneck is actually not CPU or disk but network bandwidth. This is particularly true for a data pipeline that needs to send messages between data centers over a wide-area network. Of course,
+        the user can always compress its messages one at a time without any support needed from Kafka, but this can lead to very poor compression ratios as much of the redundancy is due to repetition between messages of
+        the same type (e.g. field names in JSON or user agents in web logs or common string values). Efficient compression requires compressing multiple messages together rather than compressing each message individually.
     <p>
     Kafka supports this with an efficient batching format. A batch of messages can be clumped together compressed and sent to the server in this form. This batch of messages will be written in compressed form and will
     remain compressed in the log and will only be decompressed by the consumer.
     <p>
-    Kafka supports GZIP, Snappy, LZ4 and ZStandard compression protocols. More details on compression can be found <a href="https://cwiki.apache.org/confluence/display/KAFKA/Compression">here</a>.
+        Kafka supports GZIP, Snappy, LZ4 and ZStandard compression protocols. More details on compression can be found <a href="https://cwiki.apache.org/confluence/display/KAFKA/Compression">here</a>.
 
-    <h3><a id="theproducer" href="#theproducer">4.4 The Producer</a></h3>
+    <h3 class="anchor-heading"><a id="theproducer" class="anchor-link"></a><a href="#theproducer">4.4 The Producer</a></h3>
 
-    <h4><a id="design_loadbalancing" href="#design_loadbalancing">Load balancing</a></h4>
+    <h4 class="anchor-heading"><a id="design_loadbalancing" class="anchor-link"></a><a href="#design_loadbalancing">Load balancing</a></h4>
     <p>
-    The producer sends data directly to the broker that is the leader for the partition without any intervening routing tier. To help the producer do this all Kafka nodes can answer a request for metadata about which
-    servers are alive and where the leaders for the partitions of a topic are at any given time to allow the producer to appropriately direct its requests.
+        The producer sends data directly to the broker that is the leader for the partition without any intervening routing tier. To help the producer do this all Kafka nodes can answer a request for metadata about which
+        servers are alive and where the leaders for the partitions of a topic are at any given time to allow the producer to appropriately direct its requests.
     <p>
-    The client controls which partition it publishes messages to. This can be done at random, implementing a kind of random load balancing, or it can be done by some semantic partitioning function. We expose the interface
-    for semantic partitioning by allowing the user to specify a key to partition by and using this to hash to a partition (there is also an option to override the partition function if need be). For example if the key
-    chosen was a user id then all data for a given user would be sent to the same partition. This in turn will allow consumers to make locality assumptions about their consumption. This style of partitioning is explicitly
-    designed to allow locality-sensitive processing in consumers.
+        The client controls which partition it publishes messages to. This can be done at random, implementing a kind of random load balancing, or it can be done by some semantic partitioning function. We expose the interface
+        for semantic partitioning by allowing the user to specify a key to partition by and using this to hash to a partition (there is also an option to override the partition function if need be). For example if the key
+        chosen was a user id then all data for a given user would be sent to the same partition. This in turn will allow consumers to make locality assumptions about their consumption. This style of partitioning is explicitly
+        designed to allow locality-sensitive processing in consumers.
 
-    <h4><a id="design_asyncsend" href="#design_asyncsend">Asynchronous send</a></h4>
+    <h4 class="anchor-heading"><a id="design_asyncsend" class="anchor-link"></a><a href="#design_asyncsend">Asynchronous send</a></h4>
     <p>
-    Batching is one of the big drivers of efficiency, and to enable batching the Kafka producer will attempt to accumulate data in memory and to send out larger batches in a single request. The batching can be configured
-    to accumulate no more than a fixed number of messages and to wait no longer than some fixed latency bound (say 64k or 10 ms). This allows the accumulation of more bytes to send, and few larger I/O operations on the
-    servers. This buffering is configurable and gives a mechanism to trade off a small amount of additional latency for better throughput.
+        Batching is one of the big drivers of efficiency, and to enable batching the Kafka producer will attempt to accumulate data in memory and to send out larger batches in a single request. The batching can be configured
+        to accumulate no more than a fixed number of messages and to wait no longer than some fixed latency bound (say 64k or 10 ms). This allows the accumulation of more bytes to send, and few larger I/O operations on the
+        servers. This buffering is configurable and gives a mechanism to trade off a small amount of additional latency for better throughput.
     <p>
-    Details on <a href="#producerconfigs">configuration</a> and the <a href="http://kafka.apache.org/082/javadoc/index.html?org/apache/kafka/clients/producer/KafkaProducer.html">api</a> for the producer can be found
-    elsewhere in the documentation.
+        Details on <a href="#producerconfigs">configuration</a> and the <a href="http://kafka.apache.org/082/javadoc/index.html?org/apache/kafka/clients/producer/KafkaProducer.html">api</a> for the producer can be found
+        elsewhere in the documentation.
 
-    <h3><a id="theconsumer" href="#theconsumer">4.5 The Consumer</a></h3>
+    <h3 class="anchor-heading"><a id="theconsumer" class="anchor-link"></a><a href="#theconsumer">4.5 The Consumer</a></h3>
 
     The Kafka consumer works by issuing "fetch" requests to the brokers leading the partitions it wants to consume. The consumer specifies its offset in the log with each request and receives back a chunk of log
     beginning from that position. The consumer thus has significant control over this position and can rewind it to re-consume data if need be.
 
-    <h4><a id="design_pull" href="#design_pull">Push vs. pull</a></h4>
+    <h4 class="anchor-heading"><a id="design_pull" class="anchor-link"></a><a href="#design_pull">Push vs. pull</a></h4>
     <p>
-    An initial question we considered is whether consumers should pull data from brokers or brokers should push data to the consumer. In this respect Kafka follows a more traditional design, shared by most messaging
-    systems, where data is pushed to the broker from the producer and pulled from the broker by the consumer. Some logging-centric systems, such as <a href="http://github.com/facebook/scribe">Scribe</a> and
-    <a href="http://flume.apache.org/">Apache Flume</a>, follow a very different push-based path where data is pushed downstream. There are pros and cons to both approaches. However, a push-based system has difficulty
-    dealing with diverse consumers as the broker controls the rate at which data is transferred. The goal is generally for the consumer to be able to consume at the maximum possible rate; unfortunately, in a push
-    system this means the consumer tends to be overwhelmed when its rate of consumption falls below the rate of production (a denial of service attack, in essence). A pull-based system has the nicer property that
-    the consumer simply falls behind and catches up when it can. This can be mitigated with some kind of backoff protocol by which the consumer can indicate it is overwhelmed, but getting the rate of transfer to
-    fully utilize (but never over-utilize) the consumer is trickier than it seems. Previous attempts at building systems in this fashion led us to go with a more traditional pull model.
+        An initial question we considered is whether consumers should pull data from brokers or brokers should push data to the consumer. In this respect Kafka follows a more traditional design, shared by most messaging
+        systems, where data is pushed to the broker from the producer and pulled from the broker by the consumer. Some logging-centric systems, such as <a href="http://github.com/facebook/scribe">Scribe</a> and
+        <a href="http://flume.apache.org/">Apache Flume</a>, follow a very different push-based path where data is pushed downstream. There are pros and cons to both approaches. However, a push-based system has difficulty
+        dealing with diverse consumers as the broker controls the rate at which data is transferred. The goal is generally for the consumer to be able to consume at the maximum possible rate; unfortunately, in a push
+        system this means the consumer tends to be overwhelmed when its rate of consumption falls below the rate of production (a denial of service attack, in essence). A pull-based system has the nicer property that
+        the consumer simply falls behind and catches up when it can. This can be mitigated with some kind of backoff protocol by which the consumer can indicate it is overwhelmed, but getting the rate of transfer to
+        fully utilize (but never over-utilize) the consumer is trickier than it seems. Previous attempts at building systems in this fashion led us to go with a more traditional pull model.
     <p>
     Another advantage of a pull-based system is that it lends itself to aggressive batching of data sent to the consumer. A push-based system must choose to either send a request immediately or accumulate more data
     and then send it later without knowledge of whether the downstream consumer will be able to immediately process it. If tuned for low latency, this will result in sending a single message at a time only for the
@@ -182,12 +182,12 @@
     The deficiency of a naive pull-based system is that if the broker has no data the consumer may end up polling in a tight loop, effectively busy-waiting for data to arrive. To avoid this we have parameters in our
     pull request that allow the consumer request to block in a "long poll" waiting until data arrives (and optionally waiting until a given number of bytes is available to ensure large transfer sizes).
     <p>
-    You could imagine other possible designs which would be only pull, end-to-end. The producer would locally write to a local log, and brokers would pull from that with consumers pulling from them. A similar type of
-    "store-and-forward" producer is often proposed. This is intriguing but we felt not very suitable for our target use cases which have thousands of producers. Our experience running persistent data systems at
-    scale led us to feel that involving thousands of disks in the system across many applications would not actually make things more reliable and would be a nightmare to operate. And in practice we have found that we
-    can run a pipeline with strong SLAs at large scale without a need for producer persistence.
+        You could imagine other possible designs which would be only pull, end-to-end. The producer would locally write to a local log, and brokers would pull from that with consumers pulling from them. A similar type of
+        "store-and-forward" producer is often proposed. This is intriguing but we felt not very suitable for our target use cases which have thousands of producers. Our experience running persistent data systems at
+        scale led us to feel that involving thousands of disks in the system across many applications would not actually make things more reliable and would be a nightmare to operate. And in practice we have found that we
+        can run a pipeline with strong SLAs at large scale without a need for producer persistence.
 
-    <h4><a id="design_consumerposition" href="#design_consumerposition">Consumer Position</a></h4>
+    <h4 class="anchor-heading"><a id="design_consumerposition" class="anchor-link"></a><a href="#design_consumerposition">Consumer Position</a></h4>
     Keeping track of <i>what</i> has been consumed is, surprisingly, one of the key performance points of a messaging system.
     <p>
     Most messaging systems keep metadata about what messages have been consumed on the broker. That is, as a message is handed out to a consumer, the broker either records that fact locally immediately or it may wait
@@ -205,18 +205,18 @@
     that the position of a consumer in each partition is just a single integer, the offset of the next message to consume. This makes the state about what has been consumed very small, just one number for each partition.
     This state can be periodically checkpointed. This makes the equivalent of message acknowledgements very cheap.
     <p>
-    There is a side benefit of this decision. A consumer can deliberately <i>rewind</i> back to an old offset and re-consume data. This violates the common contract of a queue, but turns out to be an essential feature
-    for many consumers. For example, if the consumer code has a bug and is discovered after some messages are consumed, the consumer can re-consume those messages once the bug is fixed.
+        There is a side benefit of this decision. A consumer can deliberately <i>rewind</i> back to an old offset and re-consume data. This violates the common contract of a queue, but turns out to be an essential feature
+        for many consumers. For example, if the consumer code has a bug and is discovered after some messages are consumed, the consumer can re-consume those messages once the bug is fixed.
 
-    <h4><a id="design_offlineload" href="#design_offlineload">Offline Data Load</a></h4>
+    <h4 class="anchor-heading"><a id="design_offlineload" class="anchor-link"></a><a href="#design_offlineload">Offline Data Load</a></h4>
 
     Scalable persistence allows for the possibility of consumers that only periodically consume such as batch data loads that periodically bulk-load data into an offline system such as Hadoop or a relational data
     warehouse.
     <p>
-    In the case of Hadoop we parallelize the data load by splitting the load over individual map tasks, one for each node/topic/partition combination, allowing full parallelism in the loading. Hadoop provides the task
-    management, and tasks which fail can restart without danger of duplicate data&mdash;they simply restart from their original position.
+        In the case of Hadoop we parallelize the data load by splitting the load over individual map tasks, one for each node/topic/partition combination, allowing full parallelism in the loading. Hadoop provides the task
+        management, and tasks which fail can restart without danger of duplicate data&mdash;they simply restart from their original position.
 
-    <h4><a id="static_membership" href="#static_membership">Static Membership</a></h4>
+    <h4 class="anchor-heading"><a id="static_membership" class="anchor-link"></a><a href="#static_membership">Static Membership</a></h4>
     Static membership aims to improve the availability of stream applications, consumer groups and other applications built on top of the group rebalance protocol.
     The rebalance protocol relies on the group coordinator to allocate entity ids to group members. These generated ids are ephemeral and will change when members restart and rejoin.
     For consumer based apps, this "dynamic membership" can cause a large percentage of tasks re-assigned to different instances during administrative operations
@@ -238,10 +238,10 @@
     For more details, see
     <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-345%3A+Introduce+static+membership+protocol+to+reduce+consumer+rebalances">KIP-345</a>
 
-    <h3><a id="semantics" href="#semantics">4.6 Message Delivery Semantics</a></h3>
+    <h3 class="anchor-heading"><a id="semantics" class="anchor-link"></a><a href="#semantics">4.6 Message Delivery Semantics</a></h3>
     <p>
-    Now that we understand a little about how producers and consumers work, let's discuss the semantic guarantees Kafka provides between producer and consumer. Clearly there are multiple possible message delivery
-    guarantees that could be provided:
+        Now that we understand a little about how producers and consumers work, let's discuss the semantic guarantees Kafka provides between producer and consumer. Clearly there are multiple possible message delivery
+        guarantees that could be provided:
     <ul>
     <li>
         <i>At most once</i>&mdash;Messages may be lost but are never redelivered.
@@ -298,15 +298,15 @@
     <a href="https://kafka.apache.org/documentation/#connect">Kafka Connect</a> connector which populates data in HDFS along with the offsets of the data it reads so that it is guaranteed that either data and
     offsets are both updated or neither is. We follow similar patterns for many other data systems which require these stronger semantics and for which the messages do not have a primary key to allow for deduplication.
     <p>
-    So effectively Kafka supports exactly-once delivery in <a href="https://kafka.apache.org/documentation/streams">Kafka Streams</a>, and the transactional producer/consumer can be used generally to provide
-    exactly-once delivery when transferring and processing data between Kafka topics. Exactly-once delivery for other destination systems generally requires cooperation with such systems, but Kafka provides the
-    offset which makes implementing this feasible (see also <a href="https://kafka.apache.org/documentation/#connect">Kafka Connect</a>). Otherwise, Kafka guarantees at-least-once delivery by default, and allows
-    the user to implement at-most-once delivery by disabling retries on the producer and committing offsets in the consumer prior to processing a batch of messages.
+        So effectively Kafka supports exactly-once delivery in <a href="https://kafka.apache.org/documentation/streams">Kafka Streams</a>, and the transactional producer/consumer can be used generally to provide
+        exactly-once delivery when transferring and processing data between Kafka topics. Exactly-once delivery for other destination systems generally requires cooperation with such systems, but Kafka provides the
+        offset which makes implementing this feasible (see also <a href="https://kafka.apache.org/documentation/#connect">Kafka Connect</a>). Otherwise, Kafka guarantees at-least-once delivery by default, and allows
+        the user to implement at-most-once delivery by disabling retries on the producer and committing offsets in the consumer prior to processing a batch of messages.
 
-    <h3><a id="replication" href="#replication">4.7 Replication</a></h3>
+    <h3 class="anchor-heading"><a id="replication" class="anchor-link"></a><a href="#replication">4.7 Replication</a></h3>
     <p>
-    Kafka replicates the log for each topic's partitions across a configurable number of servers (you can set this replication factor on a topic-by-topic basis). This allows automatic failover to these replicas when a
-    server in the cluster fails so messages remain available in the presence of failures.
+        Kafka replicates the log for each topic's partitions across a configurable number of servers (you can set this replication factor on a topic-by-topic basis). This allows automatic failover to these replicas when a
+        server in the cluster fails so messages remain available in the presence of failures.
     <p>
     Other messaging systems provide some replication-related features, but, in our (totally biased) opinion, this appears to be a tacked-on thing, not heavily used, and with large downsides: replicas are inactive,
     throughput is heavily impacted, it requires fiddly manual configuration, etc. Kafka is meant to be used with replication by default&mdash;in fact we implement un-replicated topics as replicated topics where the
@@ -362,20 +362,20 @@
     all committed messages. That replica's log will be the most complete and therefore will be selected as the new leader. There are many remaining details that each algorithm must handle (such as precisely defined what
     makes a log more complete, ensuring log consistency during leader failure or changing the set of servers in the replica set) but we will ignore these for now.
     <p>
-    This majority vote approach has a very nice property: the latency is dependent on only the fastest servers. That is, if the replication factor is three, the latency is determined by the faster follower not the slower one.
+        This majority vote approach has a very nice property: the latency is dependent on only the fastest servers. That is, if the replication factor is three, the latency is determined by the faster follower not the slower one.
     <p>
-    There are a rich variety of algorithms in this family including ZooKeeper's
-    <a href="http://web.archive.org/web/20140602093727/http://www.stanford.edu/class/cs347/reading/zab.pdf">Zab</a>,
-    <a href="https://ramcloud.stanford.edu/wiki/download/attachments/11370504/raft.pdf">Raft</a>,
-    and <a href="http://pmg.csail.mit.edu/papers/vr-revisited.pdf">Viewstamped Replication</a>.
-    The most similar academic publication we are aware of to Kafka's actual implementation is
-    <a href="http://research.microsoft.com/apps/pubs/default.aspx?id=66814">PacificA</a> from Microsoft.
+        There are a rich variety of algorithms in this family including ZooKeeper's
+        <a href="http://web.archive.org/web/20140602093727/http://www.stanford.edu/class/cs347/reading/zab.pdf">Zab</a>,
+        <a href="https://www.usenix.org/system/files/conference/atc14/atc14-paper-ongaro.pdf">Raft</a>,
+        and <a href="http://pmg.csail.mit.edu/papers/vr-revisited.pdf">Viewstamped Replication</a>.
+        The most similar academic publication we are aware of to Kafka's actual implementation is
+        <a href="http://research.microsoft.com/apps/pubs/default.aspx?id=66814">PacificA</a> from Microsoft.
     <p>
-    The downside of majority vote is that it doesn't take many failures to leave you with no electable leaders. To tolerate one failure requires three copies of the data, and to tolerate two failures requires five copies
-    of the data. In our experience having only enough redundancy to tolerate a single failure is not enough for a practical system, but doing every write five times, with 5x the disk space requirements and 1/5th the
-    throughput, is not very practical for large volume data problems. This is likely why quorum algorithms more commonly appear for shared cluster configuration such as ZooKeeper but are less common for primary data
-    storage. For example in HDFS the namenode's high-availability feature is built on a <a href="http://blog.cloudera.com/blog/2012/10/quorum-based-journaling-in-cdh4-1">majority-vote-based journal</a>, but this more
-    expensive approach is not used for the data itself.
+        The downside of majority vote is that it doesn't take many failures to leave you with no electable leaders. To tolerate one failure requires three copies of the data, and to tolerate two failures requires five copies
+        of the data. In our experience having only enough redundancy to tolerate a single failure is not enough for a practical system, but doing every write five times, with 5x the disk space requirements and 1/5th the
+        throughput, is not very practical for large volume data problems. This is likely why quorum algorithms more commonly appear for shared cluster configuration such as ZooKeeper but are less common for primary data
+        storage. For example in HDFS the namenode's high-availability feature is built on a <a href="http://blog.cloudera.com/blog/2012/10/quorum-based-journaling-in-cdh4-1">majority-vote-based journal</a>, but this more
+        expensive approach is not used for the data itself.
     <p>
     Kafka takes a slightly different approach to choosing its quorum set. Instead of majority vote, Kafka dynamically maintains a set of in-sync replicas (ISR) that are caught-up to the leader. Only members of this set
     are eligible for election as leader. A write to a Kafka partition is not considered committed until <i>all</i> in-sync replicas have received the write. This ISR set is persisted to ZooKeeper whenever it changes.
@@ -409,11 +409,11 @@
     have every committed message. By default from version 0.11.0.0, Kafka chooses the first strategy and favor waiting for a consistent replica. This behavior can be changed using
     configuration property unclean.leader.election.enable, to support use cases where uptime is preferable to consistency.
     <p>
-    This dilemma is not specific to Kafka. It exists in any quorum-based scheme. For example in a majority voting scheme, if a majority of servers suffer a permanent failure, then you must either choose to lose 100% of
-    your data or violate consistency by taking what remains on an existing server as your new source of truth.
+        This dilemma is not specific to Kafka. It exists in any quorum-based scheme. For example in a majority voting scheme, if a majority of servers suffer a permanent failure, then you must either choose to lose 100% of
+        your data or violate consistency by taking what remains on an existing server as your new source of truth.
 
 
-    <h4><a id="design_ha" href="#design_ha">Availability and Durability Guarantees</a></h4>
+    <h4 class="anchor-heading"><a id="design_ha" class="anchor-link"></a><a href="#design_ha">Availability and Durability Guarantees</a></h4>
 
     When writing to Kafka, producers can choose whether they wait for the message to be acknowledged by 0,1 or all (-1) replicas.
     Note that "acknowledgement by all replicas" does not guarantee that the full set of assigned replicas have received the message. By default, when acks=all, acknowledgement happens as soon as all the current in-sync
@@ -432,18 +432,18 @@
     </ol>
 
 
-    <h4><a id="design_replicamanagment" href="#design_replicamanagment">Replica Management</a></h4>
+    <h4 class="anchor-heading"><a id="design_replicamanagment" class="anchor-link"></a><a href="#design_replicamanagment">Replica Management</a></h4>
 
     The above discussion on replicated logs really covers only a single log, i.e. one topic partition. However a Kafka cluster will manage hundreds or thousands of these partitions. We attempt to balance partitions
     within a cluster in a round-robin fashion to avoid clustering all partitions for high-volume topics on a small number of nodes. Likewise we try to balance leadership so that each node is the leader for a proportional
     share of its partitions.
     <p>
-    It is also important to optimize the leadership election process as that is the critical window of unavailability. A naive implementation of leader election would end up running an election per partition for all
-    partitions a node hosted when that node failed. Instead, we elect one of the brokers as the "controller". This controller detects failures at the broker level and is responsible for changing the leader of all
-    affected partitions in a failed broker. The result is that we are able to batch together many of the required leadership change notifications which makes the election process far cheaper and faster for a large number
-    of partitions. If the controller fails, one of the surviving brokers will become the new controller.
+        It is also important to optimize the leadership election process as that is the critical window of unavailability. A naive implementation of leader election would end up running an election per partition for all
+        partitions a node hosted when that node failed. Instead, we elect one of the brokers as the "controller". This controller detects failures at the broker level and is responsible for changing the leader of all
+        affected partitions in a failed broker. The result is that we are able to batch together many of the required leadership change notifications which makes the election process far cheaper and faster for a large number
+        of partitions. If the controller fails, one of the surviving brokers will become the new controller.
 
-    <h3><a id="compaction" href="#compaction">4.8 Log Compaction</a></h3>
+    <h3 class="anchor-heading"><a id="compaction" class="anchor-link"></a><a href="#compaction">4.8 Log Compaction</a></h3>
 
     Log compaction ensures that Kafka will always retain at least the last known value for each message key within the log of data for a single topic partition.  It addresses use cases and scenarios such as restoring
     state after application crashes or system failure, or reloading caches after application restarts during operational maintenance. Let's dive into these use cases in more detail and then describe how compaction works.
@@ -451,10 +451,9 @@
     So far we have described only the simpler approach to data retention where old log data is discarded after a fixed period of time or when the log reaches some predetermined size. This works well for temporal event
     data such as logging where each record stands alone. However an important class of data streams are the log of changes to keyed, mutable data (for example, the changes to a database table).
     <p>
-    Let's discuss a concrete example of such a stream. Say we have a topic containing user email addresses; every time a user updates their email address we send a message to this topic using their user id as the
-    primary key. Now say we send the following messages over some time period for a user with id 123, each message corresponding to a change in email address (messages for other ids are omitted):
-    <pre class="brush: text;">
-        123 => bill@microsoft.com
+        Let's discuss a concrete example of such a stream. Say we have a topic containing user email addresses; every time a user updates their email address we send a message to this topic using their user id as the
+        primary key. Now say we send the following messages over some time period for a user with id 123, each message corresponding to a change in email address (messages for other ids are omitted):
+    <pre class="line-numbers"><code class="language-text">       123 => bill@microsoft.com
                 .
                 .
                 .
@@ -462,8 +461,7 @@
                 .
                 .
                 .
-        123 => bill@gmail.com
-    </pre>
+        123 => bill@gmail.com</code></pre>
     Log compaction gives us a more granular retention mechanism so that we are guaranteed to retain at least the last update for each primary key (e.g. <code>bill@gmail.com</code>). By doing this we guarantee that the
     log contains a full snapshot of the final value for every key not just keys that changed recently. This means downstream consumers can restore their own state off this topic without us having to retain a complete
     log of all changes.
@@ -493,45 +491,48 @@
     <p>
     This retention policy can be set per-topic, so a single cluster can have some topics where retention is enforced by size or time and other topics where retention is enforced by compaction.
     <p>
-    This functionality is inspired by one of LinkedIn's oldest and most successful pieces of infrastructure&mdash;a database changelog caching service called <a href="https://github.com/linkedin/databus">Databus</a>.
-    Unlike most log-structured storage systems Kafka is built for subscription and organizes data for fast linear reads and writes. Unlike Databus, Kafka acts as a source-of-truth store so it is useful even in
-    situations where the upstream data source would not otherwise be replayable.
+        This functionality is inspired by one of LinkedIn's oldest and most successful pieces of infrastructure&mdash;a database changelog caching service called <a href="https://github.com/linkedin/databus">Databus</a>.
+        Unlike most log-structured storage systems Kafka is built for subscription and organizes data for fast linear reads and writes. Unlike Databus, Kafka acts as a source-of-truth store so it is useful even in
+        situations where the upstream data source would not otherwise be replayable.
 
-    <h4><a id="design_compactionbasics" href="#design_compactionbasics">Log Compaction Basics</a></h4>
+    <h4 class="anchor-heading"><a id="design_compactionbasics" class="anchor-link"></a><a href="#design_compactionbasics">Log Compaction Basics</a></h4>
 
     Here is a high-level picture that shows the logical structure of a Kafka log with the offset for each message.
     <p>
     <img class="centered" src="/{{version}}/images/log_cleaner_anatomy.png">
     <p>
-    The head of the log is identical to a traditional Kafka log. It has dense, sequential offsets and retains all messages. Log compaction adds an option for handling the tail of the log. The picture above shows a log
-    with a compacted tail. Note that the messages in the tail of the log retain the original offset assigned when they were first written&mdash;that never changes. Note also that all offsets remain valid positions in
-    the log, even if the message with that offset has been compacted away; in this case this position is indistinguishable from the next highest offset that does appear in the log. For example, in the picture above the
-    offsets 36, 37, and 38 are all equivalent positions and a read beginning at any of these offsets would return a message set beginning with 38.
+        The head of the log is identical to a traditional Kafka log. It has dense, sequential offsets and retains all messages. Log compaction adds an option for handling the tail of the log. The picture above shows a log
+        with a compacted tail. Note that the messages in the tail of the log retain the original offset assigned when they were first written&mdash;that never changes. Note also that all offsets remain valid positions in
+        the log, even if the message with that offset has been compacted away; in this case this position is indistinguishable from the next highest offset that does appear in the log. For example, in the picture above the
+        offsets 36, 37, and 38 are all equivalent positions and a read beginning at any of these offsets would return a message set beginning with 38.
     <p>
-    Compaction also allows for deletes. A message with a key and a null payload will be treated as a delete from the log. This delete marker will cause any prior message with that key to be removed (as would any new
-    message with that key), but delete markers are special in that they will themselves be cleaned out of the log after a period of time to free up space. The point in time at which deletes are no longer retained is
-    marked as the "delete retention point" in the above diagram.
+        Compaction also allows for deletes. A message with a key and a null payload will be treated as a delete from the log. Such a record is sometimes referred to as a <i>tombstone</i>. This delete marker will cause any prior message with that key to be removed (as would any new
+        message with that key), but delete markers are special in that they will themselves be cleaned out of the log after a period of time to free up space. The point in time at which deletes are no longer retained is
+        marked as the "delete retention point" in the above diagram.
     <p>
-    The compaction is done in the background by periodically recopying log segments. Cleaning does not block reads and can be throttled to use no more than a configurable amount of I/O throughput to avoid impacting
-    producers and consumers. The actual process of compacting a log segment looks something like this:
+        The compaction is done in the background by periodically recopying log segments. Cleaning does not block reads and can be throttled to use no more than a configurable amount of I/O throughput to avoid impacting
+        producers and consumers. The actual process of compacting a log segment looks something like this:
     <p>
-    <img class="centered" src="/{{version}}/images/log_compaction.png">
+        <img class="centered" src="/{{version}}/images/log_compaction.png">
     <p>
-    <h4><a id="design_compactionguarantees" href="#design_compactionguarantees">What guarantees does log compaction provide?</a></h4>
+    <h4 class="anchor-heading">
+        <a class="anchor-link" id="design_compactionguarantees" href="#design_compactionguarantees"></a>
+        <a href="#design_compactionguarantees">What guarantees does log compaction provide</a>?
+    </h4>
 
     Log compaction guarantees the following:
     <ol>
-    <li>Any consumer that stays caught-up to within the head of the log will see every message that is written; these messages will have sequential offsets. The topic's <code>min.compaction.lag.ms</code> can be used to
-    guarantee the minimum length of time must pass after a message is written before it could be compacted. I.e. it provides a lower bound on how long each message will remain in the (uncompacted) head.
-    The topic's <code>max.compaction.lag.ms</code> can be used to guarantee the maximum delay between the time a message is written and the time the message becomes eligible for compaction.
-    <li>Ordering of messages is always maintained.  Compaction will never re-order messages, just remove some.
-    <li>The offset for a message never changes.  It is the permanent identifier for a position in the log.
-    <li>Any consumer progressing from the start of the log will see at least the final state of all records in the order they were written.  Additionally, all delete markers for deleted records will be seen, provided
-    the consumer reaches the head of the log in a time period less than the topic's <code>delete.retention.ms</code> setting (the default is 24 hours).  In other words: since the removal of delete markers happens
+        <li>Any consumer that stays caught-up to within the head of the log will see every message that is written; these messages will have sequential offsets. The topic's <code>min.compaction.lag.ms</code> can be used to
+            guarantee the minimum length of time must pass after a message is written before it could be compacted. I.e. it provides a lower bound on how long each message will remain in the (uncompacted) head.
+            The topic's <code>max.compaction.lag.ms</code> can be used to guarantee the maximum delay between the time a message is written and the time the message becomes eligible for compaction.
+        <li>Ordering of messages is always maintained. Compaction will never re-order messages, just remove some.
+        <li>The offset for a message never changes. It is the permanent identifier for a position in the log.
+        <li>Any consumer progressing from the start of the log will see at least the final state of all records in the order they were written. Additionally, all delete markers for deleted records will be seen, provided
+            the consumer reaches the head of the log in a time period less than the topic's <code>delete.retention.ms</code> setting (the default is 24 hours). In other words: since the removal of delete markers happens
     concurrently with reads, it is possible for a consumer to miss delete markers if it lags by more than <code>delete.retention.ms</code>.
     </ol>
 
-    <h4><a id="design_compactiondetails" href="#design_compactiondetails">Log Compaction Details</a></h4>
+    <h4 class="anchor-heading"><a id="design_compactiondetails" class="anchor-link"></a><a href="#design_compactiondetails">Log Compaction Details</a></h4>
 
     Log compaction is handled by the log cleaner, a pool of background threads that recopy log segment files, removing records whose key appears in the head of the log. Each compactor thread works as follows:
     <ol>
@@ -543,11 +544,11 @@
     (assuming 1k messages).
     </ol>
     <p>
-    <h4><a id="design_compactionconfig" href="#design_compactionconfig">Configuring The Log Cleaner</a></h4>
+    <h4 class="anchor-heading"><a id="design_compactionconfig" class="anchor-link"></a><a href="#design_compactionconfig">Configuring The Log Cleaner</a></h4>
 
     The log cleaner is enabled by default. This will start the pool of cleaner threads.
     To enable log cleaning on a particular topic, add the log-specific property
-    <pre class="brush: text;"> log.cleanup.policy=compact</pre>
+    <pre class="language-text"><code> log.cleanup.policy=compact</code></pre>
 
     The <code>log.cleanup.policy</code> property is a broker configuration setting defined
     in the broker's <code>server.properties</code> file; it affects all of the topics
@@ -555,48 +556,51 @@
     <a href="/documentation.html#brokerconfigs">here</a>.
 
     The log cleaner can be configured to retain a minimum amount of the uncompacted "head" of the log. This is enabled by setting the compaction time lag.
-    <pre class="brush: text;">  log.cleaner.min.compaction.lag.ms</pre>
+    <pre class="language-text"><code>  log.cleaner.min.compaction.lag.ms</code></pre>
 
     This can be used to prevent messages newer than a minimum message age from being subject to compaction. If not set, all log segments are eligible for compaction except for the last segment, i.e. the one currently
     being written to. The active segment will not be compacted even if all of its messages are older than the minimum compaction time lag.
 
     The log cleaner can be configured to ensure a maximum delay after which the uncompacted "head" of the log becomes eligible for log compaction.
-    <pre class="brush: text;">  log.cleaner.max.compaction.lag.ms</pre>
+    <pre class="language-text"><code> log.cleaner.max.compaction.lag.ms</code></pre>
 
     This can be used to prevent log with low produce rate from remaining ineligible for compaction for an unbounded duration. If not set, logs that do not exceed min.cleanable.dirty.ratio are not compacted.
     Note that this compaction deadline is not a hard guarantee since it is still subjected to the availability of log cleaner threads and the actual compaction time.
     You will want to monitor the uncleanable-partitions-count, max-clean-time-secs and max-compaction-delay-secs metrics.
 
     <p>
-    Further cleaner configurations are described <a href="/documentation.html#brokerconfigs">here</a>.
+        Further cleaner configurations are described <a href="/documentation.html#brokerconfigs">here</a>.
 
-    <h3><a id="design_quotas" href="#design_quotas">4.9 Quotas</a></h3>
+    <h3 class="anchor-heading"><a id="design_quotas" class="anchor-link"></a><a href="#design_quotas">4.9 Quotas</a></h3>
     <p>
-    Kafka cluster has the ability to enforce quotas on requests to control the broker resources used by clients. Two types
-    of client quotas can be enforced by Kafka brokers for each group of clients sharing a quota:
+        Kafka cluster has the ability to enforce quotas on requests to control the broker resources used by clients. Two types
+        of client quotas can be enforced by Kafka brokers for each group of clients sharing a quota:
     <ol>
-      <li>Network bandwidth quotas define byte-rate thresholds (since 0.9)</li>
-      <li>Request rate quotas define CPU utilization thresholds as a percentage of network and I/O threads (since 0.11)</li>
+        <li>Network bandwidth quotas define byte-rate thresholds (since 0.9)</li>
+        <li>Request rate quotas define CPU utilization thresholds as a percentage of network and I/O threads (since 0.11)</li>
     </ol>
     </p>
 
-    <h4><a id="design_quotasnecessary" href="#design_quotasnecessary">Why are quotas necessary?</a></h4>
+    <h4 class="anchor-heading">
+        <a class="anchor-link" id="design_quotasnecessary" href="#design_quotasnecessary"></a>
+        <a href="#design_quotasnecessary">Why are quotas necessary</a>?
+    </h4>
     <p>
-    It is possible for producers and consumers to produce/consume very high volumes of data or generate requests at a very high
-    rate and thus monopolize broker resources, cause network saturation and generally DOS other clients and the brokers themselves.
-    Having quotas protects against these issues and is all the more important in large multi-tenant clusters where a small set of badly behaved clients can degrade user experience for the well behaved ones.
-    In fact, when running Kafka as a service this even makes it possible to enforce API limits according to an agreed upon contract.
+        It is possible for producers and consumers to produce/consume very high volumes of data or generate requests at a very high
+        rate and thus monopolize broker resources, cause network saturation and generally DOS other clients and the brokers themselves.
+        Having quotas protects against these issues and is all the more important in large multi-tenant clusters where a small set of badly behaved clients can degrade user experience for the well behaved ones.
+        In fact, when running Kafka as a service this even makes it possible to enforce API limits according to an agreed upon contract.
     </p>
-    <h4><a id="design_quotasgroups" href="#design_quotasgroups">Client groups</a></h4>
-        The identity of Kafka clients is the user principal which represents an authenticated user in a secure cluster. In a cluster that supports unauthenticated clients, user principal is a grouping of unauthenticated
-        users
-        chosen by the broker using a configurable <code>PrincipalBuilder</code>. Client-id is a logical grouping of clients with a meaningful name chosen by the client application. The tuple (user, client-id) defines
+    <h4 class="anchor-heading"><a id="design_quotasgroups" class="anchor-link"></a><a href="#design_quotasgroups">Client groups</a></h4>
+    The identity of Kafka clients is the user principal which represents an authenticated user in a secure cluster. In a cluster that supports unauthenticated clients, user principal is a grouping of unauthenticated
+    users
+    chosen by the broker using a configurable <code>PrincipalBuilder</code>. Client-id is a logical grouping of clients with a meaningful name chosen by the client application. The tuple (user, client-id) defines
         a secure logical group of clients that share both user principal and client-id.
     <p>
         Quotas can be applied to (user, client-id), user or client-id groups. For a given connection, the most specific quota matching the connection is applied. All connections of a quota group share the quota configured for the group.
         For example, if (user="test-user", client-id="test-client") has a produce quota of 10MB/sec, this is shared across all producer instances of user "test-user" with the client-id "test-client".
     </p>
-    <h4><a id="design_quotasconfig" href="#design_quotasconfig">Quota Configuration</a></h4>
+    <h4 class="anchor-heading"><a id="design_quotasconfig" class="anchor-link"></a><a href="#design_quotasconfig">Quota Configuration</a></h4>
     <p>
         Quota configuration may be defined for (user, client-id), user and client-id groups. It is possible to override the default quota at any of the quota levels that needs a higher (or even lower) quota.
         The mechanism is similar to the per-topic log config overrides.
@@ -620,14 +624,14 @@
         Broker properties (quota.producer.default, quota.consumer.default) can also be used to set defaults of network bandwidth quotas for client-id groups. These properties are being deprecated and will be removed in a later release.
         Default quotas for client-id can be set in Zookeeper similar to the other quota overrides and defaults.
     </p>
-    <h4><a id="design_quotasbandwidth" href="#design_quotasbandwidth">Network Bandwidth Quotas</a></h4>
+    <h4 class="anchor-heading"><a id="design_quotasbandwidth" class="anchor-link"></a><a href="#design_quotasbandwidth">Network Bandwidth Quotas</a></h4>
     <p>
         Network bandwidth quotas are defined as the byte rate threshold for each group of clients sharing a quota.
         By default, each unique client group receives a fixed quota in bytes/sec as configured by the cluster.
         This quota is defined on a per-broker basis. Each group of clients can publish/fetch a maximum of X bytes/sec
         per broker before clients are throttled.
     </p>
-    <h4><a id="design_quotascpu" href="#design_quotascpu">Request Rate Quotas</a></h4>
+    <h4 class="anchor-heading"><a id="design_quotascpu" class="anchor-link"></a><a href="#design_quotascpu">Request Rate Quotas</a></h4>
     <p>
         Request rate quotas are defined as the percentage of time a client can utilize on request handler I/O
         threads and network threads of each broker within a quota window. A quota of <tt>n%</tt> represents
@@ -637,7 +641,7 @@
         on the number of cores available on the broker host, request rate quotas represent the total percentage of CPU
         that may be used by each group of clients sharing the quota.
     </p>
-    <h4><a id="design_quotasenforcement" href="#design_quotasenforcement">Enforcement</a></h4>
+    <h4 class="anchor-heading"><a id="design_quotasenforcement" class="anchor-link"></a><a href="#design_quotasenforcement">Enforcement</a></h4>
     <p>
         By default, each unique client group receives a fixed quota as configured by the cluster.
         This quota is defined on a per-broker basis. Each client can utilize this quota per broker before it gets throttled. We decided that defining these quotas per broker is much better than

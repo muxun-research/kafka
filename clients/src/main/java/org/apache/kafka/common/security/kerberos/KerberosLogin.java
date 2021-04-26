@@ -16,25 +16,24 @@
  */
 package org.apache.kafka.common.security.kerberos;
 
-import javax.security.auth.kerberos.KerberosPrincipal;
-import javax.security.auth.login.AppConfigurationEntry;
-import javax.security.auth.login.Configuration;
-import javax.security.auth.login.LoginContext;
-import javax.security.auth.login.LoginException;
-import javax.security.auth.kerberos.KerberosTicket;
-import javax.security.auth.Subject;
-
+import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.security.JaasContext;
 import org.apache.kafka.common.security.JaasUtils;
 import org.apache.kafka.common.security.auth.AuthenticateCallbackHandler;
 import org.apache.kafka.common.security.authenticator.AbstractLogin;
-import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.utils.KafkaThread;
 import org.apache.kafka.common.utils.Shell;
 import org.apache.kafka.common.utils.Time;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.security.auth.Subject;
+import javax.security.auth.kerberos.KerberosPrincipal;
+import javax.security.auth.kerberos.KerberosTicket;
+import javax.security.auth.login.AppConfigurationEntry;
+import javax.security.auth.login.Configuration;
+import javax.security.auth.login.LoginContext;
+import javax.security.auth.login.LoginException;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
@@ -213,7 +212,8 @@ public class KerberosLogin extends AbstractLogin {
                             break;
                         } catch (Exception e) {
                             if (retry > 0) {
-                                --retry;
+								log.warn("[Principal={}]: Error when trying to renew with TicketCache, but will retry ", principal, e);
+								--retry;
                                 // sleep for 10 seconds
                                 try {
                                     Thread.sleep(10 * 1000);
@@ -237,7 +237,8 @@ public class KerberosLogin extends AbstractLogin {
                             break;
                         } catch (LoginException le) {
                             if (retry > 0) {
-                                --retry;
+								log.warn("[Principal={}]: Error when trying to re-Login, but will retry ", principal, le);
+								--retry;
                                 // sleep for 10 seconds.
                                 try {
                                     Thread.sleep(10 * 1000);
@@ -340,42 +341,47 @@ public class KerberosLogin extends AbstractLogin {
         return true;
     }
 
-    /**
-     * Re-login a principal. This method assumes that {@link #login()} has happened already.
-     * @throws javax.security.auth.login.LoginException on a failure
-     */
-    private void reLogin() throws LoginException {
-        if (!isKrbTicket) {
-            return;
-        }
-        if (loginContext == null) {
-            throw new LoginException("Login must be done first");
-        }
-        if (!hasSufficientTimeElapsed()) {
-            return;
-        }
-        synchronized (KerberosLogin.class) {
+	/**
+	 * Re-login a principal. This method assumes that {@link #login()} has happened already.
+	 * @throws javax.security.auth.login.LoginException on a failure
+	 */
+	protected void reLogin() throws LoginException {
+		if (!isKrbTicket) {
+			return;
+		}
+		if (loginContext == null) {
+			throw new LoginException("Login must be done first");
+		}
+		if (!hasSufficientTimeElapsed()) {
+			return;
+		}
+		synchronized (KerberosLogin.class) {
             log.info("Initiating logout for {}", principal);
             // register most recent relogin attempt
             lastLogin = currentElapsedTime();
             //clear up the kerberos state. But the tokens are not cleared! As per
             //the Java kerberos login module code, only the kerberos credentials
-            //are cleared
-            loginContext.logout();
-            //login and also update the subject field of this instance to
-            //have the new credentials (pass it to the LoginContext constructor)
-            loginContext = new LoginContext(contextName(), subject, null, configuration());
-            log.info("Initiating re-login for {}", principal);
-            loginContext.login();
-        }
-    }
+			//are cleared
+			logout();
+			//login and also update the subject field of this instance to
+			//have the new credentials (pass it to the LoginContext constructor)
+			loginContext = new LoginContext(contextName(), subject, null, configuration());
+			log.info("Initiating re-login for {}", principal);
+			loginContext.login();
+		}
+	}
 
-    private long currentElapsedTime() {
-        return time.hiResClockMs();
-    }
+	// Visibility to override for testing
+	protected void logout() throws LoginException {
+		loginContext.logout();
+	}
 
-    private long currentWallTime() {
-        return time.milliseconds();
-    }
+	private long currentElapsedTime() {
+		return time.hiResClockMs();
+	}
+
+	private long currentWallTime() {
+		return time.milliseconds();
+	}
 
 }

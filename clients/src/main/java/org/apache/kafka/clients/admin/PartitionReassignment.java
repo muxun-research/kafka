@@ -47,14 +47,23 @@ public class PartitionReassignment {
      * A subset of replicas.
      */
     public List<Integer> addingReplicas() {
-        return addingReplicas;
-    }
+		return addingReplicas;
+	}
 
-    /**
-     * The brokers that we are removing this partition from as part of a reassignment.
-     * A subset of replicas.
-     */
-    public List<Integer> removingReplicas() {
-        return removingReplicas;
-    }
+	/**
+	 * The brokers that we are removing this partition from as part of a reassignment.
+	 * A subset of replicas.
+	 */
+	public List<Integer> removingReplicas() {
+		return removingReplicas;
+	}
+
+	@Override
+	public String toString() {
+		return "PartitionReassignment(" +
+				"replicas=" + replicas +
+				", addingReplicas=" + addingReplicas +
+				", removingReplicas=" + removingReplicas +
+				')';
+	}
 }

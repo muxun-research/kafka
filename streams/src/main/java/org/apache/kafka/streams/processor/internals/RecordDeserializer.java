@@ -25,23 +25,25 @@ import org.apache.kafka.streams.errors.StreamsException;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.slf4j.Logger;
 
+import java.util.Optional;
+
 import static org.apache.kafka.streams.StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG;
 
 class RecordDeserializer {
-    private final SourceNode sourceNode;
-    private final DeserializationExceptionHandler deserializationExceptionHandler;
-    private final Logger log;
-    private final Sensor skippedRecordSensor;
+	private final Logger log;
+	private final SourceNode<?, ?, ?, ?> sourceNode;
+	private final Sensor droppedRecordsSensor;
+	private final DeserializationExceptionHandler deserializationExceptionHandler;
 
-    RecordDeserializer(final SourceNode sourceNode,
-                       final DeserializationExceptionHandler deserializationExceptionHandler,
-                       final LogContext logContext,
-                       final Sensor skippedRecordsSensor) {
-        this.sourceNode = sourceNode;
-        this.deserializationExceptionHandler = deserializationExceptionHandler;
-        this.log = logContext.logger(RecordDeserializer.class);
-        this.skippedRecordSensor = skippedRecordsSensor;
-    }
+	RecordDeserializer(final SourceNode<?, ?, ?, ?> sourceNode,
+					   final DeserializationExceptionHandler deserializationExceptionHandler,
+					   final LogContext logContext,
+					   final Sensor droppedRecordsSensor) {
+		this.sourceNode = sourceNode;
+		this.deserializationExceptionHandler = deserializationExceptionHandler;
+		this.log = logContext.logger(RecordDeserializer.class);
+		this.droppedRecordsSensor = droppedRecordsSensor;
+	}
 
     /**
      * @throws StreamsException if a deserialization error occurs and the deserialization callback returns
@@ -53,17 +55,19 @@ class RecordDeserializer {
                                                final ConsumerRecord<byte[], byte[]> rawRecord) {
 
         try {
-            return new ConsumerRecord<>(
-                rawRecord.topic(),
-                rawRecord.partition(),
-                rawRecord.offset(),
-                rawRecord.timestamp(),
-                TimestampType.CREATE_TIME,
-                rawRecord.checksum(),
-                rawRecord.serializedKeySize(),
-                rawRecord.serializedValueSize(),
-                sourceNode.deserializeKey(rawRecord.topic(), rawRecord.headers(), rawRecord.key()),
-                sourceNode.deserializeValue(rawRecord.topic(), rawRecord.headers(), rawRecord.value()), rawRecord.headers());
+			return new ConsumerRecord<>(
+					rawRecord.topic(),
+					rawRecord.partition(),
+					rawRecord.offset(),
+					rawRecord.timestamp(),
+					TimestampType.CREATE_TIME,
+					rawRecord.serializedKeySize(),
+					rawRecord.serializedValueSize(),
+					sourceNode.deserializeKey(rawRecord.topic(), rawRecord.headers(), rawRecord.key()),
+					sourceNode.deserializeValue(rawRecord.topic(), rawRecord.headers(), rawRecord.value()),
+					rawRecord.headers(),
+					Optional.empty()
+			);
         } catch (final Exception deserializationException) {
             final DeserializationExceptionHandler.DeserializationHandlerResponse response;
             try {
@@ -83,20 +87,20 @@ class RecordDeserializer {
                     DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG + " appropriately.",
                     deserializationException);
             } else {
-                log.warn(
-                    "Skipping record due to deserialization error. topic=[{}] partition=[{}] offset=[{}]",
-                    rawRecord.topic(),
-                    rawRecord.partition(),
-                    rawRecord.offset(),
-                    deserializationException
-                );
-                skippedRecordSensor.record();
+				log.warn(
+						"Skipping record due to deserialization error. topic=[{}] partition=[{}] offset=[{}]",
+						rawRecord.topic(),
+						rawRecord.partition(),
+						rawRecord.offset(),
+						deserializationException
+				);
+				droppedRecordsSensor.record();
                 return null;
             }
         }
     }
 
-    SourceNode sourceNode() {
-        return sourceNode;
-    }
+	SourceNode<?, ?, ?, ?> sourceNode() {
+		return sourceNode;
+	}
 }

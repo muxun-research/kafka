@@ -16,6 +16,13 @@
  */
 package org.apache.kafka.connect.file;
 
+import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.errors.ConnectException;
+import org.apache.kafka.connect.source.SourceRecord;
+import org.apache.kafka.connect.source.SourceTask;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,13 +36,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.kafka.connect.data.Schema;
-import org.apache.kafka.connect.errors.ConnectException;
-import org.apache.kafka.connect.source.SourceRecord;
-import org.apache.kafka.connect.source.SourceTask;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 /**
  * FileStreamSourceTask reads from stdin or a file.
  */
@@ -45,25 +45,34 @@ public class FileStreamSourceTask extends SourceTask {
     public  static final String POSITION_FIELD = "position";
     private static final Schema VALUE_SCHEMA = Schema.STRING_SCHEMA;
 
-    private String filename;
-    private InputStream stream;
-    private BufferedReader reader = null;
-    private char[] buffer = new char[1024];
-    private int offset = 0;
-    private String topic = null;
-    private int batchSize = FileStreamSourceConnector.DEFAULT_TASK_BATCH_SIZE;
+	private String filename;
+	private InputStream stream;
+	private BufferedReader reader = null;
+	private char[] buffer;
+	private int offset = 0;
+	private String topic = null;
+	private int batchSize = FileStreamSourceConnector.DEFAULT_TASK_BATCH_SIZE;
 
-    private Long streamOffset;
+	private Long streamOffset;
 
-    @Override
-    public String version() {
-        return new FileStreamSourceConnector().version();
-    }
+	public FileStreamSourceTask() {
+		this(1024);
+	}
 
-    @Override
-    public void start(Map<String, String> props) {
-        filename = props.get(FileStreamSourceConnector.FILE_CONFIG);
-        if (filename == null || filename.isEmpty()) {
+	/* visible for testing */
+	FileStreamSourceTask(int initialBufferSize) {
+		buffer = new char[initialBufferSize];
+	}
+
+	@Override
+	public String version() {
+		return new FileStreamSourceConnector().version();
+	}
+
+	@Override
+	public void start(Map<String, String> props) {
+		filename = props.get(FileStreamSourceConnector.FILE_CONFIG);
+		if (filename == null || filename.isEmpty()) {
             stream = System.in;
             // Tracking offset for stdin doesn't make sense
             streamOffset = null;
@@ -137,28 +146,31 @@ public class FileStreamSourceTask extends SourceTask {
 
                 if (nread > 0) {
                     offset += nread;
-                    if (offset == buffer.length) {
-                        char[] newbuf = new char[buffer.length * 2];
-                        System.arraycopy(buffer, 0, newbuf, 0, buffer.length);
-                        buffer = newbuf;
-                    }
-
-                    String line;
+					String line;
+					boolean foundOneLine = false;
                     do {
                         line = extractLine();
                         if (line != null) {
-                            log.trace("Read a line from {}", logFilename());
-                            if (records == null)
-                                records = new ArrayList<>();
-                            records.add(new SourceRecord(offsetKey(filename), offsetValue(streamOffset), topic, null,
-                                    null, null, VALUE_SCHEMA, line, System.currentTimeMillis()));
+							foundOneLine = true;
+							log.trace("Read a line from {}", logFilename());
+							if (records == null)
+								records = new ArrayList<>();
+							records.add(new SourceRecord(offsetKey(filename), offsetValue(streamOffset), topic, null,
+									null, null, VALUE_SCHEMA, line, System.currentTimeMillis()));
 
-                            if (records.size() >= batchSize) {
-                                return records;
-                            }
-                        }
-                    } while (line != null);
-                }
+							if (records.size() >= batchSize) {
+								return records;
+							}
+						}
+					} while (line != null);
+
+					if (!foundOneLine && offset == buffer.length) {
+						char[] newbuf = new char[buffer.length * 2];
+						System.arraycopy(buffer, 0, newbuf, 0, buffer.length);
+						log.info("Increased buffer from {} to {}", buffer.length, newbuf.length);
+						buffer = newbuf;
+					}
+				}
             }
 
             if (nread <= 0)
@@ -221,14 +233,19 @@ public class FileStreamSourceTask extends SourceTask {
     }
 
     private Map<String, String> offsetKey(String filename) {
-        return Collections.singletonMap(FILENAME_FIELD, filename);
-    }
+		return Collections.singletonMap(FILENAME_FIELD, filename);
+	}
 
-    private Map<String, Long> offsetValue(Long pos) {
-        return Collections.singletonMap(POSITION_FIELD, pos);
-    }
+	private Map<String, Long> offsetValue(Long pos) {
+		return Collections.singletonMap(POSITION_FIELD, pos);
+	}
 
-    private String logFilename() {
-        return filename == null ? "stdin" : filename;
-    }
+	private String logFilename() {
+		return filename == null ? "stdin" : filename;
+	}
+
+	/* visible for testing */
+	int bufferSize() {
+		return buffer.length;
+	}
 }

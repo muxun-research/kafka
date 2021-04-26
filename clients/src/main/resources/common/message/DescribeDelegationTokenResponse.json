@@ -18,17 +18,38 @@
   "type": "response",
   "name": "DescribeDelegationTokenResponse",
   // Starting in version 1, on quota violation, brokers send out responses before throttling.
-  "validVersions": "0-1",
+  // Version 2 adds flexible version support
+  "validVersions": "0-2",
+  "flexibleVersions": "2+",
   "fields": [
-    { "name": "ErrorCode", "type": "int16", "versions": "0+",
-      "about": "The error code, or 0 if there was no error." },
-    { "name": "Tokens", "type": "[]DescribedDelegationToken", "versions": "0+",
-      "about": "The tokens.", "fields": [
-      { "name": "PrincipalType", "type": "string", "versions": "0+",
-        "about": "The token principal type." },
-      { "name": "PrincipalName", "type": "string", "versions": "0+",
-        "about": "The token principal name." },
-      { "name": "IssueTimestamp", "type": "int64", "versions": "0+",
+    {
+      "name": "ErrorCode",
+      "type": "int16",
+      "versions": "0+",
+      "about": "The error code, or 0 if there was no error."
+    },
+    {
+      "name": "Tokens",
+      "type": "[]DescribedDelegationToken",
+      "versions": "0+",
+      "about": "The tokens.",
+      "fields": [
+        {
+          "name": "PrincipalType",
+          "type": "string",
+          "versions": "0+",
+          "about": "The token principal type."
+        },
+        {
+          "name": "PrincipalName",
+          "type": "string",
+          "versions": "0+",
+          "about": "The token principal name."
+        },
+        {
+          "name": "IssueTimestamp",
+          "type": "int64",
+          "versions": "0+",
         "about": "The token issue timestamp in milliseconds." },
       { "name": "ExpiryTimestamp", "type": "int64", "versions": "0+",
         "about": "The token expiry timestamp in milliseconds." },

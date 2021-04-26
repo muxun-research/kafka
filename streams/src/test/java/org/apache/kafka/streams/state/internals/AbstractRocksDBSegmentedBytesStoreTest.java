@@ -22,18 +22,23 @@ import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.common.utils.LogContext;
+import org.apache.kafka.common.utils.SystemTime;
+import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.streams.KeyValue;
+import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.Window;
 import org.apache.kafka.streams.kstream.Windowed;
 import org.apache.kafka.streams.kstream.internals.SessionWindow;
-import org.apache.kafka.streams.processor.StateRestoreListener;
+import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.processor.internals.MockStreamsMetrics;
+import org.apache.kafka.streams.processor.internals.Task.TaskType;
 import org.apache.kafka.streams.processor.internals.testutil.LogCaptureAppender;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.StateSerdes;
 import org.apache.kafka.test.InternalMockProcessorContext;
-import org.apache.kafka.test.NoOpRecordCollector;
+import org.apache.kafka.test.MockRecordCollector;
+import org.apache.kafka.test.StreamsTestUtils;
 import org.apache.kafka.test.TestUtils;
 import org.junit.After;
 import org.junit.Before;
@@ -42,7 +47,6 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameter;
 import org.junit.runners.Parameterized.Parameters;
-import org.rocksdb.Options;
 import org.rocksdb.WriteBatch;
 
 import java.io.File;
@@ -55,6 +59,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Properties;
 import java.util.Set;
 import java.util.SimpleTimeZone;
 
@@ -94,39 +99,39 @@ public abstract class AbstractRocksDBSegmentedBytesStoreTest<S extends Segment> 
     @Before
     public void before() {
         if (schema instanceof SessionKeySchema) {
-            windows[0] = new SessionWindow(10L, 10L);
-            windows[1] = new SessionWindow(500L, 1000L);
-            windows[2] = new SessionWindow(1_000L, 1_500L);
-            windows[3] = new SessionWindow(30_000L, 60_000L);
-            // All four of the previous windows will go into segment 1.
-            // The nextSegmentWindow is computed be a high enough time that when it gets written
-            // to the segment store, it will advance stream time past the first segment's retention time and
-            // expire it.
-            nextSegmentWindow = new SessionWindow(segmentInterval + retention, segmentInterval + retention);
-        }
-        if (schema instanceof WindowKeySchema) {
-            windows[0] = timeWindowForSize(10L, windowSizeForTimeWindow);
-            windows[1] = timeWindowForSize(500L, windowSizeForTimeWindow);
-            windows[2] = timeWindowForSize(1_000L, windowSizeForTimeWindow);
-            windows[3] = timeWindowForSize(60_000L, windowSizeForTimeWindow);
-            // All four of the previous windows will go into segment 1.
-            // The nextSegmentWindow is computed be a high enough time that when it gets written
-            // to the segment store, it will advance stream time past the first segment's retention time and
-            // expire it.
-            nextSegmentWindow = timeWindowForSize(segmentInterval + retention, windowSizeForTimeWindow);
-        }
+			windows[0] = new SessionWindow(10L, 10L);
+			windows[1] = new SessionWindow(500L, 1000L);
+			windows[2] = new SessionWindow(1_000L, 1_500L);
+			windows[3] = new SessionWindow(30_000L, 60_000L);
+			// All four of the previous windows will go into segment 1.
+			// The nextSegmentWindow is computed be a high enough time that when it gets written
+			// to the segment store, it will advance stream time past the first segment's retention time and
+			// expire it.
+			nextSegmentWindow = new SessionWindow(segmentInterval + retention, segmentInterval + retention);
+		}
+		if (schema instanceof WindowKeySchema || schema instanceof TimeOrderedKeySchema) {
+			windows[0] = timeWindowForSize(10L, windowSizeForTimeWindow);
+			windows[1] = timeWindowForSize(500L, windowSizeForTimeWindow);
+			windows[2] = timeWindowForSize(1_000L, windowSizeForTimeWindow);
+			windows[3] = timeWindowForSize(60_000L, windowSizeForTimeWindow);
+			// All four of the previous windows will go into segment 1.
+			// The nextSegmentWindow is computed be a high enough time that when it gets written
+			// to the segment store, it will advance stream time past the first segment's retention time and
+			// expire it.
+			nextSegmentWindow = timeWindowForSize(segmentInterval + retention, windowSizeForTimeWindow);
+		}
 
         bytesStore = getBytesStore();
 
         stateDir = TestUtils.tempDirectory();
-        context = new InternalMockProcessorContext(
-            stateDir,
-            Serdes.String(),
-            Serdes.Long(),
-            new NoOpRecordCollector(),
-            new ThreadCache(new LogContext("testCache "), 0, new MockStreamsMetrics(new Metrics()))
-        );
-        bytesStore.init(context, bytesStore);
+		context = new InternalMockProcessorContext(
+				stateDir,
+				Serdes.String(),
+				Serdes.Long(),
+				new MockRecordCollector(),
+				new ThreadCache(new LogContext("testCache "), 0, new MockStreamsMetrics(new Metrics()))
+		);
+		bytesStore.init((StateStoreContext) context, bytesStore);
     }
 
     @After
@@ -137,8 +142,6 @@ public abstract class AbstractRocksDBSegmentedBytesStoreTest<S extends Segment> 
     abstract AbstractRocksDBSegmentedBytesStore<S> getBytesStore();
 
     abstract AbstractSegments<S> newSegments();
-
-    abstract Options getOptions(S segment);
 
     @Test
     public void shouldPutAndFetch() {
@@ -274,9 +277,9 @@ public abstract class AbstractRocksDBSegmentedBytesStoreTest<S extends Segment> 
         bytesStore.close();
 
         final String firstSegmentName = segments.segmentName(0);
-        final String[] nameParts = firstSegmentName.split("\\.");
-        final Long segmentId = Long.parseLong(nameParts[1]);
-        final SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMddHHmm");
+		final String[] nameParts = firstSegmentName.split("\\.");
+		final long segmentId = Long.parseLong(nameParts[1]);
+		final SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMddHHmm");
         formatter.setTimeZone(new SimpleTimeZone(0, "UTC"));
         final String formatted = formatter.format(new Date(segmentId * segmentInterval));
         final File parent = new File(stateDir, storeName);
@@ -285,7 +288,7 @@ public abstract class AbstractRocksDBSegmentedBytesStoreTest<S extends Segment> 
 
         bytesStore = getBytesStore();
 
-        bytesStore.init(context, bytesStore);
+		bytesStore.init((StateStoreContext) context, bytesStore);
         final List<KeyValue<Windowed<String>, Long>> results = toList(bytesStore.fetch(Bytes.wrap(key.getBytes()), 0L, 60_000L));
         assertThat(
             results,
@@ -315,7 +318,7 @@ public abstract class AbstractRocksDBSegmentedBytesStoreTest<S extends Segment> 
 
         bytesStore = getBytesStore();
 
-        bytesStore.init(context, bytesStore);
+		bytesStore.init((StateStoreContext) context, bytesStore);
         final List<KeyValue<Windowed<String>, Long>> results = toList(bytesStore.fetch(Bytes.wrap(key.getBytes()), 0L, 60_000L));
         assertThat(
             results,
@@ -333,41 +336,47 @@ public abstract class AbstractRocksDBSegmentedBytesStoreTest<S extends Segment> 
         final String key = "a";
         // need to create a segment so we can attempt to write to it again.
         bytesStore.put(serializeKey(new Windowed<>(key, windows[0])), serializeValue(50));
-        bytesStore.close();
-        bytesStore.init(context, bytesStore);
-        bytesStore.put(serializeKey(new Windowed<>(key, windows[1])), serializeValue(100));
+		bytesStore.close();
+		bytesStore.init((StateStoreContext) context, bytesStore);
+		bytesStore.put(serializeKey(new Windowed<>(key, windows[1])), serializeValue(100));
     }
 
     @Test
     public void shouldCreateWriteBatches() {
         final String key = "a";
         final Collection<KeyValue<byte[], byte[]>> records = new ArrayList<>();
-        records.add(new KeyValue<>(serializeKey(new Windowed<>(key, windows[0])).get(), serializeValue(50L)));
-        records.add(new KeyValue<>(serializeKey(new Windowed<>(key, windows[3])).get(), serializeValue(100L)));
-        final Map<S, WriteBatch> writeBatchMap = bytesStore.getWriteBatches(records);
-        assertEquals(2, writeBatchMap.size());
-        for (final WriteBatch batch : writeBatchMap.values()) {
-            assertEquals(1, batch.count());
-        }
-    }
+		records.add(new KeyValue<>(serializeKey(new Windowed<>(key, windows[0])).get(), serializeValue(50L)));
+		records.add(new KeyValue<>(serializeKey(new Windowed<>(key, windows[3])).get(), serializeValue(100L)));
+		final Map<S, WriteBatch> writeBatchMap = bytesStore.getWriteBatches(records);
+		assertEquals(2, writeBatchMap.size());
+		for (final WriteBatch batch : writeBatchMap.values()) {
+			assertEquals(1, batch.count());
+		}
+	}
 
-    @Test
-    public void shouldRestoreToByteStore() {
-        // 0 segments initially.
-        assertEquals(0, bytesStore.getSegments().size());
-        final String key = "a";
-        final Collection<KeyValue<byte[], byte[]>> records = new ArrayList<>();
-        records.add(new KeyValue<>(serializeKey(new Windowed<>(key, windows[0])).get(), serializeValue(50L)));
-        records.add(new KeyValue<>(serializeKey(new Windowed<>(key, windows[3])).get(), serializeValue(100L)));
-        bytesStore.restoreAllInternal(records);
+	@Test
+	public void shouldRestoreToByteStoreForActiveTask() {
+		shouldRestoreToByteStore(TaskType.ACTIVE);
+	}
 
-        // 2 segments are created during restoration.
-        assertEquals(2, bytesStore.getSegments().size());
+	@Test
+	public void shouldRestoreToByteStoreForStandbyTask() {
+		context.transitionToStandby(null);
+		shouldRestoreToByteStore(TaskType.STANDBY);
+	}
 
-        // Bulk loading is enabled during recovery.
-        for (final S segment : bytesStore.getSegments()) {
-            assertThat(getOptions(segment).level0FileNumCompactionTrigger(), equalTo(1 << 30));
-        }
+	private void shouldRestoreToByteStore(final TaskType taskType) {
+		bytesStore.init((StateStoreContext) context, bytesStore);
+		// 0 segments initially.
+		assertEquals(0, bytesStore.getSegments().size());
+		final String key = "a";
+		final Collection<KeyValue<byte[], byte[]>> records = new ArrayList<>();
+		records.add(new KeyValue<>(serializeKey(new Windowed<>(key, windows[0])).get(), serializeValue(50L)));
+		records.add(new KeyValue<>(serializeKey(new Windowed<>(key, windows[3])).get(), serializeValue(100L)));
+		bytesStore.restoreAllInternal(records);
+
+		// 2 segments are created during restoration.
+		assertEquals(2, bytesStore.getSegments().size());
 
         final List<KeyValue<Windowed<String>, Long>> expected = new ArrayList<>();
         expected.add(new KeyValue<>(new Windowed<>(key, windows[0]), 50L));
@@ -377,71 +386,90 @@ public abstract class AbstractRocksDBSegmentedBytesStoreTest<S extends Segment> 
         assertEquals(expected, results);
     }
 
-    @Test
-    public void shouldRespectBulkLoadOptionsDuringInit() {
-        bytesStore.init(context, bytesStore);
-        final String key = "a";
-        bytesStore.put(serializeKey(new Windowed<>(key, windows[0])), serializeValue(50L));
-        bytesStore.put(serializeKey(new Windowed<>(key, windows[3])), serializeValue(100L));
-        assertEquals(2, bytesStore.getSegments().size());
+	@Test
+	public void shouldLogAndMeasureExpiredRecordsWithBuiltInMetricsVersionLatest() {
+		shouldLogAndMeasureExpiredRecords(StreamsConfig.METRICS_LATEST);
+	}
 
-        final StateRestoreListener restoreListener = context.getRestoreListener(bytesStore.name());
+	@Test
+	public void shouldLogAndMeasureExpiredRecordsWithBuiltInMetricsVersion0100To24() {
+		shouldLogAndMeasureExpiredRecords(StreamsConfig.METRICS_0100_TO_24);
+	}
 
-        restoreListener.onRestoreStart(null, bytesStore.name(), 0L, 0L);
+	private void shouldLogAndMeasureExpiredRecords(final String builtInMetricsVersion) {
+		final Properties streamsConfig = StreamsTestUtils.getStreamsConfig();
+		streamsConfig.setProperty(StreamsConfig.BUILT_IN_METRICS_VERSION_CONFIG, builtInMetricsVersion);
+		final AbstractRocksDBSegmentedBytesStore<S> bytesStore = getBytesStore();
+		final InternalMockProcessorContext context = new InternalMockProcessorContext(
+				TestUtils.tempDirectory(),
+				new StreamsConfig(streamsConfig)
+		);
+		final Time time = new SystemTime();
+		context.setSystemTimeMs(time.milliseconds());
+		bytesStore.init((StateStoreContext) context, bytesStore);
 
-        for (final S segment : bytesStore.getSegments()) {
-            assertThat(getOptions(segment).level0FileNumCompactionTrigger(), equalTo(1 << 30));
-        }
+		try (final LogCaptureAppender appender = LogCaptureAppender.createAndRegister()) {
+			// write a record to advance stream time, with a high enough timestamp
+			// that the subsequent record in windows[0] will already be expired.
+			bytesStore.put(serializeKey(new Windowed<>("dummy", nextSegmentWindow)), serializeValue(0));
 
-        restoreListener.onRestoreEnd(null, bytesStore.name(), 0L);
-        for (final S segment : bytesStore.getSegments()) {
-            assertThat(getOptions(segment).level0FileNumCompactionTrigger(), equalTo(4));
-        }
-    }
+			final Bytes key = serializeKey(new Windowed<>("a", windows[0]));
+			final byte[] value = serializeValue(5);
+			bytesStore.put(key, value);
 
-    @Test
-    public void shouldLogAndMeasureExpiredRecords() {
-        LogCaptureAppender.setClassLoggerToDebug(AbstractRocksDBSegmentedBytesStore.class);
-        final LogCaptureAppender appender = LogCaptureAppender.createAndRegister();
+			final List<String> messages = appender.getMessages();
+			assertThat(messages, hasItem("Skipping record for expired segment."));
+		}
 
-        // write a record to advance stream time, with a high enough timestamp
-        // that the subsequent record in windows[0] will already be expired.
-        bytesStore.put(serializeKey(new Windowed<>("dummy", nextSegmentWindow)), serializeValue(0));
+		final Map<MetricName, ? extends Metric> metrics = context.metrics().metrics();
+		final String threadId = Thread.currentThread().getName();
+		final Metric dropTotal;
+		final Metric dropRate;
+		if (StreamsConfig.METRICS_0100_TO_24.equals(builtInMetricsVersion)) {
+			dropTotal = metrics.get(new MetricName(
+					"expired-window-record-drop-total",
+					"stream-metrics-scope-metrics",
+					"The total number of dropped records due to an expired window",
+					mkMap(
+							mkEntry("client-id", threadId),
+							mkEntry("task-id", "0_0"),
+							mkEntry("metrics-scope-state-id", "bytes-store")
+					)
+			));
 
-        final Bytes key = serializeKey(new Windowed<>("a", windows[0]));
-        final byte[] value = serializeValue(5);
-        bytesStore.put(key, value);
+			dropRate = metrics.get(new MetricName(
+					"expired-window-record-drop-rate",
+					"stream-metrics-scope-metrics",
+					"The average number of dropped records due to an expired window per second.",
+					mkMap(
+							mkEntry("client-id", threadId),
+							mkEntry("task-id", "0_0"),
+							mkEntry("metrics-scope-state-id", "bytes-store")
+					)
+			));
+		} else {
+			dropTotal = metrics.get(new MetricName(
+					"dropped-records-total",
+					"stream-task-metrics",
+					"",
+					mkMap(
+							mkEntry("thread-id", threadId),
+							mkEntry("task-id", "0_0")
+					)
+			));
 
-        LogCaptureAppender.unregister(appender);
-
-        final Map<MetricName, ? extends Metric> metrics = context.metrics().metrics();
-
-        final Metric dropTotal = metrics.get(new MetricName(
-            "expired-window-record-drop-total",
-            "stream-metrics-scope-metrics",
-            "The total number of occurrence of expired-window-record-drop operations.",
-            mkMap(
-                mkEntry("client-id", "mock"),
-                mkEntry("task-id", "0_0"),
-                mkEntry("metrics-scope-id", "bytes-store")
-            )
-        ));
-
-        final Metric dropRate = metrics.get(new MetricName(
-            "expired-window-record-drop-rate",
-            "stream-metrics-scope-metrics",
-            "The average number of occurrence of expired-window-record-drop operation per second.",
-            mkMap(
-                mkEntry("client-id", "mock"),
-                mkEntry("task-id", "0_0"),
-                mkEntry("metrics-scope-id", "bytes-store")
-            )
-        ));
-
+			dropRate = metrics.get(new MetricName(
+					"dropped-records-rate",
+					"stream-task-metrics",
+					"",
+					mkMap(
+							mkEntry("thread-id", threadId),
+							mkEntry("task-id", "0_0")
+					)
+			));
+		}
         assertEquals(1.0, dropTotal.metricValue());
         assertNotEquals(0.0, dropRate.metricValue());
-        final List<String> messages = appender.getMessages();
-        assertThat(messages, hasItem("Skipping record for expired segment."));
     }
 
     private Set<String> segmentDirs() {
@@ -452,11 +480,13 @@ public abstract class AbstractRocksDBSegmentedBytesStoreTest<S extends Segment> 
 
     private Bytes serializeKey(final Windowed<String> key) {
         final StateSerdes<String, Long> stateSerdes = StateSerdes.withBuiltinTypes("dummy", String.class, Long.class);
-        if (schema instanceof SessionKeySchema) {
-            return Bytes.wrap(SessionKeySchema.toBinary(key, stateSerdes.keySerializer(), "dummy"));
-        } else {
-            return WindowKeySchema.toStoreKeyBinary(key, 0, stateSerdes);
-        }
+		if (schema instanceof SessionKeySchema) {
+			return Bytes.wrap(SessionKeySchema.toBinary(key, stateSerdes.keySerializer(), "dummy"));
+		} else if (schema instanceof TimeOrderedKeySchema) {
+			return TimeOrderedKeySchema.toStoreKeyBinary(key, 0, stateSerdes);
+		} else {
+			return WindowKeySchema.toStoreKeyBinary(key, 0, stateSerdes);
+		}
     }
 
     private byte[] serializeValue(final long value) {
@@ -468,19 +498,35 @@ public abstract class AbstractRocksDBSegmentedBytesStoreTest<S extends Segment> 
         final StateSerdes<String, Long> stateSerdes = StateSerdes.withBuiltinTypes("dummy", String.class, Long.class);
         while (iterator.hasNext()) {
             final KeyValue<Bytes, byte[]> next = iterator.next();
-            if (schema instanceof WindowKeySchema) {
-                final KeyValue<Windowed<String>, Long> deserialized = KeyValue.pair(
-                    WindowKeySchema.fromStoreKey(next.key.get(), windowSizeForTimeWindow, stateSerdes.keyDeserializer(), stateSerdes.topic()),
-                    stateSerdes.valueDeserializer().deserialize("dummy", next.value)
-                );
-                results.add(deserialized);
-            } else {
-                final KeyValue<Windowed<String>, Long> deserialized = KeyValue.pair(
-                    SessionKeySchema.from(next.key.get(), stateSerdes.keyDeserializer(), "dummy"),
-                    stateSerdes.valueDeserializer().deserialize("dummy", next.value)
-                );
-                results.add(deserialized);
-            }
+			if (schema instanceof WindowKeySchema) {
+				final KeyValue<Windowed<String>, Long> deserialized = KeyValue.pair(
+						WindowKeySchema.fromStoreKey(
+								next.key.get(),
+								windowSizeForTimeWindow,
+								stateSerdes.keyDeserializer(),
+								stateSerdes.topic()
+						),
+						stateSerdes.valueDeserializer().deserialize("dummy", next.value)
+				);
+				results.add(deserialized);
+			} else if (schema instanceof TimeOrderedKeySchema) {
+				final KeyValue<Windowed<String>, Long> deserialized = KeyValue.pair(
+						TimeOrderedKeySchema.fromStoreKey(
+								next.key.get(),
+								windowSizeForTimeWindow,
+								stateSerdes.keyDeserializer(),
+								stateSerdes.topic()
+						),
+						stateSerdes.valueDeserializer().deserialize("dummy", next.value)
+				);
+				results.add(deserialized);
+			} else {
+				final KeyValue<Windowed<String>, Long> deserialized = KeyValue.pair(
+						SessionKeySchema.from(next.key.get(), stateSerdes.keyDeserializer(), "dummy"),
+						stateSerdes.valueDeserializer().deserialize("dummy", next.value)
+				);
+				results.add(deserialized);
+			}
         }
         return results;
     }

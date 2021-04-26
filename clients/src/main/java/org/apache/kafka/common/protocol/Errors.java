@@ -16,94 +16,8 @@
  */
 package org.apache.kafka.common.protocol;
 
-import org.apache.kafka.common.errors.ApiException;
-import org.apache.kafka.common.errors.BrokerNotAvailableException;
-import org.apache.kafka.common.errors.ClusterAuthorizationException;
-import org.apache.kafka.common.errors.ConcurrentTransactionsException;
-import org.apache.kafka.common.errors.ControllerMovedException;
-import org.apache.kafka.common.errors.CoordinatorLoadInProgressException;
-import org.apache.kafka.common.errors.CoordinatorNotAvailableException;
-import org.apache.kafka.common.errors.CorruptRecordException;
-import org.apache.kafka.common.errors.DuplicateSequenceException;
-import org.apache.kafka.common.errors.DelegationTokenAuthorizationException;
-import org.apache.kafka.common.errors.DelegationTokenDisabledException;
-import org.apache.kafka.common.errors.DelegationTokenExpiredException;
-import org.apache.kafka.common.errors.DelegationTokenNotFoundException;
-import org.apache.kafka.common.errors.DelegationTokenOwnerMismatchException;
-import org.apache.kafka.common.errors.FencedLeaderEpochException;
-import org.apache.kafka.common.errors.ListenerNotFoundException;
-import org.apache.kafka.common.errors.FetchSessionIdNotFoundException;
-import org.apache.kafka.common.errors.GroupAuthorizationException;
-import org.apache.kafka.common.errors.GroupIdNotFoundException;
-import org.apache.kafka.common.errors.GroupMaxSizeReachedException;
-import org.apache.kafka.common.errors.GroupNotEmptyException;
-import org.apache.kafka.common.errors.IllegalGenerationException;
-import org.apache.kafka.common.errors.IllegalSaslStateException;
-import org.apache.kafka.common.errors.InconsistentGroupProtocolException;
-import org.apache.kafka.common.errors.InvalidCommitOffsetSizeException;
-import org.apache.kafka.common.errors.InvalidConfigurationException;
-import org.apache.kafka.common.errors.InvalidFetchSessionEpochException;
-import org.apache.kafka.common.errors.InvalidFetchSizeException;
-import org.apache.kafka.common.errors.InvalidGroupIdException;
-import org.apache.kafka.common.errors.InvalidPartitionsException;
-import org.apache.kafka.common.errors.InvalidPidMappingException;
-import org.apache.kafka.common.errors.InvalidPrincipalTypeException;
-import org.apache.kafka.common.errors.InvalidReplicaAssignmentException;
-import org.apache.kafka.common.errors.InvalidReplicationFactorException;
-import org.apache.kafka.common.errors.InvalidRequestException;
-import org.apache.kafka.common.errors.InvalidRequiredAcksException;
-import org.apache.kafka.common.errors.InvalidSessionTimeoutException;
-import org.apache.kafka.common.errors.InvalidTimestampException;
-import org.apache.kafka.common.errors.InvalidTopicException;
-import org.apache.kafka.common.errors.InvalidTxnStateException;
-import org.apache.kafka.common.errors.InvalidTxnTimeoutException;
-import org.apache.kafka.common.errors.KafkaStorageException;
-import org.apache.kafka.common.errors.LeaderNotAvailableException;
-import org.apache.kafka.common.errors.LogDirNotFoundException;
-import org.apache.kafka.common.errors.FencedInstanceIdException;
-import org.apache.kafka.common.errors.MemberIdRequiredException;
-import org.apache.kafka.common.errors.ElectionNotNeededException;
-import org.apache.kafka.common.errors.EligibleLeadersNotAvailableException;
-import org.apache.kafka.common.errors.NetworkException;
-import org.apache.kafka.common.errors.NoReassignmentInProgressException;
-import org.apache.kafka.common.errors.NotControllerException;
-import org.apache.kafka.common.errors.NotCoordinatorException;
-import org.apache.kafka.common.errors.NotEnoughReplicasAfterAppendException;
-import org.apache.kafka.common.errors.NotEnoughReplicasException;
-import org.apache.kafka.common.errors.NotLeaderForPartitionException;
-import org.apache.kafka.common.errors.OffsetMetadataTooLarge;
-import org.apache.kafka.common.errors.OffsetNotAvailableException;
-import org.apache.kafka.common.errors.OffsetOutOfRangeException;
-import org.apache.kafka.common.errors.OperationNotAttemptedException;
-import org.apache.kafka.common.errors.OutOfOrderSequenceException;
-import org.apache.kafka.common.errors.PolicyViolationException;
-import org.apache.kafka.common.errors.PreferredLeaderNotAvailableException;
-import org.apache.kafka.common.errors.ProducerFencedException;
-import org.apache.kafka.common.errors.ReassignmentInProgressException;
-import org.apache.kafka.common.errors.RebalanceInProgressException;
-import org.apache.kafka.common.errors.RecordBatchTooLargeException;
-import org.apache.kafka.common.errors.RecordTooLargeException;
-import org.apache.kafka.common.errors.ReplicaNotAvailableException;
-import org.apache.kafka.common.errors.RetriableException;
-import org.apache.kafka.common.errors.SaslAuthenticationException;
-import org.apache.kafka.common.errors.SecurityDisabledException;
-import org.apache.kafka.common.errors.TimeoutException;
-import org.apache.kafka.common.errors.TopicAuthorizationException;
-import org.apache.kafka.common.errors.TopicDeletionDisabledException;
-import org.apache.kafka.common.errors.TopicExistsException;
-import org.apache.kafka.common.errors.TransactionalIdAuthorizationException;
-import org.apache.kafka.common.errors.TransactionCoordinatorFencedException;
-import org.apache.kafka.common.errors.UnknownLeaderEpochException;
-import org.apache.kafka.common.errors.UnknownMemberIdException;
-import org.apache.kafka.common.errors.UnknownProducerIdException;
-import org.apache.kafka.common.errors.UnknownServerException;
-import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
-import org.apache.kafka.common.errors.UnsupportedByAuthenticationException;
-import org.apache.kafka.common.errors.UnsupportedCompressionTypeException;
-import org.apache.kafka.common.errors.UnsupportedForMessageFormatException;
-import org.apache.kafka.common.errors.UnsupportedSaslMechanismException;
-import org.apache.kafka.common.errors.UnsupportedVersionException;
-import org.apache.kafka.common.errors.StaleBrokerEpochException;
+import org.apache.kafka.common.InvalidRecordException;
+import org.apache.kafka.common.errors.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -114,45 +28,48 @@ import java.util.function.Function;
 /**
  * This class contains all the client-server errors--those errors that must be sent from the server to the client. These
  * are thus part of the protocol. The names can be changed but the error code cannot.
- *
+ * <p>
  * Note that client library will convert an unknown error code to the non-retriable UnknownServerException if the client library
  * version is old and does not recognize the newly-added error code. Therefore when a new server-side error is added,
  * we may need extra logic to convert the new error code to another existing error code before sending the response back to
  * the client if the request version suggests that the client may not recognize the new error code.
- *
+ * <p>
  * Do not add exceptions that occur only on the client or only on the server here.
+ * @see org.apache.kafka.common.network.SslTransportLayer
  */
 public enum Errors {
     UNKNOWN_SERVER_ERROR(-1, "The server experienced an unexpected error when processing the request.",
             UnknownServerException::new),
     NONE(0, null, message -> null),
-    OFFSET_OUT_OF_RANGE(1, "The requested offset is not within the range of offsets maintained by the server.",
-            OffsetOutOfRangeException::new),
-    CORRUPT_MESSAGE(2, "This message has failed its CRC checksum, exceeds the valid size, has a null key for a compacted topic, or is otherwise corrupt.",
-            CorruptRecordException::new),
-    UNKNOWN_TOPIC_OR_PARTITION(3, "This server does not host this topic-partition.",
-            UnknownTopicOrPartitionException::new),
-    INVALID_FETCH_SIZE(4, "The requested fetch size is invalid.",
-            InvalidFetchSizeException::new),
-    LEADER_NOT_AVAILABLE(5, "There is no leader for this topic-partition as we are in the middle of a leadership election.",
-            LeaderNotAvailableException::new),
-    NOT_LEADER_FOR_PARTITION(6, "This server is not the leader for that topic-partition.",
-            NotLeaderForPartitionException::new),
-    REQUEST_TIMED_OUT(7, "The request timed out.",
-            TimeoutException::new),
-    BROKER_NOT_AVAILABLE(8, "The broker is not available.",
-            BrokerNotAvailableException::new),
-    REPLICA_NOT_AVAILABLE(9, "The replica is not available for the requested topic-partition.",
-            ReplicaNotAvailableException::new),
-    MESSAGE_TOO_LARGE(10, "The request included a message larger than the max message size the server will accept.",
-            RecordTooLargeException::new),
-    STALE_CONTROLLER_EPOCH(11, "The controller moved to another broker.",
-            ControllerMovedException::new),
-    OFFSET_METADATA_TOO_LARGE(12, "The metadata field of the offset request was too large.",
-            OffsetMetadataTooLarge::new),
-    NETWORK_EXCEPTION(13, "The server disconnected before a response was received.",
-            NetworkException::new),
-    COORDINATOR_LOAD_IN_PROGRESS(14, "The coordinator is loading and hence can't process requests.",
+	OFFSET_OUT_OF_RANGE(1, "The requested offset is not within the range of offsets maintained by the server.",
+			OffsetOutOfRangeException::new),
+	CORRUPT_MESSAGE(2, "This message has failed its CRC checksum, exceeds the valid size, has a null key for a compacted topic, or is otherwise corrupt.",
+			CorruptRecordException::new),
+	UNKNOWN_TOPIC_OR_PARTITION(3, "This server does not host this topic-partition.",
+			UnknownTopicOrPartitionException::new),
+	INVALID_FETCH_SIZE(4, "The requested fetch size is invalid.",
+			InvalidFetchSizeException::new),
+	LEADER_NOT_AVAILABLE(5, "There is no leader for this topic-partition as we are in the middle of a leadership election.",
+			LeaderNotAvailableException::new),
+	NOT_LEADER_OR_FOLLOWER(6, "For requests intended only for the leader, this error indicates that the broker is not the current leader. " +
+			"For requests intended for any replica, this error indicates that the broker is not a replica of the topic partition.",
+			NotLeaderOrFollowerException::new),
+	REQUEST_TIMED_OUT(7, "The request timed out.",
+			TimeoutException::new),
+	BROKER_NOT_AVAILABLE(8, "The broker is not available.",
+			BrokerNotAvailableException::new),
+	REPLICA_NOT_AVAILABLE(9, "The replica is not available for the requested topic-partition. Produce/Fetch requests and other requests " +
+			"intended only for the leader or follower return NOT_LEADER_OR_FOLLOWER if the broker is not a replica of the topic-partition.",
+			ReplicaNotAvailableException::new),
+	MESSAGE_TOO_LARGE(10, "The request included a message larger than the max message size the server will accept.",
+			RecordTooLargeException::new),
+	STALE_CONTROLLER_EPOCH(11, "The controller moved to another broker.",
+			ControllerMovedException::new),
+	OFFSET_METADATA_TOO_LARGE(12, "The metadata field of the offset request was too large.",
+			OffsetMetadataTooLarge::new),
+	NETWORK_EXCEPTION(13, "The server disconnected before a response was received.",
+			NetworkException::new),
+	COORDINATOR_LOAD_IN_PROGRESS(14, "The coordinator is loading and hence can't process requests.",
             CoordinatorLoadInProgressException::new),
     COORDINATOR_NOT_AVAILABLE(15, "The coordinator is not available.",
             CoordinatorNotAvailableException::new),
@@ -212,29 +129,28 @@ public enum Errors {
             NotControllerException::new),
     INVALID_REQUEST(42, "This most likely occurs because of a request being malformed by the " +
             "client library or the message was sent to an incompatible broker. See the broker logs " +
-            "for more details.",
-            InvalidRequestException::new),
-    UNSUPPORTED_FOR_MESSAGE_FORMAT(43, "The message format version on the broker does not support the request.",
-            UnsupportedForMessageFormatException::new),
-    POLICY_VIOLATION(44, "Request parameters do not satisfy the configured policy.",
-            PolicyViolationException::new),
-    OUT_OF_ORDER_SEQUENCE_NUMBER(45, "The broker received an out of order sequence number.",
-            OutOfOrderSequenceException::new),
-    DUPLICATE_SEQUENCE_NUMBER(46, "The broker received a duplicate sequence number.",
-            DuplicateSequenceException::new),
-    INVALID_PRODUCER_EPOCH(47, "Producer attempted an operation with an old epoch. Either there is a newer producer " +
-            "with the same transactionalId, or the producer's transaction has been expired by the broker.",
-            ProducerFencedException::new),
-    INVALID_TXN_STATE(48, "The producer attempted a transactional operation in an invalid state.",
-            InvalidTxnStateException::new),
-    INVALID_PRODUCER_ID_MAPPING(49, "The producer attempted to use a producer id which is not currently assigned to " +
-            "its transactional id.",
-            InvalidPidMappingException::new),
-    INVALID_TRANSACTION_TIMEOUT(50, "The transaction timeout is larger than the maximum value allowed by " +
-            "the broker (as configured by transaction.max.timeout.ms).",
-            InvalidTxnTimeoutException::new),
-    CONCURRENT_TRANSACTIONS(51, "The producer attempted to update a transaction " +
-            "while another concurrent operation on the same transaction was ongoing.",
+			"for more details.",
+			InvalidRequestException::new),
+	UNSUPPORTED_FOR_MESSAGE_FORMAT(43, "The message format version on the broker does not support the request.",
+			UnsupportedForMessageFormatException::new),
+	POLICY_VIOLATION(44, "Request parameters do not satisfy the configured policy.",
+			PolicyViolationException::new),
+	OUT_OF_ORDER_SEQUENCE_NUMBER(45, "The broker received an out of order sequence number.",
+			OutOfOrderSequenceException::new),
+	DUPLICATE_SEQUENCE_NUMBER(46, "The broker received a duplicate sequence number.",
+			DuplicateSequenceException::new),
+	INVALID_PRODUCER_EPOCH(47, "Producer attempted to produce with an old epoch.",
+			InvalidProducerEpochException::new),
+	INVALID_TXN_STATE(48, "The producer attempted a transactional operation in an invalid state.",
+			InvalidTxnStateException::new),
+	INVALID_PRODUCER_ID_MAPPING(49, "The producer attempted to use a producer id which is not currently assigned to " +
+			"its transactional id.",
+			InvalidPidMappingException::new),
+	INVALID_TRANSACTION_TIMEOUT(50, "The transaction timeout is larger than the maximum value allowed by " +
+			"the broker (as configured by transaction.max.timeout.ms).",
+			InvalidTxnTimeoutException::new),
+	CONCURRENT_TRANSACTIONS(51, "The producer attempted to update a transaction " +
+			"while another concurrent operation on the same transaction was ongoing.",
             ConcurrentTransactionsException::new),
     TRANSACTION_COORDINATOR_FENCED(52, "Indicates that the transaction coordinator sending a WriteTxnMarker " +
             "is no longer the current coordinator for a given producer.",
@@ -289,40 +205,67 @@ public enum Errors {
             ListenerNotFoundException::new),
     TOPIC_DELETION_DISABLED(73, "Topic deletion is disabled.",
             TopicDeletionDisabledException::new),
-    FENCED_LEADER_EPOCH(74, "The leader epoch in the request is older than the epoch on the broker",
-            FencedLeaderEpochException::new),
-    UNKNOWN_LEADER_EPOCH(75, "The leader epoch in the request is newer than the epoch on the broker",
-            UnknownLeaderEpochException::new),
+	FENCED_LEADER_EPOCH(74, "The leader epoch in the request is older than the epoch on the broker.",
+			FencedLeaderEpochException::new),
+	UNKNOWN_LEADER_EPOCH(75, "The leader epoch in the request is newer than the epoch on the broker.",
+			UnknownLeaderEpochException::new),
     UNSUPPORTED_COMPRESSION_TYPE(76, "The requesting client does not support the compression type of given partition.",
             UnsupportedCompressionTypeException::new),
-    STALE_BROKER_EPOCH(77, "Broker epoch has changed",
-            StaleBrokerEpochException::new),
+	STALE_BROKER_EPOCH(77, "Broker epoch has changed.",
+			StaleBrokerEpochException::new),
     OFFSET_NOT_AVAILABLE(78, "The leader high watermark has not caught up from a recent leader " +
-            "election so the offsets cannot be guaranteed to be monotonically increasing",
-            OffsetNotAvailableException::new),
-    MEMBER_ID_REQUIRED(79, "The group member needs to have a valid member id before actually entering a consumer group",
-            MemberIdRequiredException::new),
-    PREFERRED_LEADER_NOT_AVAILABLE(80, "The preferred leader was not available",
-            PreferredLeaderNotAvailableException::new),
-    GROUP_MAX_SIZE_REACHED(81, "The consumer group has reached its max size.", GroupMaxSizeReachedException::new),
-    FENCED_INSTANCE_ID(82, "The broker rejected this static consumer since " +
-            "another consumer with the same group.instance.id has registered with a different member.id.",
-            FencedInstanceIdException::new),
-    ELIGIBLE_LEADERS_NOT_AVAILABLE(83, "Eligible topic partition leaders are not available",
-            EligibleLeadersNotAvailableException::new),
-    ELECTION_NOT_NEEDED(84, "Leader election not needed for topic partition", ElectionNotNeededException::new),
-    NO_REASSIGNMENT_IN_PROGRESS(85, "No partition reassignment is in progress.",
-            NoReassignmentInProgressException::new);
+			"election so the offsets cannot be guaranteed to be monotonically increasing.",
+			OffsetNotAvailableException::new),
+	MEMBER_ID_REQUIRED(79, "The group member needs to have a valid member id before actually entering a consumer group.",
+			MemberIdRequiredException::new),
+	PREFERRED_LEADER_NOT_AVAILABLE(80, "The preferred leader was not available.",
+			PreferredLeaderNotAvailableException::new),
+	GROUP_MAX_SIZE_REACHED(81, "The consumer group has reached its max size.", GroupMaxSizeReachedException::new),
+	FENCED_INSTANCE_ID(82, "The broker rejected this static consumer since " +
+			"another consumer with the same group.instance.id has registered with a different member.id.",
+			FencedInstanceIdException::new),
+	ELIGIBLE_LEADERS_NOT_AVAILABLE(83, "Eligible topic partition leaders are not available.",
+			EligibleLeadersNotAvailableException::new),
+	ELECTION_NOT_NEEDED(84, "Leader election not needed for topic partition.", ElectionNotNeededException::new),
+	NO_REASSIGNMENT_IN_PROGRESS(85, "No partition reassignment is in progress.",
+			NoReassignmentInProgressException::new),
+	GROUP_SUBSCRIBED_TO_TOPIC(86, "Deleting offsets of a topic is forbidden while the consumer group is actively subscribed to it.",
+			GroupSubscribedToTopicException::new),
+	INVALID_RECORD(87, "This record has failed the validation on broker and hence will be rejected.", InvalidRecordException::new),
+	UNSTABLE_OFFSET_COMMIT(88, "There are unstable offsets that need to be cleared.", UnstableOffsetCommitException::new),
+	THROTTLING_QUOTA_EXCEEDED(89, "The throttling quota has been exceeded.", ThrottlingQuotaExceededException::new),
+	PRODUCER_FENCED(90, "There is a newer producer with the same transactionalId " +
+			"which fences the current one.", ProducerFencedException::new),
+	RESOURCE_NOT_FOUND(91, "A request illegally referred to a resource that does not exist.", ResourceNotFoundException::new),
+	DUPLICATE_RESOURCE(92, "A request illegally referred to the same resource twice.", DuplicateResourceException::new),
+	UNACCEPTABLE_CREDENTIAL(93, "Requested credential would not meet criteria for acceptability.", UnacceptableCredentialException::new),
+	INCONSISTENT_VOTER_SET(94, "Indicates that the either the sender or recipient of a " +
+			"voter-only request is not one of the expected voters", InconsistentVoterSetException::new),
+	INVALID_UPDATE_VERSION(95, "The given update version was invalid.", InvalidUpdateVersionException::new),
+	FEATURE_UPDATE_FAILED(96, "Unable to update finalized features due to an unexpected server error.", FeatureUpdateFailedException::new),
+	PRINCIPAL_DESERIALIZATION_FAILURE(97, "Request principal deserialization failed during forwarding. " +
+			"This indicates an internal error on the broker cluster security setup.", PrincipalDeserializationException::new),
+	SNAPSHOT_NOT_FOUND(98, "Requested snapshot was not found", SnapshotNotFoundException::new),
+	POSITION_OUT_OF_RANGE(
+			99,
+			"Requested position is not greater than or equal to zero, and less than the size of the snapshot.",
+			PositionOutOfRangeException::new),
+	UNKNOWN_TOPIC_ID(100, "This server does not host this topic ID.", UnknownTopicIdException::new),
+	DUPLICATE_BROKER_REGISTRATION(101, "This broker ID is already in use.", DuplicateBrokerRegistrationException::new),
+	BROKER_ID_NOT_REGISTERED(102, "The given broker ID was not registered.", BrokerIdNotRegisteredException::new),
+	INCONSISTENT_TOPIC_ID(103, "The log's topic ID did not match the topic ID in the request", InconsistentTopicIdException::new),
+	INCONSISTENT_CLUSTER_ID(104, "The clusterId in the request does not match that found on the server", InconsistentClusterIdException::new),
+	TRANSACTIONAL_ID_NOT_FOUND(105, "The transactionalId could not be found", TransactionalIdNotFoundException::new);
 
-    private static final Logger log = LoggerFactory.getLogger(Errors.class);
+	private static final Logger log = LoggerFactory.getLogger(Errors.class);
 
-    private static Map<Class<?>, Errors> classToError = new HashMap<>();
-    private static Map<Short, Errors> codeToError = new HashMap<>();
+	private static Map<Class<?>, Errors> classToError = new HashMap<>();
+	private static Map<Short, Errors> codeToError = new HashMap<>();
 
-    static {
-        for (Errors error : Errors.values()) {
-            if (codeToError.put(error.code(), error) != null)
-                throw new ExceptionInInitializerError("Code " + error.code() + " for error " +
+	static {
+		for (Errors error : Errors.values()) {
+			if (codeToError.put(error.code(), error) != null)
+				throw new ExceptionInInitializerError("Code " + error.code() + " for error " +
                         error + " has already been used");
 
             if (error.exception != null)

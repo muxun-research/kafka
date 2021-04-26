@@ -16,40 +16,37 @@
  */
 package org.apache.kafka.common.requests;
 
-import java.nio.ByteBuffer;
-import java.util.Collections;
-import java.util.Map;
-
 import org.apache.kafka.common.message.RenewDelegationTokenResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.Struct;
+
+import java.nio.ByteBuffer;
+import java.util.Map;
 
 public class RenewDelegationTokenResponse extends AbstractResponse {
 
     private final RenewDelegationTokenResponseData data;
 
     public RenewDelegationTokenResponse(RenewDelegationTokenResponseData data) {
-        this.data = data;
-    }
-
-    public RenewDelegationTokenResponse(Struct struct, short version) {
-        data = new RenewDelegationTokenResponseData(struct, version);
+		super(ApiKeys.RENEW_DELEGATION_TOKEN);
+		this.data = data;
     }
 
     public static RenewDelegationTokenResponse parse(ByteBuffer buffer, short version) {
-        return new RenewDelegationTokenResponse(ApiKeys.RENEW_DELEGATION_TOKEN.responseSchema(version).read(buffer), version);
-    }
+		return new RenewDelegationTokenResponse(new RenewDelegationTokenResponseData(
+				new ByteBufferAccessor(buffer), version));
+	}
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-        return Collections.singletonMap(error(), 1);
+		return errorCounts(error());
     }
 
-    @Override
-    protected Struct toStruct(short version) {
-        return data.toStruct(version);
-    }
+	@Override
+	public RenewDelegationTokenResponseData data() {
+		return data;
+	}
 
     @Override
     public int throttleTimeMs() {

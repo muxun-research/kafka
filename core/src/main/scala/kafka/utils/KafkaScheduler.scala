@@ -75,16 +75,14 @@ class KafkaScheduler(val threads: Int,
   override def startup(): Unit = {
     debug("Initializing task scheduler.")
     this synchronized {
-      if(isStarted)
+      if (isStarted)
         throw new IllegalStateException("This scheduler has already been started!")
       executor = new ScheduledThreadPoolExecutor(threads)
       executor.setContinueExistingPeriodicTasksAfterShutdownPolicy(false)
       executor.setExecuteExistingDelayedTasksAfterShutdownPolicy(false)
       executor.setRemoveOnCancelPolicy(true)
-      executor.setThreadFactory(new ThreadFactory() {
-                                  def newThread(runnable: Runnable): Thread = 
-                                    new KafkaThread(threadNamePrefix + schedulerThreadId.getAndIncrement(), runnable, daemon)
-                                })
+      executor.setThreadFactory(runnable =>
+        new KafkaThread(threadNamePrefix + schedulerThreadId.getAndIncrement(), runnable, daemon))
     }
   }
   
@@ -110,7 +108,7 @@ class KafkaScheduler(val threads: Int,
         .format(name, TimeUnit.MILLISECONDS.convert(delay, unit), TimeUnit.MILLISECONDS.convert(period, unit)))
     this synchronized {
       ensureRunning()
-      val runnable = CoreUtils.runnable {
+      val runnable: Runnable = () => {
         try {
           trace("Beginning execution of scheduled task '%s'.".format(name))
           fun()
@@ -120,7 +118,7 @@ class KafkaScheduler(val threads: Int,
           trace("Completed execution of scheduled task '%s'.".format(name))
         }
       }
-      if(period >= 0)
+      if (period >= 0)
         executor.scheduleAtFixedRate(runnable, delay, period, unit)
       else
         executor.schedule(runnable, delay, unit)
@@ -130,7 +128,7 @@ class KafkaScheduler(val threads: Int,
   /**
    * Package private for testing.
    */
-  private[utils] def taskRunning(task: ScheduledFuture[_]): Boolean = {
+  private[kafka] def taskRunning(task: ScheduledFuture[_]): Boolean = {
     executor.getQueue().contains(task)
   }
 

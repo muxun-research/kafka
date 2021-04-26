@@ -51,25 +51,29 @@ public class SimpleRecord {
 
     public SimpleRecord(long timestamp, byte[] key, byte[] value) {
         this(timestamp, Utils.wrapNullable(key), Utils.wrapNullable(value));
-    }
+	}
 
-    public SimpleRecord(long timestamp, byte[] value) {
-        this(timestamp, null, value);
-    }
+	public SimpleRecord(long timestamp, byte[] value) {
+		this(timestamp, null, value);
+	}
 
-    public SimpleRecord(byte[] value) {
-        this(RecordBatch.NO_TIMESTAMP, null, value);
-    }
+	public SimpleRecord(byte[] value) {
+		this(RecordBatch.NO_TIMESTAMP, null, value);
+	}
 
-    public SimpleRecord(byte[] key, byte[] value) {
-        this(RecordBatch.NO_TIMESTAMP, key, value);
-    }
+	public SimpleRecord(ByteBuffer value) {
+		this(RecordBatch.NO_TIMESTAMP, null, value);
+	}
 
-    public SimpleRecord(Record record) {
-        this(record.timestamp(), record.key(), record.value(), record.headers());
-    }
+	public SimpleRecord(byte[] key, byte[] value) {
+		this(RecordBatch.NO_TIMESTAMP, key, value);
+	}
 
-    public ByteBuffer key() {
+	public SimpleRecord(Record record) {
+		this(record.timestamp(), record.key(), record.value(), record.headers());
+	}
+
+	public ByteBuffer key() {
         return key;
     }
 

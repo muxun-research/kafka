@@ -19,8 +19,8 @@ package org.apache.kafka.connect.connector;
 import org.apache.kafka.common.config.Config;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigValue;
-import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.components.Versioned;
+import org.apache.kafka.connect.errors.ConnectException;
 
 import java.util.List;
 import java.util.Map;
@@ -69,25 +69,32 @@ public abstract class Connector implements Versioned {
      * implement special handling of this case if it will avoid unnecessary changes to running Tasks.
      * </p>
      *
-     * @param ctx context object used to interact with the Kafka Connect runtime
-     * @param taskConfigs existing task configurations, which may be used when generating new task configs to avoid
-     *                    churn in partition to task assignments
-     */
-    public void initialize(ConnectorContext ctx, List<Map<String, String>> taskConfigs) {
-        context = ctx;
-        // Ignore taskConfigs. May result in more churn of tasks during recovery if updated configs
-        // are very different, but reduces the difficulty of implementing a Connector
-    }
+	 * @param ctx context object used to interact with the Kafka Connect runtime
+	 * @param taskConfigs existing task configurations, which may be used when generating new task configs to avoid
+	 *                    churn in partition to task assignments
+	 */
+	public void initialize(ConnectorContext ctx, List<Map<String, String>> taskConfigs) {
+		context = ctx;
+		// Ignore taskConfigs. May result in more churn of tasks during recovery if updated configs
+		// are very different, but reduces the difficulty of implementing a Connector
+	}
 
-    /**
-     * Start this Connector. This method will only be called on a clean Connector, i.e. it has
-     * either just been instantiated and initialized or {@link #stop()} has been invoked.
-     *
-     * @param props configuration settings
-     */
-    public abstract void start(Map<String, String> props);
+	/**
+	 * Returns the context object used to interact with the Kafka Connect runtime.
+	 * @return the context for this Connector.
+	 */
+	protected ConnectorContext context() {
+		return context;
+	}
 
-    /**
+	/**
+	 * Start this Connector. This method will only be called on a clean Connector, i.e. it has
+	 * either just been instantiated and initialized or {@link #stop()} has been invoked.
+	 * @param props configuration settings
+	 */
+	public abstract void start(Map<String, String> props);
+
+	/**
      * Reconfigure this Connector. Most implementations will not override this, using the default
      * implementation that calls {@link #stop()} followed by {@link #start(Map)}.
      * Implementations only need to override this if they want to handle this process more

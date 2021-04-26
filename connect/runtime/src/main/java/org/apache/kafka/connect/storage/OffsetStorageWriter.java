@@ -156,26 +156,23 @@ public class OffsetStorageWriter {
                 // unable to make progress.
                 log.error("CRITICAL: Failed to serialize offset data, making it impossible to commit "
                         + "offsets under namespace {}. This likely won't recover unless the "
-                        + "unserializable partition or offset information is overwritten.", namespace);
-                log.error("Cause of serialization failure:", t);
-                callback.onCompletion(t, null);
-                return null;
-            }
+						+ "unserializable partition or offset information is overwritten.", namespace);
+				log.error("Cause of serialization failure:", t);
+				callback.onCompletion(t, null);
+				return null;
+			}
 
-            // And submit the data
-            log.debug("Submitting {} entries to backing store. The offsets are: {}", offsetsSerialized.size(), toFlush);
-        }
+			// And submit the data
+			log.debug("Submitting {} entries to backing store. The offsets are: {}", offsetsSerialized.size(), toFlush);
+		}
 
-        return backingStore.set(offsetsSerialized, new Callback<Void>() {
-            @Override
-            public void onCompletion(Throwable error, Void result) {
-                boolean isCurrent = handleFinishWrite(flushId, error, result);
-                if (isCurrent && callback != null) {
-                    callback.onCompletion(error, result);
-                }
-            }
-        });
-    }
+		return backingStore.set(offsetsSerialized, (error, result) -> {
+			boolean isCurrent = handleFinishWrite(flushId, error, result);
+			if (isCurrent && callback != null) {
+				callback.onCompletion(error, result);
+			}
+		});
+	}
 
     /**
      * Cancel a flush that has been initiated by {@link #beginFlush}. This should not be called if

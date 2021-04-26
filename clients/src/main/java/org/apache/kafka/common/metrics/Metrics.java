@@ -18,6 +18,7 @@ package org.apache.kafka.common.metrics;
 
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.MetricNameTemplate;
+import org.apache.kafka.common.metrics.internals.MetricsUtils;
 import org.apache.kafka.common.utils.KafkaThread;
 import org.apache.kafka.common.utils.Time;
 import org.slf4j.Logger;
@@ -38,7 +39,6 @@ import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
 import static java.util.Collections.emptyList;
@@ -68,7 +68,6 @@ import static java.util.Collections.emptyList;
  */
 public class Metrics implements Closeable {
 
-	private static final Logger log = LoggerFactory.getLogger(Metrics.class);
 	private final MetricConfig config;
 	private final ConcurrentMap<MetricName, KafkaMetric> metrics;
 	private final ConcurrentMap<String, Sensor> sensors;
@@ -76,6 +75,7 @@ public class Metrics implements Closeable {
 	private final List<MetricsReporter> reporters;
 	private final Time time;
 	private final ScheduledThreadPoolExecutor metricsScheduler;
+	private static final Logger log = LoggerFactory.getLogger(Metrics.class);
 
 	/**
 	 * Create a metrics repository with no metric reporters and default configuration.
@@ -115,61 +115,132 @@ public class Metrics implements Closeable {
 	 * Create a metrics repository with a default config and the given metric reporters.
 	 * Expiration of Sensors is disabled.
 	 * @param defaultConfig The default config
-	 * @param reporters     The metrics reporters
-	 * @param time          The time instance to use with the metrics
+	 * @param reporters The metrics reporters
+	 * @param time The time instance to use with the metrics
 	 */
 	public Metrics(MetricConfig defaultConfig, List<MetricsReporter> reporters, Time time) {
 		this(defaultConfig, reporters, time, false);
 	}
 
 	/**
+	 * Create a metrics repository with a default config, metric reporters and metric context
+	 * Expiration of Sensors is disabled.
+	 * @param defaultConfig The default config
+	 * @param reporters The metrics reporters
+	 * @param time The time instance to use with the metrics
+	 * @param metricsContext The metricsContext to initialize metrics reporter with
+	 */
+	public Metrics(MetricConfig defaultConfig, List<MetricsReporter> reporters, Time time, MetricsContext metricsContext) {
+		this(defaultConfig, reporters, time, false, metricsContext);
+	}
+
+	/**
 	 * Create a metrics repository with a default config, given metric reporters and the ability to expire eligible sensors
-	 * @param defaultConfig    The default config
-	 * @param reporters        The metrics reporters
-	 * @param time             The time instance to use with the metrics
+	 * @param defaultConfig The default config
+	 * @param reporters The metrics reporters
+	 * @param time The time instance to use with the metrics
 	 * @param enableExpiration true if the metrics instance can garbage collect inactive sensors, false otherwise
 	 */
 	public Metrics(MetricConfig defaultConfig, List<MetricsReporter> reporters, Time time, boolean enableExpiration) {
+		this(defaultConfig, reporters, time, enableExpiration, new KafkaMetricsContext(""));
+	}
+
+	/**
+	 * Create a metrics repository with a default config, given metric reporters, the ability to expire eligible sensors
+	 * and MetricContext
+	 * @param defaultConfig The default config
+	 * @param reporters The metrics reporters
+	 * @param time The time instance to use with the metrics
+	 * @param enableExpiration true if the metrics instance can garbage collect inactive sensors, false otherwise
+	 * @param metricsContext The metricsContext to initialize metrics reporter with
+	 */
+	public Metrics(MetricConfig defaultConfig, List<MetricsReporter> reporters, Time time, boolean enableExpiration,
+				   MetricsContext metricsContext) {
 		this.config = defaultConfig;
 		this.sensors = new ConcurrentHashMap<>();
 		this.metrics = new ConcurrentHashMap<>();
 		this.childrenSensors = new ConcurrentHashMap<>();
 		this.reporters = Objects.requireNonNull(reporters);
 		this.time = time;
-		for (MetricsReporter reporter : reporters)
-			reporter.init(new ArrayList<KafkaMetric>());
+		for (MetricsReporter reporter : reporters) {
+			reporter.contextChange(metricsContext);
+			reporter.init(new ArrayList<>());
+		}
 
 		// Create the ThreadPoolExecutor only if expiration of Sensors is enabled.
 		if (enableExpiration) {
 			this.metricsScheduler = new ScheduledThreadPoolExecutor(1);
 			// Creating a daemon thread to not block shutdown
-			this.metricsScheduler.setThreadFactory(new ThreadFactory() {
-				public Thread newThread(Runnable runnable) {
-					return KafkaThread.daemon("SensorExpiryThread", runnable);
-				}
-			});
+			this.metricsScheduler.setThreadFactory(runnable -> KafkaThread.daemon("SensorExpiryThread", runnable));
 			this.metricsScheduler.scheduleAtFixedRate(new ExpireSensorTask(), 30, 30, TimeUnit.SECONDS);
 		} else {
 			this.metricsScheduler = null;
 		}
 
 		addMetric(metricName("count", "kafka-metrics-count", "total number of registered metrics"),
-				new Measurable() {
-					@Override
-					public double measure(MetricConfig config, long now) {
-						return metrics.size();
-					}
-				});
+				(config, now) -> metrics.size());
 	}
 
-	private static Map<String, String> getTags(String... keyValue) {
-		if ((keyValue.length % 2) != 0)
-			throw new IllegalArgumentException("keyValue needs to be specified in pairs");
-		Map<String, String> tags = new LinkedHashMap<String, String>();
+	/**
+	 * Create a MetricName with the given name, group, description and tags, plus default tags specified in the metric
+	 * configuration. Tag in tags takes precedence if the same tag key is specified in the default metric configuration.
+	 *
+	 * @param name        The name of the metric
+	 * @param group       logical group name of the metrics to which this metric belongs
+	 * @param description A human-readable description to include in the metric
+	 * @param tags        additional key/value attributes of the metric
+	 */
+	public MetricName metricName(String name, String group, String description, Map<String, String> tags) {
+		Map<String, String> combinedTag = new LinkedHashMap<>(config.tags());
+		combinedTag.putAll(tags);
+		return new MetricName(name, group, description, combinedTag);
+	}
 
-		for (int i = 0; i < keyValue.length; i += 2)
-			tags.put(keyValue[i], keyValue[i + 1]);
-		return tags;
+	/**
+	 * Create a MetricName with the given name, group, description, and default tags
+	 * specified in the metric configuration.
+	 *
+	 * @param name        The name of the metric
+	 * @param group       logical group name of the metrics to which this metric belongs
+	 * @param description A human-readable description to include in the metric
+	 */
+	public MetricName metricName(String name, String group, String description) {
+		return metricName(name, group, description, new HashMap<>());
+	}
+
+	/**
+	 * Create a MetricName with the given name, group and default tags specified in the metric configuration.
+	 *
+	 * @param name        The name of the metric
+	 * @param group       logical group name of the metrics to which this metric belongs
+	 */
+	public MetricName metricName(String name, String group) {
+		return metricName(name, group, "", new HashMap<>());
+	}
+
+	/**
+	 * Create a MetricName with the given name, group, description, and keyValue as tags,  plus default tags specified in the metric
+	 * configuration. Tag in keyValue takes precedence if the same tag key is specified in the default metric configuration.
+	 *
+	 * @param name          The name of the metric
+	 * @param group         logical group name of the metrics to which this metric belongs
+	 * @param description   A human-readable description to include in the metric
+	 * @param keyValue      additional key/value attributes of the metric (must come in pairs)
+	 */
+	public MetricName metricName(String name, String group, String description, String... keyValue) {
+		return metricName(name, group, description, MetricsUtils.getTags(keyValue));
+	}
+
+	/**
+	 * Create a MetricName with the given name, group and tags, plus default tags specified in the metric
+	 * configuration. Tag in tags takes precedence if the same tag key is specified in the default metric configuration.
+	 *
+	 * @param name  The name of the metric
+	 * @param group logical group name of the metrics to which this metric belongs
+	 * @param tags  key/value attributes of the metric
+	 */
+	public MetricName metricName(String name, String group, Map<String, String> tags) {
+		return metricName(name, group, "", tags);
 	}
 
 	/**
@@ -177,12 +248,13 @@ public class Metrics implements Closeable {
 	 * will be generated for each of the MBeans and the associated attributes. The MBean names are lexicographically sorted to
 	 * determine the order of these sections. This order is therefore dependent upon the order of the
 	 * tags in each {@link MetricNameTemplate}.
-	 * @param domain     the domain or prefix for the JMX MBean names; may not be null
+	 *
+	 * @param domain the domain or prefix for the JMX MBean names; may not be null
 	 * @param allMetrics the collection of all {@link MetricNameTemplate} instances each describing one metric; may not be null
 	 * @return the string containing the HTML table; never null
 	 */
 	public static String toHtmlTable(String domain, Iterable<MetricNameTemplate> allMetrics) {
-		Map<String, Map<String, String>> beansAndAttributes = new TreeMap<String, Map<String, String>>();
+		Map<String, Map<String, String>> beansAndAttributes = new TreeMap<>();
 
 		try (Metrics metrics = new Metrics()) {
 			for (MetricNameTemplate template : allMetrics) {
@@ -194,7 +266,7 @@ public class Metrics implements Closeable {
 				MetricName metricName = metrics.metricName(template.name(), template.group(), template.description(), tags);
 				String mBeanName = JmxReporter.getMBeanName(domain, metricName);
 				if (!beansAndAttributes.containsKey(mBeanName)) {
-					beansAndAttributes.put(mBeanName, new TreeMap<String, String>());
+					beansAndAttributes.put(mBeanName, new TreeMap<>());
 				}
 				Map<String, String> attrAndDesc = beansAndAttributes.get(mBeanName);
 				if (!attrAndDesc.containsKey(template.name())) {
@@ -240,71 +312,14 @@ public class Metrics implements Closeable {
 
 	}
 
-	/**
-	 * Create a MetricName with the given name, group, description and tags, plus default tags specified in the metric
-	 * configuration. Tag in tags takes precedence if the same tag key is specified in the default metric configuration.
-	 * @param name        The name of the metric
-	 * @param group       logical group name of the metrics to which this metric belongs
-	 * @param description A human-readable description to include in the metric
-	 * @param tags        additional key/value attributes of the metric
-	 */
-	public MetricName metricName(String name, String group, String description, Map<String, String> tags) {
-		Map<String, String> combinedTag = new LinkedHashMap<>(config.tags());
-		combinedTag.putAll(tags);
-		return new MetricName(name, group, description, combinedTag);
-	}
-
-	/**
-	 * Create a MetricName with the given name, group, description, and default tags
-	 * specified in the metric configuration.
-	 * @param name        The name of the metric
-	 * @param group       logical group name of the metrics to which this metric belongs
-	 * @param description A human-readable description to include in the metric
-	 */
-	public MetricName metricName(String name, String group, String description) {
-		return metricName(name, group, description, new HashMap<String, String>());
-	}
-
-	/**
-	 * Create a MetricName with the given name, group and default tags specified in the metric configuration.
-	 * @param name  The name of the metric
-	 * @param group logical group name of the metrics to which this metric belongs
-	 */
-	public MetricName metricName(String name, String group) {
-		return metricName(name, group, "", new HashMap<String, String>());
-	}
-
-	/**
-	 * Create a MetricName with the given name, group, description, and keyValue as tags,  plus default tags specified in the metric
-	 * configuration. Tag in keyValue takes precedence if the same tag key is specified in the default metric configuration.
-	 * @param name        The name of the metric
-	 * @param group       logical group name of the metrics to which this metric belongs
-	 * @param description A human-readable description to include in the metric
-	 * @param keyValue    additional key/value attributes of the metric (must come in pairs)
-	 */
-	public MetricName metricName(String name, String group, String description, String... keyValue) {
-		return metricName(name, group, description, getTags(keyValue));
-	}
-
-	/**
-	 * Create a MetricName with the given name, group and tags, plus default tags specified in the metric
-	 * configuration. Tag in tags takes precedence if the same tag key is specified in the default metric configuration.
-	 * @param name  The name of the metric
-	 * @param group logical group name of the metrics to which this metric belongs
-	 * @param tags  key/value attributes of the metric
-	 */
-	public MetricName metricName(String name, String group, Map<String, String> tags) {
-		return metricName(name, group, "", tags);
-	}
-
 	public MetricConfig config() {
 		return config;
 	}
 
 	/**
-	 * 使用给定的名称获取sensor
-	 * @param name sensor的名称
-	 * @return sensor，没有则返回null
+	 * Get the sensor with the given name if it exists
+	 * @param name The name of the sensor
+	 * @return Return the sensor or null if no such sensor exists
 	 */
 	public Sensor getSensor(String name) {
 		return this.sensors.get(Objects.requireNonNull(name));
@@ -323,7 +338,7 @@ public class Metrics implements Closeable {
 	/**
 	 * Get or create a sensor with the given unique name and no parent sensors and with a given
 	 * recording level.
-	 * @param name           The sensor name.
+	 * @param name The sensor name.
 	 * @param recordingLevel The recording level.
 	 * @return The sensor
 	 */
@@ -335,7 +350,7 @@ public class Metrics implements Closeable {
 	/**
 	 * Get or create a sensor with the given unique name and zero or more parent sensors. All parent sensors will
 	 * receive every value recorded with this sensor. This uses a default recording level of INFO.
-	 * @param name    The name of the sensor
+	 * @param name The name of the sensor
 	 * @param parents The parent sensors
 	 * @return The sensor that is created
 	 */
@@ -346,8 +361,8 @@ public class Metrics implements Closeable {
 	/**
 	 * Get or create a sensor with the given unique name and zero or more parent sensors. All parent sensors will
 	 * receive every value recorded with this sensor.
-	 * @param name           The name of the sensor.
-	 * @param parents        The parent sensors.
+	 * @param name The name of the sensor.
+	 * @param parents The parent sensors.
 	 * @param recordingLevel The recording level.
 	 * @return The sensor that is created
 	 */
@@ -358,8 +373,8 @@ public class Metrics implements Closeable {
 	/**
 	 * Get or create a sensor with the given unique name and zero or more parent sensors. All parent sensors will
 	 * receive every value recorded with this sensor. This uses a default recording level of INFO.
-	 * @param name    The name of the sensor
-	 * @param config  A default configuration to use for this sensor for metrics that don't have their own config
+	 * @param name The name of the sensor
+	 * @param config A default configuration to use for this sensor for metrics that don't have their own config
 	 * @param parents The parent sensors
 	 * @return The sensor that is created
 	 */
@@ -371,10 +386,10 @@ public class Metrics implements Closeable {
 	/**
 	 * Get or create a sensor with the given unique name and zero or more parent sensors. All parent sensors will
 	 * receive every value recorded with this sensor.
-	 * @param name           The name of the sensor
-	 * @param config         A default configuration to use for this sensor for metrics that don't have their own config
+	 * @param name The name of the sensor
+	 * @param config A default configuration to use for this sensor for metrics that don't have their own config
 	 * @param recordingLevel The recording level.
-	 * @param parents        The parent sensors
+	 * @param parents The parent sensors
 	 * @return The sensor that is created
 	 */
 	public synchronized Sensor sensor(String name, MetricConfig config, Sensor.RecordingLevel recordingLevel, Sensor... parents) {
@@ -382,48 +397,41 @@ public class Metrics implements Closeable {
 	}
 
 	/**
-	 * 使用给定的唯一名称和非必须的父sensor，获取或创建一个sensor
-	 * 所有的父sensor会接收到此sensor记录的每个值
-	 * @param name                                sensor的唯一名称
-	 * @param config                              sensor的默认配置，用于没有独有配置的度量标准
-	 * @param inactiveSensorExpirationTimeSeconds 如果在这段时间内没有在sensor上记录任何值，则可以删除该值
-	 * @param parents                             父sensor
-	 * @param recordingLevel                      记录等级
-	 * @return 创建的sensor
+	 * Get or create a sensor with the given unique name and zero or more parent sensors. All parent sensors will
+	 * receive every value recorded with this sensor.
+	 * @param name The name of the sensor
+	 * @param config A default configuration to use for this sensor for metrics that don't have their own config
+	 * @param inactiveSensorExpirationTimeSeconds If no value if recorded on the Sensor for this duration of time,
+	 *                                        it is eligible for removal
+	 * @param parents The parent sensors
+	 * @param recordingLevel The recording level.
+	 * @return The sensor that is created
 	 */
 	public synchronized Sensor sensor(String name, MetricConfig config, long inactiveSensorExpirationTimeSeconds, Sensor.RecordingLevel recordingLevel, Sensor... parents) {
-		// 先从已创建的sensor集合中获取sensor
 		Sensor s = getSensor(name);
 		if (s == null) {
-			// 没有则使用入参配置信息创建新sensor，并放入已创建的sensor中
 			s = new Sensor(this, name, parents, config == null ? this.config : config, time, inactiveSensorExpirationTimeSeconds, recordingLevel);
 			this.sensors.put(name, s);
-			// 如果需要指定 父类sensor
 			if (parents != null) {
 				for (Sensor parent : parents) {
-					// 看看是不是已经有给定sensor的父sensor集合
-					List<Sensor> children = childrenSensors.get(parent);
-					if (children == null) {
-						// 没有的话创建集合并放入
-						children = new ArrayList<>();
-						childrenSensors.put(parent, children);
-					}
+					List<Sensor> children = childrenSensors.computeIfAbsent(parent, k -> new ArrayList<>());
 					children.add(s);
 				}
 			}
-			log.debug("Added sensor with name {}", name);
+			log.trace("Added sensor with name {}", name);
 		}
 		return s;
 	}
 
 	/**
-	 * 使用给定的唯一名称和非必须的父sensor，获取或创建一个sensor
-	 * 所有的父sensor会接收到此sensor记录的每个值，默认的记录等级是INFO
-	 * @param name                                sensor的唯一名称
-	 * @param config                              sensor的默认配置，用于没有独有配置的度量标准
-	 * @param inactiveSensorExpirationTimeSeconds 如果在这段时间内没有在sensor上记录任何值，则可以删除该值
-	 * @param parents                             父sensor
-	 * @return 创建的sensor
+	 * Get or create a sensor with the given unique name and zero or more parent sensors. All parent sensors will
+	 * receive every value recorded with this sensor. This uses a default recording level of INFO.
+	 * @param name The name of the sensor
+	 * @param config A default configuration to use for this sensor for metrics that don't have their own config
+	 * @param inactiveSensorExpirationTimeSeconds If no value if recorded on the Sensor for this duration of time,
+	 *                                        it is eligible for removal
+	 * @param parents The parent sensors
+	 * @return The sensor that is created
 	 */
 	public synchronized Sensor sensor(String name, MetricConfig config, long inactiveSensorExpirationTimeSeconds, Sensor... parents) {
 		return this.sensor(name, config, inactiveSensorExpirationTimeSeconds, Sensor.RecordingLevel.INFO, parents);
@@ -431,6 +439,7 @@ public class Metrics implements Closeable {
 
 	/**
 	 * Remove a sensor (if it exists), associated metrics and its children.
+	 *
 	 * @param name The name of the sensor to be removed
 	 */
 	public void removeSensor(String name) {
@@ -442,7 +451,7 @@ public class Metrics implements Closeable {
 					if (sensors.remove(name, sensor)) {
 						for (KafkaMetric metric : sensor.metrics())
 							removeMetric(metric.metricName());
-						log.debug("Removed sensor with name {}", name);
+						log.trace("Removed sensor with name {}", name);
 						childSensors = childrenSensors.remove(sensor);
 						for (final Sensor parent : sensor.parents()) {
 							childrenSensors.getOrDefault(parent, emptyList()).remove(sensor);
@@ -460,9 +469,10 @@ public class Metrics implements Closeable {
 	/**
 	 * Add a metric to monitor an object that implements measurable. This metric won't be associated with any sensor.
 	 * This is a way to expose existing values as metrics.
-	 * <p>
+	 *
 	 * This method is kept for binary compatibility purposes, it has the same behaviour as
 	 * {@link #addMetric(MetricName, MetricValueProvider)}.
+	 *
 	 * @param metricName The name of the metric
 	 * @param measurable The measurable that will be measured by this metric
 	 */
@@ -473,11 +483,12 @@ public class Metrics implements Closeable {
 	/**
 	 * Add a metric to monitor an object that implements Measurable. This metric won't be associated with any sensor.
 	 * This is a way to expose existing values as metrics.
-	 * <p>
+	 *
 	 * This method is kept for binary compatibility purposes, it has the same behaviour as
 	 * {@link #addMetric(MetricName, MetricConfig, MetricValueProvider)}.
+	 *
 	 * @param metricName The name of the metric
-	 * @param config     The configuration to use when measuring this measurable
+	 * @param config The configuration to use when measuring this measurable
 	 * @param measurable The measurable that will be measured by this metric
 	 */
 	public void addMetric(MetricName metricName, MetricConfig config, Measurable measurable) {
@@ -488,7 +499,8 @@ public class Metrics implements Closeable {
 	 * Add a metric to monitor an object that implements MetricValueProvider. This metric won't be associated with any
 	 * sensor. This is a way to expose existing values as metrics. User is expected to add any additional
 	 * synchronization to update and access metric values, if required.
-	 * @param metricName          The name of the metric
+	 *
+	 * @param metricName The name of the metric
 	 * @param metricValueProvider The metric value provider associated with this metric
 	 */
 	public void addMetric(MetricName metricName, MetricConfig config, MetricValueProvider<?> metricValueProvider) {
@@ -504,7 +516,8 @@ public class Metrics implements Closeable {
 	 * Add a metric to monitor an object that implements MetricValueProvider. This metric won't be associated with any
 	 * sensor. This is a way to expose existing values as metrics. User is expected to add any additional
 	 * synchronization to update and access metric values, if required.
-	 * @param metricName          The name of the metric
+	 *
+	 * @param metricName The name of the metric
 	 * @param metricValueProvider The metric value provider associated with this metric
 	 */
 	public void addMetric(MetricName metricName, MetricValueProvider<?> metricValueProvider) {
@@ -514,6 +527,7 @@ public class Metrics implements Closeable {
 	/**
 	 * Remove a metric if it exists and return it. Return null otherwise. If a metric is removed, `metricRemoval`
 	 * will be invoked for each reporter.
+	 *
 	 * @param metricName The name of the metric
 	 * @return the removed `KafkaMetric` or null if no such metric exists
 	 */
@@ -579,13 +593,38 @@ public class Metrics implements Closeable {
 		return this.metrics.get(metricName);
 	}
 
+	/**
+	 * This iterates over every Sensor and triggers a removeSensor if it has expired
+	 * Package private for testing
+	 */
+	class ExpireSensorTask implements Runnable {
+		@Override
+		public void run() {
+			for (Map.Entry<String, Sensor> sensorEntry : sensors.entrySet()) {
+				// removeSensor also locks the sensor object. This is fine because synchronized is reentrant
+				// There is however a minor race condition here. Assume we have a parent sensor P and child sensor C.
+				// Calling record on C would cause a record on P as well.
+				// So expiration time for P == expiration time for C. If the record on P happens via C just after P is removed,
+				// that will cause C to also get removed.
+				// Since the expiration time is typically high it is not expected to be a significant concern
+				// and thus not necessary to optimize
+				synchronized (sensorEntry.getValue()) {
+					if (sensorEntry.getValue().hasExpired()) {
+						log.debug("Removing expired sensor {}", sensorEntry.getKey());
+						removeSensor(sensorEntry.getKey());
+					}
+				}
+			}
+		}
+	}
+
 	/* For testing use only. */
 	Map<Sensor, List<Sensor>> childrenSensors() {
 		return Collections.unmodifiableMap(childrenSensors);
 	}
 
 	public MetricName metricInstance(MetricNameTemplate template, String... keyValue) {
-		return metricInstance(template, getTags(keyValue));
+		return metricInstance(template, MetricsUtils.getTags(keyValue));
 	}
 
 	public MetricName metricInstance(MetricNameTemplate template, Map<String, String> tags) {
@@ -617,38 +656,16 @@ public class Metrics implements Closeable {
 				Thread.currentThread().interrupt();
 			}
 		}
+		log.info("Metrics scheduler closed");
 
 		for (MetricsReporter reporter : reporters) {
 			try {
+				log.info("Closing reporter {}", reporter.getClass().getName());
 				reporter.close();
 			} catch (Exception e) {
 				log.error("Error when closing " + reporter.getClass().getName(), e);
 			}
 		}
+		log.info("Metrics reporters closed");
 	}
-
-	/**
-	 * This iterates over every Sensor and triggers a removeSensor if it has expired
-	 * Package private for testing
-	 */
-	class ExpireSensorTask implements Runnable {
-		public void run() {
-			for (Map.Entry<String, Sensor> sensorEntry : sensors.entrySet()) {
-				// removeSensor also locks the sensor object. This is fine because synchronized is reentrant
-				// There is however a minor race condition here. Assume we have a parent sensor P and child sensor C.
-				// Calling record on C would cause a record on P as well.
-				// So expiration time for P == expiration time for C. If the record on P happens via C just after P is removed,
-				// that will cause C to also get removed.
-				// Since the expiration time is typically high it is not expected to be a significant concern
-				// and thus not necessary to optimize
-				synchronized (sensorEntry.getValue()) {
-					if (sensorEntry.getValue().hasExpired()) {
-						log.debug("Removing expired sensor {}", sensorEntry.getKey());
-						removeSensor(sensorEntry.getKey());
-					}
-				}
-			}
-		}
-	}
-
 }

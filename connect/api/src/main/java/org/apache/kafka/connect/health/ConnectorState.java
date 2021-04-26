@@ -22,14 +22,22 @@ package org.apache.kafka.connect.health;
  */
 public class ConnectorState extends AbstractState {
 
-    /**
-     * Provides an instance of the ConnectorState.
-     *
-     * @param state - the status of connector, may not be {@code null} or empty
-     * @param workerId - the workerId associated with the connector, may not be {@code null} or empty
-     * @param traceMessage - any error message associated with the connector, may be {@code null} or empty
-     */
-    public ConnectorState(String state, String workerId, String traceMessage) {
-        super(state, workerId, traceMessage);
-    }
+	/**
+	 * Provides an instance of the ConnectorState.
+	 * @param state        - the status of connector, may not be {@code null} or empty
+	 * @param workerId     - the workerId associated with the connector, may not be {@code null} or empty
+	 * @param traceMessage - any error message associated with the connector, may be {@code null} or empty
+	 */
+	public ConnectorState(String state, String workerId, String traceMessage) {
+		super(state, workerId, traceMessage);
+	}
+
+	@Override
+	public String toString() {
+		return "ConnectorState{"
+				+ "state='" + state() + '\''
+				+ ", traceMessage='" + traceMessage() + '\''
+				+ ", workerId='" + workerId() + '\''
+				+ '}';
+	}
 }

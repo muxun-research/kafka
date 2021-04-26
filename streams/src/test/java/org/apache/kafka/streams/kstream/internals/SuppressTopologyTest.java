@@ -43,66 +43,66 @@ public class SuppressTopologyTest {
     private static final Serde<String> STRING_SERDE = Serdes.String();
 
     private static final String NAMED_FINAL_TOPOLOGY = "Topologies:\n" +
-        "   Sub-topology: 0\n" +
-        "    Source: KSTREAM-SOURCE-0000000000 (topics: [input])\n" +
-        "      --> KSTREAM-KEY-SELECT-0000000001\n" +
-        "    Processor: KSTREAM-KEY-SELECT-0000000001 (stores: [])\n" +
-        "      --> KSTREAM-FILTER-0000000004\n" +
-        "      <-- KSTREAM-SOURCE-0000000000\n" +
-        "    Processor: KSTREAM-FILTER-0000000004 (stores: [])\n" +
-        "      --> KSTREAM-SINK-0000000003\n" +
-        "      <-- KSTREAM-KEY-SELECT-0000000001\n" +
-        "    Sink: KSTREAM-SINK-0000000003 (topic: counts-repartition)\n" +
-        "      <-- KSTREAM-FILTER-0000000004\n" +
-        "\n" +
-        "  Sub-topology: 1\n" +
-        "    Source: KSTREAM-SOURCE-0000000005 (topics: [counts-repartition])\n" +
-        "      --> KSTREAM-AGGREGATE-0000000002\n" +
-        "    Processor: KSTREAM-AGGREGATE-0000000002 (stores: [counts])\n" +
-        "      --> myname\n" +
-        "      <-- KSTREAM-SOURCE-0000000005\n" +
-        "    Processor: myname (stores: [myname-store])\n" +
-        "      --> KTABLE-TOSTREAM-0000000006\n" +
-        "      <-- KSTREAM-AGGREGATE-0000000002\n" +
-        "    Processor: KTABLE-TOSTREAM-0000000006 (stores: [])\n" +
-        "      --> KSTREAM-MAP-0000000007\n" +
-        "      <-- myname\n" +
-        "    Processor: KSTREAM-MAP-0000000007 (stores: [])\n" +
-        "      --> KSTREAM-SINK-0000000008\n" +
-        "      <-- KTABLE-TOSTREAM-0000000006\n" +
-        "    Sink: KSTREAM-SINK-0000000008 (topic: output-suppressed)\n" +
+			"   Sub-topology: 0\n" +
+			"    Source: KSTREAM-SOURCE-0000000000 (topics: [input])\n" +
+			"      --> KSTREAM-KEY-SELECT-0000000001\n" +
+			"    Processor: KSTREAM-KEY-SELECT-0000000001 (stores: [])\n" +
+			"      --> counts-repartition-filter\n" +
+			"      <-- KSTREAM-SOURCE-0000000000\n" +
+			"    Processor: counts-repartition-filter (stores: [])\n" +
+			"      --> counts-repartition-sink\n" +
+			"      <-- KSTREAM-KEY-SELECT-0000000001\n" +
+			"    Sink: counts-repartition-sink (topic: counts-repartition)\n" +
+			"      <-- counts-repartition-filter\n" +
+			"\n" +
+			"  Sub-topology: 1\n" +
+			"    Source: counts-repartition-source (topics: [counts-repartition])\n" +
+			"      --> KSTREAM-AGGREGATE-0000000002\n" +
+			"    Processor: KSTREAM-AGGREGATE-0000000002 (stores: [counts])\n" +
+			"      --> myname\n" +
+			"      <-- counts-repartition-source\n" +
+			"    Processor: myname (stores: [myname-store])\n" +
+			"      --> KTABLE-TOSTREAM-0000000006\n" +
+			"      <-- KSTREAM-AGGREGATE-0000000002\n" +
+			"    Processor: KTABLE-TOSTREAM-0000000006 (stores: [])\n" +
+			"      --> KSTREAM-MAP-0000000007\n" +
+			"      <-- myname\n" +
+			"    Processor: KSTREAM-MAP-0000000007 (stores: [])\n" +
+			"      --> KSTREAM-SINK-0000000008\n" +
+			"      <-- KTABLE-TOSTREAM-0000000006\n" +
+			"    Sink: KSTREAM-SINK-0000000008 (topic: output-suppressed)\n" +
         "      <-- KSTREAM-MAP-0000000007\n" +
         "\n";
 
     private static final String ANONYMOUS_FINAL_TOPOLOGY = "Topologies:\n" +
-        "   Sub-topology: 0\n" +
-        "    Source: KSTREAM-SOURCE-0000000000 (topics: [input])\n" +
-        "      --> KSTREAM-KEY-SELECT-0000000001\n" +
-        "    Processor: KSTREAM-KEY-SELECT-0000000001 (stores: [])\n" +
-        "      --> KSTREAM-FILTER-0000000004\n" +
-        "      <-- KSTREAM-SOURCE-0000000000\n" +
-        "    Processor: KSTREAM-FILTER-0000000004 (stores: [])\n" +
-        "      --> KSTREAM-SINK-0000000003\n" +
-        "      <-- KSTREAM-KEY-SELECT-0000000001\n" +
-        "    Sink: KSTREAM-SINK-0000000003 (topic: counts-repartition)\n" +
-        "      <-- KSTREAM-FILTER-0000000004\n" +
-        "\n" +
-        "  Sub-topology: 1\n" +
-        "    Source: KSTREAM-SOURCE-0000000005 (topics: [counts-repartition])\n" +
-        "      --> KSTREAM-AGGREGATE-0000000002\n" +
-        "    Processor: KSTREAM-AGGREGATE-0000000002 (stores: [counts])\n" +
-        "      --> KTABLE-SUPPRESS-0000000006\n" +
-        "      <-- KSTREAM-SOURCE-0000000005\n" +
-        "    Processor: KTABLE-SUPPRESS-0000000006 (stores: [KTABLE-SUPPRESS-STATE-STORE-0000000007])\n" +
-        "      --> KTABLE-TOSTREAM-0000000008\n" +
-        "      <-- KSTREAM-AGGREGATE-0000000002\n" +
-        "    Processor: KTABLE-TOSTREAM-0000000008 (stores: [])\n" +
-        "      --> KSTREAM-MAP-0000000009\n" +
-        "      <-- KTABLE-SUPPRESS-0000000006\n" +
-        "    Processor: KSTREAM-MAP-0000000009 (stores: [])\n" +
-        "      --> KSTREAM-SINK-0000000010\n" +
-        "      <-- KTABLE-TOSTREAM-0000000008\n" +
-        "    Sink: KSTREAM-SINK-0000000010 (topic: output-suppressed)\n" +
+			"   Sub-topology: 0\n" +
+			"    Source: KSTREAM-SOURCE-0000000000 (topics: [input])\n" +
+			"      --> KSTREAM-KEY-SELECT-0000000001\n" +
+			"    Processor: KSTREAM-KEY-SELECT-0000000001 (stores: [])\n" +
+			"      --> counts-repartition-filter\n" +
+			"      <-- KSTREAM-SOURCE-0000000000\n" +
+			"    Processor: counts-repartition-filter (stores: [])\n" +
+			"      --> counts-repartition-sink\n" +
+			"      <-- KSTREAM-KEY-SELECT-0000000001\n" +
+			"    Sink: counts-repartition-sink (topic: counts-repartition)\n" +
+			"      <-- counts-repartition-filter\n" +
+			"\n" +
+			"  Sub-topology: 1\n" +
+			"    Source: counts-repartition-source (topics: [counts-repartition])\n" +
+			"      --> KSTREAM-AGGREGATE-0000000002\n" +
+			"    Processor: KSTREAM-AGGREGATE-0000000002 (stores: [counts])\n" +
+			"      --> KTABLE-SUPPRESS-0000000006\n" +
+			"      <-- counts-repartition-source\n" +
+			"    Processor: KTABLE-SUPPRESS-0000000006 (stores: [KTABLE-SUPPRESS-STATE-STORE-0000000007])\n" +
+			"      --> KTABLE-TOSTREAM-0000000008\n" +
+			"      <-- KSTREAM-AGGREGATE-0000000002\n" +
+			"    Processor: KTABLE-TOSTREAM-0000000008 (stores: [])\n" +
+			"      --> KSTREAM-MAP-0000000009\n" +
+			"      <-- KTABLE-SUPPRESS-0000000006\n" +
+			"    Processor: KSTREAM-MAP-0000000009 (stores: [])\n" +
+			"      --> KSTREAM-SINK-0000000010\n" +
+			"      <-- KTABLE-TOSTREAM-0000000008\n" +
+			"    Sink: KSTREAM-SINK-0000000010 (topic: output-suppressed)\n" +
         "      <-- KSTREAM-MAP-0000000009\n" +
         "\n";
 

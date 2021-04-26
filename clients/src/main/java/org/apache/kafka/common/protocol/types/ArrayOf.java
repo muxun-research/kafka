@@ -19,6 +19,7 @@ package org.apache.kafka.common.protocol.types;
 import org.apache.kafka.common.protocol.types.Type.DocumentedType;
 
 import java.nio.ByteBuffer;
+import java.util.Optional;
 
 /**
  * Represents a type for an array of a particular type
@@ -81,28 +82,29 @@ public class ArrayOf extends DocumentedType {
 
     @Override
     public int sizeOf(Object o) {
-        int size = 4;
-        if (o == null)
-            return size;
+		int size = 4;
+		if (o == null)
+			return size;
 
-        Object[] objs = (Object[]) o;
-        for (Object obj : objs)
-            size += type.sizeOf(obj);
-        return size;
-    }
+		Object[] objs = (Object[]) o;
+		for (Object obj : objs)
+			size += type.sizeOf(obj);
+		return size;
+	}
 
-    public Type type() {
-        return type;
-    }
+	@Override
+	public Optional<Type> arrayElementType() {
+		return Optional.of(type);
+	}
 
-    @Override
-    public String toString() {
-        return ARRAY_TYPE_NAME + "(" + type + ")";
-    }
+	@Override
+	public String toString() {
+		return ARRAY_TYPE_NAME + "(" + type + ")";
+	}
 
-    @Override
-    public Object[] validate(Object item) {
-        try {
+	@Override
+	public Object[] validate(Object item) {
+		try {
             if (isNullable() && item == null)
                 return null;
 

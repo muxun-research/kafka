@@ -372,25 +372,45 @@ public class SchemaBuilder implements Schema {
      * @return a new {@link Schema.Type#MAP} SchemaBuilder
      */
     public static SchemaBuilder map(Schema keySchema, Schema valueSchema) {
-        if (null == keySchema)
-            throw new SchemaBuilderException("keySchema cannot be null.");
-        if (null == valueSchema)
-            throw new SchemaBuilderException("valueSchema cannot be null.");
-        SchemaBuilder builder = new SchemaBuilder(Type.MAP);
-        builder.keySchema = keySchema;
-        builder.valueSchema = valueSchema;
-        return builder;
-    }
+		if (null == keySchema)
+			throw new SchemaBuilderException("keySchema cannot be null.");
+		if (null == valueSchema)
+			throw new SchemaBuilderException("valueSchema cannot be null.");
+		SchemaBuilder builder = new SchemaBuilder(Type.MAP);
+		builder.keySchema = keySchema;
+		builder.valueSchema = valueSchema;
+		return builder;
+	}
 
-    @Override
-    public Schema keySchema() {
-        return keySchema;
-    }
+	static SchemaBuilder arrayOfNull() {
+		return new SchemaBuilder(Type.ARRAY);
+	}
 
-    @Override
-    public Schema valueSchema() {
-        return valueSchema;
-    }
+	static SchemaBuilder mapOfNull() {
+		return new SchemaBuilder(Type.MAP);
+	}
+
+	static SchemaBuilder mapWithNullKeys(Schema valueSchema) {
+		SchemaBuilder result = new SchemaBuilder(Type.MAP);
+		result.valueSchema = valueSchema;
+		return result;
+	}
+
+	static SchemaBuilder mapWithNullValues(Schema keySchema) {
+		SchemaBuilder result = new SchemaBuilder(Type.MAP);
+		result.keySchema = keySchema;
+		return result;
+	}
+
+	@Override
+	public Schema keySchema() {
+		return keySchema;
+	}
+
+	@Override
+	public Schema valueSchema() {
+		return valueSchema;
+	}
 
 
     /**
@@ -398,9 +418,9 @@ public class SchemaBuilder implements Schema {
      * @return the {@link Schema}
      */
     public Schema build() {
-        return new ConnectSchema(type, isOptional(), defaultValue, name, version, doc,
-                parameters == null ? null : Collections.unmodifiableMap(parameters),
-                fields == null ? null : Collections.unmodifiableList(new ArrayList<Field>(fields.values())), keySchema, valueSchema);
+		return new ConnectSchema(type, isOptional(), defaultValue, name, version, doc,
+				parameters == null ? null : Collections.unmodifiableMap(parameters),
+				fields == null ? null : Collections.unmodifiableList(new ArrayList<>(fields.values())), keySchema, valueSchema);
     }
 
     /**

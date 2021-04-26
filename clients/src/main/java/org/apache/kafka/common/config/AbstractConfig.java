@@ -108,12 +108,12 @@ public class AbstractConfig {
 
         this.originals = resolveConfigVariables(configProviderProps, (Map<String, Object>) originals);
         this.values = definition.parse(this.originals);
+		this.used = Collections.synchronizedSet(new HashSet<>());
         Map<String, Object> configUpdates = postProcessParsedConfig(Collections.unmodifiableMap(this.values));
         for (Map.Entry<String, Object> update : configUpdates.entrySet()) {
             this.values.put(update.getKey(), update.getValue());
         }
         definition.parse(this.values);
-        this.used = Collections.synchronizedSet(new HashSet<>());
         this.definition = definition;
         if (doLog)
             logAll();
@@ -193,45 +193,59 @@ public class AbstractConfig {
     }
 
     public String getString(String key) {
-        return (String) get(key);
-    }
+		return (String) get(key);
+	}
 
-    public ConfigDef.Type typeOf(String key) {
-        ConfigDef.ConfigKey configKey = definition.configKeys().get(key);
-        if (configKey == null)
-            return null;
-        return configKey.type;
-    }
+	public ConfigDef.Type typeOf(String key) {
+		ConfigDef.ConfigKey configKey = definition.configKeys().get(key);
+		if (configKey == null)
+			return null;
+		return configKey.type;
+	}
 
-    public Password getPassword(String key) {
-        return (Password) get(key);
-    }
+	public String documentationOf(String key) {
+		ConfigDef.ConfigKey configKey = definition.configKeys().get(key);
+		if (configKey == null)
+			return null;
+		return configKey.documentation;
+	}
 
-    public Class<?> getClass(String key) {
-        return (Class<?>) get(key);
-    }
+	public Password getPassword(String key) {
+		return (Password) get(key);
+	}
 
-    public Set<String> unused() {
-        Set<String> keys = new HashSet<>(originals.keySet());
-        keys.removeAll(used);
-        return keys;
-    }
+	public Class<?> getClass(String key) {
+		return (Class<?>) get(key);
+	}
 
-    public Map<String, Object> originals() {
-        Map<String, Object> copy = new RecordingMap<>();
-        copy.putAll(originals);
-        return copy;
-    }
+	public Set<String> unused() {
+		Set<String> keys = new HashSet<>(originals.keySet());
+		keys.removeAll(used);
+		return keys;
+	}
 
-    /**
-     * Get all the original settings, ensuring that all values are of type String.
-     * @return the original settings
-     * @throws ClassCastException if any of the values are not strings
-     */
-    public Map<String, String> originalsStrings() {
-        Map<String, String> copy = new RecordingMap<>();
-        for (Map.Entry<String, ?> entry : originals.entrySet()) {
-            if (!(entry.getValue() instanceof String))
+	public Map<String, Object> originals() {
+		Map<String, Object> copy = new RecordingMap<>();
+		copy.putAll(originals);
+		return copy;
+	}
+
+	public Map<String, Object> originals(Map<String, Object> configOverrides) {
+		Map<String, Object> copy = new RecordingMap<>();
+		copy.putAll(originals);
+		copy.putAll(configOverrides);
+		return copy;
+	}
+
+	/**
+	 * Get all the original settings, ensuring that all values are of type String.
+	 * @return the original settings
+	 * @throws ClassCastException if any of the values are not strings
+	 */
+	public Map<String, String> originalsStrings() {
+		Map<String, String> copy = new RecordingMap<>();
+		for (Map.Entry<String, ?> entry : originals.entrySet()) {
+			if (!(entry.getValue() instanceof String))
                 throw new ClassCastException("Non-string value found in original settings for key " + entry.getKey() +
                         ": " + (entry.getValue() == null ? null : entry.getValue().getClass().getName()));
             copy.put(entry.getKey(), (String) entry.getValue());
@@ -323,25 +337,36 @@ public class AbstractConfig {
                 ConfigDef.ConfigKey configKey = definition.configKeys().get(entry.getKey());
                 if (configKey != null)
                     result.put(entry.getKey(), definition.parseValue(configKey, entry.getValue(), true));
-            }
+			}
 
-            return result;
-        }
-    }
+			return result;
+		}
+	}
 
-    public Map<String, ?> values() {
-        return new RecordingMap<>(values);
-    }
+	public Map<String, ?> values() {
+		return new RecordingMap<>(values);
+	}
 
-    private void logAll() {
-        StringBuilder b = new StringBuilder();
-        b.append(getClass().getSimpleName());
-        b.append(" values: ");
-        b.append(Utils.NL);
+	public Map<String, ?> nonInternalValues() {
+		Map<String, Object> nonInternalConfigs = new RecordingMap<>();
+		values.forEach((key, value) -> {
+			ConfigDef.ConfigKey configKey = definition.configKeys().get(key);
+			if (configKey == null || !configKey.internalConfig) {
+				nonInternalConfigs.put(key, value);
+			}
+		});
+		return nonInternalConfigs;
+	}
 
-        for (Map.Entry<String, Object> entry : new TreeMap<>(this.values).entrySet()) {
-            b.append('\t');
-            b.append(entry.getKey());
+	private void logAll() {
+		StringBuilder b = new StringBuilder();
+		b.append(getClass().getSimpleName());
+		b.append(" values: ");
+		b.append(Utils.NL);
+
+		for (Map.Entry<String, Object> entry : new TreeMap<>(this.values).entrySet()) {
+			b.append('\t');
+			b.append(entry.getKey());
             b.append(" = ");
             b.append(entry.getValue());
             b.append(Utils.NL);
@@ -380,25 +405,36 @@ public class AbstractConfig {
         return t.cast(o);
     }
 
-    /**
-     * Get a configured instance of the give class specified by the given configuration key. If the object implements
-     * Configurable configure it using the configuration.
-     *
-     * @param key The configuration key for the class
-     * @param t The interface the class should implement
-     * @return A configured instance of the class
-     */
-    public <T> T getConfiguredInstance(String key, Class<T> t) {
-        Class<?> c = getClass(key);
+	/**
+	 * Get a configured instance of the give class specified by the given configuration key. If the object implements
+	 * Configurable configure it using the configuration.
+	 * @param key The configuration key for the class
+	 * @param t   The interface the class should implement
+	 * @return A configured instance of the class
+	 */
+	public <T> T getConfiguredInstance(String key, Class<T> t) {
+		return getConfiguredInstance(key, t, Collections.emptyMap());
+	}
 
-        return getConfiguredInstance(c, t, originals());
-    }
+	/**
+	 * Get a configured instance of the give class specified by the given configuration key. If the object implements
+	 * Configurable configure it using the configuration.
+	 * @param key             The configuration key for the class
+	 * @param t               The interface the class should implement
+	 * @param configOverrides override origin configs
+	 * @return A configured instance of the class
+	 */
+	public <T> T getConfiguredInstance(String key, Class<T> t, Map<String, Object> configOverrides) {
+		Class<?> c = getClass(key);
 
-    /**
-     * Get a list of configured instances of the given class specified by the given configuration key. The configuration
-     * may specify either null or an empty string to indicate no configured instances. In both cases, this method
-     * returns an empty list to indicate no configured instances.
-     * @param key The configuration key for the class
+		return getConfiguredInstance(c, t, originals(configOverrides));
+	}
+
+	/**
+	 * Get a list of configured instances of the given class specified by the given configuration key. The configuration
+	 * may specify either null or an empty string to indicate no configured instances. In both cases, this method
+	 * returns an empty list to indicate no configured instances.
+	 * @param key The configuration key for the class
      * @param t The interface the class should implement
      * @return The list of configured instances
      */
@@ -484,7 +520,8 @@ public class AbstractConfig {
             if (!result.data().isEmpty()) {
                 resolvedOriginals.putAll(result.data());
             }
-        }
+		}
+		providers.values().forEach(x -> Utils.closeQuietly(x, "config provider"));
 
         return new ResolvingMap<>(resolvedOriginals, originals);
     }

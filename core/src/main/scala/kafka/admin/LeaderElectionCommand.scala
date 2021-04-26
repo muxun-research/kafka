@@ -16,25 +16,20 @@
  */
 package kafka.admin
 
-import java.util.Properties
-import java.util.concurrent.ExecutionException
 import joptsimple.util.EnumConverter
 import kafka.common.AdminCommandFailedException
-import kafka.utils.CommandDefaultOptions
-import kafka.utils.CommandLineUtils
-import kafka.utils.CoreUtils
-import kafka.utils.Json
-import kafka.utils.Logging
-import org.apache.kafka.clients.admin.{Admin, AdminClientConfig, AdminClient => JAdminClient}
-import org.apache.kafka.common.ElectionType
-import org.apache.kafka.common.TopicPartition
-import org.apache.kafka.common.errors.ClusterAuthorizationException
-import org.apache.kafka.common.errors.ElectionNotNeededException
-import org.apache.kafka.common.errors.TimeoutException
+import kafka.utils.Implicits._
+import kafka.utils._
+import org.apache.kafka.clients.admin.{Admin, AdminClientConfig}
+import org.apache.kafka.common.{ElectionType, TopicPartition}
+import org.apache.kafka.common.errors.{ClusterAuthorizationException, ElectionNotNeededException, TimeoutException}
 import org.apache.kafka.common.utils.Utils
-import scala.collection.JavaConverters._
+
+import java.util.Properties
+import java.util.concurrent.ExecutionException
 import scala.collection.mutable
 import scala.concurrent.duration._
+import scala.jdk.CollectionConverters._
 
 object LeaderElectionCommand extends Logging {
   def main(args: Array[String]): Unit = {
@@ -79,9 +74,10 @@ object LeaderElectionCommand extends Logging {
         AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG,
         commandOptions.options.valueOf(commandOptions.bootstrapServer)
       )
-      props.setProperty(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, timeout.toMillis.toString)
+      props.setProperty(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, timeout.toMillis.toString)
+      props.setProperty(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, (timeout.toMillis / 2).toString)
 
-      JAdminClient.create(props)
+      Admin.create(props)
     }
 
     try {
@@ -164,13 +160,13 @@ object LeaderElectionCommand extends Logging {
     }
 
     if (noop.nonEmpty) {
-      val partitions = succeeded.mkString(", ")
+      val partitions = noop.mkString(", ")
       println(s"Valid replica already elected for partitions $partitions")
     }
 
     if (failed.nonEmpty) {
       val rootException = new AdminCommandFailedException(s"${failed.size} replica(s) could not be elected")
-      failed.foreach { case (topicPartition, exception) =>
+      failed.forKeyValue { (topicPartition, exception) =>
         println(s"Error completing leader election ($electionType) for partition: $topicPartition: $exception")
         rootException.addSuppressed(exception)
       }

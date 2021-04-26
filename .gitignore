@@ -34,6 +34,8 @@ Vagrantfile.local
 config/server-*
 config/zookeeper-*
 core/data/*
+gradle/wrapper/*.jar
+gradlew.bat
 
 results
 tests/results
@@ -50,3 +52,11 @@ kafkatest.egg-info/
 systest/
 *.swp
 clients/src/generated
+clients/src/generated-test
+jmh-benchmarks/generated
+jmh-benchmarks/src/main/generated
+streams/src/generated
+raft/src/generated
+raft/.jqwik-database
+core/src/generated
+metadata/src/generated

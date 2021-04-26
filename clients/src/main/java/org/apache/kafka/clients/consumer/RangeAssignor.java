@@ -40,53 +40,78 @@ import java.util.Map;
  * <li><code>C0: [t0p0, t0p1, t1p0, t1p1]</code></li>
  * <li><code>C1: [t0p2, t1p2]</code></li>
  * </ul>
+ *
+ * Since the introduction of static membership, we could leverage <code>group.instance.id</code> to make the assignment behavior more sticky.
+ * For the above example, after one rolling bounce, group coordinator will attempt to assign new <code>member.id</code> towards consumers,
+ * for example <code>C0</code> -&gt; <code>C3</code> <code>C1</code> -&gt; <code>C2</code>.
+ *
+ * <p>The assignment could be completely shuffled to:
+ * <ul>
+ * <li><code>C3 (was C0): [t0p2, t1p2] (before was [t0p0, t0p1, t1p0, t1p1])</code>
+ * <li><code>C2 (was C1): [t0p0, t0p1, t1p0, t1p1] (before was [t0p2, t1p2])</code>
+ * </ul>
+ *
+ * The assignment change was caused by the change of <code>member.id</code> relative order, and
+ * can be avoided by setting the group.instance.id.
+ * Consumers will have individual instance ids <code>I1</code>, <code>I2</code>. As long as
+ * 1. Number of members remain the same across generation
+ * 2. Static members' identities persist across generation
+ * 3. Subscription pattern doesn't change for any member
+ *
+ * <p>The assignment will always be:
+ * <ul>
+ * <li><code>I0: [t0p0, t0p1, t1p0, t1p1]</code>
+ * <li><code>I1: [t0p2, t1p2]</code>
+ * </ul>
  */
 public class RangeAssignor extends AbstractPartitionAssignor {
 
-    @Override
-    public String name() {
-        return "range";
-    }
+	@Override
+	public String name() {
+		return "range";
+	}
 
-    private Map<String, List<String>> consumersPerTopic(Map<String, Subscription> consumerMetadata) {
-        Map<String, List<String>> res = new HashMap<>();
-        for (Map.Entry<String, Subscription> subscriptionEntry : consumerMetadata.entrySet()) {
-            String consumerId = subscriptionEntry.getKey();
-            for (String topic : subscriptionEntry.getValue().topics())
-                put(res, topic, consumerId);
-        }
-        return res;
-    }
+	private Map<String, List<MemberInfo>> consumersPerTopic(Map<String, Subscription> consumerMetadata) {
+		Map<String, List<MemberInfo>> topicToConsumers = new HashMap<>();
+		for (Map.Entry<String, Subscription> subscriptionEntry : consumerMetadata.entrySet()) {
+			String consumerId = subscriptionEntry.getKey();
+			MemberInfo memberInfo = new MemberInfo(consumerId, subscriptionEntry.getValue().groupInstanceId());
+			for (String topic : subscriptionEntry.getValue().topics()) {
+				put(topicToConsumers, topic, memberInfo);
+			}
+		}
+		return topicToConsumers;
+	}
 
     @Override
     public Map<String, List<TopicPartition>> assign(Map<String, Integer> partitionsPerTopic,
                                                     Map<String, Subscription> subscriptions) {
-        Map<String, List<String>> consumersPerTopic = consumersPerTopic(subscriptions);
-        Map<String, List<TopicPartition>> assignment = new HashMap<>();
-        for (String memberId : subscriptions.keySet())
-            assignment.put(memberId, new ArrayList<>());
+		Map<String, List<MemberInfo>> consumersPerTopic = consumersPerTopic(subscriptions);
 
-        for (Map.Entry<String, List<String>> topicEntry : consumersPerTopic.entrySet()) {
-            String topic = topicEntry.getKey();
-            List<String> consumersForTopic = topicEntry.getValue();
+		Map<String, List<TopicPartition>> assignment = new HashMap<>();
+		for (String memberId : subscriptions.keySet())
+			assignment.put(memberId, new ArrayList<>());
 
-            Integer numPartitionsForTopic = partitionsPerTopic.get(topic);
-            if (numPartitionsForTopic == null)
-                continue;
+		for (Map.Entry<String, List<MemberInfo>> topicEntry : consumersPerTopic.entrySet()) {
+			String topic = topicEntry.getKey();
+			List<MemberInfo> consumersForTopic = topicEntry.getValue();
 
-            Collections.sort(consumersForTopic);
+			Integer numPartitionsForTopic = partitionsPerTopic.get(topic);
+			if (numPartitionsForTopic == null)
+				continue;
 
-            int numPartitionsPerConsumer = numPartitionsForTopic / consumersForTopic.size();
+			Collections.sort(consumersForTopic);
+
+			int numPartitionsPerConsumer = numPartitionsForTopic / consumersForTopic.size();
             int consumersWithExtraPartition = numPartitionsForTopic % consumersForTopic.size();
 
             List<TopicPartition> partitions = AbstractPartitionAssignor.partitions(topic, numPartitionsForTopic);
             for (int i = 0, n = consumersForTopic.size(); i < n; i++) {
                 int start = numPartitionsPerConsumer * i + Math.min(i, consumersWithExtraPartition);
                 int length = numPartitionsPerConsumer + (i + 1 > consumersWithExtraPartition ? 0 : 1);
-                assignment.get(consumersForTopic.get(i)).addAll(partitions.subList(start, start + length));
+				assignment.get(consumersForTopic.get(i).memberId).addAll(partitions.subList(start, start + length));
             }
         }
         return assignment;
     }
-
 }

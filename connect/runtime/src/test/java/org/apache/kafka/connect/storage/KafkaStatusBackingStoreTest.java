@@ -18,8 +18,10 @@ package org.apache.kafka.connect.storage;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.Callback;
+import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.errors.UnknownServerException;
+import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.connect.data.Schema;
@@ -27,16 +29,24 @@ import org.apache.kafka.connect.data.SchemaAndValue;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.runtime.ConnectorStatus;
 import org.apache.kafka.connect.runtime.TaskStatus;
+import org.apache.kafka.connect.runtime.WorkerConfig;
+import org.apache.kafka.connect.runtime.distributed.DistributedConfig;
 import org.apache.kafka.connect.util.ConnectorTaskId;
 import org.apache.kafka.connect.util.KafkaBasedLog;
 import org.easymock.Capture;
 import org.easymock.EasyMock;
 import org.easymock.EasyMockSupport;
-import org.easymock.IAnswer;
+import org.easymock.Mock;
+import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.powermock.modules.junit4.PowerMockRunner;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.easymock.EasyMock.anyObject;
 import static org.easymock.EasyMock.capture;
@@ -45,104 +55,110 @@ import static org.easymock.EasyMock.expect;
 import static org.easymock.EasyMock.expectLastCall;
 import static org.easymock.EasyMock.newCapture;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 @SuppressWarnings("unchecked")
+@RunWith(PowerMockRunner.class)
 public class KafkaStatusBackingStoreTest extends EasyMockSupport {
 
-    private static final String STATUS_TOPIC = "status-topic";
-    private static final String WORKER_ID = "localhost:8083";
-    private static final String CONNECTOR = "conn";
-    private static final ConnectorTaskId TASK = new ConnectorTaskId(CONNECTOR, 0);
+	private static final String STATUS_TOPIC = "status-topic";
+	private static final String WORKER_ID = "localhost:8083";
+	private static final String CONNECTOR = "conn";
+	private static final ConnectorTaskId TASK = new ConnectorTaskId(CONNECTOR, 0);
 
-    @Test
-    public void putConnectorState() {
-        KafkaBasedLog<String, byte[]> kafkaBasedLog = mock(KafkaBasedLog.class);
-        Converter converter = mock(Converter.class);
-        KafkaStatusBackingStore store = new KafkaStatusBackingStore(new MockTime(), converter, STATUS_TOPIC, kafkaBasedLog);
+	private KafkaStatusBackingStore store;
+	@Mock
+	Converter converter;
+	@Mock
+	private KafkaBasedLog<String, byte[]> kafkaBasedLog;
+	@Mock
+	WorkerConfig workerConfig;
 
-        byte[] value = new byte[0];
-        expect(converter.fromConnectData(eq(STATUS_TOPIC), anyObject(Schema.class), anyObject(Struct.class)))
-                .andStubReturn(value);
+	@Before
+	public void setup() {
+		store = new KafkaStatusBackingStore(new MockTime(), converter, STATUS_TOPIC, kafkaBasedLog);
+	}
 
-        final Capture<Callback> callbackCapture = newCapture();
-        kafkaBasedLog.send(eq("status-connector-conn"), eq(value), capture(callbackCapture));
-        expectLastCall()
-                .andAnswer(new IAnswer<Void>() {
-                    @Override
-                    public Void answer() throws Throwable {
-                        callbackCapture.getValue().onCompletion(null, null);
-                        return null;
-                    }
-                });
+	@Test
+	public void misconfigurationOfStatusBackingStore() {
+		expect(workerConfig.getString(DistributedConfig.STATUS_STORAGE_TOPIC_CONFIG)).andReturn(null);
+		expect(workerConfig.getString(DistributedConfig.STATUS_STORAGE_TOPIC_CONFIG)).andReturn("   ");
+		replayAll();
+
+		Exception e = assertThrows(ConfigException.class, () -> store.configure(workerConfig));
+		assertEquals("Must specify topic for connector status.", e.getMessage());
+		e = assertThrows(ConfigException.class, () -> store.configure(workerConfig));
+		assertEquals("Must specify topic for connector status.", e.getMessage());
+		verifyAll();
+	}
+
+	@Test
+	public void putConnectorState() {
+		byte[] value = new byte[0];
+		expect(converter.fromConnectData(eq(STATUS_TOPIC), anyObject(Schema.class), anyObject(Struct.class)))
+				.andStubReturn(value);
+
+		final Capture<Callback> callbackCapture = newCapture();
+		kafkaBasedLog.send(eq("status-connector-conn"), eq(value), capture(callbackCapture));
+		expectLastCall()
+				.andAnswer(() -> {
+					callbackCapture.getValue().onCompletion(null, null);
+					return null;
+				});
         replayAll();
 
         ConnectorStatus status = new ConnectorStatus(CONNECTOR, ConnectorStatus.State.RUNNING, WORKER_ID, 0);
         store.put(status);
 
         // state is not visible until read back from the log
-        assertEquals(null, store.get(CONNECTOR));
+		assertNull(store.get(CONNECTOR));
 
         verifyAll();
     }
 
     @Test
     public void putConnectorStateRetriableFailure() {
-        KafkaBasedLog<String, byte[]> kafkaBasedLog = mock(KafkaBasedLog.class);
-        Converter converter = mock(Converter.class);
-        KafkaStatusBackingStore store = new KafkaStatusBackingStore(new MockTime(), converter, STATUS_TOPIC, kafkaBasedLog);
-
         byte[] value = new byte[0];
         expect(converter.fromConnectData(eq(STATUS_TOPIC), anyObject(Schema.class), anyObject(Struct.class)))
                 .andStubReturn(value);
 
         final Capture<Callback> callbackCapture = newCapture();
         kafkaBasedLog.send(eq("status-connector-conn"), eq(value), capture(callbackCapture));
-        expectLastCall()
-                .andAnswer(new IAnswer<Void>() {
-                    @Override
-                    public Void answer() throws Throwable {
-                        callbackCapture.getValue().onCompletion(null, new TimeoutException());
-                        return null;
-                    }
-                })
-                .andAnswer(new IAnswer<Void>() {
-                    @Override
-                    public Void answer() throws Throwable {
-                        callbackCapture.getValue().onCompletion(null, null);
-                        return null;
-                    }
-                });
+		expectLastCall()
+				.andAnswer(() -> {
+					callbackCapture.getValue().onCompletion(null, new TimeoutException());
+					return null;
+				})
+				.andAnswer(() -> {
+					callbackCapture.getValue().onCompletion(null, null);
+					return null;
+				});
         replayAll();
 
         ConnectorStatus status = new ConnectorStatus(CONNECTOR, ConnectorStatus.State.RUNNING, WORKER_ID, 0);
         store.put(status);
 
         // state is not visible until read back from the log
-        assertEquals(null, store.get(CONNECTOR));
+		assertNull(store.get(CONNECTOR));
 
         verifyAll();
     }
 
     @Test
     public void putConnectorStateNonRetriableFailure() {
-        KafkaBasedLog<String, byte[]> kafkaBasedLog = mock(KafkaBasedLog.class);
-        Converter converter = mock(Converter.class);
-        KafkaStatusBackingStore store = new KafkaStatusBackingStore(new MockTime(), converter, STATUS_TOPIC, kafkaBasedLog);
-
         byte[] value = new byte[0];
         expect(converter.fromConnectData(eq(STATUS_TOPIC), anyObject(Schema.class), anyObject(Struct.class)))
                 .andStubReturn(value);
 
         final Capture<Callback> callbackCapture = newCapture();
         kafkaBasedLog.send(eq("status-connector-conn"), eq(value), capture(callbackCapture));
-        expectLastCall()
-                .andAnswer(new IAnswer<Void>() {
-                    @Override
-                    public Void answer() throws Throwable {
-                        callbackCapture.getValue().onCompletion(null, new UnknownServerException());
-                        return null;
-                    }
-                });
+		expectLastCall()
+				.andAnswer(() -> {
+					callbackCapture.getValue().onCompletion(null, new UnknownServerException());
+					return null;
+				});
         replayAll();
 
         // the error is logged and ignored
@@ -150,7 +166,7 @@ public class KafkaStatusBackingStoreTest extends EasyMockSupport {
         store.put(status);
 
         // state is not visible until read back from the log
-        assertEquals(null, store.get(CONNECTOR));
+		assertNull(store.get(CONNECTOR));
 
         verifyAll();
     }
@@ -159,10 +175,6 @@ public class KafkaStatusBackingStoreTest extends EasyMockSupport {
     public void putSafeConnectorIgnoresStaleStatus() {
         byte[] value = new byte[0];
         String otherWorkerId = "anotherhost:8083";
-
-        KafkaBasedLog<String, byte[]> kafkaBasedLog = mock(KafkaBasedLog.class);
-        Converter converter = mock(Converter.class);
-        KafkaStatusBackingStore store = new KafkaStatusBackingStore(new MockTime(), converter, STATUS_TOPIC, kafkaBasedLog);
 
         // the persisted came from a different host and has a newer generation
         Map<String, Object> statusMap = new HashMap<>();
@@ -188,10 +200,6 @@ public class KafkaStatusBackingStoreTest extends EasyMockSupport {
 
     @Test
     public void putSafeWithNoPreviousValueIsPropagated() {
-        final Converter converter = mock(Converter.class);
-        final KafkaBasedLog<String, byte[]> kafkaBasedLog = mock(KafkaBasedLog.class);
-        final KafkaStatusBackingStore store = new KafkaStatusBackingStore(new MockTime(), converter, STATUS_TOPIC, kafkaBasedLog);
-
         final byte[] value = new byte[0];
 
         final Capture<Struct> statusValueStruct = newCapture();
@@ -217,10 +225,6 @@ public class KafkaStatusBackingStoreTest extends EasyMockSupport {
     public void putSafeOverridesValueSetBySameWorker() {
         final byte[] value = new byte[0];
 
-        KafkaBasedLog<String, byte[]> kafkaBasedLog = mock(KafkaBasedLog.class);
-        Converter converter = mock(Converter.class);
-        final KafkaStatusBackingStore store = new KafkaStatusBackingStore(new MockTime(), converter, STATUS_TOPIC, kafkaBasedLog);
-
         // the persisted came from the same host, but has a newer generation
         Map<String, Object> firstStatusRead = new HashMap<>();
         firstStatusRead.put("worker_id", WORKER_ID);
@@ -241,15 +245,12 @@ public class KafkaStatusBackingStoreTest extends EasyMockSupport {
 
         final Capture<Callback> callbackCapture = newCapture();
         kafkaBasedLog.send(eq("status-connector-conn"), eq(value), capture(callbackCapture));
-        expectLastCall()
-                .andAnswer(new IAnswer<Void>() {
-                    @Override
-                    public Void answer() throws Throwable {
-                        callbackCapture.getValue().onCompletion(null, null);
-                        store.read(consumerRecord(1, "status-connector-conn", value));
-                        return null;
-                    }
-                });
+		expectLastCall()
+				.andAnswer(() -> {
+					callbackCapture.getValue().onCompletion(null, null);
+					store.read(consumerRecord(1, "status-connector-conn", value));
+					return null;
+				});
 
         replayAll();
 
@@ -266,10 +267,6 @@ public class KafkaStatusBackingStoreTest extends EasyMockSupport {
     public void putConnectorStateShouldOverride() {
         final byte[] value = new byte[0];
         String otherWorkerId = "anotherhost:8083";
-
-        KafkaBasedLog<String, byte[]> kafkaBasedLog = mock(KafkaBasedLog.class);
-        Converter converter = mock(Converter.class);
-        final KafkaStatusBackingStore store = new KafkaStatusBackingStore(new MockTime(), converter, STATUS_TOPIC, kafkaBasedLog);
 
         // the persisted came from a different host and has a newer generation
         Map<String, Object> firstStatusRead = new HashMap<>();
@@ -291,15 +288,12 @@ public class KafkaStatusBackingStoreTest extends EasyMockSupport {
 
         final Capture<Callback> callbackCapture = newCapture();
         kafkaBasedLog.send(eq("status-connector-conn"), eq(value), capture(callbackCapture));
-        expectLastCall()
-                .andAnswer(new IAnswer<Void>() {
-                    @Override
-                    public Void answer() throws Throwable {
-                        callbackCapture.getValue().onCompletion(null, null);
-                        store.read(consumerRecord(1, "status-connector-conn", value));
-                        return null;
-                    }
-                });
+		expectLastCall()
+				.andAnswer(() -> {
+					callbackCapture.getValue().onCompletion(null, null);
+					store.read(consumerRecord(1, "status-connector-conn", value));
+					return null;
+				});
         replayAll();
 
         store.read(consumerRecord(0, "status-connector-conn", value));
@@ -314,10 +308,6 @@ public class KafkaStatusBackingStoreTest extends EasyMockSupport {
     @Test
     public void readConnectorState() {
         byte[] value = new byte[0];
-
-        KafkaBasedLog<String, byte[]> kafkaBasedLog = mock(KafkaBasedLog.class);
-        Converter converter = mock(Converter.class);
-        KafkaStatusBackingStore store = new KafkaStatusBackingStore(new MockTime(), converter, STATUS_TOPIC, kafkaBasedLog);
 
         Map<String, Object> statusMap = new HashMap<>();
         statusMap.put("worker_id", WORKER_ID);
@@ -339,64 +329,116 @@ public class KafkaStatusBackingStoreTest extends EasyMockSupport {
 
     @Test
     public void putTaskState() {
-        KafkaBasedLog<String, byte[]> kafkaBasedLog = mock(KafkaBasedLog.class);
-        Converter converter = mock(Converter.class);
-        KafkaStatusBackingStore store = new KafkaStatusBackingStore(new MockTime(), converter, STATUS_TOPIC, kafkaBasedLog);
-
         byte[] value = new byte[0];
         expect(converter.fromConnectData(eq(STATUS_TOPIC), anyObject(Schema.class), anyObject(Struct.class)))
                 .andStubReturn(value);
 
         final Capture<Callback> callbackCapture = newCapture();
         kafkaBasedLog.send(eq("status-task-conn-0"), eq(value), capture(callbackCapture));
-        expectLastCall()
-                .andAnswer(new IAnswer<Void>() {
-                    @Override
-                    public Void answer() throws Throwable {
-                        callbackCapture.getValue().onCompletion(null, null);
-                        return null;
-                    }
-                });
+		expectLastCall()
+				.andAnswer(() -> {
+					callbackCapture.getValue().onCompletion(null, null);
+					return null;
+				});
         replayAll();
 
         TaskStatus status = new TaskStatus(TASK, TaskStatus.State.RUNNING, WORKER_ID, 0);
         store.put(status);
 
         // state is not visible until read back from the log
-        assertEquals(null, store.get(TASK));
+		assertNull(store.get(TASK));
 
         verifyAll();
     }
 
     @Test
-    public void readTaskState() {
-        byte[] value = new byte[0];
+	public void readTaskState() {
+		byte[] value = new byte[0];
 
-        KafkaBasedLog<String, byte[]> kafkaBasedLog = mock(KafkaBasedLog.class);
-        Converter converter = mock(Converter.class);
-        KafkaStatusBackingStore store = new KafkaStatusBackingStore(new MockTime(), converter, STATUS_TOPIC, kafkaBasedLog);
+		Map<String, Object> statusMap = new HashMap<>();
+		statusMap.put("worker_id", WORKER_ID);
+		statusMap.put("state", "RUNNING");
+		statusMap.put("generation", 0L);
 
-        Map<String, Object> statusMap = new HashMap<>();
-        statusMap.put("worker_id", WORKER_ID);
-        statusMap.put("state", "RUNNING");
-        statusMap.put("generation", 0L);
+		expect(converter.toConnectData(STATUS_TOPIC, value))
+				.andReturn(new SchemaAndValue(null, statusMap));
 
-        expect(converter.toConnectData(STATUS_TOPIC, value))
-                .andReturn(new SchemaAndValue(null, statusMap));
+		replayAll();
 
-        replayAll();
+		store.read(consumerRecord(0, "status-task-conn-0", value));
 
-        store.read(consumerRecord(0, "status-task-conn-0", value));
+		TaskStatus status = new TaskStatus(TASK, TaskStatus.State.RUNNING, WORKER_ID, 0);
+		assertEquals(status, store.get(TASK));
 
-        TaskStatus status = new TaskStatus(TASK, TaskStatus.State.RUNNING, WORKER_ID, 0);
-        assertEquals(status, store.get(TASK));
+		verifyAll();
+	}
 
-        verifyAll();
-    }
+	@Test
+	public void deleteConnectorState() {
+		final byte[] value = new byte[0];
+		Map<String, Object> statusMap = new HashMap<>();
+		statusMap.put("worker_id", WORKER_ID);
+		statusMap.put("state", "RUNNING");
+		statusMap.put("generation", 0L);
 
-    private static ConsumerRecord<String, byte[]> consumerRecord(long offset, String key, byte[] value) {
-        return new ConsumerRecord<>(STATUS_TOPIC, 0, offset, System.currentTimeMillis(),
-                TimestampType.CREATE_TIME, 0L, 0, 0, key, value);
-    }
+		converter.fromConnectData(eq(STATUS_TOPIC), anyObject(Schema.class), anyObject(Struct.class));
+		EasyMock.expectLastCall().andReturn(value);
+		kafkaBasedLog.send(eq("status-connector-" + CONNECTOR), eq(value), anyObject(Callback.class));
+		expectLastCall();
+
+		converter.fromConnectData(eq(STATUS_TOPIC), anyObject(Schema.class), anyObject(Struct.class));
+		EasyMock.expectLastCall().andReturn(value);
+		kafkaBasedLog.send(eq("status-task-conn-0"), eq(value), anyObject(Callback.class));
+		expectLastCall();
+
+		expect(converter.toConnectData(STATUS_TOPIC, value)).andReturn(new SchemaAndValue(null, statusMap));
+
+		replayAll();
+
+		ConnectorStatus connectorStatus = new ConnectorStatus(CONNECTOR, ConnectorStatus.State.RUNNING, WORKER_ID, 0);
+		store.put(connectorStatus);
+		TaskStatus taskStatus = new TaskStatus(TASK, TaskStatus.State.RUNNING, WORKER_ID, 0);
+		store.put(taskStatus);
+		store.read(consumerRecord(0, "status-task-conn-0", value));
+
+		assertEquals(new HashSet<>(Collections.singletonList(CONNECTOR)), store.connectors());
+		assertEquals(new HashSet<>(Collections.singletonList(taskStatus)), new HashSet<>(store.getAll(CONNECTOR)));
+		store.read(consumerRecord(0, "status-connector-conn", null));
+		assertTrue(store.connectors().isEmpty());
+		assertTrue(store.getAll(CONNECTOR).isEmpty());
+		verifyAll();
+	}
+
+	@Test
+	public void deleteTaskState() {
+		final byte[] value = new byte[0];
+		Map<String, Object> statusMap = new HashMap<>();
+		statusMap.put("worker_id", WORKER_ID);
+		statusMap.put("state", "RUNNING");
+		statusMap.put("generation", 0L);
+
+		converter.fromConnectData(eq(STATUS_TOPIC), anyObject(Schema.class), anyObject(Struct.class));
+		EasyMock.expectLastCall().andReturn(value);
+		kafkaBasedLog.send(eq("status-task-conn-0"), eq(value), anyObject(Callback.class));
+		expectLastCall();
+
+		expect(converter.toConnectData(STATUS_TOPIC, value)).andReturn(new SchemaAndValue(null, statusMap));
+
+		replayAll();
+
+		TaskStatus taskStatus = new TaskStatus(TASK, TaskStatus.State.RUNNING, WORKER_ID, 0);
+		store.put(taskStatus);
+		store.read(consumerRecord(0, "status-task-conn-0", value));
+
+		assertEquals(new HashSet<>(Collections.singletonList(taskStatus)), new HashSet<>(store.getAll(CONNECTOR)));
+		store.read(consumerRecord(0, "status-task-conn-0", null));
+		assertTrue(store.getAll(CONNECTOR).isEmpty());
+		verifyAll();
+	}
+
+	private static ConsumerRecord<String, byte[]> consumerRecord(long offset, String key, byte[] value) {
+		return new ConsumerRecord<>(STATUS_TOPIC, 0, offset, System.currentTimeMillis(),
+				TimestampType.CREATE_TIME, 0, 0, key, value, new RecordHeaders(), Optional.empty());
+	}
 
 }

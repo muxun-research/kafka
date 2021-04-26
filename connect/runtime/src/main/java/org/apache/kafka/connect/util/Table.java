@@ -52,14 +52,17 @@ public class Table<R, C, V> {
         V value = columns.remove(column);
         if (columns.isEmpty())
             table.remove(row);
-        return value;
-    }
+		return value;
+	}
 
-    public Map<C, V> row(R row) {
-        Map<C, V> columns = table.get(row);
-        if (columns == null)
-            return Collections.emptyMap();
-        return Collections.unmodifiableMap(columns);
-    }
+	public Map<C, V> row(R row) {
+		Map<C, V> columns = table.get(row);
+		if (columns == null)
+			return Collections.emptyMap();
+		return Collections.unmodifiableMap(columns);
+	}
 
+	public boolean isEmpty() {
+		return table.isEmpty();
+	}
 }

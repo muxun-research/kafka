@@ -33,39 +33,50 @@ import org.apache.kafka.streams.state.Stores;
 import org.apache.kafka.test.IntegrationTest;
 import org.apache.kafka.test.StreamsTestUtils;
 import org.apache.kafka.test.TestUtils;
+import org.junit.AfterClass;
 import org.junit.Before;
-import org.junit.ClassRule;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
-import java.util.concurrent.ExecutionException;
 
 @Category({IntegrationTest.class})
 public class StateRestorationIntegrationTest {
-    private StreamsBuilder builder = new StreamsBuilder();
+	private StreamsBuilder builder = new StreamsBuilder();
 
-    private static final String APPLICATION_ID = "restoration-test-app";
-    private static final String STATE_STORE_NAME = "stateStore";
-    private static final String INPUT_TOPIC = "input";
-    private static final String OUTPUT_TOPIC = "output";
+	private static final String APPLICATION_ID = "restoration-test-app";
+	private static final String STATE_STORE_NAME = "stateStore";
+	private static final String INPUT_TOPIC = "input";
+	private static final String OUTPUT_TOPIC = "output";
 
-    private Properties streamsConfiguration;
+	private Properties streamsConfiguration;
 
-    @ClassRule
-    public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(1);
-    private final MockTime mockTime = CLUSTER.time;
+	public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(1);
 
-    @Before
-    public void setUp() throws Exception {
-        final Properties props = new Properties();
+	@BeforeClass
+	public static void startCluster() throws IOException {
+		CLUSTER.start();
+	}
 
-        streamsConfiguration = StreamsTestUtils.getStreamsConfig(
-                APPLICATION_ID,
-                CLUSTER.bootstrapServers(),
+	@AfterClass
+	public static void closeCluster() {
+		CLUSTER.stop();
+	}
+
+	private final MockTime mockTime = CLUSTER.time;
+
+	@Before
+	public void setUp() throws Exception {
+		final Properties props = new Properties();
+
+		streamsConfiguration = StreamsTestUtils.getStreamsConfig(
+				APPLICATION_ID,
+				CLUSTER.bootstrapServers(),
                 Serdes.Integer().getClass().getName(),
                 Serdes.ByteArray().getClass().getName(),
                 props);
@@ -76,18 +87,18 @@ public class StateRestorationIntegrationTest {
         IntegrationTestUtils.purgeLocalStreamsState(streamsConfiguration);
     }
 
-    @Test
-    public void shouldRestoreNullRecord() throws InterruptedException, ExecutionException {
-        builder.table(INPUT_TOPIC, Materialized.<Integer, Bytes>as(
-                Stores.persistentTimestampedKeyValueStore(STATE_STORE_NAME))
-                .withKeySerde(Serdes.Integer())
-                .withValueSerde(Serdes.Bytes())
-                .withCachingDisabled()).toStream().to(OUTPUT_TOPIC);
+	@Test
+	public void shouldRestoreNullRecord() throws Exception {
+		builder.table(INPUT_TOPIC, Materialized.<Integer, Bytes>as(
+				Stores.persistentTimestampedKeyValueStore(STATE_STORE_NAME))
+				.withKeySerde(Serdes.Integer())
+				.withValueSerde(Serdes.Bytes())
+				.withCachingDisabled()).toStream().to(OUTPUT_TOPIC);
 
-        final Properties producerConfig = TestUtils.producerConfig(
-                CLUSTER.bootstrapServers(), IntegerSerializer.class, BytesSerializer.class);
+		final Properties producerConfig = TestUtils.producerConfig(
+				CLUSTER.bootstrapServers(), IntegerSerializer.class, BytesSerializer.class);
 
-        final List<KeyValue<Integer, Bytes>> initialKeyValues = Arrays.asList(
+		final List<KeyValue<Integer, Bytes>> initialKeyValues = Arrays.asList(
                 KeyValue.pair(3, new Bytes(new byte[]{3})),
                 KeyValue.pair(3, null),
                 KeyValue.pair(1, new Bytes(new byte[]{1})));

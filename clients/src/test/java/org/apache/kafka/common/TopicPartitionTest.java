@@ -17,12 +17,12 @@
 package org.apache.kafka.common;
 
 import org.apache.kafka.common.utils.Serializer;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * This test ensures TopicPartition class is serializable and is serialization compatible.
@@ -35,10 +35,10 @@ public class TopicPartitionTest {
     private int partNum = 5;
 
     private void checkValues(TopicPartition deSerTP) {
-        //assert deserialized values are same as original
-        assertEquals("partition number should be " + partNum + " but got " + deSerTP.partition(), partNum, deSerTP.partition());
-        assertEquals("topic should be " + topicName + " but got " + deSerTP.topic(), topicName, deSerTP.topic());
-    }
+		//assert deserialized values are same as original
+		assertEquals(partNum, deSerTP.partition(), "partition number should be " + partNum + " but got " + deSerTP.partition());
+		assertEquals(topicName, deSerTP.topic(), "topic should be " + topicName + " but got " + deSerTP.topic());
+	}
 
     @Test
     public void testSerializationRoundtrip() throws IOException, ClassNotFoundException {

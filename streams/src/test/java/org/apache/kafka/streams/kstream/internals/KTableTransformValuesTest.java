@@ -21,8 +21,9 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.KeyValueTimestamp;
-import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.StreamsBuilder;
+import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.TestInputTopic;
 import org.apache.kafka.streams.TopologyTestDriver;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.Grouped;
@@ -40,10 +41,9 @@ import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.Stores;
 import org.apache.kafka.streams.state.TimestampedKeyValueStore;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
-import org.apache.kafka.streams.test.ConsumerRecordFactory;
 import org.apache.kafka.test.MockProcessorSupplier;
 import org.apache.kafka.test.MockReducer;
-import org.apache.kafka.test.SingletonNoOpValueTransformer;
+import org.apache.kafka.test.NoOpValueTransformerWithKeySupplier;
 import org.apache.kafka.test.TestUtils;
 import org.easymock.EasyMockRunner;
 import org.easymock.Mock;
@@ -58,6 +58,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 
+import static org.easymock.EasyMock.anyBoolean;
 import static org.easymock.EasyMock.expect;
 import static org.easymock.EasyMock.expectLastCall;
 import static org.easymock.EasyMock.replay;
@@ -77,9 +78,6 @@ public class KTableTransformValuesTest {
     private static final String OTHER_STORE_NAME = "otherStore";
 
     private static final Consumed<String, String> CONSUMED = Consumed.with(Serdes.String(), Serdes.String());
-
-    private final ConsumerRecordFactory<String, String> recordFactory =
-        new ConsumerRecordFactory<>(new StringSerializer(), new StringSerializer(), 0L);
 
     private TopologyTestDriver driver;
     private MockProcessorSupplier<String, String> capture;
@@ -142,9 +140,9 @@ public class KTableTransformValuesTest {
     @SuppressWarnings("unchecked")
     @Test
     public void shouldInitializeTransformerWithForwardDisabledProcessorContext() {
-        final SingletonNoOpValueTransformer<String, String> transformer = new SingletonNoOpValueTransformer<>();
-        final KTableTransformValues<String, String, String> transformValues =
-            new KTableTransformValues<>(parent, transformer, null);
+		final NoOpValueTransformerWithKeySupplier<String, String> transformer = new NoOpValueTransformerWithKeySupplier<>();
+		final KTableTransformValues<String, String, String> transformValues =
+				new KTableTransformValues<>(parent, transformer, null);
         final Processor<String, Change<String>> processor = transformValues.get();
 
         processor.init(context);
@@ -171,36 +169,51 @@ public class KTableTransformValuesTest {
 
     @Test
     public void shouldSendOldValuesIfConfigured() {
-        final KTableTransformValues<String, String, String> transformValues =
-            new KTableTransformValues<>(parent, new ExclamationValueTransformerSupplier(), null);
+		final KTableTransformValues<String, String, String> transformValues =
+				new KTableTransformValues<>(parent, new ExclamationValueTransformerSupplier(), null);
 
-        transformValues.enableSendingOldValues();
-        final Processor<String, Change<String>> processor = transformValues.get();
-        processor.init(context);
+		expect(parent.enableSendingOldValues(true)).andReturn(true);
+		replay(parent);
 
-        context.forward("Key", new Change<>("Key->newValue!", "Key->oldValue!"));
-        expectLastCall();
-        replay(context);
+		transformValues.enableSendingOldValues(true);
+		final Processor<String, Change<String>> processor = transformValues.get();
+		processor.init(context);
 
-        processor.process("Key", new Change<>("newValue", "oldValue"));
+		context.forward("Key", new Change<>("Key->newValue!", "Key->oldValue!"));
+		expectLastCall();
+		replay(context);
 
-        verify(context);
-    }
+		processor.process("Key", new Change<>("newValue", "oldValue"));
 
-    @Test
-    public void shouldSetSendOldValuesOnParent() {
-        parent.enableSendingOldValues();
-        expectLastCall();
-        replay(parent);
+		verify(context);
+	}
 
-        new KTableTransformValues<>(parent, new SingletonNoOpValueTransformer<>(), QUERYABLE_NAME).enableSendingOldValues();
+	@Test
+	public void shouldNotSetSendOldValuesOnParentIfMaterialized() {
+		expect(parent.enableSendingOldValues(anyBoolean()))
+				.andThrow(new AssertionError("Should not call enableSendingOldValues"))
+				.anyTimes();
 
-        verify(parent);
-    }
+		replay(parent);
 
-    @SuppressWarnings("unchecked")
-    @Test
-    public void shouldTransformOnGetIfNotMaterialized() {
+		new KTableTransformValues<>(parent, new NoOpValueTransformerWithKeySupplier<>(), QUERYABLE_NAME).enableSendingOldValues(true);
+
+		verify(parent);
+	}
+
+	@Test
+	public void shouldSetSendOldValuesOnParentIfNotMaterialized() {
+		expect(parent.enableSendingOldValues(true)).andReturn(true);
+		replay(parent);
+
+		new KTableTransformValues<>(parent, new NoOpValueTransformerWithKeySupplier<>(), null).enableSendingOldValues(true);
+
+		verify(parent);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Test
+	public void shouldTransformOnGetIfNotMaterialized() {
         final KTableTransformValues<String, String, String> transformValues =
             new KTableTransformValues<>(parent, new ExclamationValueTransformerSupplier(), null);
 
@@ -317,58 +330,61 @@ public class KTableTransformValuesTest {
     @Test
     public void shouldTransformValuesWithKey() {
         builder
-            .addStateStore(storeBuilder(STORE_NAME))
-            .addStateStore(storeBuilder(OTHER_STORE_NAME))
-            .table(INPUT_TOPIC, CONSUMED)
-            .transformValues(
-                new ExclamationValueTransformerSupplier(STORE_NAME, OTHER_STORE_NAME),
-                STORE_NAME, OTHER_STORE_NAME)
-            .toStream()
-            .process(capture);
+				.addStateStore(storeBuilder(STORE_NAME))
+				.addStateStore(storeBuilder(OTHER_STORE_NAME))
+				.table(INPUT_TOPIC, CONSUMED)
+				.transformValues(
+						new ExclamationValueTransformerSupplier(STORE_NAME, OTHER_STORE_NAME),
+						STORE_NAME, OTHER_STORE_NAME)
+				.toStream()
+				.process(capture);
 
-        driver = new TopologyTestDriver(builder.build(), props());
+		driver = new TopologyTestDriver(builder.build(), props());
+		final TestInputTopic<String, String> inputTopic =
+				driver.createInputTopic(INPUT_TOPIC, new StringSerializer(), new StringSerializer());
 
-        driver.pipeInput(recordFactory.create(INPUT_TOPIC, "A", "a", 5L));
-        driver.pipeInput(recordFactory.create(INPUT_TOPIC, "B", "b", 10L));
-        driver.pipeInput(recordFactory.create(INPUT_TOPIC, "D", (String) null, 15L));
+		inputTopic.pipeInput("A", "a", 5L);
+		inputTopic.pipeInput("B", "b", 10L);
+		inputTopic.pipeInput("D", (String) null, 15L);
 
 
-        assertThat(output(), hasItems(new KeyValueTimestamp<>("A", "A->a!", 5),
-                new KeyValueTimestamp<>("B", "B->b!", 10),
-                new KeyValueTimestamp<>("D", "D->null!", 15)
-        ));
-        assertNull("Store should not be materialized", driver.getKeyValueStore(QUERYABLE_NAME));
-    }
+		assertThat(output(), hasItems(new KeyValueTimestamp<>("A", "A->a!", 5),
+				new KeyValueTimestamp<>("B", "B->b!", 10),
+				new KeyValueTimestamp<>("D", "D->null!", 15)
+		));
+		assertNull("Store should not be materialized", driver.getKeyValueStore(QUERYABLE_NAME));
+	}
 
     @Test
     public void shouldTransformValuesWithKeyAndMaterialize() {
         builder
             .addStateStore(storeBuilder(STORE_NAME))
             .table(INPUT_TOPIC, CONSUMED)
-            .transformValues(
-                new ExclamationValueTransformerSupplier(STORE_NAME, QUERYABLE_NAME),
-                Materialized.<String, String, KeyValueStore<Bytes, byte[]>>as(QUERYABLE_NAME)
-                    .withKeySerde(Serdes.String())
-                    .withValueSerde(Serdes.String()),
-                STORE_NAME)
-            .toStream()
-            .process(capture);
+				.transformValues(
+						new ExclamationValueTransformerSupplier(STORE_NAME, QUERYABLE_NAME),
+						Materialized.<String, String, KeyValueStore<Bytes, byte[]>>as(QUERYABLE_NAME)
+								.withKeySerde(Serdes.String())
+								.withValueSerde(Serdes.String()),
+						STORE_NAME)
+				.toStream()
+				.process(capture);
 
-        driver = new TopologyTestDriver(builder.build(), props());
+		driver = new TopologyTestDriver(builder.build(), props());
+		final TestInputTopic<String, String> inputTopic =
+				driver.createInputTopic(INPUT_TOPIC, new StringSerializer(), new StringSerializer());
+		inputTopic.pipeInput("A", "a", 5L);
+		inputTopic.pipeInput("B", "b", 10L);
+		inputTopic.pipeInput("C", (String) null, 15L);
 
-        driver.pipeInput(recordFactory.create(INPUT_TOPIC, "A", "a", 5L));
-        driver.pipeInput(recordFactory.create(INPUT_TOPIC, "B", "b", 10L));
-        driver.pipeInput(recordFactory.create(INPUT_TOPIC, "C", (String) null, 15L));
+		assertThat(output(), hasItems(new KeyValueTimestamp<>("A", "A->a!", 5),
+				new KeyValueTimestamp<>("B", "B->b!", 10),
+				new KeyValueTimestamp<>("C", "C->null!", 15)));
 
-        assertThat(output(), hasItems(new KeyValueTimestamp<>("A", "A->a!", 5),
-                new KeyValueTimestamp<>("B", "B->b!", 10),
-                new KeyValueTimestamp<>("C", "C->null!", 15)));
-
-        {
-            final KeyValueStore<String, String> keyValueStore = driver.getKeyValueStore(QUERYABLE_NAME);
-            assertThat(keyValueStore.get("A"), is("A->a!"));
-            assertThat(keyValueStore.get("B"), is("B->b!"));
-            assertThat(keyValueStore.get("C"), is("C->null!"));
+		{
+			final KeyValueStore<String, String> keyValueStore = driver.getKeyValueStore(QUERYABLE_NAME);
+			assertThat(keyValueStore.get("A"), is("A->a!"));
+			assertThat(keyValueStore.get("B"), is("B->b!"));
+			assertThat(keyValueStore.get("C"), is("C->null!"));
         }
         {
             final KeyValueStore<String, ValueAndTimestamp<String>> keyValueStore = driver.getTimestampedKeyValueStore(QUERYABLE_NAME);
@@ -384,66 +400,70 @@ public class KTableTransformValuesTest {
             .table(INPUT_TOPIC, CONSUMED)
             .transformValues(
                 new StatefulTransformerSupplier(),
-                Materialized.<String, Integer, KeyValueStore<Bytes, byte[]>>as(QUERYABLE_NAME)
-                    .withKeySerde(Serdes.String())
-                    .withValueSerde(Serdes.Integer()))
-            .groupBy(toForceSendingOfOldValues(), Grouped.with(Serdes.String(), Serdes.Integer()))
-            .reduce(MockReducer.INTEGER_ADDER, MockReducer.INTEGER_SUBTRACTOR)
-            .mapValues(mapBackToStrings())
-            .toStream()
-            .process(capture);
+					Materialized.<String, Integer, KeyValueStore<Bytes, byte[]>>as(QUERYABLE_NAME)
+							.withKeySerde(Serdes.String())
+							.withValueSerde(Serdes.Integer()))
+				.groupBy(toForceSendingOfOldValues(), Grouped.with(Serdes.String(), Serdes.Integer()))
+				.reduce(MockReducer.INTEGER_ADDER, MockReducer.INTEGER_SUBTRACTOR)
+				.mapValues(mapBackToStrings())
+				.toStream()
+				.process(capture);
 
-        driver = new TopologyTestDriver(builder.build(), props());
+		driver = new TopologyTestDriver(builder.build(), props());
+		final TestInputTopic<String, String> inputTopic =
+				driver.createInputTopic(INPUT_TOPIC, new StringSerializer(), new StringSerializer());
 
-        driver.pipeInput(recordFactory.create(INPUT_TOPIC, "A", "ignored", 5L));
-        driver.pipeInput(recordFactory.create(INPUT_TOPIC, "A", "ignored", 15L));
-        driver.pipeInput(recordFactory.create(INPUT_TOPIC, "A", "ignored", 10L));
+		inputTopic.pipeInput("A", "ignored", 5L);
+		inputTopic.pipeInput("A", "ignored1", 15L);
+		inputTopic.pipeInput("A", "ignored2", 10L);
 
-        assertThat(output(), hasItems(new KeyValueTimestamp<>("A", "1", 5),
-                new KeyValueTimestamp<>("A", "0", 15),
-                new KeyValueTimestamp<>("A", "2", 15),
-                new KeyValueTimestamp<>("A", "0", 15),
-                new KeyValueTimestamp<>("A", "3", 15)));
+		assertThat(output(), hasItems(new KeyValueTimestamp<>("A", "1", 5),
+				new KeyValueTimestamp<>("A", "0", 15),
+				new KeyValueTimestamp<>("A", "2", 15),
+				new KeyValueTimestamp<>("A", "0", 15),
+				new KeyValueTimestamp<>("A", "3", 15)));
 
-        final KeyValueStore<String, Integer> keyValueStore = driver.getKeyValueStore(QUERYABLE_NAME);
-        assertThat(keyValueStore.get("A"), is(3));
-    }
+		final KeyValueStore<String, Integer> keyValueStore = driver.getKeyValueStore(QUERYABLE_NAME);
+		assertThat(keyValueStore.get("A"), is(3));
+	}
 
     @Test
     public void shouldCalculateCorrectOldValuesIfNotStatefulEvenIfNotMaterialized() {
-        builder
-            .table(INPUT_TOPIC, CONSUMED)
-            .transformValues(new StatelessTransformerSupplier())
-            .groupBy(toForceSendingOfOldValues(), Grouped.with(Serdes.String(), Serdes.Integer()))
-            .reduce(MockReducer.INTEGER_ADDER, MockReducer.INTEGER_SUBTRACTOR)
-            .mapValues(mapBackToStrings())
-            .toStream()
-            .process(capture);
+		builder
+				.table(INPUT_TOPIC, CONSUMED)
+				.transformValues(new StatelessTransformerSupplier())
+				.groupBy(toForceSendingOfOldValues(), Grouped.with(Serdes.String(), Serdes.Integer()))
+				.reduce(MockReducer.INTEGER_ADDER, MockReducer.INTEGER_SUBTRACTOR)
+				.mapValues(mapBackToStrings())
+				.toStream()
+				.process(capture);
 
-        driver = new TopologyTestDriver(builder.build(), props());
+		driver = new TopologyTestDriver(builder.build(), props());
+		final TestInputTopic<String, String> inputTopic =
+				driver.createInputTopic(INPUT_TOPIC, new StringSerializer(), new StringSerializer());
 
-        driver.pipeInput(recordFactory.create(INPUT_TOPIC, "A", "a", 5L));
-        driver.pipeInput(recordFactory.create(INPUT_TOPIC, "A", "aa", 15L));
-        driver.pipeInput(recordFactory.create(INPUT_TOPIC, "A", "aaa", 10));
+		inputTopic.pipeInput("A", "a", 5L);
+		inputTopic.pipeInput("A", "aa", 15L);
+		inputTopic.pipeInput("A", "aaa", 10);
 
-        assertThat(output(), hasItems(new KeyValueTimestamp<>("A", "1", 5),
-                 new KeyValueTimestamp<>("A", "0", 15),
-                 new KeyValueTimestamp<>("A", "2", 15),
-                 new KeyValueTimestamp<>("A", "0", 15),
-                 new KeyValueTimestamp<>("A", "3", 15)));
-    }
+		assertThat(output(), hasItems(new KeyValueTimestamp<>("A", "1", 5),
+				new KeyValueTimestamp<>("A", "0", 15),
+				new KeyValueTimestamp<>("A", "2", 15),
+				new KeyValueTimestamp<>("A", "0", 15),
+				new KeyValueTimestamp<>("A", "3", 15)));
+	}
 
-    private ArrayList<KeyValueTimestamp<Object, Object>> output() {
-        return capture.capturedProcessors(1).get(0).processed;
-    }
+	private ArrayList<KeyValueTimestamp<String, String>> output() {
+		return capture.capturedProcessors(1).get(0).processed();
+	}
 
-    private static KeyValueMapper<String, Integer, KeyValue<String, Integer>> toForceSendingOfOldValues() {
-        return KeyValue::new;
-    }
+	private static KeyValueMapper<String, Integer, KeyValue<String, Integer>> toForceSendingOfOldValues() {
+		return KeyValue::new;
+	}
 
-    private static ValueMapper<Integer, String> mapBackToStrings() {
-        return Object::toString;
-    }
+	private static ValueMapper<Integer, String> mapBackToStrings() {
+		return Object::toString;
+	}
 
     private static StoreBuilder<KeyValueStore<Long, Long>> storeBuilder(final String storeName) {
         return Stores.keyValueStoreBuilder(Stores.persistentKeyValueStore(storeName), Serdes.Long(), Serdes.Long());
@@ -451,8 +471,6 @@ public class KTableTransformValuesTest {
 
     public static Properties props() {
         final Properties props = new Properties();
-        props.setProperty(StreamsConfig.APPLICATION_ID_CONFIG, "kstream-transform-values-test");
-        props.setProperty(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9091");
         props.setProperty(StreamsConfig.STATE_DIR_CONFIG, TestUtils.tempDirectory().getAbsolutePath());
         props.setProperty(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.Integer().getClass().getName());
         props.setProperty(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.Integer().getClass().getName());

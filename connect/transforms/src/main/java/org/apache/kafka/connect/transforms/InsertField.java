@@ -27,8 +27,8 @@ import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.data.Timestamp;
-import org.apache.kafka.connect.transforms.util.SimpleConfig;
 import org.apache.kafka.connect.transforms.util.SchemaUtil;
+import org.apache.kafka.connect.transforms.util.SimpleConfig;
 
 import java.util.Date;
 import java.util.HashMap;
@@ -122,17 +122,19 @@ public abstract class InsertField<R extends ConnectRecord<R>> implements Transfo
             throw new ConfigException(ConfigName.STATIC_VALUE, null, "No value specified for static field: " + staticField);
         }
 
-        schemaUpdateCache = new SynchronizedCache<>(new LRUCache<Schema, Schema>(16));
+		schemaUpdateCache = new SynchronizedCache<>(new LRUCache<>(16));
     }
 
     @Override
     public R apply(R record) {
-        if (operatingSchema(record) == null) {
-            return applySchemaless(record);
-        } else {
-            return applyWithSchema(record);
-        }
-    }
+		if (operatingValue(record) == null) {
+			return record;
+		} else if (operatingSchema(record) == null) {
+			return applySchemaless(record);
+		} else {
+			return applyWithSchema(record);
+		}
+	}
 
     private R applySchemaless(R record) {
         final Map<String, Object> value = requireMap(operatingValue(record), PURPOSE);

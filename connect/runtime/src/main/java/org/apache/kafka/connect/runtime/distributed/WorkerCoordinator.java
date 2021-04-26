@@ -16,11 +16,10 @@
  */
 package org.apache.kafka.connect.runtime.distributed;
 
+import org.apache.kafka.clients.GroupRebalanceConfig;
 import org.apache.kafka.clients.consumer.internals.AbstractCoordinator;
 import org.apache.kafka.clients.consumer.internals.ConsumerNetworkClient;
-import org.apache.kafka.clients.GroupRebalanceConfig;
 import org.apache.kafka.common.metrics.Measurable;
-import org.apache.kafka.common.metrics.MetricConfig;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.requests.JoinGroupRequest;
 import org.apache.kafka.common.utils.LogContext;
@@ -50,22 +49,21 @@ import static org.apache.kafka.connect.runtime.distributed.ConnectProtocolCompat
  * to workers.
  */
 public class WorkerCoordinator extends AbstractCoordinator implements Closeable {
-    // Currently doesn't support multiple task assignment strategies, so we just fill in a default value
-    public static final String DEFAULT_SUBPROTOCOL = "default";
-
     private final Logger log;
     private final String restUrl;
-    private final ConfigBackingStore configStorage;
-    private ExtendedAssignment assignmentSnapshot;
-    private ClusterConfigState configSnapshot;
+	private final ConfigBackingStore configStorage;
+	private volatile ExtendedAssignment assignmentSnapshot;
+	private ClusterConfigState configSnapshot;
     private final WorkerRebalanceListener listener;
     private final ConnectProtocolCompatibility protocolCompatibility;
     private LeaderState leaderState;
 
     private boolean rejoinRequested;
-    private volatile ConnectProtocolCompatibility currentConnectProtocol;
-    private final ConnectAssignor eagerAssignor;
-    private final ConnectAssignor incrementalAssignor;
+	private volatile ConnectProtocolCompatibility currentConnectProtocol;
+	private volatile int lastCompletedGenerationId;
+	private final ConnectAssignor eagerAssignor;
+	private final ConnectAssignor incrementalAssignor;
+	private final int coordinatorDiscoveryTimeoutMs;
 
     /**
      * Initialize the coordination manager.
@@ -88,22 +86,25 @@ public class WorkerCoordinator extends AbstractCoordinator implements Closeable 
               metricGrpPrefix,
               time);
         this.log = logContext.logger(WorkerCoordinator.class);
-        this.restUrl = restUrl;
-        this.configStorage = configStorage;
-        this.assignmentSnapshot = null;
-        new WorkerCoordinatorMetrics(metrics, metricGrpPrefix);
-        this.listener = listener;
-        this.rejoinRequested = false;
-        this.protocolCompatibility = protocolCompatibility;
-        this.incrementalAssignor = new IncrementalCooperativeAssignor(logContext, time, maxDelay);
-        this.eagerAssignor = new EagerAssignor(logContext);
-        this.currentConnectProtocol = protocolCompatibility;
-    }
+		this.restUrl = restUrl;
+		this.configStorage = configStorage;
+		this.assignmentSnapshot = null;
+		new WorkerCoordinatorMetrics(metrics, metricGrpPrefix);
+		this.listener = listener;
+		this.rejoinRequested = false;
+		this.protocolCompatibility = protocolCompatibility;
+		this.incrementalAssignor = new IncrementalCooperativeAssignor(logContext, time, maxDelay);
+		this.eagerAssignor = new EagerAssignor(logContext);
+		this.currentConnectProtocol = protocolCompatibility;
+		this.coordinatorDiscoveryTimeoutMs = config.heartbeatIntervalMs;
+		this.lastCompletedGenerationId = Generation.NO_GENERATION.generationId;
+	}
 
-    @Override
-    public void requestRejoin() {
-        rejoinRequested = true;
-    }
+	@Override
+	public void requestRejoin(final String reason) {
+		log.debug("Request joining group due to: {}", reason);
+		rejoinRequested = true;
+	}
 
     @Override
     public String protocolType() {
@@ -124,9 +125,22 @@ public class WorkerCoordinator extends AbstractCoordinator implements Closeable 
 
         do {
             if (coordinatorUnknown()) {
-                ensureCoordinatorReady(time.timer(Long.MAX_VALUE));
-                now = time.milliseconds();
-            }
+				log.debug("Broker coordinator is marked unknown. Attempting discovery with a timeout of {}ms",
+						coordinatorDiscoveryTimeoutMs);
+				if (ensureCoordinatorReady(time.timer(coordinatorDiscoveryTimeoutMs))) {
+					log.debug("Broker coordinator is ready");
+				} else {
+					log.debug("Can not connect to broker coordinator");
+					final ExtendedAssignment localAssignmentSnapshot = assignmentSnapshot;
+					if (localAssignmentSnapshot != null && !localAssignmentSnapshot.failed()) {
+						log.info("Broker coordinator was unreachable for {}ms. Revoking previous assignment {} to " +
+								"avoid running tasks while not being a member the group", coordinatorDiscoveryTimeoutMs, localAssignmentSnapshot);
+						listener.onRevoked(localAssignmentSnapshot.leader(), localAssignmentSnapshot.connectors(), localAssignmentSnapshot.tasks());
+						assignmentSnapshot = null;
+					}
+				}
+				now = time.milliseconds();
+			}
 
             if (rejoinNeededOrPending()) {
                 ensureActiveGroup();
@@ -151,16 +165,19 @@ public class WorkerCoordinator extends AbstractCoordinator implements Closeable 
 
     @Override
     public JoinGroupRequestProtocolCollection metadata() {
-        configSnapshot = configStorage.snapshot();
-        ExtendedWorkerState workerState = new ExtendedWorkerState(restUrl, configSnapshot.offset(), assignmentSnapshot);
-        switch (protocolCompatibility) {
-            case EAGER:
-                return ConnectProtocol.metadataRequest(workerState);
-            case COMPATIBLE:
-                return IncrementalCooperativeConnectProtocol.metadataRequest(workerState);
-            default:
-                throw new IllegalStateException("Unknown Connect protocol compatibility mode " + protocolCompatibility);
-        }
+		configSnapshot = configStorage.snapshot();
+		final ExtendedAssignment localAssignmentSnapshot = assignmentSnapshot;
+		ExtendedWorkerState workerState = new ExtendedWorkerState(restUrl, configSnapshot.offset(), localAssignmentSnapshot);
+		switch (protocolCompatibility) {
+			case EAGER:
+				return ConnectProtocol.metadataRequest(workerState);
+			case COMPATIBLE:
+				return IncrementalCooperativeConnectProtocol.metadataRequest(workerState, false);
+			case SESSIONED:
+				return IncrementalCooperativeConnectProtocol.metadataRequest(workerState, true);
+			default:
+				throw new IllegalStateException("Unknown Connect protocol compatibility mode " + protocolCompatibility);
+		}
     }
 
     @Override
@@ -174,22 +191,24 @@ public class WorkerCoordinator extends AbstractCoordinator implements Closeable 
         // up to date, try to rejoin again, leaving the group and backing off, etc.).
         rejoinRequested = false;
         if (currentConnectProtocol != EAGER) {
-            if (!newAssignment.revokedConnectors().isEmpty() || !newAssignment.revokedTasks().isEmpty()) {
-                listener.onRevoked(newAssignment.leader(), newAssignment.revokedConnectors(), newAssignment.revokedTasks());
-            }
+			if (!newAssignment.revokedConnectors().isEmpty() || !newAssignment.revokedTasks().isEmpty()) {
+				listener.onRevoked(newAssignment.leader(), newAssignment.revokedConnectors(), newAssignment.revokedTasks());
+			}
 
-            if (assignmentSnapshot != null) {
-                assignmentSnapshot.connectors().removeAll(newAssignment.revokedConnectors());
-                assignmentSnapshot.tasks().removeAll(newAssignment.revokedTasks());
-                log.debug("After revocations snapshot of assignment: {}", assignmentSnapshot);
-                newAssignment.connectors().addAll(assignmentSnapshot.connectors());
-                newAssignment.tasks().addAll(assignmentSnapshot.tasks());
-            }
-            log.debug("Augmented new assignment: {}", newAssignment);
-        }
-        assignmentSnapshot = newAssignment;
-        listener.onAssigned(assignmentSnapshot, generation);
-    }
+			final ExtendedAssignment localAssignmentSnapshot = assignmentSnapshot;
+			if (localAssignmentSnapshot != null) {
+				localAssignmentSnapshot.connectors().removeAll(newAssignment.revokedConnectors());
+				localAssignmentSnapshot.tasks().removeAll(newAssignment.revokedTasks());
+				log.debug("After revocations snapshot of assignment: {}", localAssignmentSnapshot);
+				newAssignment.connectors().addAll(localAssignmentSnapshot.connectors());
+				newAssignment.tasks().addAll(localAssignmentSnapshot.tasks());
+			}
+			log.debug("Augmented new assignment: {}", newAssignment);
+		}
+		assignmentSnapshot = newAssignment;
+		lastCompletedGenerationId = generation;
+		listener.onAssigned(newAssignment, generation);
+	}
 
     @Override
     protected Map<String, ByteBuffer> performAssignment(String leaderId, String protocol, List<JoinGroupResponseMember> allMemberMetadata) {
@@ -202,37 +221,62 @@ public class WorkerCoordinator extends AbstractCoordinator implements Closeable 
     protected void onJoinPrepare(int generation, String memberId) {
         log.info("Rebalance started");
         leaderState(null);
+		final ExtendedAssignment localAssignmentSnapshot = assignmentSnapshot;
         if (currentConnectProtocol == EAGER) {
-            log.debug("Revoking previous assignment {}", assignmentSnapshot);
-            if (assignmentSnapshot != null && !assignmentSnapshot.failed())
-                listener.onRevoked(assignmentSnapshot.leader(), assignmentSnapshot.connectors(), assignmentSnapshot.tasks());
-        } else {
-            log.debug("Cooperative rebalance triggered. Keeping assignment {} until it's "
-                      + "explicitly revoked.", assignmentSnapshot);
+			log.debug("Revoking previous assignment {}", localAssignmentSnapshot);
+			if (localAssignmentSnapshot != null && !localAssignmentSnapshot.failed())
+				listener.onRevoked(localAssignmentSnapshot.leader(), localAssignmentSnapshot.connectors(), localAssignmentSnapshot.tasks());
+		} else {
+			log.debug("Cooperative rebalance triggered. Keeping assignment {} until it's "
+					+ "explicitly revoked.", localAssignmentSnapshot);
         }
     }
 
     @Override
     protected boolean rejoinNeededOrPending() {
-        return super.rejoinNeededOrPending() || (assignmentSnapshot == null || assignmentSnapshot.failed()) || rejoinRequested;
-    }
+		final ExtendedAssignment localAssignmentSnapshot = assignmentSnapshot;
+		return super.rejoinNeededOrPending() || (localAssignmentSnapshot == null || localAssignmentSnapshot.failed()) || rejoinRequested;
+	}
 
-    @Override
-    public String memberId() {
-        Generation generation = generation();
-        if (generation != null)
-            return generation.memberId;
-        return JoinGroupRequest.UNKNOWN_MEMBER_ID;
-    }
+	@Override
+	public String memberId() {
+		Generation generation = generationIfStable();
+		if (generation != null)
+			return generation.memberId;
+		return JoinGroupRequest.UNKNOWN_MEMBER_ID;
+	}
 
-    private boolean isLeader() {
-        return assignmentSnapshot != null && memberId().equals(assignmentSnapshot.leader());
-    }
+	/**
+	 * Return the current generation. The generation refers to this worker's knowledge with
+	 * respect to which  generation is the latest one and, therefore, this information is local.
+	 * @return the generation ID or -1 if no generation is defined
+	 */
+	public int generationId() {
+		return super.generation().generationId;
+	}
 
-    public String ownerUrl(String connector) {
-        if (rejoinNeededOrPending() || !isLeader())
-            return null;
-        return leaderState().ownerUrl(connector);
+	/**
+	 * Return id that corresponds to the group generation that was active when the last join was successful
+	 * @return the generation ID of the last group that was joined successfully by this member or -1 if no generation
+	 * was stable at that point
+	 */
+	public int lastCompletedGenerationId() {
+		return lastCompletedGenerationId;
+	}
+
+	public void revokeAssignment(ExtendedAssignment assignment) {
+		listener.onRevoked(assignment.leader(), assignment.connectors(), assignment.tasks());
+	}
+
+	private boolean isLeader() {
+		final ExtendedAssignment localAssignmentSnapshot = assignmentSnapshot;
+		return localAssignmentSnapshot != null && memberId().equals(localAssignmentSnapshot.leader());
+	}
+
+	public String ownerUrl(String connector) {
+		if (rejoinNeededOrPending() || !isLeader())
+			return null;
+		return leaderState().ownerUrl(connector);
     }
 
     public String ownerUrl(ConnectorTaskId task) {
@@ -292,37 +336,39 @@ public class WorkerCoordinator extends AbstractCoordinator implements Closeable 
      * @return the current connect protocol version
      */
     public short currentProtocolVersion() {
-        return currentConnectProtocol == EAGER ? (short) 0 : (short) 1;
-    }
+        return currentConnectProtocol.protocolVersion();
+	}
 
-    private class WorkerCoordinatorMetrics {
+	private class WorkerCoordinatorMetrics {
         public final String metricGrpName;
 
         public WorkerCoordinatorMetrics(Metrics metrics, String metricGrpPrefix) {
-            this.metricGrpName = metricGrpPrefix + "-coordinator-metrics";
+			this.metricGrpName = metricGrpPrefix + "-coordinator-metrics";
 
-            Measurable numConnectors = new Measurable() {
-                @Override
-                public double measure(MetricConfig config, long now) {
-                    return assignmentSnapshot.connectors().size();
-                }
-            };
+			Measurable numConnectors = (config, now) -> {
+				final ExtendedAssignment localAssignmentSnapshot = assignmentSnapshot;
+				if (localAssignmentSnapshot == null) {
+					return 0.0;
+				}
+				return localAssignmentSnapshot.connectors().size();
+			};
 
-            Measurable numTasks = new Measurable() {
-                @Override
-                public double measure(MetricConfig config, long now) {
-                    return assignmentSnapshot.tasks().size();
-                }
-            };
+			Measurable numTasks = (config, now) -> {
+				final ExtendedAssignment localAssignmentSnapshot = assignmentSnapshot;
+				if (localAssignmentSnapshot == null) {
+					return 0.0;
+				}
+				return localAssignmentSnapshot.tasks().size();
+			};
 
-            metrics.addMetric(metrics.metricName("assigned-connectors",
-                              this.metricGrpName,
-                              "The number of connector instances currently assigned to this consumer"), numConnectors);
-            metrics.addMetric(metrics.metricName("assigned-tasks",
-                              this.metricGrpName,
-                              "The number of tasks currently assigned to this consumer"), numTasks);
-        }
-    }
+			metrics.addMetric(metrics.metricName("assigned-connectors",
+					this.metricGrpName,
+					"The number of connector instances currently assigned to this consumer"), numConnectors);
+			metrics.addMetric(metrics.metricName("assigned-tasks",
+					this.metricGrpName,
+					"The number of tasks currently assigned to this consumer"), numTasks);
+		}
+	}
 
     public static <K, V> Map<V, K> invertAssignment(Map<K, Collection<V>> assignment) {
         Map<V, K> inverted = new HashMap<>();

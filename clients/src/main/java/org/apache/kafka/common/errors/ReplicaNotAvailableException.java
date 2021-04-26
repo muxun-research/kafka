@@ -16,17 +16,23 @@
  */
 package org.apache.kafka.common.errors;
 
-public class ReplicaNotAvailableException extends ApiException {
+/**
+ * The replica is not available for the requested topic partition. This may be
+ * a transient exception during reassignments. From version 2.6 onwards, Fetch requests
+ * and other requests intended only for the leader or follower of the topic partition return
+ * {@link NotLeaderOrFollowerException} if the broker is a not a replica of the partition.
+ */
+public class ReplicaNotAvailableException extends InvalidMetadataException {
 
-    private static final long serialVersionUID = 1L;
+	private static final long serialVersionUID = 1L;
 
-    public ReplicaNotAvailableException(String message) {
-        super(message);
-    }
+	public ReplicaNotAvailableException(String message) {
+		super(message);
+	}
 
-    public ReplicaNotAvailableException(String message, Throwable cause) {
-        super(message, cause);
-    }
+	public ReplicaNotAvailableException(String message, Throwable cause) {
+		super(message, cause);
+	}
 
     public ReplicaNotAvailableException(Throwable cause) {
         super(cause);

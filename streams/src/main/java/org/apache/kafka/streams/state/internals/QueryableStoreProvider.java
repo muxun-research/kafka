@@ -16,53 +16,47 @@
  */
 package org.apache.kafka.streams.state.internals;
 
-import org.apache.kafka.streams.errors.InvalidStateStoreException;
+import org.apache.kafka.streams.StoreQueryParameters;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.state.QueryableStoreType;
 
 import java.util.ArrayList;
 import java.util.List;
 
-import static java.util.Collections.singletonList;
-
 /**
  * A wrapper over all of the {@link StateStoreProvider}s in a Topology
  */
 public class QueryableStoreProvider {
 
-    private final List<StateStoreProvider> storeProviders;
-    private final GlobalStateStoreProvider globalStoreProvider;
+	private final List<StreamThreadStateStoreProvider> storeProviders;
+	private final GlobalStateStoreProvider globalStoreProvider;
 
-    public QueryableStoreProvider(final List<StateStoreProvider> storeProviders,
-                                  final GlobalStateStoreProvider globalStateStoreProvider) {
-        this.storeProviders = new ArrayList<>(storeProviders);
-        this.globalStoreProvider = globalStateStoreProvider;
-    }
+	public QueryableStoreProvider(final List<StreamThreadStateStoreProvider> storeProviders,
+								  final GlobalStateStoreProvider globalStateStoreProvider) {
+		this.storeProviders = new ArrayList<>(storeProviders);
+		this.globalStoreProvider = globalStateStoreProvider;
+	}
 
-    /**
-     * Get a composite object wrapping the instances of the {@link StateStore} with the provided
-     * storeName and {@link QueryableStoreType}
-     *
-     * @param storeName          name of the store
-     * @param queryableStoreType accept stores passing {@link QueryableStoreType#accepts(StateStore)}
-     * @param <T>                The expected type of the returned store
-     * @return A composite object that wraps the store instances.
-     */
-    public <T> T getStore(final String storeName,
-                          final QueryableStoreType<T> queryableStoreType) {
-        final List<T> globalStore = globalStoreProvider.stores(storeName, queryableStoreType);
-        if (!globalStore.isEmpty()) {
-            return queryableStoreType.create(new WrappingStoreProvider(singletonList(globalStoreProvider)), storeName);
-        }
-        final List<T> allStores = new ArrayList<>();
-        for (final StateStoreProvider storeProvider : storeProviders) {
-            allStores.addAll(storeProvider.stores(storeName, queryableStoreType));
-        }
-        if (allStores.isEmpty()) {
-            throw new InvalidStateStoreException("The state store, " + storeName + ", may have migrated to another instance.");
-        }
-        return queryableStoreType.create(
-                new WrappingStoreProvider(storeProviders),
-                storeName);
-    }
+	/**
+	 * Get a composite object wrapping the instances of the {@link StateStore} with the provided
+	 * storeName and {@link QueryableStoreType}
+	 * @param storeQueryParameters if stateStoresEnabled is used i.e. staleStoresEnabled is true, include standbys and recovering stores;
+	 *                             if stateStoresDisabled i.e. staleStoresEnabled is false, only include running actives;
+	 *                             if partition is null then it fetches all local partitions on the instance;
+	 *                             if partition is set then it fetches a specific partition.
+	 * @param <T>                  The expected type of the returned store
+	 * @return A composite object that wraps the store instances.
+	 */
+	public <T> T getStore(final StoreQueryParameters<T> storeQueryParameters) {
+		final String storeName = storeQueryParameters.storeName();
+		final QueryableStoreType<T> queryableStoreType = storeQueryParameters.queryableStoreType();
+		final List<T> globalStore = globalStoreProvider.stores(storeName, queryableStoreType);
+		if (!globalStore.isEmpty()) {
+			return queryableStoreType.create(globalStoreProvider, storeName);
+		}
+		return queryableStoreType.create(
+				new WrappingStoreProvider(storeProviders, storeQueryParameters),
+				storeName
+		);
+	}
 }

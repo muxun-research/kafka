@@ -31,70 +31,54 @@ import java.util.Objects;
 @InterfaceStability.Evolving
 public class ConfigEntry {
 
-    private final String name;
-    private final String value;
-    private final ConfigSource source;
-    private final boolean isSensitive;
-    private final boolean isReadOnly;
-    private final List<ConfigSynonym> synonyms;
+	private final String name;
+	private final String value;
+	private final ConfigSource source;
+	private final boolean isSensitive;
+	private final boolean isReadOnly;
+	private final List<ConfigSynonym> synonyms;
+	private final ConfigType type;
+	private final String documentation;
 
-    /**
-     * Create a configuration entry with the provided values.
-     *
-     * @param name the non-null config name
-     * @param value the config value or null
-     */
-    public ConfigEntry(String name, String value) {
-        this(name, value, false, false, false);
-    }
-
-    /**
-     * Create a configuration with the provided values.
-     *
-     * @param name the non-null config name
-     * @param value the config value or null
-     * @param isDefault whether the config value is the default or if it's been explicitly set
-     * @param isSensitive whether the config value is sensitive, the broker never returns the value if it is sensitive
-     * @param isReadOnly whether the config is read-only and cannot be updated
-     * @deprecated since 1.1.0. This constructor will be removed in a future release.
-     */
-    @Deprecated
-    public ConfigEntry(String name, String value, boolean isDefault, boolean isSensitive, boolean isReadOnly) {
-        this(name,
-             value,
-             isDefault ? ConfigSource.DEFAULT_CONFIG : ConfigSource.UNKNOWN,
-             isSensitive,
-             isReadOnly,
-             Collections.<ConfigSynonym>emptyList());
-    }
+	/**
+	 * Create a configuration entry with the provided values.
+	 * @param name  the non-null config name
+	 * @param value the config value or null
+	 */
+	public ConfigEntry(String name, String value) {
+		this(name, value, ConfigSource.UNKNOWN, false, false,
+				Collections.emptyList(), ConfigType.UNKNOWN, null);
+	}
 
     /**
      * Create a configuration with the provided values.
-     *
-     * @param name the non-null config name
-     * @param value the config value or null
-     * @param source the source of this config entry
-     * @param isSensitive whether the config value is sensitive, the broker never returns the value if it is sensitive
-     * @param isReadOnly whether the config is read-only and cannot be updated
-     * @param synonyms Synonym configs in order of precedence
-     */
-    ConfigEntry(String name, String value, ConfigSource source, boolean isSensitive, boolean isReadOnly,
-                List<ConfigSynonym> synonyms) {
-        Objects.requireNonNull(name, "name should not be null");
-        this.name = name;
-        this.value = value;
-        this.source = source;
-        this.isSensitive = isSensitive;
-        this.isReadOnly = isReadOnly;
-        this.synonyms = synonyms;
-    }
+	 *
+	 * @param name the non-null config name
+	 * @param value the config value or null
+	 * @param source the source of this config entry
+	 * @param isSensitive whether the config value is sensitive, the broker never returns the value if it is sensitive
+	 * @param isReadOnly whether the config is read-only and cannot be updated
+	 * @param synonyms Synonym configs in order of precedence
+	 */
+	ConfigEntry(String name, String value, ConfigSource source, boolean isSensitive, boolean isReadOnly,
+				List<ConfigSynonym> synonyms, ConfigType type, String documentation) {
+		Objects.requireNonNull(name, "name should not be null");
+		this.name = name;
+		this.value = value;
+		this.source = source;
+		this.isSensitive = isSensitive;
+		this.isReadOnly = isReadOnly;
+		this.synonyms = synonyms;
+		this.type = type;
+		this.documentation = documentation;
+	}
 
-    /**
-     * Return the config name.
-     */
-    public String name() {
-        return name;
-    }
+	/**
+	 * Return the config name.
+	 */
+	public String name() {
+		return name;
+	}
 
     /**
      * Return the value or null. Null is returned if the config is unset or if isSensitive is true.
@@ -133,30 +117,44 @@ public class ConfigEntry {
     }
 
     /**
-     * Returns all config values that may be used as the value of this config along with their source,
-     * in the order of precedence. The list starts with the value returned in this ConfigEntry.
-     * The list is empty if synonyms were not requested using {@link DescribeConfigsOptions#includeSynonyms(boolean)}
-     */
-    public List<ConfigSynonym> synonyms() {
-        return  synonyms;
-    }
+	 * Returns all config values that may be used as the value of this config along with their source,
+	 * in the order of precedence. The list starts with the value returned in this ConfigEntry.
+	 * The list is empty if synonyms were not requested using {@link DescribeConfigsOptions#includeSynonyms(boolean)}
+	 */
+	public List<ConfigSynonym> synonyms() {
+		return synonyms;
+	}
 
-    @Override
-    public boolean equals(Object o) {
-        if (this == o)
-            return true;
-        if (o == null || getClass() != o.getClass())
-            return false;
+	/**
+	 * Return the config data type.
+	 */
+	public ConfigType type() {
+		return type;
+	}
 
-        ConfigEntry that = (ConfigEntry) o;
+	/**
+	 * Return the config documentation.
+	 */
+	public String documentation() {
+		return documentation;
+	}
 
-        return this.name.equals(that.name) &&
-                this.value != null ? this.value.equals(that.value) : that.value == null &&
-                this.isSensitive == that.isSensitive &&
-                this.isReadOnly == that.isReadOnly &&
-                this.source == that.source &&
-                Objects.equals(this.synonyms, that.synonyms);
-    }
+	@Override
+	public boolean equals(Object o) {
+		if (this == o)
+			return true;
+		if (o == null || getClass() != o.getClass())
+			return false;
+
+		ConfigEntry that = (ConfigEntry) o;
+
+		return this.name.equals(that.name) &&
+				this.value != null ? this.value.equals(that.value) : that.value == null &&
+				this.isSensitive == that.isSensitive &&
+				this.isReadOnly == that.isReadOnly &&
+				this.source == that.source &&
+				Objects.equals(this.synonyms, that.synonyms);
+	}
 
     @Override
     public int hashCode() {
@@ -173,29 +171,44 @@ public class ConfigEntry {
 
     @Override
     public String toString() {
-        return "ConfigEntry(" +
-                "name=" + name +
-                ", value=" + value +
-                ", source=" + source +
-                ", isSensitive=" + isSensitive +
-                ", isReadOnly=" + isReadOnly +
-                ", synonyms=" + synonyms +
-                ")";
-    }
+		return "ConfigEntry(" +
+				"name=" + name +
+				", value=" + value +
+				", source=" + source +
+				", isSensitive=" + isSensitive +
+				", isReadOnly=" + isReadOnly +
+				", synonyms=" + synonyms +
+				")";
+	}
 
+	/**
+	 * Data type of configuration entry.
+	 */
+	public enum ConfigType {
+		UNKNOWN,
+		BOOLEAN,
+		STRING,
+		INT,
+		SHORT,
+		LONG,
+		DOUBLE,
+		LIST,
+		CLASS,
+		PASSWORD
+	}
 
-    /**
-     * Source of configuration entries.
-     */
-    public enum ConfigSource {
-        DYNAMIC_TOPIC_CONFIG,           // dynamic topic config that is configured for a specific topic
-        DYNAMIC_BROKER_LOGGER_CONFIG,   // dynamic broker logger config that is configured for a specific broker
-        DYNAMIC_BROKER_CONFIG,          // dynamic broker config that is configured for a specific broker
-        DYNAMIC_DEFAULT_BROKER_CONFIG,  // dynamic broker config that is configured as default for all brokers in the cluster
-        STATIC_BROKER_CONFIG,           // static broker config provided as broker properties at start up (e.g. server.properties file)
-        DEFAULT_CONFIG,                 // built-in default configuration for configs that have a default value
-        UNKNOWN                         // source unknown e.g. in the ConfigEntry used for alter requests where source is not set
-    }
+	/**
+	 * Source of configuration entries.
+	 */
+	public enum ConfigSource {
+		DYNAMIC_TOPIC_CONFIG,           // dynamic topic config that is configured for a specific topic
+		DYNAMIC_BROKER_LOGGER_CONFIG,   // dynamic broker logger config that is configured for a specific broker
+		DYNAMIC_BROKER_CONFIG,          // dynamic broker config that is configured for a specific broker
+		DYNAMIC_DEFAULT_BROKER_CONFIG,  // dynamic broker config that is configured as default for all brokers in the cluster
+		STATIC_BROKER_CONFIG,           // static broker config provided as broker properties at start up (e.g. server.properties file)
+		DEFAULT_CONFIG,                 // built-in default configuration for configs that have a default value
+		UNKNOWN                         // source unknown e.g. in the ConfigEntry used for alter requests where source is not set
+	}
 
     /**
      * Class representing a configuration synonym of a {@link ConfigEntry}.

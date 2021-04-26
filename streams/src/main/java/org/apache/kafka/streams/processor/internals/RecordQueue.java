@@ -22,9 +22,9 @@ import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.streams.errors.DeserializationExceptionHandler;
 import org.apache.kafka.streams.errors.StreamsException;
+import org.apache.kafka.streams.processor.internals.metrics.TaskMetrics;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.TimestampExtractor;
-import org.apache.kafka.streams.processor.internals.metrics.ThreadMetrics;
 import org.slf4j.Logger;
 
 import java.util.ArrayDeque;
@@ -38,48 +38,55 @@ public class RecordQueue {
 
     public static final long UNKNOWN = ConsumerRecord.NO_TIMESTAMP;
 
-    private final Logger log;
-    private final SourceNode source;
-    private final TopicPartition partition;
+	private final Logger log;
+	private final SourceNode<?, ?, ?, ?> source;
+	private final TopicPartition partition;
     private final ProcessorContext processorContext;
     private final TimestampExtractor timestampExtractor;
     private final RecordDeserializer recordDeserializer;
     private final ArrayDeque<ConsumerRecord<byte[], byte[]>> fifoQueue;
 
-    private StampedRecord headRecord = null;
-    private long partitionTime = RecordQueue.UNKNOWN;
+	private StampedRecord headRecord = null;
+	private long partitionTime = UNKNOWN;
 
-    private Sensor skipRecordsSensor;
+	private final Sensor droppedRecordsSensor;
 
     RecordQueue(final TopicPartition partition,
-                final SourceNode source,
-                final TimestampExtractor timestampExtractor,
-                final DeserializationExceptionHandler deserializationExceptionHandler,
-                final InternalProcessorContext processorContext,
-                final LogContext logContext) {
-        this.source = source;
-        this.partition = partition;
-        this.fifoQueue = new ArrayDeque<>();
-        this.timestampExtractor = timestampExtractor;
-        this.processorContext = processorContext;
-        skipRecordsSensor = ThreadMetrics.skipRecordSensor(processorContext.metrics());
-        recordDeserializer = new RecordDeserializer(
-            source,
-            deserializationExceptionHandler,
-            logContext,
-            skipRecordsSensor
-        );
-        this.log = logContext.logger(RecordQueue.class);
-    }
+				final SourceNode<?, ?, ?, ?> source,
+				final TimestampExtractor timestampExtractor,
+				final DeserializationExceptionHandler deserializationExceptionHandler,
+				final InternalProcessorContext processorContext,
+				final LogContext logContext) {
+		this.source = source;
+		this.partition = partition;
+		this.fifoQueue = new ArrayDeque<>();
+		this.timestampExtractor = timestampExtractor;
+		this.processorContext = processorContext;
+		droppedRecordsSensor = TaskMetrics.droppedRecordsSensorOrSkippedRecordsSensor(
+				Thread.currentThread().getName(),
+				processorContext.taskId().toString(),
+				processorContext.metrics()
+		);
+		recordDeserializer = new RecordDeserializer(
+				source,
+				deserializationExceptionHandler,
+				logContext,
+				droppedRecordsSensor
+		);
+		this.log = logContext.logger(RecordQueue.class);
+	}
 
-    /**
-     * Returns the corresponding source node in the topology
-     *
-     * @return SourceNode
-     */
-    public SourceNode source() {
-        return source;
-    }
+	void setPartitionTime(final long partitionTime) {
+		this.partitionTime = partitionTime;
+	}
+
+	/**
+	 * Returns the corresponding source node in the topology
+	 * @return SourceNode
+	 */
+	public SourceNode<?, ?, ?, ?> source() {
+		return source;
+	}
 
     /**
      * Returns the partition with which this queue is associated
@@ -114,8 +121,9 @@ public class RecordQueue {
     public StampedRecord poll() {
         final StampedRecord recordToReturn = headRecord;
         headRecord = null;
+		partitionTime = Math.max(partitionTime, recordToReturn.timestamp);
 
-        updateHead();
+		updateHead();
 
         return recordToReturn;
     }
@@ -140,33 +148,28 @@ public class RecordQueue {
     }
 
     /**
-     * Returns the head record's timestamp
-     *
-     * @return timestamp
-     */
-    public long headRecordTimestamp() {
-        return headRecord == null ? UNKNOWN : headRecord.timestamp;
-    }
+	 * Returns the head record's timestamp
+	 *
+	 * @return timestamp
+	 */
+	public long headRecordTimestamp() {
+		return headRecord == null ? UNKNOWN : headRecord.timestamp;
+	}
 
-    /**
-     * Returns the tracked partition time
-     *
-     * @return partition time
-     */
-    long partitionTime() {
-        return partitionTime;
-    }
+	public Long headRecordOffset() {
+		return headRecord == null ? null : headRecord.offset();
+	}
 
-    /**
-     * Clear the fifo queue of its elements, also clear the time tracker's kept stamped elements
-     */
-    public void clear() {
-        fifoQueue.clear();
-        headRecord = null;
-        partitionTime = RecordQueue.UNKNOWN;
-    }
+	/**
+	 * Clear the fifo queue of its elements
+	 */
+	public void clear() {
+		fifoQueue.clear();
+		headRecord = null;
+		partitionTime = UNKNOWN;
+	}
 
-    private void updateHead() {
+	private void updateHead() {
         while (headRecord == null && !fifoQueue.isEmpty()) {
             final ConsumerRecord<byte[], byte[]> raw = fifoQueue.pollFirst();
             final ConsumerRecord<Object, Object> deserialized = recordDeserializer.deserialize(processorContext, raw);
@@ -189,19 +192,22 @@ public class RecordQueue {
             log.trace("Source node {} extracted timestamp {} for record {}", source.name(), timestamp, deserialized);
 
             // drop message if TS is invalid, i.e., negative
-            if (timestamp < 0) {
-                log.warn(
-                        "Skipping record due to negative extracted timestamp. topic=[{}] partition=[{}] offset=[{}] extractedTimestamp=[{}] extractor=[{}]",
-                        deserialized.topic(), deserialized.partition(), deserialized.offset(), timestamp, timestampExtractor.getClass().getCanonicalName()
-                );
+			if (timestamp < 0) {
+				log.warn(
+						"Skipping record due to negative extracted timestamp. topic=[{}] partition=[{}] offset=[{}] extractedTimestamp=[{}] extractor=[{}]",
+						deserialized.topic(), deserialized.partition(), deserialized.offset(), timestamp, timestampExtractor.getClass().getCanonicalName()
+				);
+				droppedRecordsSensor.record();
+				continue;
+			}
+			headRecord = new StampedRecord(deserialized, timestamp);
+		}
+	}
 
-                skipRecordsSensor.record();
-                continue;
-            }
-
-            headRecord = new StampedRecord(deserialized, timestamp);
-
-            partitionTime = Math.max(partitionTime, timestamp);
-        }
-    }
+	/**
+	 * @return the local partitionTime for this particular RecordQueue
+	 */
+	long partitionTime() {
+		return partitionTime;
+	}
 }

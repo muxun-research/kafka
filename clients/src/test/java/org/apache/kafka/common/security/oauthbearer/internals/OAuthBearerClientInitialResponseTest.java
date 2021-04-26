@@ -16,25 +16,26 @@
  */
 package org.apache.kafka.common.security.oauthbearer.internals;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-
 import org.apache.kafka.common.security.auth.SaslExtensions;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import javax.security.sasl.SaslException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 public class OAuthBearerClientInitialResponseTest {
 
-    /*
-        Test how a client would build a response
-     */
-    @Test
-    public void testBuildClientResponseToBytes() throws Exception {
-        String expectedMesssage = "n,,\u0001auth=Bearer 123.345.567\u0001nineteen=42\u0001\u0001";
+	/*
+		Test how a client would build a response
+	 */
+	@Test
+	public void testBuildClientResponseToBytes() throws Exception {
+		String expectedMesssage = "n,,\u0001auth=Bearer 123.345.567\u0001nineteen=42\u0001\u0001";
 
         Map<String, String> extensions = new HashMap<>();
         extensions.put("nineteen", "42");
@@ -55,11 +56,11 @@ public class OAuthBearerClientInitialResponseTest {
         assertEquals(serverMessage, message);
     }
 
-    @Test(expected = SaslException.class)
+	@Test
     public void testThrowsSaslExceptionOnInvalidExtensionKey() throws Exception {
         Map<String, String> extensions = new HashMap<>();
-        extensions.put("19", "42"); // keys can only be a-z
-        new OAuthBearerClientInitialResponse("123.345.567", new SaslExtensions(extensions));
+		extensions.put("19", "42"); // keys can only be a-z
+		assertThrows(SaslException.class, () -> new OAuthBearerClientInitialResponse("123.345.567", new SaslExtensions(extensions)));
     }
 
     @Test

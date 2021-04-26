@@ -27,7 +27,7 @@ import org.apache.kafka.streams.TopologyWrapper;
 import org.apache.kafka.streams.kstream.GlobalKTable;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KeyValueMapper;
-import org.apache.kafka.streams.test.ConsumerRecordFactory;
+import org.apache.kafka.streams.TestInputTopic;
 import org.apache.kafka.test.MockProcessor;
 import org.apache.kafka.test.MockProcessorSupplier;
 import org.apache.kafka.test.MockValueJoiner;
@@ -36,6 +36,8 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.Properties;
 import java.util.Set;
@@ -75,43 +77,47 @@ public class KStreamGlobalKTableJoinTest {
         stream.join(table, keyMapper, MockValueJoiner.TOSTRING_JOINER).process(supplier);
 
         final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.Integer(), Serdes.String());
-        driver = new TopologyTestDriver(builder.build(), props);
+		driver = new TopologyTestDriver(builder.build(), props);
 
-        processor = supplier.theCapturedProcessor();
-    }
+		processor = supplier.theCapturedProcessor();
+	}
 
-    @After
-    public void cleanup() {
-        driver.close();
-    }
+	@After
+	public void cleanup() {
+		driver.close();
+	}
 
-    private void pushToStream(final int messageCount, final String valuePrefix, final boolean includeForeignKey) {
-        final ConsumerRecordFactory<Integer, String> recordFactory =
-            new ConsumerRecordFactory<>(new IntegerSerializer(), new StringSerializer(), 0L, 1L);
-        for (int i = 0; i < messageCount; i++) {
-            String value = valuePrefix + expectedKeys[i];
-            if (includeForeignKey) {
-                value = value + ",FKey" + expectedKeys[i];
-            }
-            driver.pipeInput(recordFactory.create(streamTopic, expectedKeys[i], value));
-        }
+	private void pushToStream(final int messageCount, final String valuePrefix, final boolean includeForeignKey, final boolean includeNullKey) {
+		final TestInputTopic<Integer, String> inputTopic =
+				driver.createInputTopic(streamTopic, new IntegerSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ofMillis(1L));
+		for (int i = 0; i < messageCount; i++) {
+			String value = valuePrefix + expectedKeys[i];
+			if (includeForeignKey) {
+				value = value + ",FKey" + expectedKeys[i];
+			}
+			Integer key = expectedKeys[i];
+			if (includeNullKey && i == 0) {
+				key = null;
+			}
+			inputTopic.pipeInput(key, value);
+		}
     }
 
     private void pushToGlobalTable(final int messageCount, final String valuePrefix) {
-        final ConsumerRecordFactory<String, String> recordFactory =
-            new ConsumerRecordFactory<>(new StringSerializer(), new StringSerializer());
-        for (int i = 0; i < messageCount; i++) {
-            driver.pipeInput(recordFactory.create(globalTableTopic, "FKey" + expectedKeys[i], valuePrefix + expectedKeys[i]));
-        }
-    }
+		final TestInputTopic<String, String> inputTopic =
+				driver.createInputTopic(globalTableTopic, new StringSerializer(), new StringSerializer());
+		for (int i = 0; i < messageCount; i++) {
+			inputTopic.pipeInput("FKey" + expectedKeys[i], valuePrefix + expectedKeys[i]);
+		}
+	}
 
     private void pushNullValueToGlobalTable(final int messageCount) {
-        final ConsumerRecordFactory<String, String> recordFactory =
-            new ConsumerRecordFactory<>(new StringSerializer(), new StringSerializer());
-        for (int i = 0; i < messageCount; i++) {
-            driver.pipeInput(recordFactory.create(globalTableTopic, "FKey" + expectedKeys[i], (String) null));
-        }
-    }
+		final TestInputTopic<String, String> inputTopic =
+				driver.createInputTopic(globalTableTopic, new StringSerializer(), new StringSerializer());
+		for (int i = 0; i < messageCount; i++) {
+			inputTopic.pipeInput("FKey" + expectedKeys[i], (String) null);
+		}
+	}
 
     @Test
     public void shouldNotRequireCopartitioning() {
@@ -126,8 +132,8 @@ public class KStreamGlobalKTableJoinTest {
 
         // push two items to the primary stream. the globalTable is empty
 
-        pushToStream(2, "X", true);
-        processor.checkAndClearProcessResult(EMPTY);
+		pushToStream(2, "X", true, false);
+		processor.checkAndClearProcessResult(EMPTY);
     }
 
     @Test
@@ -135,8 +141,8 @@ public class KStreamGlobalKTableJoinTest {
 
         // push two items to the primary stream. the globalTable is empty
 
-        pushToStream(2, "X", true);
-        processor.checkAndClearProcessResult(EMPTY);
+		pushToStream(2, "X", true, false);
+		processor.checkAndClearProcessResult(EMPTY);
 
         // push two items to the globalTable. this should not produce any item.
 
@@ -145,9 +151,9 @@ public class KStreamGlobalKTableJoinTest {
 
         // push all four items to the primary stream. this should produce two items.
 
-        pushToStream(4, "X", true);
-        processor.checkAndClearProcessResult(new KeyValueTimestamp<>(0, "X0,FKey0+Y0", 0),
-                new KeyValueTimestamp<>(1, "X1,FKey1+Y1", 1));
+		pushToStream(4, "X", true, false);
+		processor.checkAndClearProcessResult(new KeyValueTimestamp<>(0, "X0,FKey0+Y0", 0),
+				new KeyValueTimestamp<>(1, "X1,FKey1+Y1", 1));
 
         // push all items to the globalTable. this should not produce any item
 
@@ -156,11 +162,11 @@ public class KStreamGlobalKTableJoinTest {
 
         // push all four items to the primary stream. this should produce four items.
 
-        pushToStream(4, "X", true);
-        processor.checkAndClearProcessResult(new KeyValueTimestamp<>(0, "X0,FKey0+YY0", 0),
-                new KeyValueTimestamp<>(1, "X1,FKey1+YY1", 1),
-                new KeyValueTimestamp<>(2, "X2,FKey2+YY2", 2),
-                new KeyValueTimestamp<>(3, "X3,FKey3+YY3", 3));
+		pushToStream(4, "X", true, false);
+		processor.checkAndClearProcessResult(new KeyValueTimestamp<>(0, "X0,FKey0+YY0", 0),
+				new KeyValueTimestamp<>(1, "X1,FKey1+YY1", 1),
+				new KeyValueTimestamp<>(2, "X2,FKey2+YY2", 2),
+				new KeyValueTimestamp<>(3, "X3,FKey3+YY3", 3));
 
         // push all items to the globalTable. this should not produce any item
 
@@ -178,9 +184,9 @@ public class KStreamGlobalKTableJoinTest {
 
         // push all four items to the primary stream. this should produce two items.
 
-        pushToStream(4, "X", true);
-        processor.checkAndClearProcessResult(new KeyValueTimestamp<>(0, "X0,FKey0+Y0", 0),
-                new KeyValueTimestamp<>(1, "X1,FKey1+Y1", 1));
+		pushToStream(4, "X", true, false);
+		processor.checkAndClearProcessResult(new KeyValueTimestamp<>(0, "X0,FKey0+Y0", 0),
+				new KeyValueTimestamp<>(1, "X1,FKey1+Y1", 1));
 
     }
 
@@ -194,11 +200,11 @@ public class KStreamGlobalKTableJoinTest {
 
         // push all four items to the primary stream. this should produce four items.
 
-        pushToStream(4, "X", true);
-        processor.checkAndClearProcessResult(new KeyValueTimestamp<>(0, "X0,FKey0+Y0", 0),
-                new KeyValueTimestamp<>(1, "X1,FKey1+Y1", 1),
-                new KeyValueTimestamp<>(2, "X2,FKey2+Y2", 2),
-                new KeyValueTimestamp<>(3, "X3,FKey3+Y3", 3));
+		pushToStream(4, "X", true, false);
+		processor.checkAndClearProcessResult(new KeyValueTimestamp<>(0, "X0,FKey0+Y0", 0),
+				new KeyValueTimestamp<>(1, "X1,FKey1+Y1", 1),
+				new KeyValueTimestamp<>(2, "X2,FKey2+Y2", 2),
+				new KeyValueTimestamp<>(3, "X3,FKey3+Y3", 3));
 
         // push two items with null to the globalTable as deletes. this should not produce any item.
 
@@ -207,24 +213,37 @@ public class KStreamGlobalKTableJoinTest {
 
         // push all four items to the primary stream. this should produce two items.
 
-        pushToStream(4, "XX", true);
-        processor.checkAndClearProcessResult(new KeyValueTimestamp<>(2, "XX2,FKey2+Y2", 2),
-                new KeyValueTimestamp<>(3, "XX3,FKey3+Y3", 3));
+		pushToStream(4, "XX", true, false);
+		processor.checkAndClearProcessResult(new KeyValueTimestamp<>(2, "XX2,FKey2+Y2", 2),
+				new KeyValueTimestamp<>(3, "XX3,FKey3+Y3", 3));
     }
 
     @Test
-    public void shouldNotJoinOnNullKeyMapperValues() {
+	public void shouldNotJoinOnNullKeyMapperValues() {
 
-        // push all items to the globalTable. this should not produce any item
+		// push all items to the globalTable. this should not produce any item
 
-        pushToGlobalTable(4, "Y");
-        processor.checkAndClearProcessResult(EMPTY);
+		pushToGlobalTable(4, "Y");
+		processor.checkAndClearProcessResult(EMPTY);
 
-        // push all four items to the primary stream with no foreign key, resulting in null keyMapper values.
-        // this should not produce any item.
+		// push all four items to the primary stream with no foreign key, resulting in null keyMapper values.
+		// this should not produce any item.
 
-        pushToStream(4, "XXX", false);
-        processor.checkAndClearProcessResult(EMPTY);
-    }
+		pushToStream(4, "XXX", false, false);
+		processor.checkAndClearProcessResult(EMPTY);
+	}
 
+	@Test
+	public void shouldJoinOnNullKeyWithNonNullKeyMapperValues() {
+		// push two items to the globalTable. this should not produce any item.
+
+		pushToGlobalTable(2, "Y");
+		processor.checkAndClearProcessResult(EMPTY);
+
+		// push all four items to the primary stream. this should produce two items.
+
+		pushToStream(4, "X", true, true);
+		processor.checkAndClearProcessResult(new KeyValueTimestamp<>(null, "X0,FKey0+Y0", 0),
+				new KeyValueTimestamp<>(1, "X1,FKey1+Y1", 1));
+	}
 }

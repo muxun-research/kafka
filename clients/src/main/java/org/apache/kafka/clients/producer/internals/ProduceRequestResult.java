@@ -21,7 +21,7 @@ import org.apache.kafka.common.record.RecordBatch;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-
+import java.util.function.Function;
 
 /**
  * 在每个partition的生产请求中只有这样的一个对象，所有的RecordMetadata共享同一个ProducerRequestResult实例，因为它们都是向同一个partition发送数据的
@@ -40,8 +40,8 @@ public class ProduceRequestResult {
 	/**
 	 * record追加时间
 	 */
-    private volatile long logAppendTime = RecordBatch.NO_TIMESTAMP;
-    private volatile RuntimeException error;
+	private volatile long logAppendTime = RecordBatch.NO_TIMESTAMP;
+	private volatile Function<Integer, RuntimeException> errorsByIndex;
 
     /**
      * Create an instance of this class.
@@ -52,17 +52,16 @@ public class ProduceRequestResult {
         this.topicPartition = topicPartition;
     }
 
-    /**
-     * Set the result of the produce request.
-     *
-     * @param baseOffset The base offset assigned to the record
-     * @param logAppendTime The log append time or -1 if CreateTime is being used
-     * @param error The error that occurred if there was one, or null
-     */
-    public void set(long baseOffset, long logAppendTime, RuntimeException error) {
-        this.baseOffset = baseOffset;
-        this.logAppendTime = logAppendTime;
-        this.error = error;
+	/**
+	 * Set the result of the produce request.
+	 * @param baseOffset    The base offset assigned to the record
+	 * @param logAppendTime The log append time or -1 if CreateTime is being used
+	 * @param errorsByIndex Function mapping the batch index to the exception, or null if the response was successful
+	 */
+	public void set(long baseOffset, long logAppendTime, Function<Integer, RuntimeException> errorsByIndex) {
+		this.baseOffset = baseOffset;
+		this.logAppendTime = logAppendTime;
+		this.errorsByIndex = errorsByIndex;
     }
 
     /**
@@ -112,12 +111,16 @@ public class ProduceRequestResult {
         return logAppendTime;
     }
 
-    /**
-     * The error thrown (generally on the server) while processing this request
-     */
-    public RuntimeException error() {
-        return error;
-    }
+	/**
+	 * The error thrown (generally on the server) while processing this request
+	 */
+	public RuntimeException error(int batchIndex) {
+		if (errorsByIndex == null) {
+			return null;
+		} else {
+			return errorsByIndex.apply(batchIndex);
+		}
+	}
 
     /**
      * The topic and partition to which the record was appended

@@ -30,6 +30,7 @@ import org.apache.kafka.test.TestCondition;
 import org.apache.kafka.test.TestUtils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -37,19 +38,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
  * A mock network client for use testing code
  */
 public class MockClient implements KafkaClient {
-    public static final RequestMatcher ALWAYS_TRUE = new RequestMatcher() {
-        @Override
-        public boolean matches(AbstractRequest body) {
-            return true;
-        }
-    };
+	public static final RequestMatcher ALWAYS_TRUE = body -> true;
 
     private static class FutureResponse {
         private final Node node;
@@ -72,30 +70,37 @@ public class MockClient implements KafkaClient {
 
     }
 
-    private int correlation;
-    private final Time time;
+	private int correlation;
+	private Runnable wakeupHook;
+	private final Time time;
     private final MockMetadataUpdater metadataUpdater;
     private final Map<String, ConnectionState> connections = new HashMap<>();
     private final Map<Node, Long> pendingAuthenticationErrors = new HashMap<>();
-    private final Map<Node, AuthenticationException> authenticationErrors = new HashMap<>();
-    // Use concurrent queue for requests so that requests may be queried from a different thread
-    private final Queue<ClientRequest> requests = new ConcurrentLinkedDeque<>();
-    // Use concurrent queue for responses so that responses may be updated during poll() from a different thread.
-    private final Queue<ClientResponse> responses = new ConcurrentLinkedDeque<>();
-    private final Queue<FutureResponse> futureResponses = new ConcurrentLinkedDeque<>();
-    private final Queue<MetadataUpdate> metadataUpdates = new ConcurrentLinkedDeque<>();
-    private volatile NodeApiVersions nodeApiVersions = NodeApiVersions.create();
-    private volatile int numBlockingWakeups = 0;
-    private volatile boolean active = true;
+	private final Map<Node, AuthenticationException> authenticationErrors = new HashMap<>();
+	// Use concurrent queue for requests so that requests may be queried from a different thread
+	private final Queue<ClientRequest> requests = new ConcurrentLinkedDeque<>();
+	// Use concurrent queue for responses so that responses may be updated during poll() from a different thread.
+	private final Queue<ClientResponse> responses = new ConcurrentLinkedDeque<>();
+	private final Queue<FutureResponse> futureResponses = new ConcurrentLinkedDeque<>();
+	private final Queue<MetadataUpdate> metadataUpdates = new ConcurrentLinkedDeque<>();
+	private volatile NodeApiVersions nodeApiVersions = NodeApiVersions.create();
+	private volatile int numBlockingWakeups = 0;
+	private volatile boolean active = true;
+	private volatile CompletableFuture<String> disconnectFuture;
+	private volatile Consumer<Node> readyCallback;
 
-    public MockClient(Time time, Metadata metadata) {
-        this(time, new DefaultMockMetadataUpdater(metadata));
-    }
+	public MockClient(Time time) {
+		this(time, new NoOpMetadataUpdater());
+	}
 
-    public MockClient(Time time, MockMetadataUpdater metadataUpdater) {
-        this.time = time;
-        this.metadataUpdater = metadataUpdater;
-    }
+	public MockClient(Time time, Metadata metadata) {
+		this(time, new DefaultMockMetadataUpdater(metadata));
+	}
+
+	public MockClient(Time time, MockMetadataUpdater metadataUpdater) {
+		this.time = time;
+		this.metadataUpdater = metadataUpdater;
+	}
 
     public boolean isConnected(String idString) {
         return connectionState(idString).state == ConnectionState.State.CONNECTED;
@@ -117,8 +122,11 @@ public class MockClient implements KafkaClient {
 
     @Override
     public boolean ready(Node node, long now) {
-        return connectionState(node.idString()).ready(now);
-    }
+		if (readyCallback != null) {
+			readyCallback.accept(node);
+		}
+		return connectionState(node.idString()).ready(now);
+	}
 
     @Override
     public long connectionDelay(Node node, long now) {
@@ -130,9 +138,9 @@ public class MockClient implements KafkaClient {
         return connectionDelay(node, now);
     }
 
-    public void blackout(Node node, long durationMs) {
-        connectionState(node.idString()).backoff(time.milliseconds() + durationMs);
-    }
+	public void backoff(Node node, long durationMs) {
+		connectionState(node.idString()).backoff(time.milliseconds() + durationMs);
+	}
 
     public void setUnreachable(Node node, long durationMs) {
         disconnect(node.idString());
@@ -144,45 +152,57 @@ public class MockClient implements KafkaClient {
     }
 
     public void delayReady(Node node, long durationMs) {
-        connectionState(node.idString()).setReadyDelayed(time.milliseconds() + durationMs);
-    }
+		connectionState(node.idString()).setReadyDelayed(time.milliseconds() + durationMs);
+	}
 
-    public void authenticationFailed(Node node, long blackoutMs) {
-        pendingAuthenticationErrors.remove(node);
-        authenticationErrors.put(node, (AuthenticationException) Errors.SASL_AUTHENTICATION_FAILED.exception());
-        disconnect(node.idString());
-        blackout(node, blackoutMs);
-    }
+	public void authenticationFailed(Node node, long backoffMs) {
+		pendingAuthenticationErrors.remove(node);
+		authenticationErrors.put(node, (AuthenticationException) Errors.SASL_AUTHENTICATION_FAILED.exception());
+		disconnect(node.idString());
+		backoff(node, backoffMs);
+	}
 
-    public void createPendingAuthenticationError(Node node, long blackoutMs) {
-        pendingAuthenticationErrors.put(node, blackoutMs);
-    }
+	public void createPendingAuthenticationError(Node node, long backoffMs) {
+		pendingAuthenticationErrors.put(node, backoffMs);
+	}
 
-    @Override
-    public boolean connectionFailed(Node node) {
-        return connectionState(node.idString()).isBackingOff(time.milliseconds());
-    }
+	@Override
+	public boolean connectionFailed(Node node) {
+		return connectionState(node.idString()).isBackingOff(time.milliseconds());
+	}
 
-    @Override
-    public AuthenticationException authenticationException(Node node) {
-        return authenticationErrors.get(node);
-    }
+	@Override
+	public AuthenticationException authenticationException(Node node) {
+		return authenticationErrors.get(node);
+	}
 
-    @Override
-    public void disconnect(String node) {
-        long now = time.milliseconds();
-        Iterator<ClientRequest> iter = requests.iterator();
-        while (iter.hasNext()) {
-            ClientRequest request = iter.next();
-            if (request.destination().equals(node)) {
-                short version = request.requestBuilder().latestAllowedVersion();
-                responses.add(new ClientResponse(request.makeHeader(version), request.callback(), request.destination(),
-                        request.createdTimeMs(), now, true, null, null, null));
-                iter.remove();
-            }
-        }
-        connectionState(node).disconnect();
-    }
+	public void setReadyCallback(Consumer<Node> onReadyCall) {
+		this.readyCallback = onReadyCall;
+	}
+
+	public void setDisconnectFuture(CompletableFuture<String> disconnectFuture) {
+		this.disconnectFuture = disconnectFuture;
+	}
+
+	@Override
+	public void disconnect(String node) {
+		long now = time.milliseconds();
+		Iterator<ClientRequest> iter = requests.iterator();
+		while (iter.hasNext()) {
+			ClientRequest request = iter.next();
+			if (request.destination().equals(node)) {
+				short version = request.requestBuilder().latestAllowedVersion();
+				responses.add(new ClientResponse(request.makeHeader(version), request.callback(), request.destination(),
+						request.createdTimeMs(), now, true, null, null, null));
+				iter.remove();
+			}
+		}
+		CompletableFuture<String> curDisconnectFuture = disconnectFuture;
+		if (curDisconnectFuture != null) {
+			curDisconnectFuture.complete(node);
+		}
+		connectionState(node).disconnect();
+	}
 
     @Override
     public void send(ClientRequest request, long now) {
@@ -193,13 +213,13 @@ public class MockClient implements KafkaClient {
         for (Iterator<Map.Entry<Node, Long>> authErrorIter =
              pendingAuthenticationErrors.entrySet().iterator(); authErrorIter.hasNext(); ) {
             Map.Entry<Node, Long> entry = authErrorIter.next();
-            Node node = entry.getKey();
-            long blackoutMs = entry.getValue();
+			Node node = entry.getKey();
+			long backoffMs = entry.getValue();
             if (node.idString().equals(request.destination())) {
                 authErrorIter.remove();
                 // Set up a disconnected ClientResponse and create an authentication error
                 // for the affected node.
-                authenticationFailed(node, blackoutMs);
+				authenticationFailed(node, backoffMs);
                 AbstractRequest.Builder<?> builder = request.requestBuilder();
                 short version = nodeApiVersions.latestUsableVersion(request.apiKey(), builder.oldestAllowedVersion(),
                     builder.latestAllowedVersion());
@@ -212,29 +232,31 @@ public class MockClient implements KafkaClient {
         }
         Iterator<FutureResponse> iterator = futureResponses.iterator();
         while (iterator.hasNext()) {
-            FutureResponse futureResp = iterator.next();
-            if (futureResp.node != null && !request.destination().equals(futureResp.node.idString()))
-                continue;
+			FutureResponse futureResp = iterator.next();
+			if (futureResp.node != null && !request.destination().equals(futureResp.node.idString()))
+				continue;
 
-            AbstractRequest.Builder<?> builder = request.requestBuilder();
-            short version = nodeApiVersions.latestUsableVersion(request.apiKey(), builder.oldestAllowedVersion(),
-                    builder.latestAllowedVersion());
-            AbstractRequest abstractRequest = request.requestBuilder().build(version);
-            if (!futureResp.requestMatcher.matches(abstractRequest))
-                throw new IllegalStateException("Request matcher did not match next-in-line request " + abstractRequest + " with prepared response " + futureResp.responseBody);
+			AbstractRequest.Builder<?> builder = request.requestBuilder();
+			short version = nodeApiVersions.latestUsableVersion(request.apiKey(), builder.oldestAllowedVersion(),
+					builder.latestAllowedVersion());
 
-            UnsupportedVersionException unsupportedVersionException = null;
-            if (futureResp.isUnsupportedRequest)
-                unsupportedVersionException = new UnsupportedVersionException("Api " +
-                        request.apiKey() + " with version " + version);
-
-            ClientResponse resp = new ClientResponse(request.makeHeader(version), request.callback(), request.destination(),
-                    request.createdTimeMs(), time.milliseconds(), futureResp.disconnected,
-                    unsupportedVersionException, null, futureResp.responseBody);
-            responses.add(resp);
-            iterator.remove();
-            return;
-        }
+			UnsupportedVersionException unsupportedVersionException = null;
+			if (futureResp.isUnsupportedRequest) {
+				unsupportedVersionException = new UnsupportedVersionException(
+						"Api " + request.apiKey() + " with version " + version);
+			} else {
+				AbstractRequest abstractRequest = request.requestBuilder().build(version);
+				if (!futureResp.requestMatcher.matches(abstractRequest))
+					throw new IllegalStateException("Request matcher did not match next-in-line request "
+							+ abstractRequest + " with prepared response " + futureResp.responseBody);
+			}
+			ClientResponse resp = new ClientResponse(request.makeHeader(version), request.callback(), request.destination(),
+					request.createdTimeMs(), time.milliseconds(), futureResp.disconnected,
+					unsupportedVersionException, null, futureResp.responseBody);
+			responses.add(resp);
+			iterator.remove();
+			return;
+		}
 
         this.requests.add(request);
     }
@@ -250,21 +272,27 @@ public class MockClient implements KafkaClient {
 
     @Override
     public synchronized void wakeup() {
-        if (numBlockingWakeups > 0) {
-            numBlockingWakeups--;
-            notify();
-        }
-    }
+		if (numBlockingWakeups > 0) {
+			numBlockingWakeups--;
+			notify();
+		}
+		if (wakeupHook != null) {
+			wakeupHook.run();
+		}
+	}
 
     private synchronized void maybeAwaitWakeup() {
         try {
-            int remainingBlockingWakeups = numBlockingWakeups;
-            if (remainingBlockingWakeups <= 0)
-                return;
+			int remainingBlockingWakeups = numBlockingWakeups;
+			if (remainingBlockingWakeups <= 0)
+				return;
 
-            while (numBlockingWakeups == remainingBlockingWakeups)
-                wait();
-        } catch (InterruptedException e) {
+			TestUtils.waitForCondition(() -> {
+				if (numBlockingWakeups == remainingBlockingWakeups)
+					MockClient.this.wait(500);
+				return numBlockingWakeups < remainingBlockingWakeups;
+			}, 5000, "Failed to receive expected wakeup");
+		} catch (InterruptedException e) {
             throw new InterruptException(e);
         }
     }
@@ -298,28 +326,35 @@ public class MockClient implements KafkaClient {
         return Math.max(0, currentTimeMs - startTimeMs);
     }
 
-
     private void checkTimeoutOfPendingRequests(long nowMs) {
         ClientRequest request = requests.peek();
-        while (request != null && elapsedTimeMs(nowMs, request.createdTimeMs()) > request.requestTimeoutMs()) {
-            disconnect(request.destination());
-            requests.poll();
-            request = requests.peek();
-        }
-    }
+		while (request != null && elapsedTimeMs(nowMs, request.createdTimeMs()) >= request.requestTimeoutMs()) {
+			disconnect(request.destination());
+			requests.poll();
+			request = requests.peek();
+		}
+	}
 
-    public Queue<ClientRequest> requests() {
-        return this.requests;
-    }
+	public Queue<ClientRequest> requests() {
+		return this.requests;
+	}
 
-    public void respond(AbstractResponse response) {
-        respond(response, false);
-    }
+	public Queue<ClientResponse> responses() {
+		return this.responses;
+	}
 
-    public void respond(RequestMatcher matcher, AbstractResponse response) {
-        ClientRequest nextRequest = requests.peek();
-        if (nextRequest == null)
-            throw new IllegalStateException("No current requests queued");
+	public Queue<FutureResponse> futureResponses() {
+		return this.futureResponses;
+	}
+
+	public void respond(AbstractResponse response) {
+		respond(response, false);
+	}
+
+	public void respond(RequestMatcher matcher, AbstractResponse response) {
+		ClientRequest nextRequest = requests.peek();
+		if (nextRequest == null)
+			throw new IllegalStateException("No current requests queued");
 
         AbstractRequest request = nextRequest.requestBuilder().build();
         if (!matcher.matches(request))
@@ -330,7 +365,6 @@ public class MockClient implements KafkaClient {
 
     // Utility method to enable out of order responses
     public void respondToRequest(ClientRequest clientRequest, AbstractResponse response) {
-        AbstractRequest request = clientRequest.requestBuilder().build();
         requests.remove(clientRequest);
         short version = clientRequest.requestBuilder().latestAllowedVersion();
         responses.add(new ClientResponse(clientRequest.makeHeader(version), clientRequest.callback(), clientRequest.destination(),
@@ -378,25 +412,29 @@ public class MockClient implements KafkaClient {
      * Prepare a response for a request matching the provided matcher. If the matcher does not
      * match, {@link KafkaClient#send(ClientRequest, long)} will throw IllegalStateException
      * @param matcher The matcher to apply
-     * @param response The response body
-     */
-    public void prepareResponse(RequestMatcher matcher, AbstractResponse response) {
-        prepareResponse(matcher, response, false);
-    }
+	 * @param response The response body
+	 */
+	public void prepareResponse(RequestMatcher matcher, AbstractResponse response) {
+		prepareResponse(matcher, response, false);
+	}
 
-    public void prepareResponseFrom(RequestMatcher matcher, AbstractResponse response, Node node) {
-        prepareResponseFrom(matcher, response, node, false, false);
-    }
+	public void prepareResponseFrom(RequestMatcher matcher, AbstractResponse response, Node node) {
+		prepareResponseFrom(matcher, response, node, false, false);
+	}
 
-    public void prepareResponse(AbstractResponse response, boolean disconnected) {
-        prepareResponse(ALWAYS_TRUE, response, disconnected);
-    }
+	public void prepareResponseFrom(RequestMatcher matcher, AbstractResponse response, Node node, boolean disconnected) {
+		prepareResponseFrom(matcher, response, node, disconnected, false);
+	}
 
-    public void prepareResponseFrom(AbstractResponse response, Node node, boolean disconnected) {
-        prepareResponseFrom(ALWAYS_TRUE, response, node, disconnected, false);
-    }
+	public void prepareResponse(AbstractResponse response, boolean disconnected) {
+		prepareResponse(ALWAYS_TRUE, response, disconnected);
+	}
 
-    /**
+	public void prepareResponseFrom(AbstractResponse response, Node node, boolean disconnected) {
+		prepareResponseFrom(ALWAYS_TRUE, response, node, disconnected, false);
+	}
+
+	/**
      * Prepare a response for a request matching the provided matcher. If the matcher does not
      * match, {@link KafkaClient#send(ClientRequest, long)} will throw IllegalStateException.
      * @param matcher The request matcher to apply
@@ -535,24 +573,29 @@ public class MockClient implements KafkaClient {
         connections.remove(node);
     }
 
-    @Override
-    public Node leastLoadedNode(long now) {
-        // Consistent with NetworkClient, we do not return nodes awaiting reconnect backoff
-        for (Node node : metadataUpdater.fetchNodes()) {
-            if (!connectionState(node.idString()).isBackingOff(now))
-                return node;
-        }
-        return null;
-    }
+	@Override
+	public Node leastLoadedNode(long now) {
+		// Consistent with NetworkClient, we do not return nodes awaiting reconnect backoff
+		for (Node node : metadataUpdater.fetchNodes()) {
+			if (!connectionState(node.idString()).isBackingOff(now))
+				return node;
+		}
+		return null;
+	}
 
-    /**
-     * The RequestMatcher provides a way to match a particular request to a response prepared
-     * through {@link #prepareResponse(RequestMatcher, AbstractResponse)}. Basically this allows testers
-     * to inspect the request body for the type of the request or for specific fields that should be set,
-     * and to fail the test if it doesn't match.
-     */
-    public interface RequestMatcher {
-        boolean matches(AbstractRequest body);
+	public void setWakeupHook(Runnable wakeupHook) {
+		this.wakeupHook = wakeupHook;
+	}
+
+	/**
+	 * The RequestMatcher provides a way to match a particular request to a response prepared
+	 * through {@link #prepareResponse(RequestMatcher, AbstractResponse)}. Basically this allows testers
+	 * to inspect the request body for the type of the request or for specific fields that should be set,
+	 * and to fail the test if it doesn't match.
+	 */
+	@FunctionalInterface
+	public interface RequestMatcher {
+		boolean matches(AbstractRequest body);
     }
 
     public void setNodeApiVersions(NodeApiVersions nodeApiVersions) {
@@ -584,24 +627,43 @@ public class MockClient implements KafkaClient {
     public interface MockMetadataUpdater {
         List<Node> fetchNodes();
 
-        boolean isUpdateNeeded();
+		boolean isUpdateNeeded();
 
-        void update(Time time, MetadataUpdate update);
+		void update(Time time, MetadataUpdate update);
 
-        default void updateWithCurrentMetadata(Time time) {}
+		default void updateWithCurrentMetadata(Time time) {
+		}
 
-        default void close() {}
-    }
+		default void close() {
+		}
+	}
 
-    private static class DefaultMockMetadataUpdater implements MockMetadataUpdater {
-        private final Metadata metadata;
-        private MetadataUpdate lastUpdate;
+	private static class NoOpMetadataUpdater implements MockMetadataUpdater {
+		@Override
+		public List<Node> fetchNodes() {
+			return Collections.emptyList();
+		}
 
-        public DefaultMockMetadataUpdater(Metadata metadata) {
-            this.metadata = metadata;
-        }
+		@Override
+		public boolean isUpdateNeeded() {
+			return false;
+		}
 
-        @Override
+		@Override
+		public void update(Time time, MetadataUpdate update) {
+			throw new UnsupportedOperationException();
+		}
+	}
+
+	private static class DefaultMockMetadataUpdater implements MockMetadataUpdater {
+		private final Metadata metadata;
+		private MetadataUpdate lastUpdate;
+
+		public DefaultMockMetadataUpdater(Metadata metadata) {
+			this.metadata = metadata;
+		}
+
+		@Override
         public List<Node> fetchNodes() {
             return metadata.fetch().nodes();
         }
@@ -637,9 +699,9 @@ public class MockClient implements KafkaClient {
         @Override
         public void update(Time time, MetadataUpdate update) {
             MetadataRequest.Builder builder = metadata.newMetadataRequestBuilder();
-            maybeCheckExpectedTopics(update, builder);
-            metadata.update(update.updateResponse, time.milliseconds());
-            this.lastUpdate = update;
+			maybeCheckExpectedTopics(update, builder);
+			metadata.updateWithCurrentRequestVersion(update.updateResponse, false, time.milliseconds());
+			this.lastUpdate = update;
         }
 
         @Override

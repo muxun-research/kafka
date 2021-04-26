@@ -16,18 +16,47 @@
 {
   "apiKey": 44,
   "type": "request",
+  "listeners": [
+    "zkBroker",
+    "broker",
+    "controller"
+  ],
   "name": "IncrementalAlterConfigsRequest",
-  "validVersions": "0",
+  // Version 1 is the first flexible version.
+  "validVersions": "0-1",
+  "flexibleVersions": "1+",
   "fields": [
-    { "name": "Resources", "type": "[]AlterConfigsResource", "versions": "0+",
-      "about": "The incremental updates for each resource.", "fields": [
-      { "name": "ResourceType", "type": "int8", "versions": "0+", "mapKey": true,
-        "about": "The resource type." },
-      { "name": "ResourceName", "type": "string", "versions": "0+", "mapKey": true,
-        "about": "The resource name." },
-      { "name": "Configs", "type": "[]AlterableConfig", "versions": "0+",
-        "about": "The configurations.",  "fields": [
-        { "name": "Name", "type": "string", "versions": "0+", "mapKey": true,
+    {
+      "name": "Resources",
+      "type": "[]AlterConfigsResource",
+      "versions": "0+",
+      "about": "The incremental updates for each resource.",
+      "fields": [
+        {
+          "name": "ResourceType",
+          "type": "int8",
+          "versions": "0+",
+          "mapKey": true,
+          "about": "The resource type."
+        },
+        {
+          "name": "ResourceName",
+          "type": "string",
+          "versions": "0+",
+          "mapKey": true,
+          "about": "The resource name."
+        },
+        {
+          "name": "Configs",
+          "type": "[]AlterableConfig",
+          "versions": "0+",
+          "about": "The configurations.",
+          "fields": [
+            {
+              "name": "Name",
+              "type": "string",
+              "versions": "0+",
+              "mapKey": true,
           "about": "The configuration key name." },
         { "name": "ConfigOperation", "type": "int8", "versions": "0+", "mapKey": true,
           "about": "The type (Set, Delete, Append, Subtract) of operation." },

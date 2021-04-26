@@ -18,17 +18,12 @@ package org.apache.kafka.streams.state.internals;
 
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.streams.errors.InvalidStateStoreException;
-import org.apache.kafka.streams.processor.ProcessorContext;
-import org.apache.kafka.streams.processor.StateStore;
+import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.KeyValueStore;
-import org.apache.kafka.streams.state.RocksDBConfigSetter;
 import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.Stores;
 import org.junit.Test;
-import org.rocksdb.Options;
-
-import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -37,32 +32,18 @@ import static org.junit.Assert.fail;
 
 public class RocksDBKeyValueStoreTest extends AbstractKeyValueStoreTest {
 
-    @SuppressWarnings("unchecked")
-    @Override
-    protected <K, V> KeyValueStore<K, V> createKeyValueStore(final ProcessorContext context) {
-        final StoreBuilder storeBuilder = Stores.keyValueStoreBuilder(
-                Stores.persistentKeyValueStore("my-store"),
-                (Serde<K>) context.keySerde(),
-                (Serde<V>) context.valueSerde());
+	@SuppressWarnings("unchecked")
+	@Override
+	protected <K, V> KeyValueStore<K, V> createKeyValueStore(final StateStoreContext context) {
+		final StoreBuilder<KeyValueStore<K, V>> storeBuilder = Stores.keyValueStoreBuilder(
+				Stores.persistentKeyValueStore("my-store"),
+				(Serde<K>) context.keySerde(),
+				(Serde<V>) context.valueSerde());
 
-        final StateStore store = storeBuilder.build();
-        store.init(context, store);
-        return (KeyValueStore<K, V>) store;
-    }
-
-    public static class TheRocksDbConfigSetter implements RocksDBConfigSetter {
-        static boolean called = false;
-
-        @Override
-        public void setConfig(final String storeName, final Options options, final Map<String, Object> configs) {
-            called = true;
-        }
-    }
-
-    @Test
-    public void shouldUseCustomRocksDbConfigSetter() {
-        assertTrue(TheRocksDbConfigSetter.called);
-    }
+		final KeyValueStore<K, V> store = storeBuilder.build();
+		store.init(context, store);
+		return store;
+	}
 
     @Test
     public void shouldPerformRangeQueriesWithCachingDisabled() {
@@ -86,18 +67,18 @@ public class RocksDBKeyValueStoreTest extends AbstractKeyValueStoreTest {
         assertFalse(range.hasNext());
     }
 
-    @Test
-    public void shouldCloseOpenIteratorsWhenStoreClosedAndThrowInvalidStateStoreOnHasNextAndNext() {
-        context.setTime(1L);
-        store.put(1, "hi");
-        store.put(2, "goodbye");
-        final KeyValueIterator<Integer, String> iteratorOne = store.range(1, 5);
-        final KeyValueIterator<Integer, String> iteratorTwo = store.range(1, 4);
+	@Test
+	public void shouldCloseOpenRangeIteratorsWhenStoreClosedAndThrowInvalidStateStoreOnHasNextAndNext() {
+		context.setTime(1L);
+		store.put(1, "hi");
+		store.put(2, "goodbye");
+		final KeyValueIterator<Integer, String> iteratorOne = store.range(1, 5);
+		final KeyValueIterator<Integer, String> iteratorTwo = store.range(1, 4);
 
-        assertTrue(iteratorOne.hasNext());
-        assertTrue(iteratorTwo.hasNext());
+		assertTrue(iteratorOne.hasNext());
+		assertTrue(iteratorTwo.hasNext());
 
-        store.close();
+		store.close();
 
         try {
             iteratorOne.hasNext();
@@ -127,5 +108,4 @@ public class RocksDBKeyValueStoreTest extends AbstractKeyValueStoreTest {
             // ok
         }
     }
-
 }

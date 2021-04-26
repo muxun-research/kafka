@@ -26,26 +26,25 @@ import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.common.utils.LogContext;
 import org.junit.Test;
 
-import java.util.Collections;
+import java.util.Optional;
 
 import static org.junit.Assert.assertEquals;
 
 public class RecordDeserializerTest {
 
-    private final RecordHeaders headers = new RecordHeaders(new Header[] {new RecordHeader("key", "value".getBytes())});
-    private final ConsumerRecord<byte[], byte[]> rawRecord = new ConsumerRecord<>("topic",
-        1,
-        1,
-        10,
-        TimestampType.LOG_APPEND_TIME,
-        5L,
-        3,
-        5,
-        new byte[0],
-        new byte[0],
-        headers);
+	private final RecordHeaders headers = new RecordHeaders(new Header[]{new RecordHeader("key", "value".getBytes())});
+	private final ConsumerRecord<byte[], byte[]> rawRecord = new ConsumerRecord<>("topic",
+			1,
+			1,
+			10,
+			TimestampType.LOG_APPEND_TIME,
+			3,
+			5,
+			new byte[0],
+			new byte[0],
+			headers,
+			Optional.empty());
 
-    @SuppressWarnings("deprecation")
     @Test
     public void shouldReturnConsumerRecordWithDeserializedValueWhenNoExceptions() {
         final RecordDeserializer recordDeserializer = new RecordDeserializer(
@@ -56,13 +55,12 @@ public class RecordDeserializerTest {
             ),
             null,
             new LogContext(),
-            new Metrics().sensor("skipped-records")
+				new Metrics().sensor("dropped-records")
         );
         final ConsumerRecord<Object, Object> record = recordDeserializer.deserialize(null, rawRecord);
         assertEquals(rawRecord.topic(), record.topic());
         assertEquals(rawRecord.partition(), record.partition());
         assertEquals(rawRecord.offset(), record.offset());
-        assertEquals(rawRecord.checksum(), record.checksum());
         assertEquals("key", record.key());
         assertEquals("value", record.value());
         assertEquals(rawRecord.timestamp(), record.timestamp());
@@ -70,18 +68,18 @@ public class RecordDeserializerTest {
         assertEquals(rawRecord.headers(), record.headers());
     }
 
-    static class TheSourceNode extends SourceNode<Object, Object> {
-        private final boolean keyThrowsException;
-        private final boolean valueThrowsException;
-        private final Object key;
-        private final Object value;
+	static class TheSourceNode extends SourceNode<Object, Object, Object, Object> {
+		private final boolean keyThrowsException;
+		private final boolean valueThrowsException;
+		private final Object key;
+		private final Object value;
 
-        TheSourceNode(final boolean keyThrowsException,
-                      final boolean valueThrowsException,
-                      final Object key,
-                      final Object value) {
-            super("", Collections.emptyList(), null, null);
-            this.keyThrowsException = keyThrowsException;
+		TheSourceNode(final boolean keyThrowsException,
+					  final boolean valueThrowsException,
+					  final Object key,
+					  final Object value) {
+			super("", null, null);
+			this.keyThrowsException = keyThrowsException;
             this.valueThrowsException = valueThrowsException;
             this.key = key;
             this.value = value;

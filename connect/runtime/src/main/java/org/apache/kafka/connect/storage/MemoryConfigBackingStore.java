@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.connect.storage;
 
+import org.apache.kafka.connect.runtime.SessionKey;
 import org.apache.kafka.connect.runtime.TargetState;
 import org.apache.kafka.connect.runtime.WorkerConfigTransformer;
 import org.apache.kafka.connect.runtime.distributed.ClusterConfigState;
@@ -67,13 +68,14 @@ public class MemoryConfigBackingStore implements ConfigBackingStore {
         }
 
         return new ClusterConfigState(
-                ClusterConfigState.NO_OFFSET,
-                connectorTaskCounts,
-                connectorConfigs,
-                connectorTargetStates,
-                taskConfigs,
-                Collections.<String>emptySet(),
-                configTransformer);
+				ClusterConfigState.NO_OFFSET,
+				null,
+				connectorTaskCounts,
+				connectorConfigs,
+				connectorTargetStates,
+				taskConfigs,
+				Collections.emptySet(),
+				configTransformer);
     }
 
     @Override
@@ -133,25 +135,30 @@ public class MemoryConfigBackingStore implements ConfigBackingStore {
 
     @Override
     public synchronized void putTargetState(String connector, TargetState state) {
-        ConnectorState connectorState = connectors.get(connector);
-        if (connectorState == null)
-            throw new IllegalArgumentException("No connector `" + connector + "` configured");
+		ConnectorState connectorState = connectors.get(connector);
+		if (connectorState == null)
+			throw new IllegalArgumentException("No connector `" + connector + "` configured");
 
-        connectorState.targetState = state;
+		connectorState.targetState = state;
 
-        if (updateListener != null)
-            updateListener.onConnectorTargetStateChange(connector);
-    }
+		if (updateListener != null)
+			updateListener.onConnectorTargetStateChange(connector);
+	}
 
-    @Override
-    public synchronized void setUpdateListener(UpdateListener listener) {
-        this.updateListener = listener;
-    }
+	@Override
+	public void putSessionKey(SessionKey sessionKey) {
+		// no-op
+	}
 
-    private static class ConnectorState {
-        private TargetState targetState;
-        private Map<String, String> connConfig;
-        private Map<ConnectorTaskId, Map<String, String>> taskConfigs;
+	@Override
+	public synchronized void setUpdateListener(UpdateListener listener) {
+		this.updateListener = listener;
+	}
+
+	private static class ConnectorState {
+		private TargetState targetState;
+		private Map<String, String> connConfig;
+		private Map<ConnectorTaskId, Map<String, String>> taskConfigs;
 
         public ConnectorState(Map<String, String> connConfig) {
             this.targetState = TargetState.STARTED;

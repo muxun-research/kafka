@@ -16,30 +16,34 @@
  */
 package org.apache.kafka.common.network;
 
-import java.nio.ByteBuffer;
+import java.io.IOException;
 
-/**
- * 由4字节网络顺序大小n，后跟n字节内容组成的以大小分隔的发送
- */
-public class NetworkSend extends ByteBufferSend {
+public class NetworkSend implements Send {
+	private final String destinationId;
+	private final Send send;
 
-    public NetworkSend(String destination, ByteBuffer buffer) {
-        super(destination, sizeBuffer(buffer.remaining()), buffer);
-    }
+	public NetworkSend(String destinationId, Send send) {
+		this.destinationId = destinationId;
+		this.send = send;
+	}
 
-	/**
-	 * 使用ByteBuffer创建一个传输数据大小的buffer
-	 * @param size 剩余需要发送的buffer字节数大小
-	 * @return 传输数据大小的buffer
-	 */
-	private static ByteBuffer sizeBuffer(int size) {
-		// 创建一个4字节的ByteBuffer
-		ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
-		// 写入需要发送的字节数
-		sizeBuffer.putInt(size);
-		// 准备写入buffer
-		sizeBuffer.rewind();
-		return sizeBuffer;
+	public String destinationId() {
+		return destinationId;
+	}
+
+	@Override
+	public boolean completed() {
+		return send.completed();
+	}
+
+	@Override
+	public long writeTo(TransferableChannel channel) throws IOException {
+		return send.writeTo(channel);
+	}
+
+	@Override
+	public long size() {
+		return send.size();
 	}
 
 }

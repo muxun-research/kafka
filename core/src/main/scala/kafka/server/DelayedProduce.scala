@@ -17,12 +17,12 @@
 
 package kafka.server
 
-
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.Lock
 
 import com.yammer.metrics.core.Meter
 import kafka.metrics.KafkaMetricsGroup
+import kafka.utils.Implicits._
 import kafka.utils.Pool
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.protocol.Errors
@@ -38,16 +38,17 @@ case class ProducePartitionStatus(requiredOffset: Long, responseStatus: Partitio
 }
 
 /**
- * 创建延迟生产操作metadata
+ * The produce metadata maintained by the delayed produce operation
  */
 case class ProduceMetadata(produceRequiredAcks: Short,
                            produceStatus: Map[TopicPartition, ProducePartitionStatus]) {
+
   override def toString = s"[requiredAcks: $produceRequiredAcks, partitionStatus: $produceStatus]"
 }
 
 /**
- * 有副本管理器创建的延迟生产请求，并生产操作缓存中进行观察
- * 其实也是一个延迟操作
+ * A delayed produce operation that can be created by the replica manager and watched
+ * in the produce operation purgatory
  */
 class DelayedProduce(delayMs: Long,
                      produceMetadata: ProduceMetadata,
@@ -56,10 +57,10 @@ class DelayedProduce(delayMs: Long,
                      lockOpt: Option[Lock] = None)
   extends DelayedOperation(delayMs, lockOpt) {
 
-  // 首先，根据error code更新acks待定变量
-  produceMetadata.produceStatus.foreach { case (topicPartition, status) =>
+  // first update the acks pending variable according to the error code
+  produceMetadata.produceStatus.forKeyValue { (topicPartition, status) =>
     if (status.responseStatus.error == Errors.NONE) {
-      // 超时错误状态将会在收到需要的acks后清除
+      // Timeout error state will be cleared when required acks are received
       status.acksPending = true
       status.responseStatus.error = Errors.REQUEST_TIMED_OUT
     } else {
@@ -70,30 +71,30 @@ class DelayedProduce(delayMs: Long,
   }
 
   /**
-   * 延迟生产操作可以在每个partition在满足下列条件后后完成：
-   * Case A: broker不再是leader节点，在响应中设置错误信息
-   * Case B: broker仍然是leader节点:
-   *   B.1 - 如果在检查是否需要required时抛出了本地错误，则ACK副本已经赶上此操作，在响应中设置错误
-   *   B.2 - 其他情况，不在响应中设置错误
+   * The delayed produce operation can be completed if every partition
+   * it produces to is satisfied by one of the following:
+   *
+   * Case A: This broker is no longer the leader: set an error in response
+   * Case B: This broker is the leader:
+   * B.1 - If there was a local error thrown while checking if at least requiredAcks
+   * replicas have caught up to this operation: set an error in response
+   * B.2 - Otherwise, set the response with no error.
    */
   override def tryComplete(): Boolean = {
-    // 检查每个partition是否还有待定的acks
-    produceMetadata.produceStatus.foreach { case (topicPartition, status) =>
+    // check for each partition if it still has pending acks
+    produceMetadata.produceStatus.forKeyValue { (topicPartition, status) =>
       trace(s"Checking produce satisfaction for $topicPartition, current status $status")
-      // 忽略那些已经完成应答的partition
+      // skip those partitions that have already been satisfied
       if (status.acksPending) {
-        val (hasEnough, error) = replicaManager.getPartition(topicPartition) match {
-          case HostedPartition.Online(partition) =>
-            // 如果partition处于在线状态，检查partition是否处于可完成应答状态
-            partition.checkEnoughReplicasReachOffset(status.requiredOffset)
-
-          case HostedPartition.Offline =>
-            (false, Errors.KAFKA_STORAGE_ERROR)
-
-          case HostedPartition.None =>
+        val (hasEnough, error) = replicaManager.getPartitionOrError(topicPartition) match {
+          case Left(err) =>
             // Case A
-            (false, Errors.UNKNOWN_TOPIC_OR_PARTITION)
+            (false, err)
+
+          case Right(partition) =>
+            partition.checkEnoughReplicasReachOffset(status.requiredOffset)
         }
+
         // Case B.1 || B.2
         if (error != Errors.NONE || hasEnough) {
           status.acksPending = false
@@ -102,16 +103,15 @@ class DelayedProduce(delayMs: Long,
       }
     }
 
-    // 在case A或者case B的情况下，每个partition是否已经满足条件
+    // check if every partition has satisfied at least one of case A or B
     if (!produceMetadata.produceStatus.values.exists(_.acksPending))
-    // 强制执行
       forceComplete()
     else
       false
   }
 
   override def onExpiration(): Unit = {
-    produceMetadata.produceStatus.foreach { case (topicPartition, status) =>
+    produceMetadata.produceStatus.forKeyValue { (topicPartition, status) =>
       if (status.acksPending) {
         debug(s"Expiring produce request for partition $topicPartition with status $status")
         DelayedProduceMetrics.recordExpiration(topicPartition)

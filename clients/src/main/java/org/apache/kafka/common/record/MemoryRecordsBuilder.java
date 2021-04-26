@@ -18,8 +18,11 @@ package org.apache.kafka.common.record;
 
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.message.LeaderChangeMessage;
+import org.apache.kafka.common.protocol.MessageUtil;
 import org.apache.kafka.common.protocol.types.Struct;
 import org.apache.kafka.common.utils.ByteBufferOutputStream;
+import org.apache.kafka.common.utils.Utils;
 
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -29,12 +32,13 @@ import java.nio.ByteBuffer;
 import static org.apache.kafka.common.utils.Utils.wrapNullable;
 
 /**
- * 向内存写入新的日志数据，比如，这是{@link MemoryRecords}的写入路径
- * 它透明的处理压缩并公开用于追加新纪录的方法，可能带有消息的格式转换
+ * This class is used to write new log data in memory, i.e. this is the write path for {@link MemoryRecords}.
+ * It transparently handles compression and exposes methods for appending new records, possibly with message
+ * format conversion.
  * <p>
- * 低内存占有是非常重要的，在record追加结束的时间和builder关闭的时间是有差距的（比如Producer）
- * 所以当前者发生时，调用"closeForRecordAppends"就显得比较重要
- * 这将释放诸如压缩缓存区之类的资源，该资源可能相对较大（比如LZ4算法可能占用64KB）
+ * In cases where keeping memory retention low is important and there's a gap between the time that record appends stop
+ * and the builder is closed (e.g. the Producer), it's important to call `closeForRecordAppends` when the former happens.
+ * This will release resources like compression buffers that can be relatively large (64 KB for LZ4).
  */
 public class MemoryRecordsBuilder implements AutoCloseable {
 	private static final float COMPRESSION_RATE_ESTIMATION_FACTOR = 1.05f;
@@ -390,14 +394,11 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 	}
 
 	/**
-	 * 追加record
-	 * 对于V0、V1版本的消息，返回CRC
-	 * 对于V2及以上版本的消息，返回null
+	 * Append a new record at the given offset.
 	 */
-	private Long appendWithOffset(long offset, boolean isControlRecord, long timestamp, ByteBuffer key,
+	private void appendWithOffset(long offset, boolean isControlRecord, long timestamp, ByteBuffer key,
 								  ByteBuffer value, Header[] headers) {
 		try {
-
 			if (isControlRecord != isControlBatch)
 				throw new IllegalArgumentException("Control records can only be appended to control batches");
 
@@ -416,9 +417,8 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 
 			if (magic > RecordBatch.MAGIC_VALUE_V1) {
 				appendDefaultRecord(offset, timestamp, key, value, headers);
-				return null;
 			} else {
-				return appendLegacyRecord(offset, timestamp, key, value, magic);
+				appendLegacyRecord(offset, timestamp, key, value, magic);
 			}
 		} catch (IOException e) {
 			throw new KafkaException("I/O exception when writing to the append stream, closing", e);
@@ -432,23 +432,9 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 	 * @param key       The record key
 	 * @param value     The record value
 	 * @param headers   The record headers if there are any
-	 * @return CRC of the record or null if record-level CRC is not supported for the message format
 	 */
-	public Long appendWithOffset(long offset, long timestamp, byte[] key, byte[] value, Header[] headers) {
-		return appendWithOffset(offset, false, timestamp, wrapNullable(key), wrapNullable(value), headers);
-	}
-
-	/**
-	 * 使用给定的offset追加新的record
-	 * @param offset    log缓存中record的绝对偏移量
-	 * @param timestamp record的时间戳
-	 * @param key       record的key
-	 * @param value     record的value
-	 * @param headers   record的header
-	 * @return record的CRC，如果当前消息格式不支持record级别的CRC，则返回null
-	 */
-	public Long appendWithOffset(long offset, long timestamp, ByteBuffer key, ByteBuffer value, Header[] headers) {
-		return appendWithOffset(offset, false, timestamp, key, value, headers);
+	public void appendWithOffset(long offset, long timestamp, byte[] key, byte[] value, Header[] headers) {
+		appendWithOffset(offset, false, timestamp, wrapNullable(key), wrapNullable(value), headers);
 	}
 
 	/**
@@ -457,10 +443,10 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 	 * @param timestamp The record timestamp
 	 * @param key       The record key
 	 * @param value     The record value
-	 * @return CRC of the record or null if record-level CRC is not supported for the message format
+	 * @param headers   The record headers if there are any
 	 */
-	public Long appendWithOffset(long offset, long timestamp, byte[] key, byte[] value) {
-		return appendWithOffset(offset, timestamp, wrapNullable(key), wrapNullable(value), Record.EMPTY_HEADERS);
+	public void appendWithOffset(long offset, long timestamp, ByteBuffer key, ByteBuffer value, Header[] headers) {
+		appendWithOffset(offset, false, timestamp, key, value, headers);
 	}
 
 	/**
@@ -469,20 +455,45 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 	 * @param timestamp The record timestamp
 	 * @param key       The record key
 	 * @param value     The record value
-	 * @return CRC of the record or null if record-level CRC is not supported for the message format
 	 */
-	public Long appendWithOffset(long offset, long timestamp, ByteBuffer key, ByteBuffer value) {
-		return appendWithOffset(offset, timestamp, key, value, Record.EMPTY_HEADERS);
+	public void appendWithOffset(long offset, long timestamp, byte[] key, byte[] value) {
+		appendWithOffset(offset, timestamp, wrapNullable(key), wrapNullable(value), Record.EMPTY_HEADERS);
+	}
+
+	/**
+	 * Append a new record at the given offset.
+	 * @param offset    The absolute offset of the record in the log buffer
+	 * @param timestamp The record timestamp
+	 * @param key       The record key
+	 * @param value     The record value
+	 */
+	public void appendWithOffset(long offset, long timestamp, ByteBuffer key, ByteBuffer value) {
+		appendWithOffset(offset, timestamp, key, value, Record.EMPTY_HEADERS);
 	}
 
 	/**
 	 * Append a new record at the given offset.
 	 * @param offset The absolute offset of the record in the log buffer
 	 * @param record The record to append
-	 * @return CRC of the record or null if record-level CRC is not supported for the message format
 	 */
-	public Long appendWithOffset(long offset, SimpleRecord record) {
-		return appendWithOffset(offset, record.timestamp(), record.key(), record.value(), record.headers());
+	public void appendWithOffset(long offset, SimpleRecord record) {
+		appendWithOffset(offset, record.timestamp(), record.key(), record.value(), record.headers());
+	}
+
+	/**
+	 * Append a control record at the given offset. The control record type must be known or
+	 * this method will raise an error.
+	 * @param offset The absolute offset of the record in the log buffer
+	 * @param record The record to append
+	 */
+	public void appendControlRecordWithOffset(long offset, SimpleRecord record) {
+		short typeId = ControlRecordType.parseTypeId(record.key());
+		ControlRecordType type = ControlRecordType.fromTypeId(typeId);
+		if (type == ControlRecordType.UNKNOWN)
+			throw new IllegalArgumentException("Cannot append record with unknown control record type " + typeId);
+
+		appendWithOffset(offset, true, record.timestamp(),
+				record.key(), record.value(), record.headers());
 	}
 
 	/**
@@ -490,33 +501,9 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 	 * @param timestamp The record timestamp
 	 * @param key       The record key
 	 * @param value     The record value
-	 * @return CRC of the record or null if record-level CRC is not supported for the message format
 	 */
-	public Long append(long timestamp, ByteBuffer key, ByteBuffer value) {
-		return append(timestamp, key, value, Record.EMPTY_HEADERS);
-	}
-
-	/**
-	 * Append a new record at the next sequential offset.
-	 * @param timestamp The record timestamp
-	 * @param key       The record key
-	 * @param value     The record value
-	 * @param headers   The record headers if there are any
-	 * @return CRC of the record or null if record-level CRC is not supported for the message format
-	 */
-	public Long append(long timestamp, ByteBuffer key, ByteBuffer value, Header[] headers) {
-		return appendWithOffset(nextSequentialOffset(), timestamp, key, value, headers);
-	}
-
-	/**
-	 * Append a new record at the next sequential offset.
-	 * @param timestamp The record timestamp
-	 * @param key       The record key
-	 * @param value     The record value
-	 * @return CRC of the record or null if record-level CRC is not supported for the message format
-	 */
-	public Long append(long timestamp, byte[] key, byte[] value) {
-		return append(timestamp, wrapNullable(key), wrapNullable(value), Record.EMPTY_HEADERS);
+	public void append(long timestamp, ByteBuffer key, ByteBuffer value) {
+		append(timestamp, key, value, Record.EMPTY_HEADERS);
 	}
 
 	/**
@@ -527,17 +514,38 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 	 * @param headers   The record headers if there are any
 	 * @return CRC of the record or null if record-level CRC is not supported for the message format
 	 */
-	public Long append(long timestamp, byte[] key, byte[] value, Header[] headers) {
-		return append(timestamp, wrapNullable(key), wrapNullable(value), headers);
+	public void append(long timestamp, ByteBuffer key, ByteBuffer value, Header[] headers) {
+		appendWithOffset(nextSequentialOffset(), timestamp, key, value, headers);
+	}
+
+	/**
+	 * Append a new record at the next sequential offset.
+	 * @param timestamp The record timestamp
+	 * @param key       The record key
+	 * @param value     The record value
+	 * @return CRC of the record or null if record-level CRC is not supported for the message format
+	 */
+	public void append(long timestamp, byte[] key, byte[] value) {
+		append(timestamp, wrapNullable(key), wrapNullable(value), Record.EMPTY_HEADERS);
+	}
+
+	/**
+	 * Append a new record at the next sequential offset.
+	 * @param timestamp The record timestamp
+	 * @param key       The record key
+	 * @param value     The record value
+	 * @param headers   The record headers if there are any
+	 */
+	public void append(long timestamp, byte[] key, byte[] value, Header[] headers) {
+		append(timestamp, wrapNullable(key), wrapNullable(value), headers);
 	}
 
 	/**
 	 * Append a new record at the next sequential offset.
 	 * @param record The record to append
-	 * @return CRC of the record or null if record-level CRC is not supported for the message format
 	 */
-	public Long append(SimpleRecord record) {
-		return appendWithOffset(nextSequentialOffset(), record);
+	public void append(SimpleRecord record) {
+		appendWithOffset(nextSequentialOffset(), record);
 	}
 
 	/**
@@ -545,26 +553,30 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 	 * @param timestamp The record timestamp
 	 * @param type      The control record type (cannot be UNKNOWN)
 	 * @param value     The control record value
-	 * @return CRC of the record or null if record-level CRC is not supported for the message format
 	 */
-	private Long appendControlRecord(long timestamp, ControlRecordType type, ByteBuffer value) {
+	private void appendControlRecord(long timestamp, ControlRecordType type, ByteBuffer value) {
 		Struct keyStruct = type.recordKey();
 		ByteBuffer key = ByteBuffer.allocate(keyStruct.sizeOf());
 		keyStruct.writeTo(key);
 		key.flip();
-		return appendWithOffset(nextSequentialOffset(), true, timestamp, key, value, Record.EMPTY_HEADERS);
+		appendWithOffset(nextSequentialOffset(), true, timestamp, key, value, Record.EMPTY_HEADERS);
 	}
 
-	/**
-	 * Return CRC of the record or null if record-level CRC is not supported for the message format
-	 */
-	public Long appendEndTxnMarker(long timestamp, EndTransactionMarker marker) {
+	public void appendEndTxnMarker(long timestamp, EndTransactionMarker marker) {
 		if (producerId == RecordBatch.NO_PRODUCER_ID)
 			throw new IllegalArgumentException("End transaction marker requires a valid producerId");
 		if (!isTransactional)
 			throw new IllegalArgumentException("End transaction marker depends on batch transactional flag being enabled");
 		ByteBuffer value = marker.serializeValue();
-		return appendControlRecord(timestamp, marker.controlType(), value);
+		appendControlRecord(timestamp, marker.controlType(), value);
+	}
+
+	public void appendLeaderChangeMessage(long timestamp, LeaderChangeMessage leaderChangeMessage) {
+		if (partitionLeaderEpoch == RecordBatch.NO_PARTITION_LEADER_EPOCH) {
+			throw new IllegalArgumentException("Partition leader epoch must be valid, but get " + partitionLeaderEpoch);
+		}
+		appendControlRecord(timestamp, ControlRecordType.LEADER_CHANGE,
+				MessageUtil.toByteBuffer(leaderChangeMessage, ControlRecordUtils.LEADER_CHANGE_SCHEMA_VERSION));
 	}
 
 	/**
@@ -588,6 +600,34 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 	}
 
 	/**
+	 * Append a record without doing offset/magic validation (this should only be used in testing).
+	 * @param offset The offset of the record
+	 * @param record The record to add
+	 */
+	public void appendUncheckedWithOffset(long offset, SimpleRecord record) throws IOException {
+		if (magic >= RecordBatch.MAGIC_VALUE_V2) {
+			int offsetDelta = (int) (offset - baseOffset);
+			long timestamp = record.timestamp();
+			if (firstTimestamp == null)
+				firstTimestamp = timestamp;
+
+			int sizeInBytes = DefaultRecord.writeTo(appendStream,
+					offsetDelta,
+					timestamp - firstTimestamp,
+					record.key(),
+					record.value(),
+					record.headers());
+			recordWritten(offset, timestamp, sizeInBytes);
+		} else {
+			LegacyRecord legacyRecord = LegacyRecord.create(magic,
+					record.timestamp(),
+					Utils.toNullableArray(record.key()),
+					Utils.toNullableArray(record.value()));
+			appendUncheckedWithOffset(offset, legacyRecord);
+		}
+	}
+
+	/**
 	 * Append a record at the next sequential offset.
 	 * @param record the record to add
 	 */
@@ -597,7 +637,6 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 
 	/**
 	 * Append a log record using a different offset
-	 * 使用不同的offset追加日志
 	 * @param offset The offset of the record
 	 * @param record The record to add
 	 */
@@ -624,27 +663,12 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 		appendWithOffset(nextSequentialOffset(), record);
 	}
 
-	/**
-	 * V1以上版本的record追加，不包括V1版本
-	 * @param offset    record的绝对偏移量
-	 * @param timestamp record的时间戳
-	 * @param key       record的key
-	 * @param value     record的value
-	 * @param headers   record的header
-	 * @throws IOException IO异常，抛出异常
-	 */
 	private void appendDefaultRecord(long offset, long timestamp, ByteBuffer key, ByteBuffer value,
 									 Header[] headers) throws IOException {
-		// 确认数据输出流处于开启状态
 		ensureOpenForRecordAppend();
-		// 计算相对偏移量
 		int offsetDelta = (int) (offset - baseOffset);
-		// 计算时间偏移量
 		long timestampDelta = timestamp - firstTimestamp;
-		// 获取写入的字节数量
-		// 注意：写入的时候，写入的是基于baseOffset的相对偏移量，时间戳也是相对时间戳
 		int sizeInBytes = DefaultRecord.writeTo(appendStream, offsetDelta, timestampDelta, key, value, headers);
-		// 计数，标识位更新（上一次写入的绝对偏移量，时间戳）
 		recordWritten(offset, timestamp, sizeInBytes);
 	}
 
@@ -670,28 +694,18 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 		return offset;
 	}
 
-	/**
-	 * 记录record写入的信息
-	 * @param offset    写入的record的绝对偏移量
-	 * @param timestamp 写入的record的绝对时间戳
-	 * @param size      写入record的字节数
-	 */
 	private void recordWritten(long offset, long timestamp, int size) {
-		// 校验是否超过单个batch的写入上限
 		if (numRecords == Integer.MAX_VALUE)
 			throw new IllegalArgumentException("Maximum number of records per batch exceeded, max records: " + Integer.MAX_VALUE);
-		// 是否超过相对偏移量的技术上限
 		if (offset - baseOffset > Integer.MAX_VALUE)
 			throw new IllegalArgumentException("Maximum offset delta exceeded, base offset: " + baseOffset +
 					", last offset: " + offset);
-		// 计数器计数
+
 		numRecords += 1;
 		uncompressedRecordsSizeInBytes += size;
-		// 更新上一次写入的绝对偏移量
 		lastOffset = offset;
-		// 如果是V0版本以上的消息版本，时间戳超过了记录的最大时间戳
+
 		if (magic > RecordBatch.MAGIC_VALUE_V0 && timestamp > maxTimestamp) {
-			// 更新时间戳和绝对偏移量
 			maxTimestamp = timestamp;
 			offsetOfMaxTimestamp = offset;
 		}
@@ -792,6 +806,17 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 		return lastOffset == null ? baseOffset : lastOffset + 1;
 	}
 
+	public static class RecordsInfo {
+		public final long maxTimestamp;
+		public final long shallowOffsetOfMaxTimestamp;
+
+		public RecordsInfo(long maxTimestamp,
+						   long shallowOffsetOfMaxTimestamp) {
+			this.maxTimestamp = maxTimestamp;
+			this.shallowOffsetOfMaxTimestamp = shallowOffsetOfMaxTimestamp;
+		}
+	}
+
 	/**
 	 * Return the producer id of the RecordBatches created by this builder.
 	 */
@@ -805,16 +830,5 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 
 	public int baseSequence() {
 		return this.baseSequence;
-	}
-
-	public static class RecordsInfo {
-		public final long maxTimestamp;
-		public final long shallowOffsetOfMaxTimestamp;
-
-		public RecordsInfo(long maxTimestamp,
-						   long shallowOffsetOfMaxTimestamp) {
-			this.maxTimestamp = maxTimestamp;
-			this.shallowOffsetOfMaxTimestamp = shallowOffsetOfMaxTimestamp;
-		}
 	}
 }

@@ -16,18 +16,41 @@
 {
   "apiKey": 38,
   "type": "request",
+  "listeners": [
+    "zkBroker"
+  ],
   "name": "CreateDelegationTokenRequest",
   // Version 1 is the same as version 0.
-  "validVersions": "0-1",
+  //
+  // Version 2 is the first flexible version.
+  "validVersions": "0-2",
+  "flexibleVersions": "2+",
   "fields": [
-    { "name": "Renewers", "type": "[]CreatableRenewers", "versions": "0+",
-      "about": "A list of those who are allowed to renew this token before it expires.", "fields": [
-      { "name": "PrincipalType", "type": "string", "versions": "0+",
-        "about": "The type of the Kafka principal." },
-      { "name": "PrincipalName", "type": "string", "versions": "0+",
-        "about": "The name of the Kafka principal." }
-    ]},
-    { "name": "MaxLifetimeMs", "type": "int64", "versions": "0+",
-      "about": "The maximum lifetime of the token in milliseconds, or -1 to use the server side default." }
+    {
+      "name": "Renewers",
+      "type": "[]CreatableRenewers",
+      "versions": "0+",
+      "about": "A list of those who are allowed to renew this token before it expires.",
+      "fields": [
+        {
+          "name": "PrincipalType",
+          "type": "string",
+          "versions": "0+",
+          "about": "The type of the Kafka principal."
+        },
+        {
+          "name": "PrincipalName",
+          "type": "string",
+          "versions": "0+",
+          "about": "The name of the Kafka principal."
+        }
+      ]
+    },
+    {
+      "name": "MaxLifetimeMs",
+      "type": "int64",
+      "versions": "0+",
+      "about": "The maximum lifetime of the token in milliseconds, or -1 to use the server side default."
+    }
   ]
 }

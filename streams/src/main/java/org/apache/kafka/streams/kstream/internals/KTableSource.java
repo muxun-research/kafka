@@ -22,7 +22,6 @@ import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.ProcessorSupplier;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
-import org.apache.kafka.streams.processor.internals.metrics.ThreadMetrics;
 import org.apache.kafka.streams.state.TimestampedKeyValueStore;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
 import org.slf4j.Logger;
@@ -30,15 +29,17 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Objects;
 
+import static org.apache.kafka.streams.processor.internals.metrics.TaskMetrics.droppedRecordsSensorOrSkippedRecordsSensor;
+
 public class KTableSource<K, V> implements ProcessorSupplier<K, V> {
-    private static final Logger LOG = LoggerFactory.getLogger(KTableSource.class);
+	private static final Logger LOG = LoggerFactory.getLogger(KTableSource.class);
 
-    private final String storeName;
-    private String queryableName;
-    private boolean sendOldValues;
+	private final String storeName;
+	private String queryableName;
+	private boolean sendOldValues;
 
-    public KTableSource(final String storeName, final String queryableName) {
-        Objects.requireNonNull(storeName, "storeName can't be null");
+	public KTableSource(final String storeName, final String queryableName) {
+		Objects.requireNonNull(storeName, "storeName can't be null");
 
         this.storeName = storeName;
         this.queryableName = queryableName;
@@ -57,29 +58,33 @@ public class KTableSource<K, V> implements ProcessorSupplier<K, V> {
     // when source ktable requires sending old values, we just
     // need to set the queryable name as the store name to enforce materialization
     public void enableSendingOldValues() {
-        this.sendOldValues = true;
-        this.queryableName = storeName;
-    }
+		this.sendOldValues = true;
+		this.queryableName = storeName;
+	}
 
-    // when the source ktable requires materialization from downstream, we just
-    // need to set the queryable name as the store name to enforce materialization
-    public void materialize() {
-        this.queryableName = storeName;
-    }
+	// when the source ktable requires materialization from downstream, we just
+	// need to set the queryable name as the store name to enforce materialization
+	public void materialize() {
+		this.queryableName = storeName;
+	}
 
-    private class KTableSourceProcessor extends AbstractProcessor<K, V> {
+	public boolean materialized() {
+		return queryableName != null;
+	}
 
-        private TimestampedKeyValueStore<K, V> store;
-        private TimestampedTupleForwarder<K, V> tupleForwarder;
-        private StreamsMetricsImpl metrics;
-        private Sensor skippedRecordsSensor;
+	private class KTableSourceProcessor extends AbstractProcessor<K, V> {
 
-        @SuppressWarnings("unchecked")
-        @Override
+		private TimestampedKeyValueStore<K, V> store;
+		private TimestampedTupleForwarder<K, V> tupleForwarder;
+		private StreamsMetricsImpl metrics;
+		private Sensor droppedRecordsSensor;
+
+		@SuppressWarnings("unchecked")
+		@Override
         public void init(final ProcessorContext context) {
             super.init(context);
-            metrics = (StreamsMetricsImpl) context.metrics();
-            skippedRecordsSensor = ThreadMetrics.skipRecordSensor(metrics);
+			metrics = (StreamsMetricsImpl) context.metrics();
+			droppedRecordsSensor = droppedRecordsSensorOrSkippedRecordsSensor(Thread.currentThread().getName(), context.taskId().toString(), metrics);
             if (queryableName != null) {
                 store = (TimestampedKeyValueStore<K, V>) context.getStateStore(queryableName);
                 tupleForwarder = new TimestampedTupleForwarder<>(
@@ -94,11 +99,11 @@ public class KTableSource<K, V> implements ProcessorSupplier<K, V> {
         public void process(final K key, final V value) {
             // if the key is null, then ignore the record
             if (key == null) {
-                LOG.warn(
-                    "Skipping record due to null key. topic=[{}] partition=[{}] offset=[{}]",
-                    context().topic(), context().partition(), context().offset()
-                );
-                skippedRecordsSensor.record();
+				LOG.warn(
+						"Skipping record due to null key. topic=[{}] partition=[{}] offset=[{}]",
+						context().topic(), context().partition(), context().offset()
+				);
+				droppedRecordsSensor.record();
                 return;
             }
 

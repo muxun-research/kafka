@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.common.protocol.types;
 
+import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.record.BaseRecords;
 
 import java.nio.ByteBuffer;
@@ -78,29 +79,41 @@ public class Struct {
 
     public Byte get(Field.Int8 field) {
         return getByte(field.name);
-    }
+	}
 
-    public Integer get(Field.Int32 field) {
-        return getInt(field.name);
-    }
+	public Integer get(Field.Int32 field) {
+		return getInt(field.name);
+	}
 
-    public Long get(Field.Int64 field) {
-        return getLong(field.name);
-    }
+	public Long get(Field.Int64 field) {
+		return getLong(field.name);
+	}
 
-    public Short get(Field.Int16 field) {
-        return getShort(field.name);
-    }
+	public Uuid get(Field.UUID field) {
+		return getUuid(field.name);
+	}
 
-    public String get(Field.Str field) {
-        return getString(field.name);
-    }
+	public Integer get(Field.Uint16 field) {
+		return getInt(field.name);
+	}
 
-    public String get(Field.NullableStr field) {
-        return getString(field.name);
-    }
+	public Short get(Field.Int16 field) {
+		return getShort(field.name);
+	}
 
-    public Boolean get(Field.Bool field) {
+	public Double get(Field.Float64 field) {
+		return getDouble(field.name);
+	}
+
+	public String get(Field.Str field) {
+		return getString(field.name);
+	}
+
+	public String get(Field.NullableStr field) {
+		return getString(field.name);
+	}
+
+	public Boolean get(Field.Bool field) {
         return getBoolean(field.name);
     }
 
@@ -108,43 +121,55 @@ public class Struct {
         return getArray(field.name);
     }
 
-    public Object[] get(Field.ComplexArray field) {
-        return getArray(field.name);
-    }
+	public Object[] get(Field.ComplexArray field) {
+		return getArray(field.name);
+	}
 
-    public Long getOrElse(Field.Int64 field, long alternative) {
-        if (hasField(field.name))
-            return getLong(field.name);
-        return alternative;
-    }
+	public Long getOrElse(Field.Int64 field, long alternative) {
+		if (hasField(field.name))
+			return getLong(field.name);
+		return alternative;
+	}
 
-    public Short getOrElse(Field.Int16 field, short alternative) {
-        if (hasField(field.name))
-            return getShort(field.name);
-        return alternative;
-    }
+	public Uuid getOrElse(Field.UUID field, Uuid alternative) {
+		if (hasField(field.name))
+			return getUuid(field.name);
+		return alternative;
+	}
 
-    public Byte getOrElse(Field.Int8 field, byte alternative) {
-        if (hasField(field.name))
-            return getByte(field.name);
-        return alternative;
-    }
+	public Short getOrElse(Field.Int16 field, short alternative) {
+		if (hasField(field.name))
+			return getShort(field.name);
+		return alternative;
+	}
 
-    public Integer getOrElse(Field.Int32 field, int alternative) {
-        if (hasField(field.name))
-            return getInt(field.name);
-        return alternative;
-    }
+	public Byte getOrElse(Field.Int8 field, byte alternative) {
+		if (hasField(field.name))
+			return getByte(field.name);
+		return alternative;
+	}
 
-    public String getOrElse(Field.NullableStr field, String alternative) {
-        if (hasField(field.name))
-            return getString(field.name);
-        return alternative;
-    }
+	public Integer getOrElse(Field.Int32 field, int alternative) {
+		if (hasField(field.name))
+			return getInt(field.name);
+		return alternative;
+	}
 
-    public String getOrElse(Field.Str field, String alternative) {
-        if (hasField(field.name))
-            return getString(field.name);
+	public Double getOrElse(Field.Float64 field, double alternative) {
+		if (hasField(field.name))
+			return getDouble(field.name);
+		return alternative;
+	}
+
+	public String getOrElse(Field.NullableStr field, String alternative) {
+		if (hasField(field.name))
+			return getString(field.name);
+		return alternative;
+	}
+
+	public String getOrElse(Field.Str field, String alternative) {
+		if (hasField(field.name))
+			return getString(field.name);
         return alternative;
     }
 
@@ -215,45 +240,69 @@ public class Struct {
 
     public BaseRecords getRecords(String name) {
         return (BaseRecords) get(name);
-    }
+	}
 
-    public Short getShort(BoundField field) {
-        return (Short) get(field);
-    }
+	public Short getShort(BoundField field) {
+		return (Short) get(field);
+	}
 
-    public Short getShort(String name) {
-        return (Short) get(name);
-    }
+	public Short getShort(String name) {
+		return (Short) get(name);
+	}
 
-    public Integer getInt(BoundField field) {
-        return (Integer) get(field);
-    }
+	public Integer getUnsignedShort(BoundField field) {
+		return (Integer) get(field);
+	}
 
-    public Integer getInt(String name) {
-        return (Integer) get(name);
-    }
+	public Integer getUnsignedShort(String name) {
+		return (Integer) get(name);
+	}
 
-    public Long getUnsignedInt(String name) {
+	public Integer getInt(BoundField field) {
+		return (Integer) get(field);
+	}
+
+	public Integer getInt(String name) {
+		return (Integer) get(name);
+	}
+
+	public Long getUnsignedInt(String name) {
         return (Long) get(name);
-    }
+	}
 
-    public Long getLong(BoundField field) {
-        return (Long) get(field);
-    }
+	public Long getLong(BoundField field) {
+		return (Long) get(field);
+	}
 
-    public Long getLong(String name) {
-        return (Long) get(name);
-    }
+	public Long getLong(String name) {
+		return (Long) get(name);
+	}
 
-    public Object[] getArray(BoundField field) {
-        return (Object[]) get(field);
-    }
+	public Uuid getUuid(BoundField field) {
+		return (Uuid) get(field);
+	}
 
-    public Object[] getArray(String name) {
-        return (Object[]) get(name);
-    }
+	public Uuid getUuid(String name) {
+		return (Uuid) get(name);
+	}
 
-    public String getString(BoundField field) {
+	public Double getDouble(BoundField field) {
+		return (Double) get(field);
+	}
+
+	public Double getDouble(String name) {
+		return (Double) get(name);
+	}
+
+	public Object[] getArray(BoundField field) {
+		return (Object[]) get(field);
+	}
+
+	public Object[] getArray(String name) {
+		return (Object[]) get(name);
+	}
+
+	public String getString(BoundField field) {
         return (String) get(field);
     }
 
@@ -332,29 +381,45 @@ public class Struct {
 
     public Struct set(Field.Int8 def, byte value) {
         return set(def.name, value);
-    }
+	}
 
-    public Struct set(Field.Int32 def, int value) {
-        return set(def.name, value);
-    }
+	public Struct set(Field.Int32 def, int value) {
+		return set(def.name, value);
+	}
 
-    public Struct set(Field.Int64 def, long value) {
-        return set(def.name, value);
-    }
+	public Struct set(Field.Int64 def, long value) {
+		return set(def.name, value);
+	}
 
-    public Struct set(Field.Int16 def, short value) {
-        return set(def.name, value);
-    }
+	public Struct set(Field.UUID def, Uuid value) {
+		return set(def.name, value);
+	}
 
-    public Struct set(Field.Bool def, boolean value) {
-        return set(def.name, value);
-    }
+	public Struct set(Field.Int16 def, short value) {
+		return set(def.name, value);
+	}
 
-    public Struct set(Field.Array def, Object[] value) {
-        return set(def.name, value);
-    }
+	public Struct set(Field.Uint16 def, int value) {
+		if (value < 0 || value > 65535) {
+			throw new RuntimeException("Invalid value for unsigned short for " +
+					def.name + ": " + value);
+		}
+		return set(def.name, value);
+	}
 
-    public Struct set(Field.ComplexArray def, Object[] value) {
+	public Struct set(Field.Float64 def, double value) {
+		return set(def.name, value);
+	}
+
+	public Struct set(Field.Bool def, boolean value) {
+		return set(def.name, value);
+	}
+
+	public Struct set(Field.Array def, Object[] value) {
+		return set(def.name, value);
+	}
+
+	public Struct set(Field.ComplexArray def, Object[] value) {
         return set(def.name, value);
     }
 
@@ -393,14 +458,13 @@ public class Struct {
      */
     public Struct instance(BoundField field) {
         validateField(field);
-        if (field.def.type instanceof Schema) {
-            return new Struct((Schema) field.def.type);
-        } else if (field.def.type instanceof ArrayOf) {
-            ArrayOf array = (ArrayOf) field.def.type;
-            return new Struct((Schema) array.type());
-        } else {
-            throw new SchemaException("Field '" + field.def.name + "' is not a container type, it is of type " + field.def.type);
-        }
+		if (field.def.type instanceof Schema) {
+			return new Struct((Schema) field.def.type);
+		} else if (field.def.type.isArray()) {
+			return new Struct((Schema) field.def.type.arrayElementType().get());
+		} else {
+			throw new SchemaException("Field '" + field.def.name + "' is not a container type, it is of type " + field.def.type);
+		}
     }
 
     /**
@@ -449,6 +513,7 @@ public class Struct {
      * @throws SchemaException If validation fails
      */
     private void validateField(BoundField field) {
+		Objects.requireNonNull(field, "`field` must be non-null");
         if (this.schema != field.schema)
             throw new SchemaException("Attempt to access field '" + field.def.name + "' from a different schema instance.");
         if (field.index > values.length)
@@ -472,17 +537,17 @@ public class Struct {
             BoundField f = this.schema.get(i);
             b.append(f.def.name);
             b.append('=');
-            if (f.def.type instanceof ArrayOf && this.values[i] != null) {
-                Object[] arrayValue = (Object[]) this.values[i];
-                b.append('[');
-                for (int j = 0; j < arrayValue.length; j++) {
-                    b.append(arrayValue[j]);
-                    if (j < arrayValue.length - 1)
-                        b.append(',');
-                }
-                b.append(']');
-            } else
-                b.append(this.values[i]);
+			if (f.def.type.isArray() && this.values[i] != null) {
+				Object[] arrayValue = (Object[]) this.values[i];
+				b.append('[');
+				for (int j = 0; j < arrayValue.length; j++) {
+					b.append(arrayValue[j]);
+					if (j < arrayValue.length - 1)
+						b.append(',');
+				}
+				b.append(']');
+			} else
+				b.append(this.values[i]);
             if (i < this.values.length - 1)
                 b.append(',');
         }
@@ -496,17 +561,17 @@ public class Struct {
         int result = 1;
         for (int i = 0; i < this.values.length; i++) {
             BoundField f = this.schema.get(i);
-            if (f.def.type instanceof ArrayOf) {
-                if (this.get(f) != null) {
-                    Object[] arrayObject = (Object[]) this.get(f);
-                    for (Object arrayItem: arrayObject)
-                        result = prime * result + arrayItem.hashCode();
-                }
-            } else {
-                Object field = this.get(f);
-                if (field != null) {
-                    result = prime * result + field.hashCode();
-                }
+			if (f.def.type.isArray()) {
+				if (this.get(f) != null) {
+					Object[] arrayObject = (Object[]) this.get(f);
+					for (Object arrayItem : arrayObject)
+						result = prime * result + arrayItem.hashCode();
+				}
+			} else {
+				Object field = this.get(f);
+				if (field != null) {
+					result = prime * result + field.hashCode();
+				}
             }
         }
         return result;
@@ -526,17 +591,16 @@ public class Struct {
         for (int i = 0; i < this.values.length; i++) {
             BoundField f = this.schema.get(i);
             boolean result;
-            if (f.def.type instanceof ArrayOf) {
-                result = Arrays.equals((Object[]) this.get(f), (Object[]) other.get(f));
-            } else {
-                Object thisField = this.get(f);
-                Object otherField = other.get(f);
-                result = Objects.equals(thisField, otherField);
-            }
-            if (!result)
-                return false;
+			if (f.def.type.isArray()) {
+				result = Arrays.equals((Object[]) this.get(f), (Object[]) other.get(f));
+			} else {
+				Object thisField = this.get(f);
+				Object otherField = other.get(f);
+				result = Objects.equals(thisField, otherField);
+			}
+			if (!result)
+				return false;
         }
         return true;
     }
-
 }

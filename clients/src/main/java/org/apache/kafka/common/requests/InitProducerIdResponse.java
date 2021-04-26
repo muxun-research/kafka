@@ -18,32 +18,32 @@ package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.message.InitProducerIdResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
 import java.util.Map;
 
 /**
  * Possible error codes:
+ * <p>
  * - {@link Errors#NOT_COORDINATOR}
  * - {@link Errors#COORDINATOR_NOT_AVAILABLE}
  * - {@link Errors#COORDINATOR_LOAD_IN_PROGRESS}
  * - {@link Errors#TRANSACTIONAL_ID_AUTHORIZATION_FAILED}
  * - {@link Errors#CLUSTER_AUTHORIZATION_FAILED}
+ * - {@link Errors#INVALID_PRODUCER_EPOCH} // for version <=3
+ * - {@link Errors#PRODUCER_FENCED}
  */
 public class InitProducerIdResponse extends AbstractResponse {
-    public final InitProducerIdResponseData data;
+    private final InitProducerIdResponseData data;
 
-    public InitProducerIdResponse(InitProducerIdResponseData data) {
-        this.data = data;
-    }
+	public InitProducerIdResponse(InitProducerIdResponseData data) {
+        super(ApiKeys.INIT_PRODUCER_ID);
+		this.data = data;
+	}
 
-    public InitProducerIdResponse(Struct struct, short version) {
-        this.data = new InitProducerIdResponseData(struct, version);
-    }
-
-    @Override
+	@Override
     public int throttleTimeMs() {
         return data.throttleTimeMs();
     }
@@ -54,15 +54,15 @@ public class InitProducerIdResponse extends AbstractResponse {
     }
 
     @Override
-    protected Struct toStruct(short version) {
-        return data.toStruct(version);
-    }
+	public InitProducerIdResponseData data() {
+		return data;
+	}
 
-    public static InitProducerIdResponse parse(ByteBuffer buffer, short version) {
-        return new InitProducerIdResponse(ApiKeys.INIT_PRODUCER_ID.parseResponse(version, buffer), version);
-    }
+	public static InitProducerIdResponse parse(ByteBuffer buffer, short version) {
+        return new InitProducerIdResponse(new InitProducerIdResponseData(new ByteBufferAccessor(buffer), version));
+	}
 
-    @Override
+	@Override
     public String toString() {
         return data.toString();
     }

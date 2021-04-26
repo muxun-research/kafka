@@ -16,27 +16,27 @@
  */
 package org.apache.kafka.clients.producer.internals;
 
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.MetricNameTemplate;
 import org.apache.kafka.common.metrics.Measurable;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.metrics.Sensor;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 public class SenderMetricsRegistry {
 
-    final static String METRIC_GROUP_NAME = "producer-metrics";
-    final static String TOPIC_METRIC_GROUP_NAME = "producer-topic-metrics";
+	final static String METRIC_GROUP_NAME = "producer-metrics";
+	final static String TOPIC_METRIC_GROUP_NAME = "producer-topic-metrics";
 
-    private final List<MetricNameTemplate> allTemplates;
+	private final List<MetricNameTemplate> allTemplates;
 
-    public final MetricName batchSizeAvg;
-    public final MetricName batchSizeMax;
+	public final MetricName batchSizeAvg;
+	public final MetricName batchSizeMax;
     public final MetricName compressionRateAvg;
     public final MetricName recordQueueTimeAvg;
     public final MetricName recordQueueTimeMax;
@@ -81,12 +81,13 @@ public class SenderMetricsRegistry {
         
         this.batchSizeAvg = createMetricName("batch-size-avg",
                 "The average number of bytes sent per partition per-request.");
-        this.batchSizeMax = createMetricName("batch-size-max",
-                "The max number of bytes sent per partition per-request.");
-        this.compressionRateAvg = createMetricName("compression-rate-avg",
-                "The average compression rate of record batches.");
-        this.recordQueueTimeAvg = createMetricName("record-queue-time-avg",
-                "The average time in ms record batches spent in the send buffer.");
+		this.batchSizeMax = createMetricName("batch-size-max",
+				"The max number of bytes sent per partition per-request.");
+		this.compressionRateAvg = createMetricName("compression-rate-avg",
+				"The average compression rate of record batches, defined as the average ratio of the " +
+						"compressed batch size over the uncompressed size.");
+		this.recordQueueTimeAvg = createMetricName("record-queue-time-avg",
+				"The average time in ms record batches spent in the send buffer.");
         this.recordQueueTimeMax = createMetricName("record-queue-time-max",
                 "The maximum time in ms record batches spent in the send buffer.");
         this.requestLatencyAvg = createMetricName("request-latency-avg", 
@@ -136,12 +137,13 @@ public class SenderMetricsRegistry {
                 "The total number of records sent for a topic.");
         this.topicByteRate = createTopicTemplate("byte-rate",
                 "The average number of bytes sent per second for a topic.");
-        this.topicByteTotal = createTopicTemplate("byte-total", 
-                "The total number of bytes sent for a topic.");
-        this.topicCompressionRate = createTopicTemplate("compression-rate",
-                "The average compression rate of record batches for a topic.");
-        this.topicRecordRetryRate = createTopicTemplate("record-retry-rate",
-                "The average per-second number of retried record sends for a topic");
+		this.topicByteTotal = createTopicTemplate("byte-total",
+				"The total number of bytes sent for a topic.");
+		this.topicCompressionRate = createTopicTemplate("compression-rate",
+				"The average compression rate of record batches for a topic, defined as the average ratio " +
+						"of the compressed batch size over the uncompressed size.");
+		this.topicRecordRetryRate = createTopicTemplate("record-retry-rate",
+				"The average per-second number of retried record sends for a topic");
         this.topicRecordRetryTotal = createTopicTemplate("record-retry-total",
                 "The total number of retried record sends for a topic");
         this.topicRecordErrorRate = createTopicTemplate("record-error-rate",

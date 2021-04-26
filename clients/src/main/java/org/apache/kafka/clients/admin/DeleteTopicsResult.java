@@ -32,9 +32,9 @@ import java.util.Map;
 public class DeleteTopicsResult {
     final Map<String, KafkaFuture<Void>> futures;
 
-    DeleteTopicsResult(Map<String, KafkaFuture<Void>> futures) {
-        this.futures = futures;
-    }
+    protected DeleteTopicsResult(Map<String, KafkaFuture<Void>> futures) {
+		this.futures = futures;
+	}
 
     /**
      * Return a map from topic names to futures which can be used to check the status of

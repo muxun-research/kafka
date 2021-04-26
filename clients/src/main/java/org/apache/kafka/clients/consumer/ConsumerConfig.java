@@ -18,20 +18,25 @@ package org.apache.kafka.clients.consumer;
 
 import org.apache.kafka.clients.ClientDnsLookup;
 import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigDef.Importance;
 import org.apache.kafka.common.config.ConfigDef.Type;
+import org.apache.kafka.common.config.SecurityConfig;
+import org.apache.kafka.common.errors.InvalidConfigurationException;
 import org.apache.kafka.common.metrics.Sensor;
-import org.apache.kafka.common.requests.IsolationLevel;
+import org.apache.kafka.common.requests.JoinGroupRequest;
 import org.apache.kafka.common.serialization.Deserializer;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.kafka.common.config.ConfigDef.Range.atLeast;
 import static org.apache.kafka.common.config.ConfigDef.ValidString.in;
@@ -47,30 +52,36 @@ public class ConsumerConfig extends AbstractConfig {
      * THESE ARE PART OF THE PUBLIC API AND CHANGE WILL BREAK USER CODE.
      */
 
-    /**
-	 * group.id
-     */
+	/**
+	 * <code>group.id</code>
+	 */
     public static final String GROUP_ID_CONFIG = CommonClientConfigs.GROUP_ID_CONFIG;
-    private static final String GROUP_ID_DOC = CommonClientConfigs.GROUP_ID_DOC;
+	private static final String GROUP_ID_DOC = CommonClientConfigs.GROUP_ID_DOC;
 
-    /**
-     * <code>group.instance.id</code>
-     */
-    public static final String GROUP_INSTANCE_ID_CONFIG = CommonClientConfigs.GROUP_INSTANCE_ID_CONFIG;
-    private static final String GROUP_INSTANCE_ID_DOC = CommonClientConfigs.GROUP_INSTANCE_ID_DOC;
+	/**
+	 * <code>group.instance.id</code>
+	 */
+	public static final String GROUP_INSTANCE_ID_CONFIG = CommonClientConfigs.GROUP_INSTANCE_ID_CONFIG;
+	private static final String GROUP_INSTANCE_ID_DOC = CommonClientConfigs.GROUP_INSTANCE_ID_DOC;
 
-    /** <code>max.poll.records</code> */
-    public static final String MAX_POLL_RECORDS_CONFIG = "max.poll.records";
-    private static final String MAX_POLL_RECORDS_DOC = "The maximum number of records returned in a single call to poll().";
+	/**
+	 * <code>max.poll.records</code>
+	 */
+	public static final String MAX_POLL_RECORDS_CONFIG = "max.poll.records";
+	private static final String MAX_POLL_RECORDS_DOC = "The maximum number of records returned in a single call to poll()."
+			+ " Note, that <code>" + MAX_POLL_RECORDS_CONFIG + "</code> does not impact the underlying fetching behavior."
+			+ " The consumer will cache the records from each fetch request and returns them incrementally from each poll.";
 
-    /** <code>max.poll.interval.ms</code> */
-    public static final String MAX_POLL_INTERVAL_MS_CONFIG = CommonClientConfigs.MAX_POLL_INTERVAL_MS_CONFIG;
-    private static final String MAX_POLL_INTERVAL_MS_DOC = CommonClientConfigs.MAX_POLL_INTERVAL_MS_DOC;
-    /**
-     * <code>session.timeout.ms</code>
-     */
-    public static final String SESSION_TIMEOUT_MS_CONFIG = CommonClientConfigs.SESSION_TIMEOUT_MS_CONFIG;
-    private static final String SESSION_TIMEOUT_MS_DOC = CommonClientConfigs.SESSION_TIMEOUT_MS_DOC;
+	/**
+	 * <code>max.poll.interval.ms</code>
+	 */
+	public static final String MAX_POLL_INTERVAL_MS_CONFIG = CommonClientConfigs.MAX_POLL_INTERVAL_MS_CONFIG;
+	private static final String MAX_POLL_INTERVAL_MS_DOC = CommonClientConfigs.MAX_POLL_INTERVAL_MS_DOC;
+	/**
+	 * <code>session.timeout.ms</code>
+	 */
+	public static final String SESSION_TIMEOUT_MS_CONFIG = CommonClientConfigs.SESSION_TIMEOUT_MS_CONFIG;
+	private static final String SESSION_TIMEOUT_MS_DOC = CommonClientConfigs.SESSION_TIMEOUT_MS_DOC;
 
     /**
      * <code>heartbeat.interval.ms</code>
@@ -78,40 +89,52 @@ public class ConsumerConfig extends AbstractConfig {
     public static final String HEARTBEAT_INTERVAL_MS_CONFIG = CommonClientConfigs.HEARTBEAT_INTERVAL_MS_CONFIG;
     private static final String HEARTBEAT_INTERVAL_MS_DOC = CommonClientConfigs.HEARTBEAT_INTERVAL_MS_DOC;
 
-    /**
-	 * 和Kafka集群进行连接的host:pairs对
+	/**
+	 * <code>bootstrap.servers</code>
      */
     public static final String BOOTSTRAP_SERVERS_CONFIG = CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG;
 
     /** <code>client.dns.lookup</code> */
     public static final String CLIENT_DNS_LOOKUP_CONFIG = CommonClientConfigs.CLIENT_DNS_LOOKUP_CONFIG;
 
-    /**
-	 * 开启自动提交
+	/**
+	 * <code>enable.auto.commit</code>
      */
     public static final String ENABLE_AUTO_COMMIT_CONFIG = "enable.auto.commit";
     private static final String ENABLE_AUTO_COMMIT_DOC = "If true the consumer's offset will be periodically committed in the background.";
 
-    /**
-     * <code>auto.commit.interval.ms</code>
-     */
-    public static final String AUTO_COMMIT_INTERVAL_MS_CONFIG = "auto.commit.interval.ms";
-    private static final String AUTO_COMMIT_INTERVAL_MS_DOC = "The frequency in milliseconds that the consumer offsets are auto-committed to Kafka if <code>enable.auto.commit</code> is set to <code>true</code>.";
+	/**
+	 * <code>auto.commit.interval.ms</code>
+	 */
+	public static final String AUTO_COMMIT_INTERVAL_MS_CONFIG = "auto.commit.interval.ms";
+	private static final String AUTO_COMMIT_INTERVAL_MS_DOC = "The frequency in milliseconds that the consumer offsets are auto-committed to Kafka if <code>enable.auto.commit</code> is set to <code>true</code>.";
 
-    /**
-	 * 自定义的partition分配策略
-     */
-    public static final String PARTITION_ASSIGNMENT_STRATEGY_CONFIG = "partition.assignment.strategy";
-    private static final String PARTITION_ASSIGNMENT_STRATEGY_DOC = "A list of class names or class types, ordered by preference, of supported assignors responsible for the partition assignment strategy that the client will use to distribute partition ownership amongst consumer instances when group management is used. Implementing the <code>org.apache.kafka.clients.consumer.ConsumerPartitionAssignor</code> interface allows you to plug in a custom assignment strategy.";
+	/**
+	 * <code>partition.assignment.strategy</code>
+	 */
+	public static final String PARTITION_ASSIGNMENT_STRATEGY_CONFIG = "partition.assignment.strategy";
+	private static final String PARTITION_ASSIGNMENT_STRATEGY_DOC = "A list of class names or class types, " +
+			"ordered by preference, of supported partition assignment strategies that the client will use to distribute " +
+			"partition ownership amongst consumer instances when group management is used. Available options are:" +
+			"<ul>" +
+			"<li><code>org.apache.kafka.clients.consumer.RangeAssignor</code>: The default assignor, which works on a per-topic basis.</li>" +
+			"<li><code>org.apache.kafka.clients.consumer.RoundRobinAssignor</code>: Assigns partitions to consumers in a round-robin fashion.</li>" +
+			"<li><code>org.apache.kafka.clients.consumer.StickyAssignor</code>: Guarantees an assignment that is " +
+			"maximally balanced while preserving as many existing partition assignments as possible.</li>" +
+			"<li><code>org.apache.kafka.clients.consumer.CooperativeStickyAssignor</code>: Follows the same StickyAssignor " +
+			"logic, but allows for cooperative rebalancing.</li>" +
+			"</ul>" +
+			"<p>Implementing the <code>org.apache.kafka.clients.consumer.ConsumerPartitionAssignor</code> " +
+			"interface allows you to plug in a custom assignment strategy.";
 
-    /**
-     * <code>auto.offset.reset</code>
-     */
-    public static final String AUTO_OFFSET_RESET_CONFIG = "auto.offset.reset";
-    public static final String AUTO_OFFSET_RESET_DOC = "What to do when there is no initial offset in Kafka or if the current offset does not exist any more on the server (e.g. because that data has been deleted): <ul><li>earliest: automatically reset the offset to the earliest offset<li>latest: automatically reset the offset to the latest offset</li><li>none: throw exception to the consumer if no previous offset is found for the consumer's group</li><li>anything else: throw exception to the consumer.</li></ul>";
+	/**
+	 * <code>auto.offset.reset</code>
+	 */
+	public static final String AUTO_OFFSET_RESET_CONFIG = "auto.offset.reset";
+	public static final String AUTO_OFFSET_RESET_DOC = "What to do when there is no initial offset in Kafka or if the current offset does not exist any more on the server (e.g. because that data has been deleted): <ul><li>earliest: automatically reset the offset to the earliest offset<li>latest: automatically reset the offset to the latest offset</li><li>none: throw exception to the consumer if no previous offset is found for the consumer's group</li><li>anything else: throw exception to the consumer.</li></ul>";
 
-    /**
-     * <code>fetch.min.bytes</code>
+	/**
+	 * <code>fetch.min.bytes</code>
      */
     public static final String FETCH_MIN_BYTES_CONFIG = "fetch.min.bytes";
     private static final String FETCH_MIN_BYTES_DOC = "The minimum amount of data the server should return for a fetch request. If insufficient data is available the request will wait for that much data to accumulate before answering the request. The default setting of 1 byte means that fetch requests are answered as soon as a single byte of data is available or the fetch request times out waiting for data to arrive. Setting this to something greater than 1 will cause the server to wait for larger amounts of data to accumulate which can improve server throughput a bit at the cost of some additional latency.";
@@ -203,92 +226,131 @@ public class ConsumerConfig extends AbstractConfig {
      * <code>check.crcs</code>
      */
     public static final String CHECK_CRCS_CONFIG = "check.crcs";
-    private static final String CHECK_CRCS_DOC = "Automatically check the CRC32 of the records consumed. This ensures no on-the-wire or on-disk corruption to the messages occurred. This check adds some overhead, so it may be disabled in cases seeking extreme performance.";
-
-    /** <code>key.deserializer</code> */
-    public static final String KEY_DESERIALIZER_CLASS_CONFIG = "key.deserializer";
-    public static final String KEY_DESERIALIZER_CLASS_DOC = "Deserializer class for key that implements the <code>org.apache.kafka.common.serialization.Deserializer</code> interface.";
-
-    /** <code>value.deserializer</code> */
-    public static final String VALUE_DESERIALIZER_CLASS_CONFIG = "value.deserializer";
-    public static final String VALUE_DESERIALIZER_CLASS_DOC = "Deserializer class for value that implements the <code>org.apache.kafka.common.serialization.Deserializer</code> interface.";
-
-    /** <code>connections.max.idle.ms</code> */
-    public static final String CONNECTIONS_MAX_IDLE_MS_CONFIG = CommonClientConfigs.CONNECTIONS_MAX_IDLE_MS_CONFIG;
+	private static final String CHECK_CRCS_DOC = "Automatically check the CRC32 of the records consumed. This ensures no on-the-wire or on-disk corruption to the messages occurred. This check adds some overhead, so it may be disabled in cases seeking extreme performance.";
 
 	/**
-	 * 请求超时时间属性
-	 * request.timeout.ms
+	 * <code>key.deserializer</code>
+	 */
+	public static final String KEY_DESERIALIZER_CLASS_CONFIG = "key.deserializer";
+	public static final String KEY_DESERIALIZER_CLASS_DOC = "Deserializer class for key that implements the <code>org.apache.kafka.common.serialization.Deserializer</code> interface.";
+
+	/**
+	 * <code>value.deserializer</code>
+	 */
+	public static final String VALUE_DESERIALIZER_CLASS_CONFIG = "value.deserializer";
+	public static final String VALUE_DESERIALIZER_CLASS_DOC = "Deserializer class for value that implements the <code>org.apache.kafka.common.serialization.Deserializer</code> interface.";
+
+	/**
+	 * <code>socket.connection.setup.timeout.ms</code>
+	 */
+	public static final String SOCKET_CONNECTION_SETUP_TIMEOUT_MS_CONFIG = CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MS_CONFIG;
+
+	/**
+	 * <code>socket.connection.setup.timeout.max.ms</code>
+	 */
+	public static final String SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_CONFIG = CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_CONFIG;
+
+	/**
+	 * <code>connections.max.idle.ms</code>
+	 */
+	public static final String CONNECTIONS_MAX_IDLE_MS_CONFIG = CommonClientConfigs.CONNECTIONS_MAX_IDLE_MS_CONFIG;
+
+	/**
+	 * <code>request.timeout.ms</code>
 	 */
 	public static final String REQUEST_TIMEOUT_MS_CONFIG = CommonClientConfigs.REQUEST_TIMEOUT_MS_CONFIG;
-	/**
-	 * 消费者API的默认超时时间
-	 */
-	public static final String DEFAULT_API_TIMEOUT_MS_CONFIG = "default.api.timeout.ms";
-	/**
-	 * 请求超时时间属性的描述
-	 */
 	private static final String REQUEST_TIMEOUT_MS_DOC = CommonClientConfigs.REQUEST_TIMEOUT_MS_DOC;
-    public static final String DEFAULT_API_TIMEOUT_MS_DOC = "Specifies the timeout (in milliseconds) for consumer APIs that could block. This configuration is used as the default timeout for all consumer operations that do not explicitly accept a <code>timeout</code> parameter.";
 
-    /** <code>interceptor.classes</code> */
-    public static final String INTERCEPTOR_CLASSES_CONFIG = "interceptor.classes";
-    public static final String INTERCEPTOR_CLASSES_DOC = "A list of classes to use as interceptors. "
-                                                        + "Implementing the <code>org.apache.kafka.clients.consumer.ConsumerInterceptor</code> interface allows you to intercept (and possibly mutate) records "
-                                                        + "received by the consumer. By default, there are no interceptors.";
+	/**
+	 * <code>default.api.timeout.ms</code>
+	 */
+	public static final String DEFAULT_API_TIMEOUT_MS_CONFIG = CommonClientConfigs.DEFAULT_API_TIMEOUT_MS_CONFIG;
+
+	/**
+	 * <code>interceptor.classes</code>
+	 */
+	public static final String INTERCEPTOR_CLASSES_CONFIG = "interceptor.classes";
+	public static final String INTERCEPTOR_CLASSES_DOC = "A list of classes to use as interceptors. "
+			+ "Implementing the <code>org.apache.kafka.clients.consumer.ConsumerInterceptor</code> interface allows you to intercept (and possibly mutate) records "
+			+ "received by the consumer. By default, there are no interceptors.";
 
 
-    /** <code>exclude.internal.topics</code> */
-    public static final String EXCLUDE_INTERNAL_TOPICS_CONFIG = "exclude.internal.topics";
+	/**
+	 * <code>exclude.internal.topics</code>
+	 */
+	public static final String EXCLUDE_INTERNAL_TOPICS_CONFIG = "exclude.internal.topics";
     private static final String EXCLUDE_INTERNAL_TOPICS_DOC = "Whether internal topics matching a subscribed pattern should " +
             "be excluded from the subscription. It is always possible to explicitly subscribe to an internal topic.";
-    public static final boolean DEFAULT_EXCLUDE_INTERNAL_TOPICS = true;
+	public static final boolean DEFAULT_EXCLUDE_INTERNAL_TOPICS = true;
 
-    /**
-     * <code>internal.leave.group.on.close</code>
-     * Whether or not the consumer should leave the group on close. If set to <code>false</code> then a rebalance
-     * won't occur until <code>session.timeout.ms</code> expires.
-     *
-     * <p>
-     * Note: this is an internal configuration and could be changed in the future in a backward incompatible way
-     *
-     */
-    static final String LEAVE_GROUP_ON_CLOSE_CONFIG = "internal.leave.group.on.close";
+	/**
+	 * <code>internal.leave.group.on.close</code>
+	 * Whether or not the consumer should leave the group on close. If set to <code>false</code> then a rebalance
+	 * won't occur until <code>session.timeout.ms</code> expires.
+	 *
+	 * <p>
+	 * Note: this is an internal configuration and could be changed in the future in a backward incompatible way
+	 */
+	static final String LEAVE_GROUP_ON_CLOSE_CONFIG = "internal.leave.group.on.close";
 
-    /** <code>isolation.level</code> */
-    public static final String ISOLATION_LEVEL_CONFIG = "isolation.level";
-    public static final String ISOLATION_LEVEL_DOC = "<p>Controls how to read messages written transactionally. If set to <code>read_committed</code>, consumer.poll() will only return" +
-            " transactional messages which have been committed. If set to <code>read_uncommitted</code>' (the default), consumer.poll() will return all messages, even transactional messages" +
-            " which have been aborted. Non-transactional messages will be returned unconditionally in either mode.</p> <p>Messages will always be returned in offset order. Hence, in " +
-            " <code>read_committed</code> mode, consumer.poll() will only return messages up to the last stable offset (LSO), which is the one less than the offset of the first open transaction." +
-            " In particular any messages appearing after messages belonging to ongoing transactions will be withheld until the relevant transaction has been completed. As a result, <code>read_committed</code>" +
-            " consumers will not be able to read up to the high watermark when there are in flight transactions.</p><p> Further, when in <code>read_committed</code> the seekToEnd method will" +
-            " return the LSO";
+	/**
+	 * <code>internal.throw.on.fetch.stable.offset.unsupported</code>
+	 * Whether or not the consumer should throw when the new stable offset feature is supported.
+	 * If set to <code>true</code> then the client shall crash upon hitting it.
+	 * The purpose of this flag is to prevent unexpected broker downgrade which makes
+	 * the offset fetch protection against pending commit invalid. The safest approach
+	 * is to fail fast to avoid introducing correctness issue.
+	 *
+	 * <p>
+	 * Note: this is an internal configuration and could be changed in the future in a backward incompatible way
+	 */
+	static final String THROW_ON_FETCH_STABLE_OFFSET_UNSUPPORTED = "internal.throw.on.fetch.stable.offset.unsupported";
 
-    public static final String DEFAULT_ISOLATION_LEVEL = IsolationLevel.READ_UNCOMMITTED.toString().toLowerCase(Locale.ROOT);
+	/**
+	 * <code>isolation.level</code>
+	 */
+	public static final String ISOLATION_LEVEL_CONFIG = "isolation.level";
+	public static final String ISOLATION_LEVEL_DOC = "Controls how to read messages written transactionally. If set to <code>read_committed</code>, consumer.poll() will only return" +
+			" transactional messages which have been committed. If set to <code>read_uncommitted</code> (the default), consumer.poll() will return all messages, even transactional messages" +
+			" which have been aborted. Non-transactional messages will be returned unconditionally in either mode. <p>Messages will always be returned in offset order. Hence, in " +
+			" <code>read_committed</code> mode, consumer.poll() will only return messages up to the last stable offset (LSO), which is the one less than the offset of the first open transaction." +
+			" In particular any messages appearing after messages belonging to ongoing transactions will be withheld until the relevant transaction has been completed. As a result, <code>read_committed</code>" +
+			" consumers will not be able to read up to the high watermark when there are in flight transactions.</p><p> Further, when in <code>read_committed</code> the seekToEnd method will" +
+			" return the LSO";
 
-    /** <code>allow.auto.create.topics</code> */
-    public static final String ALLOW_AUTO_CREATE_TOPICS_CONFIG = "allow.auto.create.topics";
-    private static final String ALLOW_AUTO_CREATE_TOPICS_DOC = "Allow automatic topic creation on the broker when" +
-            " subscribing to or assigning a topic. A topic being subscribed to will be automatically created only if the" +
-            " broker allows for it using `auto.create.topics.enable` broker configuration. This configuration must" +
-            " be set to `false` when using brokers older than 0.11.0";
-    public static final boolean DEFAULT_ALLOW_AUTO_CREATE_TOPICS = true;
-    
-    static {
-        CONFIG = new ConfigDef().define(BOOTSTRAP_SERVERS_CONFIG,
-                                        Type.LIST,
-                                        Collections.emptyList(),
-                                        new ConfigDef.NonNullValidator(),
-                                        Importance.HIGH,
-                                        CommonClientConfigs.BOOTSTRAP_SERVERS_DOC)
-                                .define(CLIENT_DNS_LOOKUP_CONFIG,
-                                        Type.STRING,
-                                        ClientDnsLookup.DEFAULT.toString(),
-                                        in(ClientDnsLookup.DEFAULT.toString(),
-                                           ClientDnsLookup.USE_ALL_DNS_IPS.toString(),
-                                           ClientDnsLookup.RESOLVE_CANONICAL_BOOTSTRAP_SERVERS_ONLY.toString()),
-                                        Importance.MEDIUM,
+	public static final String DEFAULT_ISOLATION_LEVEL = IsolationLevel.READ_UNCOMMITTED.toString().toLowerCase(Locale.ROOT);
+
+	/**
+	 * <code>allow.auto.create.topics</code>
+	 */
+	public static final String ALLOW_AUTO_CREATE_TOPICS_CONFIG = "allow.auto.create.topics";
+	private static final String ALLOW_AUTO_CREATE_TOPICS_DOC = "Allow automatic topic creation on the broker when" +
+			" subscribing to or assigning a topic. A topic being subscribed to will be automatically created only if the" +
+			" broker allows for it using `auto.create.topics.enable` broker configuration. This configuration must" +
+			" be set to `false` when using brokers older than 0.11.0";
+	public static final boolean DEFAULT_ALLOW_AUTO_CREATE_TOPICS = true;
+
+	/**
+	 * <code>security.providers</code>
+	 */
+	public static final String SECURITY_PROVIDERS_CONFIG = SecurityConfig.SECURITY_PROVIDERS_CONFIG;
+	private static final String SECURITY_PROVIDERS_DOC = SecurityConfig.SECURITY_PROVIDERS_DOC;
+
+	private static final AtomicInteger CONSUMER_CLIENT_ID_SEQUENCE = new AtomicInteger(1);
+
+	static {
+		CONFIG = new ConfigDef().define(BOOTSTRAP_SERVERS_CONFIG,
+				Type.LIST,
+				Collections.emptyList(),
+				new ConfigDef.NonNullValidator(),
+				Importance.HIGH,
+				CommonClientConfigs.BOOTSTRAP_SERVERS_DOC)
+				.define(CLIENT_DNS_LOOKUP_CONFIG,
+						Type.STRING,
+						ClientDnsLookup.USE_ALL_DNS_IPS.toString(),
+						in(ClientDnsLookup.USE_ALL_DNS_IPS.toString(),
+								ClientDnsLookup.RESOLVE_CANONICAL_BOOTSTRAP_SERVERS_ONLY.toString()),
+						Importance.MEDIUM,
                                         CommonClientConfigs.CLIENT_DNS_LOOKUP_DOC)
                                 .define(GROUP_ID_CONFIG, Type.STRING, null, Importance.HIGH, GROUP_ID_DOC)
                                 .define(GROUP_INSTANCE_ID_CONFIG,
@@ -414,13 +476,13 @@ public class ConsumerConfig extends AbstractConfig {
                                         Type.INT,
                                         2,
                                         atLeast(1),
-                                        Importance.LOW,
-                                        CommonClientConfigs.METRICS_NUM_SAMPLES_DOC)
-                                .define(METRICS_RECORDING_LEVEL_CONFIG,
-                                        Type.STRING,
-                                        Sensor.RecordingLevel.INFO.toString(),
-                                        in(Sensor.RecordingLevel.INFO.toString(), Sensor.RecordingLevel.DEBUG.toString()),
-                                        Importance.LOW,
+										Importance.LOW,
+										CommonClientConfigs.METRICS_NUM_SAMPLES_DOC)
+				.define(METRICS_RECORDING_LEVEL_CONFIG,
+						Type.STRING,
+						Sensor.RecordingLevel.INFO.toString(),
+						in(Sensor.RecordingLevel.INFO.toString(), Sensor.RecordingLevel.DEBUG.toString(), Sensor.RecordingLevel.TRACE.toString()),
+						Importance.LOW,
                                         CommonClientConfigs.METRICS_RECORDING_LEVEL_DOC)
                                 .define(METRIC_REPORTER_CLASSES_CONFIG,
                                         Type.LIST,
@@ -435,19 +497,29 @@ public class ConsumerConfig extends AbstractConfig {
                                 .define(VALUE_DESERIALIZER_CLASS_CONFIG,
                                         Type.CLASS,
                                         Importance.HIGH,
-                                        VALUE_DESERIALIZER_CLASS_DOC)
-                                .define(REQUEST_TIMEOUT_MS_CONFIG,
-                                        Type.INT,
-                                        30000,
-                                        atLeast(0),
-                                        Importance.MEDIUM,
-                                        REQUEST_TIMEOUT_MS_DOC)
-                                .define(DEFAULT_API_TIMEOUT_MS_CONFIG,
-                                        Type.INT,
-                                        60 * 1000,
-                                        atLeast(0),
-                                        Importance.MEDIUM,
-                                        DEFAULT_API_TIMEOUT_MS_DOC)
+										VALUE_DESERIALIZER_CLASS_DOC)
+				.define(REQUEST_TIMEOUT_MS_CONFIG,
+						Type.INT,
+						30000,
+						atLeast(0),
+						Importance.MEDIUM,
+						REQUEST_TIMEOUT_MS_DOC)
+				.define(DEFAULT_API_TIMEOUT_MS_CONFIG,
+						Type.INT,
+						60 * 1000,
+						atLeast(0),
+						Importance.MEDIUM,
+						CommonClientConfigs.DEFAULT_API_TIMEOUT_MS_DOC)
+				.define(SOCKET_CONNECTION_SETUP_TIMEOUT_MS_CONFIG,
+						Type.LONG,
+						CommonClientConfigs.DEFAULT_SOCKET_CONNECTION_SETUP_TIMEOUT_MS,
+						Importance.MEDIUM,
+						CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MS_DOC)
+				.define(SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_CONFIG,
+						Type.LONG,
+						CommonClientConfigs.DEFAULT_SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS,
+						Importance.MEDIUM,
+                                        CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_DOC)
                                 /* default is set to be a bit lower than the server default (10 min), to avoid both client and server closing connection at same time */
                                 .define(CONNECTIONS_MAX_IDLE_MS_CONFIG,
                                         Type.LONG,
@@ -467,70 +539,96 @@ public class ConsumerConfig extends AbstractConfig {
                                         Importance.MEDIUM,
                                         MAX_POLL_RECORDS_DOC)
                                 .define(MAX_POLL_INTERVAL_MS_CONFIG,
-                                        Type.INT,
-                                        300000,
-                                        atLeast(1),
-                                        Importance.MEDIUM,
-                                        MAX_POLL_INTERVAL_MS_DOC)
-                                .define(EXCLUDE_INTERNAL_TOPICS_CONFIG,
-                                        Type.BOOLEAN,
-                                        DEFAULT_EXCLUDE_INTERNAL_TOPICS,
-                                        Importance.MEDIUM,
-                                        EXCLUDE_INTERNAL_TOPICS_DOC)
-                                .defineInternal(LEAVE_GROUP_ON_CLOSE_CONFIG,
-                                        Type.BOOLEAN,
-                                        true,
-                                        Importance.LOW)
-                                .define(ISOLATION_LEVEL_CONFIG,
-                                        Type.STRING,
-                                        DEFAULT_ISOLATION_LEVEL,
-                                        in(IsolationLevel.READ_COMMITTED.toString().toLowerCase(Locale.ROOT), IsolationLevel.READ_UNCOMMITTED.toString().toLowerCase(Locale.ROOT)),
-                                        Importance.MEDIUM,
-                                        ISOLATION_LEVEL_DOC)
-                                .define(ALLOW_AUTO_CREATE_TOPICS_CONFIG,
-                                        Type.BOOLEAN,
-                                        DEFAULT_ALLOW_AUTO_CREATE_TOPICS,
-                                        Importance.MEDIUM,
-                                        ALLOW_AUTO_CREATE_TOPICS_DOC)
-                                // security support
-                                .define(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG,
-                                        Type.STRING,
-                                        CommonClientConfigs.DEFAULT_SECURITY_PROTOCOL,
-                                        Importance.MEDIUM,
-                                        CommonClientConfigs.SECURITY_PROTOCOL_DOC)
-                                .withClientSslSupport()
-                                .withClientSaslSupport();
-    }
+										Type.INT,
+										300000,
+										atLeast(1),
+										Importance.MEDIUM,
+										MAX_POLL_INTERVAL_MS_DOC)
+				.define(EXCLUDE_INTERNAL_TOPICS_CONFIG,
+						Type.BOOLEAN,
+						DEFAULT_EXCLUDE_INTERNAL_TOPICS,
+						Importance.MEDIUM,
+						EXCLUDE_INTERNAL_TOPICS_DOC)
+				.defineInternal(LEAVE_GROUP_ON_CLOSE_CONFIG,
+						Type.BOOLEAN,
+						true,
+						Importance.LOW)
+				.defineInternal(THROW_ON_FETCH_STABLE_OFFSET_UNSUPPORTED,
+						Type.BOOLEAN,
+						false,
+						Importance.LOW)
+				.define(ISOLATION_LEVEL_CONFIG,
+						Type.STRING,
+						DEFAULT_ISOLATION_LEVEL,
+						in(IsolationLevel.READ_COMMITTED.toString().toLowerCase(Locale.ROOT), IsolationLevel.READ_UNCOMMITTED.toString().toLowerCase(Locale.ROOT)),
+						Importance.MEDIUM,
+						ISOLATION_LEVEL_DOC)
+				.define(ALLOW_AUTO_CREATE_TOPICS_CONFIG,
+						Type.BOOLEAN,
+						DEFAULT_ALLOW_AUTO_CREATE_TOPICS,
+						Importance.MEDIUM,
+						ALLOW_AUTO_CREATE_TOPICS_DOC)
+				// security support
+				.define(SECURITY_PROVIDERS_CONFIG,
+						Type.STRING,
+						null,
+						Importance.LOW,
+						SECURITY_PROVIDERS_DOC)
+				.define(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG,
+						Type.STRING,
+						CommonClientConfigs.DEFAULT_SECURITY_PROTOCOL,
+						Importance.MEDIUM,
+						CommonClientConfigs.SECURITY_PROTOCOL_DOC)
+				.withClientSslSupport()
+				.withClientSaslSupport();
+	}
 
-    @Override
-    protected Map<String, Object> postProcessParsedConfig(final Map<String, Object> parsedValues) {
-        return CommonClientConfigs.postProcessReconnectBackoffConfigs(this, parsedValues);
-    }
+	@Override
+	protected Map<String, Object> postProcessParsedConfig(final Map<String, Object> parsedValues) {
+		Map<String, Object> refinedConfigs = CommonClientConfigs.postProcessReconnectBackoffConfigs(this, parsedValues);
+		maybeOverrideClientId(refinedConfigs);
+		return refinedConfigs;
+	}
 
-    public static Map<String, Object> addDeserializerToConfig(Map<String, Object> configs,
-                                                              Deserializer<?> keyDeserializer,
-                                                              Deserializer<?> valueDeserializer) {
-        Map<String, Object> newConfigs = new HashMap<>(configs);
-        if (keyDeserializer != null)
-            newConfigs.put(KEY_DESERIALIZER_CLASS_CONFIG, keyDeserializer.getClass());
-        if (valueDeserializer != null)
-            newConfigs.put(VALUE_DESERIALIZER_CLASS_CONFIG, valueDeserializer.getClass());
-        return newConfigs;
-    }
+	private void maybeOverrideClientId(Map<String, Object> configs) {
+		final String clientId = this.getString(CLIENT_ID_CONFIG);
+		if (clientId == null || clientId.isEmpty()) {
+			final String groupId = this.getString(GROUP_ID_CONFIG);
+			String groupInstanceId = this.getString(GROUP_INSTANCE_ID_CONFIG);
+			if (groupInstanceId != null)
+				JoinGroupRequest.validateGroupInstanceId(groupInstanceId);
 
-    public static Properties addDeserializerToConfig(Properties properties,
-                                                     Deserializer<?> keyDeserializer,
-                                                     Deserializer<?> valueDeserializer) {
-        Properties newProperties = new Properties();
-        newProperties.putAll(properties);
-        if (keyDeserializer != null)
-            newProperties.put(KEY_DESERIALIZER_CLASS_CONFIG, keyDeserializer.getClass().getName());
-        if (valueDeserializer != null)
-            newProperties.put(VALUE_DESERIALIZER_CLASS_CONFIG, valueDeserializer.getClass().getName());
-        return newProperties;
-    }
+			String groupInstanceIdPart = groupInstanceId != null ? groupInstanceId : CONSUMER_CLIENT_ID_SEQUENCE.getAndIncrement() + "";
+			String generatedClientId = String.format("consumer-%s-%s", groupId, groupInstanceIdPart);
+			configs.put(CLIENT_ID_CONFIG, generatedClientId);
+		}
+	}
 
-    public ConsumerConfig(Properties props) {
+	protected static Map<String, Object> appendDeserializerToConfig(Map<String, Object> configs,
+																	Deserializer<?> keyDeserializer,
+																	Deserializer<?> valueDeserializer) {
+		Map<String, Object> newConfigs = new HashMap<>(configs);
+		if (keyDeserializer != null)
+			newConfigs.put(KEY_DESERIALIZER_CLASS_CONFIG, keyDeserializer.getClass());
+		if (valueDeserializer != null)
+			newConfigs.put(VALUE_DESERIALIZER_CLASS_CONFIG, valueDeserializer.getClass());
+		return newConfigs;
+	}
+
+	boolean maybeOverrideEnableAutoCommit() {
+		Optional<String> groupId = Optional.ofNullable(getString(CommonClientConfigs.GROUP_ID_CONFIG));
+		boolean enableAutoCommit = getBoolean(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG);
+		if (!groupId.isPresent()) { // overwrite in case of default group id where the config is not explicitly provided
+			if (!originals().containsKey(ENABLE_AUTO_COMMIT_CONFIG)) {
+				enableAutoCommit = false;
+			} else if (enableAutoCommit) {
+				throw new InvalidConfigurationException(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG + " cannot be set to true when default group id (null) is used.");
+			}
+		}
+		return enableAutoCommit;
+	}
+
+	public ConsumerConfig(Properties props) {
         super(CONFIG, props);
     }
 
@@ -540,18 +638,18 @@ public class ConsumerConfig extends AbstractConfig {
 
     protected ConsumerConfig(Map<?, ?> props, boolean doLog) {
         super(CONFIG, props, doLog);
-    }
+	}
 
-    public static Set<String> configNames() {
+	public static Set<String> configNames() {
         return CONFIG.names();
     }
 
-    public static ConfigDef configDef() {
-        return  new ConfigDef(CONFIG);
+	public static ConfigDef configDef() {
+		return new ConfigDef(CONFIG);
     }
 
     public static void main(String[] args) {
-        System.out.println(CONFIG.toHtmlTable());
+        System.out.println(CONFIG.toHtml(4, config -> "consumerconfigs_" + config));
     }
 
 }

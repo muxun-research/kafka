@@ -17,9 +17,13 @@
 package org.apache.kafka.clients.consumer;
 
 import org.apache.kafka.common.Cluster;
+import org.apache.kafka.common.Configurable;
+import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.utils.Utils;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -123,27 +127,30 @@ public interface ConsumerPartitionAssignor {
         }
 
         public List<TopicPartition> ownedPartitions() {
-            return ownedPartitions;
-        }
+			return ownedPartitions;
+		}
 
-        public void setGroupInstanceId(Optional<String> groupInstanceId) {
-            this.groupInstanceId = groupInstanceId;
-        }
+		public void setGroupInstanceId(Optional<String> groupInstanceId) {
+			this.groupInstanceId = groupInstanceId;
+		}
 
-        public Optional<String> groupInstanceId() {
-            return groupInstanceId;
-        }
-    }
+		public Optional<String> groupInstanceId() {
+			return groupInstanceId;
+		}
 
-	/**
-	 * 分配
-	 */
+		@Override
+		public String toString() {
+			return "Subscription(" +
+					"topics=" + topics +
+					(userData == null ? "" : ", userDataSize=" + userData.remaining()) +
+					", ownedPartitions=" + ownedPartitions +
+					", groupInstanceId=" + (groupInstanceId.map(String::toString).orElse("null")) +
+					")";
+		}
+	}
+
 	final class Assignment {
-		/**
-		 * 分配的partition
-		 */
 		private List<TopicPartition> partitions;
-
 		private ByteBuffer userData;
 
 		public Assignment(List<TopicPartition> partitions, ByteBuffer userData) {
@@ -162,17 +169,19 @@ public interface ConsumerPartitionAssignor {
 		public ByteBuffer userData() {
 			return userData;
 		}
+
+		@Override
+		public String toString() {
+			return "Assignment(" +
+					"partitions=" + partitions +
+					(userData == null ? "" : ", userDataSize=" + userData.remaining()) +
+					')';
+		}
 	}
 
-	/**
-	 * 当前消费组的订阅信息
-	 */
 	final class GroupSubscription {
 		private final Map<String, Subscription> subscriptions;
 
-		/**
-		 * memberId-订阅信息
-		 */
 		public GroupSubscription(Map<String, Subscription> subscriptions) {
 			this.subscriptions = subscriptions;
 		}
@@ -180,15 +189,16 @@ public interface ConsumerPartitionAssignor {
 		public Map<String, Subscription> groupSubscription() {
 			return subscriptions;
 		}
+
+		@Override
+		public String toString() {
+			return "GroupSubscription(" +
+					"subscriptions=" + subscriptions +
+					")";
+		}
 	}
 
-	/**
-	 * 集群的管理信息
-	 */
 	final class GroupAssignment {
-		/**
-		 * memberId-分配partition信息
-		 */
 		private final Map<String, Assignment> assignments;
 
 		public GroupAssignment(Map<String, Assignment> assignments) {
@@ -198,48 +208,92 @@ public interface ConsumerPartitionAssignor {
 		public Map<String, Assignment> groupAssignment() {
 			return assignments;
 		}
+
+		@Override
+		public String toString() {
+			return "GroupAssignment(" +
+					"assignments=" + assignments +
+					")";
+		}
 	}
 
-    /**
-	 * 再平衡协议声明了partition分配方式和撤销语义，宗旨是建立一个一致性的规则集合，所有的consumer都会在一个组中，按照顺序来在partition中传递关系
-	 * {@link ConsumerPartitionAssignor}实现，可以声明支持一个或者多个再平衡协议和{@link ConsumerPartitionAssignor#supportedProtocols()}
-	 * 并且在{@link ConsumerPartitionAssignor#assign(Cluster, GroupSubscription)}实现中尊重协议规则是它们的责任
-	 * 没有遵循支持协议的规则将会产生运行时错误和未定义的表现
-	 *
-	 * {@link RebalanceProtocol#EAGER}再平衡协议需要一个consumer在参与平衡事件之前，来撤销所有已拥有的partition信息，因此，它允许进行重新分配
-	 * {@link RebalanceProtocol#COOPERATIVE}再平衡协议允许consumer在参与平衡事件之前，保留当前拥有的partition，分配器不会立即重新分配已拥有的partition
-	 * 但是相反，这可能表明了consumer需要撤销partition，以便于在下一次再平衡事件中能将已撤销的partition重新非配给其他使用者
-     */
-    enum RebalanceProtocol {
-		/**
-		 * 独占
-		 */
-		EAGER((byte) 0),
-		/**
-		 * 协作
-		 */
-		COOPERATIVE((byte) 1);
+	/**
+	 * The rebalance protocol defines partition assignment and revocation semantics. The purpose is to establish a
+	 * consistent set of rules that all consumers in a group follow in order to transfer ownership of a partition.
+	 * {@link ConsumerPartitionAssignor} implementors can claim supporting one or more rebalance protocols via the
+	 * {@link ConsumerPartitionAssignor#supportedProtocols()}, and it is their responsibility to respect the rules
+	 * of those protocols in their {@link ConsumerPartitionAssignor#assign(Cluster, GroupSubscription)} implementations.
+	 * Failures to follow the rules of the supported protocols would lead to runtime error or undefined behavior.
+	 * <p>
+	 * The {@link RebalanceProtocol#EAGER} rebalance protocol requires a consumer to always revoke all its owned
+	 * partitions before participating in a rebalance event. It therefore allows a complete reshuffling of the assignment.
+	 * <p>
+	 * {@link RebalanceProtocol#COOPERATIVE} rebalance protocol allows a consumer to retain its currently owned
+	 * partitions before participating in a rebalance event. The assignor should not reassign any owned partitions
+	 * immediately, but instead may indicate consumers the need for partition revocation so that the revoked
+	 * partitions can be reassigned to other consumers in the next rebalance event. This is designed for sticky assignment
+	 * logic which attempts to minimize partition reassignment with cooperative adjustments.
+	 */
+	enum RebalanceProtocol {
+		EAGER((byte) 0), COOPERATIVE((byte) 1);
 
-        private final byte id;
+		private final byte id;
 
-        RebalanceProtocol(byte id) {
-            this.id = id;
-        }
+		RebalanceProtocol(byte id) {
+			this.id = id;
+		}
 
-        public byte id() {
-            return id;
-        }
+		public byte id() {
+			return id;
+		}
 
         public static RebalanceProtocol forId(byte id) {
             switch (id) {
-                case 0:
-                    return EAGER;
-                case 1:
-                    return COOPERATIVE;
-                default:
-                    throw new IllegalArgumentException("Unknown rebalance protocol id: " + id);
-            }
-        }
-    }
+				case 0:
+					return EAGER;
+				case 1:
+					return COOPERATIVE;
+				default:
+					throw new IllegalArgumentException("Unknown rebalance protocol id: " + id);
+			}
+		}
+	}
+
+	/**
+	 * Get a list of configured instances of {@link org.apache.kafka.clients.consumer.ConsumerPartitionAssignor}
+	 * based on the class names/types specified by {@link org.apache.kafka.clients.consumer.ConsumerConfig#PARTITION_ASSIGNMENT_STRATEGY_CONFIG}
+	 */
+	static List<ConsumerPartitionAssignor> getAssignorInstances(List<String> assignorClasses, Map<String, Object> configs) {
+		List<ConsumerPartitionAssignor> assignors = new ArrayList<>();
+
+		if (assignorClasses == null)
+			return assignors;
+
+		for (Object klass : assignorClasses) {
+			// first try to get the class if passed in as a string
+			if (klass instanceof String) {
+				try {
+					klass = Class.forName((String) klass, true, Utils.getContextOrKafkaClassLoader());
+				} catch (ClassNotFoundException classNotFound) {
+					throw new KafkaException(klass + " ClassNotFoundException exception occurred", classNotFound);
+				}
+			}
+
+			if (klass instanceof Class<?>) {
+				Object assignor = Utils.newInstance((Class<?>) klass);
+				if (assignor instanceof Configurable)
+					((Configurable) assignor).configure(configs);
+
+				if (assignor instanceof ConsumerPartitionAssignor) {
+					assignors.add((ConsumerPartitionAssignor) assignor);
+				} else {
+					throw new KafkaException(klass + " is not an instance of " + ConsumerPartitionAssignor.class.getName());
+				}
+			} else {
+				throw new KafkaException("List contains element of type " + klass.getClass().getName() + ", expected String or Class");
+			}
+		}
+		return assignors;
+	}
 
 }

@@ -19,6 +19,7 @@ package org.apache.kafka.connect.runtime;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.metrics.KafkaMetric;
+import org.apache.kafka.common.metrics.MetricsContext;
 import org.apache.kafka.common.metrics.MetricsReporter;
 import org.apache.kafka.common.utils.MockTime;
 
@@ -58,7 +59,7 @@ public class MockConnectMetrics extends ConnectMetrics {
     }
 
     public MockConnectMetrics(MockTime time) {
-        super("mock", new WorkerConfig(WorkerConfig.baseConfigDef(), DEFAULT_WORKER_CONFIG), time);
+		super("mock", new WorkerConfig(WorkerConfig.baseConfigDef(), DEFAULT_WORKER_CONFIG), time, "cluster-1");
     }
 
     @Override
@@ -88,7 +89,7 @@ public class MockConnectMetrics extends ConnectMetrics {
      */
     public double currentMetricValueAsDouble(MetricGroup metricGroup, String name) {
         Object value = currentMetricValue(metricGroup, name);
-        return value instanceof Double ? ((Double) value).doubleValue() : Double.NaN;
+		return value instanceof Double ? (Double) value : Double.NaN;
     }
 
     /**
@@ -134,7 +135,7 @@ public class MockConnectMetrics extends ConnectMetrics {
      */
     public static double currentMetricValueAsDouble(ConnectMetrics metrics, MetricGroup metricGroup, String name) {
         Object value = currentMetricValue(metrics, metricGroup, name);
-        return value instanceof Double ? ((Double) value).doubleValue() : Double.NaN;
+		return value instanceof Double ? (Double) value : Double.NaN;
     }
 
     /**
@@ -151,48 +152,58 @@ public class MockConnectMetrics extends ConnectMetrics {
         return value instanceof String ? (String) value : null;
     }
 
-    public static class MockMetricsReporter implements MetricsReporter {
-        private Map<MetricName, KafkaMetric> metricsByName = new HashMap<>();
+	public static class MockMetricsReporter implements MetricsReporter {
+		private Map<MetricName, KafkaMetric> metricsByName = new HashMap<>();
 
-        public MockMetricsReporter() {
-        }
+		private MetricsContext metricsContext;
 
-        @Override
-        public void configure(Map<String, ?> configs) {
-            // do nothing
-        }
+		public MockMetricsReporter() {
+		}
 
-        @Override
-        public void init(List<KafkaMetric> metrics) {
-            for (KafkaMetric metric : metrics) {
-                metricsByName.put(metric.metricName(), metric);
-            }
-        }
+		@Override
+		public void configure(Map<String, ?> configs) {
+			// do nothing
+		}
 
-        @Override
-        public void metricChange(KafkaMetric metric) {
-            metricsByName.put(metric.metricName(), metric);
-        }
+		@Override
+		public void init(List<KafkaMetric> metrics) {
+			for (KafkaMetric metric : metrics) {
+				metricsByName.put(metric.metricName(), metric);
+			}
+		}
 
-        @Override
-        public void metricRemoval(KafkaMetric metric) {
-            // don't remove metrics, or else we won't be able to access them after the metric metricGroup is closed
-        }
+		@Override
+		public void metricChange(KafkaMetric metric) {
+			metricsByName.put(metric.metricName(), metric);
+		}
 
-        @Override
-        public void close() {
-            // do nothing
-        }
+		@Override
+		public void metricRemoval(KafkaMetric metric) {
+			// don't remove metrics, or else we won't be able to access them after the metric metricGroup is closed
+		}
 
-        /**
-         * Get the current value of the metric.
-         *
-         * @param metricName the name of the metric that was registered most recently
-         * @return the current value of the metric
-         */
-        public Object currentMetricValue(MetricName metricName) {
-            KafkaMetric metric = metricsByName.get(metricName);
-            return metric != null ? metric.metricValue() : null;
-        }
-    }
+		@Override
+		public void close() {
+			// do nothing
+		}
+
+		/**
+		 * Get the current value of the metric.
+		 * @param metricName the name of the metric that was registered most recently
+		 * @return the current value of the metric
+		 */
+		public Object currentMetricValue(MetricName metricName) {
+			KafkaMetric metric = metricsByName.get(metricName);
+			return metric != null ? metric.metricValue() : null;
+		}
+
+		@Override
+		public void contextChange(MetricsContext metricsContext) {
+			this.metricsContext = metricsContext;
+		}
+
+		public MetricsContext getMetricsContext() {
+			return this.metricsContext;
+		}
+	}
 }

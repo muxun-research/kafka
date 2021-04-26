@@ -18,16 +18,9 @@
 package org.apache.kafka.connect.rest.basic.auth.extension;
 
 import org.apache.kafka.common.config.ConfigException;
+import org.apache.kafka.common.utils.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.Map;
-import java.util.Properties;
-import java.util.concurrent.ConcurrentHashMap;
 
 import javax.security.auth.Subject;
 import javax.security.auth.callback.Callback;
@@ -36,6 +29,13 @@ import javax.security.auth.callback.NameCallback;
 import javax.security.auth.callback.PasswordCallback;
 import javax.security.auth.login.LoginException;
 import javax.security.auth.spi.LoginModule;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.Map;
+import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * {@link PropertyFileLoginModule} authenticates against a properties file.
@@ -59,40 +59,76 @@ public class PropertyFileLoginModule implements LoginModule {
     public void initialize(Subject subject, CallbackHandler callbackHandler, Map<String, ?> sharedState, Map<String, ?> options) {
         this.callbackHandler = callbackHandler;
         fileName = (String) options.get(FILE_OPTIONS);
-        if (fileName == null || fileName.trim().isEmpty()) {
-            throw new ConfigException("Property Credentials file must be specified");
-        }
-        if (!credentialPropertiesMap.containsKey(fileName)) {
-            Properties credentialProperties = new Properties();
-            try {
-                try (InputStream inputStream = Files.newInputStream(Paths.get(fileName))) {
-                    credentialProperties.load(inputStream);
-                }
-                credentialPropertiesMap.putIfAbsent(fileName, credentialProperties);
-            } catch (IOException e) {
-                log.error("Error loading credentials file ", e);
-                throw new ConfigException("Error loading Property Credentials file");
-            }
-        }
+		if (Utils.isBlank(fileName)) {
+			throw new ConfigException("Property Credentials file must be specified");
+		}
+
+		if (!credentialPropertiesMap.containsKey(fileName)) {
+			log.trace("Opening credential properties file '{}'", fileName);
+			Properties credentialProperties = new Properties();
+			try {
+				try (InputStream inputStream = Files.newInputStream(Paths.get(fileName))) {
+					log.trace("Parsing credential properties file '{}'", fileName);
+					credentialProperties.load(inputStream);
+				}
+				credentialPropertiesMap.putIfAbsent(fileName, credentialProperties);
+				if (credentialProperties.isEmpty())
+					log.warn("Credential properties file '{}' is empty; all requests will be permitted",
+							fileName);
+			} catch (IOException e) {
+				log.error("Error loading credentials file ", e);
+				throw new ConfigException("Error loading Property Credentials file");
+			}
+		} else {
+			log.trace(
+					"Credential properties file '{}' has already been opened and parsed; will read from cached, in-memory store",
+					fileName);
+		}
     }
 
     @Override
     public boolean login() throws LoginException {
         Callback[] callbacks = configureCallbacks();
         try {
-            callbackHandler.handle(callbacks);
-        } catch (Exception e) {
-            throw new LoginException(e.getMessage());
-        }
+			log.trace("Authenticating user; invoking JAAS login callbacks");
+			callbackHandler.handle(callbacks);
+		} catch (Exception e) {
+			log.warn("Authentication failed while invoking JAAS login callbacks", e);
+			throw new LoginException(e.getMessage());
+		}
 
-        String username = ((NameCallback) callbacks[0]).getName();
-        char[] passwordChars = ((PasswordCallback) callbacks[1]).getPassword();
-        String password = passwordChars != null ? new String(passwordChars) : null;
-        Properties credentialProperties = credentialPropertiesMap.get(fileName);
-        authenticated = credentialProperties.isEmpty() ||
-                        (password != null && password.equals(credentialProperties.get(username)));
-        return authenticated;
-    }
+		String username = ((NameCallback) callbacks[0]).getName();
+		char[] passwordChars = ((PasswordCallback) callbacks[1]).getPassword();
+		String password = passwordChars != null ? new String(passwordChars) : null;
+		Properties credentialProperties = credentialPropertiesMap.get(fileName);
+
+		if (credentialProperties.isEmpty()) {
+			log.trace("Not validating credentials for user '{}' as credential properties file '{}' is empty",
+					username,
+					fileName);
+			authenticated = true;
+		} else if (username == null) {
+			log.trace("No credentials were provided or the provided credentials were malformed");
+			authenticated = false;
+		} else if (password != null && password.equals(credentialProperties.get(username))) {
+			log.trace("Credentials provided for user '{}' match those present in the credential properties file '{}'",
+					username,
+					fileName);
+			authenticated = true;
+		} else if (!credentialProperties.containsKey(username)) {
+			log.trace("User '{}' is not present in the credential properties file '{}'",
+					username,
+					fileName);
+			authenticated = false;
+		} else {
+			log.trace("Credentials provided for user '{}' do not match those present in the credential properties file '{}'",
+					username,
+					fileName);
+			authenticated = false;
+		}
+
+		return authenticated;
+	}
 
     @Override
     public boolean commit() throws LoginException {
@@ -110,7 +146,6 @@ public class PropertyFileLoginModule implements LoginModule {
     }
 
     private Callback[] configureCallbacks() {
-
         Callback[] callbacks = new Callback[2];
         callbacks[0] = new NameCallback("Enter user name");
         callbacks[1] = new PasswordCallback("Enter password", false);

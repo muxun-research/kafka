@@ -18,13 +18,11 @@ package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.message.SaslAuthenticateResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
-import java.util.Collections;
 import java.util.Map;
-
 
 /**
  * Response from SASL server which for a SASL challenge as defined by the SASL protocol
@@ -35,11 +33,8 @@ public class SaslAuthenticateResponse extends AbstractResponse {
     private final SaslAuthenticateResponseData data;
 
     public SaslAuthenticateResponse(SaslAuthenticateResponseData data) {
-        this.data = data;
-    }
-
-    public SaslAuthenticateResponse(Struct struct, short version) {
-        this.data = new SaslAuthenticateResponseData(struct, version);
+		super(ApiKeys.SASL_AUTHENTICATE);
+		this.data = data;
     }
 
     /**
@@ -52,27 +47,32 @@ public class SaslAuthenticateResponse extends AbstractResponse {
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-        return Collections.singletonMap(Errors.forCode(data.errorCode()), 1);
+		return errorCounts(Errors.forCode(data.errorCode()));
     }
 
     public String errorMessage() {
         return data.errorMessage();
     }
 
-    public long sessionLifetimeMs() {
-        return data.sessionLifetimeMs();
-    }
+	public long sessionLifetimeMs() {
+		return data.sessionLifetimeMs();
+	}
 
-    public byte[] saslAuthBytes() {
-        return data.authBytes();
-    }
+	public byte[] saslAuthBytes() {
+		return data.authBytes();
+	}
 
-    @Override
-    public Struct toStruct(short version) {
-        return data.toStruct(version);
-    }
+	@Override
+	public int throttleTimeMs() {
+		return DEFAULT_THROTTLE_TIME;
+	}
 
-    public static SaslAuthenticateResponse parse(ByteBuffer buffer, short version) {
-        return new SaslAuthenticateResponse(ApiKeys.SASL_AUTHENTICATE.parseResponse(version, buffer), version);
-    }
+	@Override
+	public SaslAuthenticateResponseData data() {
+		return data;
+	}
+
+	public static SaslAuthenticateResponse parse(ByteBuffer buffer, short version) {
+		return new SaslAuthenticateResponse(new SaslAuthenticateResponseData(new ByteBufferAccessor(buffer), version));
+	}
 }

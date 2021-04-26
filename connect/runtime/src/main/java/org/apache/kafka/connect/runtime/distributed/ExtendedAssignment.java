@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -73,26 +74,39 @@ public class ExtendedAssignment extends ConnectProtocol.Assignment {
      * @param delay the scheduled delay after which the worker should rejoin the group
      */
     public ExtendedAssignment(short version, short error, String leader, String leaderUrl, long configOffset,
-                             Collection<String> connectorIds, Collection<ConnectorTaskId> taskIds,
-                             Collection<String> revokedConnectorIds, Collection<ConnectorTaskId> revokedTaskIds,
-                             int delay) {
-        super(error, leader, leaderUrl, configOffset, connectorIds, taskIds);
-        this.version = version;
-        this.revokedConnectorIds = Objects.requireNonNull(revokedConnectorIds,
-                "Revoked connector IDs may be empty but not null");
-        this.revokedTaskIds = Objects.requireNonNull(revokedTaskIds,
-                "Revoked task IDs may be empty but not null");
-        this.delay = delay;
-    }
+							  Collection<String> connectorIds, Collection<ConnectorTaskId> taskIds,
+							  Collection<String> revokedConnectorIds, Collection<ConnectorTaskId> revokedTaskIds,
+							  int delay) {
+		super(error, leader, leaderUrl, configOffset, connectorIds, taskIds);
+		this.version = version;
+		this.revokedConnectorIds = Objects.requireNonNull(revokedConnectorIds,
+				"Revoked connector IDs may be empty but not null");
+		this.revokedTaskIds = Objects.requireNonNull(revokedTaskIds,
+				"Revoked task IDs may be empty but not null");
+		this.delay = delay;
+	}
 
-    /**
-     * Return the version of the connect protocol that this assignment belongs to.
-     *
-     * @return the connect protocol version of this assignment
-     */
-    public short version() {
-        return version;
-    }
+	public static ExtendedAssignment duplicate(ExtendedAssignment assignment) {
+		return new ExtendedAssignment(
+				assignment.version(),
+				assignment.error(),
+				assignment.leader(),
+				assignment.leaderUrl(),
+				assignment.offset(),
+				new LinkedHashSet<>(assignment.connectors()),
+				new LinkedHashSet<>(assignment.tasks()),
+				new LinkedHashSet<>(assignment.revokedConnectors()),
+				new LinkedHashSet<>(assignment.revokedTasks()),
+				assignment.delay());
+	}
+
+	/**
+	 * Return the version of the connect protocol that this assignment belongs to.
+	 * @return the connect protocol version of this assignment
+	 */
+	public short version() {
+		return version;
+	}
 
     /**
      * Return the IDs of the connectors that are revoked by this assignment.

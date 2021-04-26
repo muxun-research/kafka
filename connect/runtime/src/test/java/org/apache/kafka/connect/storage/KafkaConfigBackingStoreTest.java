@@ -21,6 +21,8 @@ import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.config.ConfigException;
+import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
@@ -30,12 +32,13 @@ import org.apache.kafka.connect.runtime.TargetState;
 import org.apache.kafka.connect.runtime.distributed.ClusterConfigState;
 import org.apache.kafka.connect.runtime.distributed.DistributedConfig;
 import org.apache.kafka.connect.util.Callback;
+import org.apache.kafka.connect.util.ConnectUtils;
 import org.apache.kafka.connect.util.ConnectorTaskId;
 import org.apache.kafka.connect.util.KafkaBasedLog;
 import org.apache.kafka.connect.util.TestFuture;
+import org.apache.kafka.connect.util.TopicAdmin;
 import org.easymock.Capture;
 import org.easymock.EasyMock;
-import org.easymock.IAnswer;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -53,16 +56,19 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Future;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(PowerMockRunner.class)
-@PrepareForTest(KafkaConfigBackingStore.class)
-@PowerMockIgnore("javax.management.*")
+@PrepareForTest({KafkaConfigBackingStore.class, ConnectUtils.class})
+@PowerMockIgnore({"javax.management.*", "javax.crypto.*"})
 @SuppressWarnings({"unchecked", "deprecation"})
 public class KafkaConfigBackingStoreTest {
     private static final String TOPIC = "connect-configs";
@@ -137,44 +143,53 @@ public class KafkaConfigBackingStoreTest {
 
     private Capture<String> capturedTopic = EasyMock.newCapture();
     private Capture<Map<String, Object>> capturedProducerProps = EasyMock.newCapture();
-    private Capture<Map<String, Object>> capturedConsumerProps = EasyMock.newCapture();
-    private Capture<Map<String, Object>> capturedAdminProps = EasyMock.newCapture();
-    private Capture<NewTopic> capturedNewTopic = EasyMock.newCapture();
+	private Capture<Map<String, Object>> capturedConsumerProps = EasyMock.newCapture();
+	private Capture<Supplier<TopicAdmin>> capturedAdminSupplier = EasyMock.newCapture();
+	private Capture<NewTopic> capturedNewTopic = EasyMock.newCapture();
     private Capture<Callback<ConsumerRecord<String, byte[]>>> capturedConsumedCallback = EasyMock.newCapture();
 
     private long logOffset = 0;
 
     @Before
     public void setUp() {
-        configStorage = PowerMock.createPartialMock(KafkaConfigBackingStore.class, new String[]{"createKafkaBasedLog"}, converter, DEFAULT_DISTRIBUTED_CONFIG, null);
-        Whitebox.setInternalState(configStorage, "configLog", storeLog);
-        configStorage.setUpdateListener(configUpdateListener);
-    }
+		PowerMock.mockStaticPartial(ConnectUtils.class, "lookupKafkaClusterId");
+		EasyMock.expect(ConnectUtils.lookupKafkaClusterId(EasyMock.anyObject())).andReturn("test-cluster").anyTimes();
+		PowerMock.replay(ConnectUtils.class);
+
+		configStorage = PowerMock.createPartialMock(KafkaConfigBackingStore.class, new String[]{"createKafkaBasedLog"}, converter, DEFAULT_DISTRIBUTED_CONFIG, null);
+		Whitebox.setInternalState(configStorage, "configLog", storeLog);
+		configStorage.setUpdateListener(configUpdateListener);
+	}
 
     @Test
     public void testStartStop() throws Exception {
-        expectConfigure();
-        expectStart(Collections.emptyList(), Collections.emptyMap());
-        expectStop();
+		expectConfigure();
+		expectStart(Collections.emptyList(), Collections.emptyMap());
+		expectPartitionCount(1);
+		expectStop();
+		PowerMock.replayAll();
 
-        PowerMock.replayAll();
+		Map<String, String> settings = new HashMap<>(DEFAULT_CONFIG_STORAGE_PROPS);
+		settings.put("config.storage.min.insync.replicas", "3");
+		settings.put("config.storage.max.message.bytes", "1001");
+		configStorage.setupAndCreateKafkaBasedLog(TOPIC, new DistributedConfig(settings));
 
-        configStorage.setupAndCreateKafkaBasedLog(TOPIC, DEFAULT_DISTRIBUTED_CONFIG);
+		assertEquals(TOPIC, capturedTopic.getValue());
+		assertEquals("org.apache.kafka.common.serialization.StringSerializer", capturedProducerProps.getValue().get(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG));
+		assertEquals("org.apache.kafka.common.serialization.ByteArraySerializer", capturedProducerProps.getValue().get(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG));
+		assertEquals("org.apache.kafka.common.serialization.StringDeserializer", capturedConsumerProps.getValue().get(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG));
+		assertEquals("org.apache.kafka.common.serialization.ByteArrayDeserializer", capturedConsumerProps.getValue().get(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG));
 
-        assertEquals(TOPIC, capturedTopic.getValue());
-        assertEquals("org.apache.kafka.common.serialization.StringSerializer", capturedProducerProps.getValue().get(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG));
-        assertEquals("org.apache.kafka.common.serialization.ByteArraySerializer", capturedProducerProps.getValue().get(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG));
-        assertEquals("org.apache.kafka.common.serialization.StringDeserializer", capturedConsumerProps.getValue().get(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG));
-        assertEquals("org.apache.kafka.common.serialization.ByteArrayDeserializer", capturedConsumerProps.getValue().get(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG));
+		assertEquals(TOPIC, capturedNewTopic.getValue().name());
+		assertEquals(1, capturedNewTopic.getValue().numPartitions());
+		assertEquals(TOPIC_REPLICATION_FACTOR, capturedNewTopic.getValue().replicationFactor());
+		assertEquals("3", capturedNewTopic.getValue().configs().get("min.insync.replicas"));
+		assertEquals("1001", capturedNewTopic.getValue().configs().get("max.message.bytes"));
+		configStorage.start();
+		configStorage.stop();
 
-        assertEquals(TOPIC, capturedNewTopic.getValue().name());
-        assertEquals(1, capturedNewTopic.getValue().numPartitions());
-        assertEquals(TOPIC_REPLICATION_FACTOR, capturedNewTopic.getValue().replicationFactor());
-        configStorage.start();
-        configStorage.stop();
-
-        PowerMock.verifyAll();
-    }
+		PowerMock.verifyAll();
+	}
 
     @Test
     public void testPutConnectorConfig() throws Exception {
@@ -198,7 +213,8 @@ public class KafkaConfigBackingStoreTest {
         configUpdateListener.onConnectorConfigRemove(CONNECTOR_IDS.get(1));
         EasyMock.expectLastCall();
 
-        expectStop();
+		expectPartitionCount(1);
+		expectStop();
 
         PowerMock.replayAll();
 
@@ -239,73 +255,165 @@ public class KafkaConfigBackingStoreTest {
     }
 
     @Test
-    public void testPutTaskConfigs() throws Exception {
-        expectConfigure();
-        expectStart(Collections.emptyList(), Collections.emptyMap());
+	public void testPutTaskConfigs() throws Exception {
+		expectConfigure();
+		expectStart(Collections.emptyList(), Collections.emptyMap());
 
-        // Task configs should read to end, write to the log, read to end, write root, then read to end again
-        expectReadToEnd(new LinkedHashMap<>());
-        expectConvertWriteRead(
-                TASK_CONFIG_KEYS.get(0), KafkaConfigBackingStore.TASK_CONFIGURATION_V0, CONFIGS_SERIALIZED.get(0),
-                "properties", SAMPLE_CONFIGS.get(0));
-        expectConvertWriteRead(
-                TASK_CONFIG_KEYS.get(1), KafkaConfigBackingStore.TASK_CONFIGURATION_V0, CONFIGS_SERIALIZED.get(1),
-                "properties", SAMPLE_CONFIGS.get(1));
-        expectReadToEnd(new LinkedHashMap<String, byte[]>());
-        expectConvertWriteRead(
-                COMMIT_TASKS_CONFIG_KEYS.get(0), KafkaConfigBackingStore.CONNECTOR_TASKS_COMMIT_V0, CONFIGS_SERIALIZED.get(2),
-                "tasks", 2); // Starts with 0 tasks, after update has 2
-        // As soon as root is rewritten, we should see a callback notifying us that we reconfigured some tasks
-        configUpdateListener.onTaskConfigUpdate(Arrays.asList(TASK_IDS.get(0), TASK_IDS.get(1)));
-        EasyMock.expectLastCall();
+		// Task configs should read to end, write to the log, read to end, write root, then read to end again
+		expectReadToEnd(new LinkedHashMap<>());
+		expectConvertWriteRead(
+				TASK_CONFIG_KEYS.get(0), KafkaConfigBackingStore.TASK_CONFIGURATION_V0, CONFIGS_SERIALIZED.get(0),
+				"properties", SAMPLE_CONFIGS.get(0));
+		expectConvertWriteRead(
+				TASK_CONFIG_KEYS.get(1), KafkaConfigBackingStore.TASK_CONFIGURATION_V0, CONFIGS_SERIALIZED.get(1),
+				"properties", SAMPLE_CONFIGS.get(1));
+		expectReadToEnd(new LinkedHashMap<>());
+		expectConvertWriteRead(
+				COMMIT_TASKS_CONFIG_KEYS.get(0), KafkaConfigBackingStore.CONNECTOR_TASKS_COMMIT_V0, CONFIGS_SERIALIZED.get(2),
+				"tasks", 2); // Starts with 0 tasks, after update has 2
+		// As soon as root is rewritten, we should see a callback notifying us that we reconfigured some tasks
+		configUpdateListener.onTaskConfigUpdate(Arrays.asList(TASK_IDS.get(0), TASK_IDS.get(1)));
+		EasyMock.expectLastCall();
 
-        // Records to be read by consumer as it reads to the end of the log
-        LinkedHashMap<String, byte[]> serializedConfigs = new LinkedHashMap<>();
-        serializedConfigs.put(TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(0));
-        serializedConfigs.put(TASK_CONFIG_KEYS.get(1), CONFIGS_SERIALIZED.get(1));
-        serializedConfigs.put(COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(2));
-        expectReadToEnd(serializedConfigs);
+		// Records to be read by consumer as it reads to the end of the log
+		LinkedHashMap<String, byte[]> serializedConfigs = new LinkedHashMap<>();
+		serializedConfigs.put(TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(0));
+		serializedConfigs.put(TASK_CONFIG_KEYS.get(1), CONFIGS_SERIALIZED.get(1));
+		serializedConfigs.put(COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(2));
+		expectReadToEnd(serializedConfigs);
 
-        expectStop();
+		expectPartitionCount(1);
+		expectStop();
 
-        PowerMock.replayAll();
+		PowerMock.replayAll();
 
-        configStorage.setupAndCreateKafkaBasedLog(TOPIC, DEFAULT_DISTRIBUTED_CONFIG);
-        configStorage.start();
+		configStorage.setupAndCreateKafkaBasedLog(TOPIC, DEFAULT_DISTRIBUTED_CONFIG);
+		configStorage.start();
 
-        // Bootstrap as if we had already added the connector, but no tasks had been added yet
-        whiteboxAddConnector(CONNECTOR_IDS.get(0), SAMPLE_CONFIGS.get(0), Collections.emptyList());
+		// Bootstrap as if we had already added the connector, but no tasks had been added yet
+		whiteboxAddConnector(CONNECTOR_IDS.get(0), SAMPLE_CONFIGS.get(0), Collections.emptyList());
 
-        // Null before writing
-        ClusterConfigState configState = configStorage.snapshot();
-        assertEquals(-1, configState.offset());
-        assertNull(configState.taskConfig(TASK_IDS.get(0)));
-        assertNull(configState.taskConfig(TASK_IDS.get(1)));
+		// Null before writing
+		ClusterConfigState configState = configStorage.snapshot();
+		assertEquals(-1, configState.offset());
+		assertNull(configState.taskConfig(TASK_IDS.get(0)));
+		assertNull(configState.taskConfig(TASK_IDS.get(1)));
 
-        // Writing task configs should block until all the writes have been performed and the root record update
-        // has completed
-        List<Map<String, String>> taskConfigs = Arrays.asList(SAMPLE_CONFIGS.get(0), SAMPLE_CONFIGS.get(1));
-        configStorage.putTaskConfigs("connector1", taskConfigs);
+		// Writing task configs should block until all the writes have been performed and the root record update
+		// has completed
+		List<Map<String, String>> taskConfigs = Arrays.asList(SAMPLE_CONFIGS.get(0), SAMPLE_CONFIGS.get(1));
+		configStorage.putTaskConfigs("connector1", taskConfigs);
 
-        // Validate root config by listing all connectors and tasks
-        configState = configStorage.snapshot();
-        assertEquals(3, configState.offset());
-        String connectorName = CONNECTOR_IDS.get(0);
-        assertEquals(Arrays.asList(connectorName), new ArrayList<>(configState.connectors()));
-        assertEquals(Arrays.asList(TASK_IDS.get(0), TASK_IDS.get(1)), configState.tasks(connectorName));
-        assertEquals(SAMPLE_CONFIGS.get(0), configState.taskConfig(TASK_IDS.get(0)));
-        assertEquals(SAMPLE_CONFIGS.get(1), configState.taskConfig(TASK_IDS.get(1)));
-        assertEquals(Collections.EMPTY_SET, configState.inconsistentConnectors());
+		// Validate root config by listing all connectors and tasks
+		configState = configStorage.snapshot();
+		assertEquals(3, configState.offset());
+		String connectorName = CONNECTOR_IDS.get(0);
+		assertEquals(Arrays.asList(connectorName), new ArrayList<>(configState.connectors()));
+		assertEquals(Arrays.asList(TASK_IDS.get(0), TASK_IDS.get(1)), configState.tasks(connectorName));
+		assertEquals(SAMPLE_CONFIGS.get(0), configState.taskConfig(TASK_IDS.get(0)));
+		assertEquals(SAMPLE_CONFIGS.get(1), configState.taskConfig(TASK_IDS.get(1)));
+		assertEquals(Collections.EMPTY_SET, configState.inconsistentConnectors());
 
-        configStorage.stop();
+		configStorage.stop();
 
-        PowerMock.verifyAll();
-    }
+		PowerMock.verifyAll();
+	}
 
-    @Test
-    public void testPutTaskConfigsZeroTasks() throws Exception {
-        expectConfigure();
-        expectStart(Collections.emptyList(), Collections.emptyMap());
+	@Test
+	public void testPutTaskConfigsStartsOnlyReconfiguredTasks() throws Exception {
+		expectConfigure();
+		expectStart(Collections.emptyList(), Collections.emptyMap());
+
+		// Task configs should read to end, write to the log, read to end, write root, then read to end again
+		expectReadToEnd(new LinkedHashMap<>());
+		expectConvertWriteRead(
+				TASK_CONFIG_KEYS.get(0), KafkaConfigBackingStore.TASK_CONFIGURATION_V0, CONFIGS_SERIALIZED.get(0),
+				"properties", SAMPLE_CONFIGS.get(0));
+		expectConvertWriteRead(
+				TASK_CONFIG_KEYS.get(1), KafkaConfigBackingStore.TASK_CONFIGURATION_V0, CONFIGS_SERIALIZED.get(1),
+				"properties", SAMPLE_CONFIGS.get(1));
+		expectReadToEnd(new LinkedHashMap<>());
+		expectConvertWriteRead(
+				COMMIT_TASKS_CONFIG_KEYS.get(0), KafkaConfigBackingStore.CONNECTOR_TASKS_COMMIT_V0, CONFIGS_SERIALIZED.get(2),
+				"tasks", 2); // Starts with 0 tasks, after update has 2
+		// As soon as root is rewritten, we should see a callback notifying us that we reconfigured some tasks
+		configUpdateListener.onTaskConfigUpdate(Arrays.asList(TASK_IDS.get(0), TASK_IDS.get(1)));
+		EasyMock.expectLastCall();
+
+		// Records to be read by consumer as it reads to the end of the log
+		LinkedHashMap<String, byte[]> serializedConfigs = new LinkedHashMap<>();
+		serializedConfigs.put(TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(0));
+		serializedConfigs.put(TASK_CONFIG_KEYS.get(1), CONFIGS_SERIALIZED.get(1));
+		serializedConfigs.put(COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(2));
+		expectReadToEnd(serializedConfigs);
+
+		// Task configs should read to end, write to the log, read to end, write root, then read to end again
+		expectReadToEnd(new LinkedHashMap<>());
+		expectConvertWriteRead(
+				TASK_CONFIG_KEYS.get(2), KafkaConfigBackingStore.TASK_CONFIGURATION_V0, CONFIGS_SERIALIZED.get(3),
+				"properties", SAMPLE_CONFIGS.get(2));
+		expectReadToEnd(new LinkedHashMap<>());
+		expectConvertWriteRead(
+				COMMIT_TASKS_CONFIG_KEYS.get(1), KafkaConfigBackingStore.CONNECTOR_TASKS_COMMIT_V0, CONFIGS_SERIALIZED.get(4),
+				"tasks", 1); // Starts with 2 tasks, after update has 3
+
+		// As soon as root is rewritten, we should see a callback notifying us that we reconfigured some tasks
+		configUpdateListener.onTaskConfigUpdate(Arrays.asList(TASK_IDS.get(2)));
+		EasyMock.expectLastCall();
+
+		// Records to be read by consumer as it reads to the end of the log
+		serializedConfigs = new LinkedHashMap<>();
+		serializedConfigs.put(TASK_CONFIG_KEYS.get(2), CONFIGS_SERIALIZED.get(3));
+		serializedConfigs.put(COMMIT_TASKS_CONFIG_KEYS.get(1), CONFIGS_SERIALIZED.get(4));
+		expectReadToEnd(serializedConfigs);
+
+		expectPartitionCount(1);
+		expectStop();
+
+		PowerMock.replayAll();
+
+		configStorage.setupAndCreateKafkaBasedLog(TOPIC, DEFAULT_DISTRIBUTED_CONFIG);
+		configStorage.start();
+
+		// Bootstrap as if we had already added the connector, but no tasks had been added yet
+		whiteboxAddConnector(CONNECTOR_IDS.get(0), SAMPLE_CONFIGS.get(0), Collections.emptyList());
+		whiteboxAddConnector(CONNECTOR_IDS.get(1), SAMPLE_CONFIGS.get(1), Collections.emptyList());
+
+		// Null before writing
+		ClusterConfigState configState = configStorage.snapshot();
+		assertEquals(-1, configState.offset());
+		assertNull(configState.taskConfig(TASK_IDS.get(0)));
+		assertNull(configState.taskConfig(TASK_IDS.get(1)));
+
+		// Writing task configs should block until all the writes have been performed and the root record update
+		// has completed
+		List<Map<String, String>> taskConfigs = Arrays.asList(SAMPLE_CONFIGS.get(0), SAMPLE_CONFIGS.get(1));
+		configStorage.putTaskConfigs("connector1", taskConfigs);
+		taskConfigs = Collections.singletonList(SAMPLE_CONFIGS.get(2));
+		configStorage.putTaskConfigs("connector2", taskConfigs);
+
+		// Validate root config by listing all connectors and tasks
+		configState = configStorage.snapshot();
+		assertEquals(5, configState.offset());
+		String connectorName1 = CONNECTOR_IDS.get(0);
+		String connectorName2 = CONNECTOR_IDS.get(1);
+		assertEquals(Arrays.asList(connectorName1, connectorName2), new ArrayList<>(configState.connectors()));
+		assertEquals(Arrays.asList(TASK_IDS.get(0), TASK_IDS.get(1)), configState.tasks(connectorName1));
+		assertEquals(Collections.singletonList(TASK_IDS.get(2)), configState.tasks(connectorName2));
+		assertEquals(SAMPLE_CONFIGS.get(0), configState.taskConfig(TASK_IDS.get(0)));
+		assertEquals(SAMPLE_CONFIGS.get(1), configState.taskConfig(TASK_IDS.get(1)));
+		assertEquals(SAMPLE_CONFIGS.get(2), configState.taskConfig(TASK_IDS.get(2)));
+		assertEquals(Collections.EMPTY_SET, configState.inconsistentConnectors());
+
+		configStorage.stop();
+
+		PowerMock.verifyAll();
+	}
+
+	@Test
+	public void testPutTaskConfigsZeroTasks() throws Exception {
+		expectConfigure();
+		expectStart(Collections.emptyList(), Collections.emptyMap());
 
         // Task configs should read to end, write to the log, read to end, write root.
         expectReadToEnd(new LinkedHashMap<>());
@@ -313,15 +421,16 @@ public class KafkaConfigBackingStoreTest {
             COMMIT_TASKS_CONFIG_KEYS.get(0), KafkaConfigBackingStore.CONNECTOR_TASKS_COMMIT_V0, CONFIGS_SERIALIZED.get(0),
             "tasks", 0); // We have 0 tasks
         // As soon as root is rewritten, we should see a callback notifying us that we reconfigured some tasks
-        configUpdateListener.onTaskConfigUpdate(Collections.<ConnectorTaskId>emptyList());
-        EasyMock.expectLastCall();
+		configUpdateListener.onTaskConfigUpdate(Collections.emptyList());
+		EasyMock.expectLastCall();
 
         // Records to be read by consumer as it reads to the end of the log
         LinkedHashMap<String, byte[]> serializedConfigs = new LinkedHashMap<>();
         serializedConfigs.put(COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(0));
         expectReadToEnd(serializedConfigs);
 
-        expectStop();
+		expectPartitionCount(1);
+		expectStop();
 
         PowerMock.replayAll();
 
@@ -356,13 +465,18 @@ public class KafkaConfigBackingStoreTest {
     @Test
     public void testRestoreTargetState() throws Exception {
         expectConfigure();
-        List<ConsumerRecord<String, byte[]>> existingRecords = Arrays.asList(
-                new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, CONNECTOR_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(0)),
-                new ConsumerRecord<>(TOPIC, 0, 1, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(1)),
-                new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(1), CONFIGS_SERIALIZED.get(2)),
-                new ConsumerRecord<>(TOPIC, 0, 3, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TARGET_STATE_KEYS.get(0), CONFIGS_SERIALIZED.get(3)),
-                new ConsumerRecord<>(TOPIC, 0, 4, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(4)));
-        LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
+		List<ConsumerRecord<String, byte[]>> existingRecords = Arrays.asList(
+				new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0, 0, CONNECTOR_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(0), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 1, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(1), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(1),
+						CONFIGS_SERIALIZED.get(2), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 3, 0L, TimestampType.CREATE_TIME, 0, 0, TARGET_STATE_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(3), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 4, 0L, TimestampType.CREATE_TIME, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(4), new RecordHeaders(), Optional.empty()));
+		LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
         deserialized.put(CONFIGS_SERIALIZED.get(0), CONNECTOR_CONFIG_STRUCTS.get(0));
         deserialized.put(CONFIGS_SERIALIZED.get(1), TASK_CONFIG_STRUCTS.get(0));
         deserialized.put(CONFIGS_SERIALIZED.get(2), TASK_CONFIG_STRUCTS.get(0));
@@ -374,7 +488,8 @@ public class KafkaConfigBackingStoreTest {
 
         // Shouldn't see any callbacks since this is during startup
 
-        expectStop();
+		expectPartitionCount(1);
+		expectStop();
 
         PowerMock.replayAll();
 
@@ -397,12 +512,16 @@ public class KafkaConfigBackingStoreTest {
         // verify that we handle target state changes correctly when they come up through the log
 
         expectConfigure();
-        List<ConsumerRecord<String, byte[]>> existingRecords = Arrays.asList(
-                new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, CONNECTOR_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(0)),
-                new ConsumerRecord<>(TOPIC, 0, 1, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(1)),
-                new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(1), CONFIGS_SERIALIZED.get(2)),
-                new ConsumerRecord<>(TOPIC, 0, 3, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(3)));
-        LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
+		List<ConsumerRecord<String, byte[]>> existingRecords = Arrays.asList(
+				new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0, 0, CONNECTOR_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(0), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 1, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(1), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(1),
+						CONFIGS_SERIALIZED.get(2), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 3, 0L, TimestampType.CREATE_TIME, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(3), new RecordHeaders(), Optional.empty()));
+		LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
         deserialized.put(CONFIGS_SERIALIZED.get(0), CONNECTOR_CONFIG_STRUCTS.get(0));
         deserialized.put(CONFIGS_SERIALIZED.get(1), TASK_CONFIG_STRUCTS.get(0));
         deserialized.put(CONFIGS_SERIALIZED.get(2), TASK_CONFIG_STRUCTS.get(0));
@@ -416,7 +535,8 @@ public class KafkaConfigBackingStoreTest {
         configUpdateListener.onConnectorTargetStateChange(CONNECTOR_IDS.get(0));
         EasyMock.expectLastCall();
 
-        expectStop();
+		expectPartitionCount(1);
+		expectStop();
 
         PowerMock.replayAll();
 
@@ -439,16 +559,20 @@ public class KafkaConfigBackingStoreTest {
         // verify that we handle connector deletions correctly when they come up through the log
 
         expectConfigure();
-        List<ConsumerRecord<String, byte[]>> existingRecords = Arrays.asList(
-                new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, CONNECTOR_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(0)),
-                new ConsumerRecord<>(TOPIC, 0, 1, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(1)),
-                new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(1), CONFIGS_SERIALIZED.get(2)),
-                new ConsumerRecord<>(TOPIC, 0, 3, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(3)));
-        LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
+		List<ConsumerRecord<String, byte[]>> existingRecords = Arrays.asList(
+				new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0, 0, CONNECTOR_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(0), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 1, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(1), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(1),
+						CONFIGS_SERIALIZED.get(2), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 3, 0L, TimestampType.CREATE_TIME, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(3), new RecordHeaders(), Optional.empty()));
+		LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
         deserialized.put(CONFIGS_SERIALIZED.get(0), CONNECTOR_CONFIG_STRUCTS.get(0));
-        deserialized.put(CONFIGS_SERIALIZED.get(1), TASK_CONFIG_STRUCTS.get(0));
-        deserialized.put(CONFIGS_SERIALIZED.get(2), TASK_CONFIG_STRUCTS.get(0));
-        deserialized.put(CONFIGS_SERIALIZED.get(3), TASKS_COMMIT_STRUCT_TWO_TASK_CONNECTOR);
+		deserialized.put(CONFIGS_SERIALIZED.get(1), TASK_CONFIG_STRUCTS.get(0));
+		deserialized.put(CONFIGS_SERIALIZED.get(2), TASK_CONFIG_STRUCTS.get(1));
+		deserialized.put(CONFIGS_SERIALIZED.get(3), TASKS_COMMIT_STRUCT_TWO_TASK_CONNECTOR);
         logOffset = 5;
 
         expectStart(existingRecords, deserialized);
@@ -466,34 +590,49 @@ public class KafkaConfigBackingStoreTest {
         configUpdateListener.onConnectorConfigRemove(CONNECTOR_IDS.get(0));
         EasyMock.expectLastCall();
 
-        expectStop();
+		expectPartitionCount(1);
+		expectStop();
 
-        PowerMock.replayAll();
+		PowerMock.replayAll();
 
-        configStorage.setupAndCreateKafkaBasedLog(TOPIC, DEFAULT_DISTRIBUTED_CONFIG);
-        configStorage.start();
+		configStorage.setupAndCreateKafkaBasedLog(TOPIC, DEFAULT_DISTRIBUTED_CONFIG);
+		configStorage.start();
 
-        // Should see a single connector with initial state paused
-        ClusterConfigState configState = configStorage.snapshot();
-        assertEquals(TargetState.STARTED, configState.targetState(CONNECTOR_IDS.get(0)));
+		// Should see a single connector with initial state paused
+		ClusterConfigState configState = configStorage.snapshot();
+		assertEquals(TargetState.STARTED, configState.targetState(CONNECTOR_IDS.get(0)));
+		assertEquals(SAMPLE_CONFIGS.get(0), configState.connectorConfig(CONNECTOR_IDS.get(0)));
+		assertEquals(SAMPLE_CONFIGS.subList(0, 2), configState.allTaskConfigs(CONNECTOR_IDS.get(0)));
+		assertEquals(2, configState.taskCount(CONNECTOR_IDS.get(0)));
 
-        configStorage.refresh(0, TimeUnit.SECONDS);
+		configStorage.refresh(0, TimeUnit.SECONDS);
+		configState = configStorage.snapshot();
+		// Connector should now be removed from the snapshot
+		assertFalse(configState.contains(CONNECTOR_IDS.get(0)));
+		// Task configs for the deleted connector should also be removed from the snapshot
+		assertEquals(Collections.emptyList(), configState.allTaskConfigs(CONNECTOR_IDS.get(0)));
+		assertEquals(0, configState.taskCount(CONNECTOR_IDS.get(0)));
 
-        configStorage.stop();
+		configStorage.stop();
 
-        PowerMock.verifyAll();
-    }
+		PowerMock.verifyAll();
+	}
 
     @Test
     public void testRestoreTargetStateUnexpectedDeletion() throws Exception {
         expectConfigure();
-        List<ConsumerRecord<String, byte[]>> existingRecords = Arrays.asList(
-                new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, CONNECTOR_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(0)),
-                new ConsumerRecord<>(TOPIC, 0, 1, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(1)),
-                new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(1), CONFIGS_SERIALIZED.get(2)),
-                new ConsumerRecord<>(TOPIC, 0, 3, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TARGET_STATE_KEYS.get(0), CONFIGS_SERIALIZED.get(3)),
-                new ConsumerRecord<>(TOPIC, 0, 4, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(4)));
-        LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
+		List<ConsumerRecord<String, byte[]>> existingRecords = Arrays.asList(
+				new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0, 0, CONNECTOR_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(0), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 1, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(1), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(1),
+						CONFIGS_SERIALIZED.get(2), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 3, 0L, TimestampType.CREATE_TIME, 0, 0, TARGET_STATE_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(3), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 4, 0L, TimestampType.CREATE_TIME, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(4), new RecordHeaders(), Optional.empty()));
+		LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
         deserialized.put(CONFIGS_SERIALIZED.get(0), CONNECTOR_CONFIG_STRUCTS.get(0));
         deserialized.put(CONFIGS_SERIALIZED.get(1), TASK_CONFIG_STRUCTS.get(0));
         deserialized.put(CONFIGS_SERIALIZED.get(2), TASK_CONFIG_STRUCTS.get(0));
@@ -501,7 +640,8 @@ public class KafkaConfigBackingStoreTest {
         deserialized.put(CONFIGS_SERIALIZED.get(4), TASKS_COMMIT_STRUCT_TWO_TASK_CONNECTOR);
         logOffset = 5;
 
-        expectStart(existingRecords, deserialized);
+		expectStart(existingRecords, deserialized);
+		expectPartitionCount(1);
 
         // Shouldn't see any callbacks since this is during startup
 
@@ -531,15 +671,22 @@ public class KafkaConfigBackingStoreTest {
         expectConfigure();
         // Overwrite each type at least once to ensure we see the latest data after loading
         List<ConsumerRecord<String, byte[]>> existingRecords = Arrays.asList(
-                new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, CONNECTOR_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(0)),
-                new ConsumerRecord<>(TOPIC, 0, 1, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(1)),
-                new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(1), CONFIGS_SERIALIZED.get(2)),
-                new ConsumerRecord<>(TOPIC, 0, 3, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, CONNECTOR_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(3)),
-                new ConsumerRecord<>(TOPIC, 0, 4, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(4)),
-                // Connector after root update should make it through, task update shouldn't
-                new ConsumerRecord<>(TOPIC, 0, 5, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, CONNECTOR_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(5)),
-                new ConsumerRecord<>(TOPIC, 0, 6, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(6)));
-        LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
+				new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0, 0, CONNECTOR_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(0), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 1, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(1), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(1),
+						CONFIGS_SERIALIZED.get(2), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 3, 0L, TimestampType.CREATE_TIME, 0, 0, CONNECTOR_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(3), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 4, 0L, TimestampType.CREATE_TIME, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(4), new RecordHeaders(), Optional.empty()),
+				// Connector after root update should make it through, task update shouldn't
+				new ConsumerRecord<>(TOPIC, 0, 5, 0L, TimestampType.CREATE_TIME, 0, 0, CONNECTOR_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(5), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 6, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(6), new RecordHeaders(), Optional.empty()));
+		LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
         deserialized.put(CONFIGS_SERIALIZED.get(0), CONNECTOR_CONFIG_STRUCTS.get(0));
         deserialized.put(CONFIGS_SERIALIZED.get(1), TASK_CONFIG_STRUCTS.get(0));
         deserialized.put(CONFIGS_SERIALIZED.get(2), TASK_CONFIG_STRUCTS.get(0));
@@ -548,7 +695,8 @@ public class KafkaConfigBackingStoreTest {
         deserialized.put(CONFIGS_SERIALIZED.get(5), CONNECTOR_CONFIG_STRUCTS.get(2));
         deserialized.put(CONFIGS_SERIALIZED.get(6), TASK_CONFIG_STRUCTS.get(1));
         logOffset = 7;
-        expectStart(existingRecords, deserialized);
+		expectStart(existingRecords, deserialized);
+		expectPartitionCount(1);
 
         // Shouldn't see any callbacks since this is during startup
 
@@ -585,13 +733,19 @@ public class KafkaConfigBackingStoreTest {
 
         expectConfigure();
         // Overwrite each type at least once to ensure we see the latest data after loading
-        List<ConsumerRecord<String, byte[]>> existingRecords = Arrays.asList(
-                new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, CONNECTOR_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(0)),
-                new ConsumerRecord<>(TOPIC, 0, 1, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(1)),
-                new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(1), CONFIGS_SERIALIZED.get(2)),
-                new ConsumerRecord<>(TOPIC, 0, 3, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, CONNECTOR_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(3)),
-                new ConsumerRecord<>(TOPIC, 0, 4, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TARGET_STATE_KEYS.get(0), CONFIGS_SERIALIZED.get(4)),
-                new ConsumerRecord<>(TOPIC, 0, 5, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(5)));
+		List<ConsumerRecord<String, byte[]>> existingRecords = Arrays.asList(
+				new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0, 0, CONNECTOR_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(0), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 1, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(1), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(1),
+						CONFIGS_SERIALIZED.get(2), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 3, 0L, TimestampType.CREATE_TIME, 0, 0, CONNECTOR_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(3), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 4, 0L, TimestampType.CREATE_TIME, 0, 0, TARGET_STATE_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(4), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 5, 0L, TimestampType.CREATE_TIME, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(5), new RecordHeaders(), Optional.empty()));
 
         LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
         deserialized.put(CONFIGS_SERIALIZED.get(0), CONNECTOR_CONFIG_STRUCTS.get(0));
@@ -602,7 +756,8 @@ public class KafkaConfigBackingStoreTest {
         deserialized.put(CONFIGS_SERIALIZED.get(5), TASKS_COMMIT_STRUCT_TWO_TASK_CONNECTOR);
 
         logOffset = 6;
-        expectStart(existingRecords, deserialized);
+		expectStart(existingRecords, deserialized);
+		expectPartitionCount(1);
 
         // Shouldn't see any callbacks since this is during startup
 
@@ -630,16 +785,24 @@ public class KafkaConfigBackingStoreTest {
         expectConfigure();
         // Overwrite each type at least once to ensure we see the latest data after loading
         List<ConsumerRecord<String, byte[]>> existingRecords = Arrays.asList(
-            new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, CONNECTOR_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(0)),
-            new ConsumerRecord<>(TOPIC, 0, 1, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(1)),
-            new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(1), CONFIGS_SERIALIZED.get(2)),
-            new ConsumerRecord<>(TOPIC, 0, 3, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, CONNECTOR_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(3)),
-            new ConsumerRecord<>(TOPIC, 0, 4, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(4)),
-            // Connector after root update should make it through, task update shouldn't
-            new ConsumerRecord<>(TOPIC, 0, 5, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, CONNECTOR_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(5)),
-            new ConsumerRecord<>(TOPIC, 0, 6, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(6)),
-            new ConsumerRecord<>(TOPIC, 0, 7, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(7)));
-        LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
+				new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0, 0, CONNECTOR_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(0), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 1, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(1), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(1),
+						CONFIGS_SERIALIZED.get(2), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 3, 0L, TimestampType.CREATE_TIME, 0, 0, CONNECTOR_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(3), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 4, 0L, TimestampType.CREATE_TIME, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(4), new RecordHeaders(), Optional.empty()),
+				// Connector after root update should make it through, task update shouldn't
+				new ConsumerRecord<>(TOPIC, 0, 5, 0L, TimestampType.CREATE_TIME, 0, 0, CONNECTOR_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(5), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 6, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(6), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 7, 0L, TimestampType.CREATE_TIME, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(7), new RecordHeaders(), Optional.empty()));
+		LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
         deserialized.put(CONFIGS_SERIALIZED.get(0), CONNECTOR_CONFIG_STRUCTS.get(0));
         deserialized.put(CONFIGS_SERIALIZED.get(1), TASK_CONFIG_STRUCTS.get(0));
         deserialized.put(CONFIGS_SERIALIZED.get(2), TASK_CONFIG_STRUCTS.get(0));
@@ -649,7 +812,8 @@ public class KafkaConfigBackingStoreTest {
         deserialized.put(CONFIGS_SERIALIZED.get(6), TASK_CONFIG_STRUCTS.get(1));
         deserialized.put(CONFIGS_SERIALIZED.get(7), TASKS_COMMIT_STRUCT_ZERO_TASK_CONNECTOR);
         logOffset = 8;
-        expectStart(existingRecords, deserialized);
+		expectStart(existingRecords, deserialized);
+		expectPartitionCount(1);
 
         // Shouldn't see any callbacks since this is during startup
 
@@ -677,106 +841,129 @@ public class KafkaConfigBackingStoreTest {
     }
 
     @Test
-    public void testPutTaskConfigsDoesNotResolveAllInconsistencies() throws Exception {
-        // Test a case where a failure and compaction has left us in an inconsistent state when reading the log.
-        // We start out by loading an initial configuration where we started to write a task update, and then
-        // compaction cleaned up the earlier record.
+	public void testPutTaskConfigsDoesNotResolveAllInconsistencies() throws Exception {
+		// Test a case where a failure and compaction has left us in an inconsistent state when reading the log.
+		// We start out by loading an initial configuration where we started to write a task update, and then
+		// compaction cleaned up the earlier record.
 
-        expectConfigure();
-        List<ConsumerRecord<String, byte[]>> existingRecords = Arrays.asList(
-                new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, CONNECTOR_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(0)),
-                // This is the record that has been compacted:
-                //new ConsumerRecord<>(TOPIC, 0, 1, TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(1)),
-                new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(1), CONFIGS_SERIALIZED.get(2)),
-                new ConsumerRecord<>(TOPIC, 0, 4, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(4)),
-                new ConsumerRecord<>(TOPIC, 0, 5, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(5)));
-        LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
-        deserialized.put(CONFIGS_SERIALIZED.get(0), CONNECTOR_CONFIG_STRUCTS.get(0));
-        deserialized.put(CONFIGS_SERIALIZED.get(2), TASK_CONFIG_STRUCTS.get(0));
-        deserialized.put(CONFIGS_SERIALIZED.get(4), TASKS_COMMIT_STRUCT_TWO_TASK_CONNECTOR);
-        deserialized.put(CONFIGS_SERIALIZED.get(5), TASK_CONFIG_STRUCTS.get(1));
-        logOffset = 6;
-        expectStart(existingRecords, deserialized);
+		expectConfigure();
+		List<ConsumerRecord<String, byte[]>> existingRecords = Arrays.asList(
+				new ConsumerRecord<>(TOPIC, 0, 0, 0L, TimestampType.CREATE_TIME, 0, 0, CONNECTOR_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(0), new RecordHeaders(), Optional.empty()),
+				// This is the record that has been compacted:
+				//new ConsumerRecord<>(TOPIC, 0, 1, TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(1)),
+				new ConsumerRecord<>(TOPIC, 0, 2, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(1),
+						CONFIGS_SERIALIZED.get(2), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 4, 0L, TimestampType.CREATE_TIME, 0, 0, COMMIT_TASKS_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(4), new RecordHeaders(), Optional.empty()),
+				new ConsumerRecord<>(TOPIC, 0, 5, 0L, TimestampType.CREATE_TIME, 0, 0, TASK_CONFIG_KEYS.get(0),
+						CONFIGS_SERIALIZED.get(5), new RecordHeaders(), Optional.empty()));
+		LinkedHashMap<byte[], Struct> deserialized = new LinkedHashMap<>();
+		deserialized.put(CONFIGS_SERIALIZED.get(0), CONNECTOR_CONFIG_STRUCTS.get(0));
+		deserialized.put(CONFIGS_SERIALIZED.get(2), TASK_CONFIG_STRUCTS.get(0));
+		deserialized.put(CONFIGS_SERIALIZED.get(4), TASKS_COMMIT_STRUCT_TWO_TASK_CONNECTOR);
+		deserialized.put(CONFIGS_SERIALIZED.get(5), TASK_CONFIG_STRUCTS.get(1));
+		logOffset = 6;
+		expectStart(existingRecords, deserialized);
+		expectPartitionCount(1);
 
-        // Successful attempt to write new task config
-        expectReadToEnd(new LinkedHashMap<String, byte[]>());
-        expectConvertWriteRead(
-                TASK_CONFIG_KEYS.get(0), KafkaConfigBackingStore.TASK_CONFIGURATION_V0, CONFIGS_SERIALIZED.get(0),
-                "properties", SAMPLE_CONFIGS.get(0));
-        expectReadToEnd(new LinkedHashMap<String, byte[]>());
-        expectConvertWriteRead(
-                COMMIT_TASKS_CONFIG_KEYS.get(0), KafkaConfigBackingStore.CONNECTOR_TASKS_COMMIT_V0, CONFIGS_SERIALIZED.get(2),
-                "tasks", 1); // Updated to just 1 task
-        // As soon as root is rewritten, we should see a callback notifying us that we reconfigured some tasks
-        configUpdateListener.onTaskConfigUpdate(Arrays.asList(TASK_IDS.get(0)));
-        EasyMock.expectLastCall();
-        // Records to be read by consumer as it reads to the end of the log
-        LinkedHashMap<String, byte[]> serializedConfigs = new LinkedHashMap<>();
-        serializedConfigs.put(TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(0));
-        serializedConfigs.put(COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(2));
-        expectReadToEnd(serializedConfigs);
+		// Successful attempt to write new task config
+		expectReadToEnd(new LinkedHashMap<>());
+		expectConvertWriteRead(
+				TASK_CONFIG_KEYS.get(0), KafkaConfigBackingStore.TASK_CONFIGURATION_V0, CONFIGS_SERIALIZED.get(0),
+				"properties", SAMPLE_CONFIGS.get(0));
+		expectReadToEnd(new LinkedHashMap<>());
+		expectConvertWriteRead(
+				COMMIT_TASKS_CONFIG_KEYS.get(0), KafkaConfigBackingStore.CONNECTOR_TASKS_COMMIT_V0, CONFIGS_SERIALIZED.get(2),
+				"tasks", 1); // Updated to just 1 task
+		// As soon as root is rewritten, we should see a callback notifying us that we reconfigured some tasks
+		configUpdateListener.onTaskConfigUpdate(Arrays.asList(TASK_IDS.get(0)));
+		EasyMock.expectLastCall();
+		// Records to be read by consumer as it reads to the end of the log
+		LinkedHashMap<String, byte[]> serializedConfigs = new LinkedHashMap<>();
+		serializedConfigs.put(TASK_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(0));
+		serializedConfigs.put(COMMIT_TASKS_CONFIG_KEYS.get(0), CONFIGS_SERIALIZED.get(2));
+		expectReadToEnd(serializedConfigs);
 
-        expectStop();
+		expectStop();
 
-        PowerMock.replayAll();
+		PowerMock.replayAll();
 
-        configStorage.setupAndCreateKafkaBasedLog(TOPIC, DEFAULT_DISTRIBUTED_CONFIG);
-        configStorage.start();
-        // After reading the log, it should have been in an inconsistent state
-        ClusterConfigState configState = configStorage.snapshot();
-        assertEquals(6, configState.offset()); // Should always be next to be read, not last committed
-        assertEquals(Arrays.asList(CONNECTOR_IDS.get(0)), new ArrayList<>(configState.connectors()));
-        // Inconsistent data should leave us with no tasks listed for the connector and an entry in the inconsistent list
-        assertEquals(Collections.emptyList(), configState.tasks(CONNECTOR_IDS.get(0)));
-        // Both TASK_CONFIG_STRUCTS[0] -> SAMPLE_CONFIGS[0]
-        assertNull(configState.taskConfig(TASK_IDS.get(0)));
-        assertNull(configState.taskConfig(TASK_IDS.get(1)));
-        assertEquals(Collections.singleton(CONNECTOR_IDS.get(0)), configState.inconsistentConnectors());
+		configStorage.setupAndCreateKafkaBasedLog(TOPIC, DEFAULT_DISTRIBUTED_CONFIG);
+		configStorage.start();
+		// After reading the log, it should have been in an inconsistent state
+		ClusterConfigState configState = configStorage.snapshot();
+		assertEquals(6, configState.offset()); // Should always be next to be read, not last committed
+		assertEquals(Arrays.asList(CONNECTOR_IDS.get(0)), new ArrayList<>(configState.connectors()));
+		// Inconsistent data should leave us with no tasks listed for the connector and an entry in the inconsistent list
+		assertEquals(Collections.emptyList(), configState.tasks(CONNECTOR_IDS.get(0)));
+		// Both TASK_CONFIG_STRUCTS[0] -> SAMPLE_CONFIGS[0]
+		assertNull(configState.taskConfig(TASK_IDS.get(0)));
+		assertNull(configState.taskConfig(TASK_IDS.get(1)));
+		assertEquals(Collections.singleton(CONNECTOR_IDS.get(0)), configState.inconsistentConnectors());
 
-        // Next, issue a write that has everything that is needed and it should be accepted. Note that in this case
-        // we are going to shrink the number of tasks to 1
-        configStorage.putTaskConfigs("connector1", Collections.singletonList(SAMPLE_CONFIGS.get(0)));
-        // Validate updated config
-        configState = configStorage.snapshot();
-        // This is only two more ahead of the last one because multiple calls fail, and so their configs are not written
-        // to the topic. Only the last call with 1 task config + 1 commit actually gets written.
-        assertEquals(8, configState.offset());
-        assertEquals(Arrays.asList(CONNECTOR_IDS.get(0)), new ArrayList<>(configState.connectors()));
-        assertEquals(Arrays.asList(TASK_IDS.get(0)), configState.tasks(CONNECTOR_IDS.get(0)));
-        assertEquals(SAMPLE_CONFIGS.get(0), configState.taskConfig(TASK_IDS.get(0)));
-        assertEquals(Collections.EMPTY_SET, configState.inconsistentConnectors());
+		// Next, issue a write that has everything that is needed and it should be accepted. Note that in this case
+		// we are going to shrink the number of tasks to 1
+		configStorage.putTaskConfigs("connector1", Collections.singletonList(SAMPLE_CONFIGS.get(0)));
+		// Validate updated config
+		configState = configStorage.snapshot();
+		// This is only two more ahead of the last one because multiple calls fail, and so their configs are not written
+		// to the topic. Only the last call with 1 task config + 1 commit actually gets written.
+		assertEquals(8, configState.offset());
+		assertEquals(Arrays.asList(CONNECTOR_IDS.get(0)), new ArrayList<>(configState.connectors()));
+		assertEquals(Arrays.asList(TASK_IDS.get(0)), configState.tasks(CONNECTOR_IDS.get(0)));
+		assertEquals(SAMPLE_CONFIGS.get(0), configState.taskConfig(TASK_IDS.get(0)));
+		assertEquals(Collections.EMPTY_SET, configState.inconsistentConnectors());
 
-        configStorage.stop();
+		configStorage.stop();
 
-        PowerMock.verifyAll();
-    }
+		PowerMock.verifyAll();
+	}
 
-    private void expectConfigure() throws Exception {
-        PowerMock.expectPrivate(configStorage, "createKafkaBasedLog",
-                EasyMock.capture(capturedTopic), EasyMock.capture(capturedProducerProps),
-                EasyMock.capture(capturedConsumerProps), EasyMock.capture(capturedConsumedCallback),
-                EasyMock.capture(capturedNewTopic), EasyMock.capture(capturedAdminProps))
-                .andReturn(storeLog);
-    }
+	@Test
+	public void testExceptionOnStartWhenConfigTopicHasMultiplePartitions() throws Exception {
+		expectConfigure();
+		expectStart(Collections.emptyList(), Collections.emptyMap());
 
-    // If non-empty, deserializations should be a LinkedHashMap
-    private void expectStart(final List<ConsumerRecord<String, byte[]>> preexistingRecords,
-                             final Map<byte[], Struct> deserializations) {
-        storeLog.start();
-        PowerMock.expectLastCall().andAnswer(new IAnswer<Object>() {
-            @Override
-            public Object answer() throws Throwable {
-                for (ConsumerRecord<String, byte[]> rec : preexistingRecords)
-                    capturedConsumedCallback.getValue().onCompletion(null, rec);
-                return null;
-            }
-        });
-        for (Map.Entry<byte[], Struct> deserializationEntry : deserializations.entrySet()) {
-            // Note null schema because default settings for internal serialization are schema-less
-            EasyMock.expect(converter.toConnectData(EasyMock.eq(TOPIC), EasyMock.aryEq(deserializationEntry.getKey())))
-                    .andReturn(new SchemaAndValue(null, structToMap(deserializationEntry.getValue())));
-        }
-    }
+		expectPartitionCount(2);
+
+		PowerMock.replayAll();
+
+		configStorage.setupAndCreateKafkaBasedLog(TOPIC, DEFAULT_DISTRIBUTED_CONFIG);
+		ConfigException e = assertThrows(ConfigException.class, () -> configStorage.start());
+		assertTrue(e.getMessage().contains("required to have a single partition"));
+
+		PowerMock.verifyAll();
+	}
+
+	private void expectConfigure() throws Exception {
+		PowerMock.expectPrivate(configStorage, "createKafkaBasedLog",
+				EasyMock.capture(capturedTopic), EasyMock.capture(capturedProducerProps),
+				EasyMock.capture(capturedConsumerProps), EasyMock.capture(capturedConsumedCallback),
+				EasyMock.capture(capturedNewTopic), EasyMock.capture(capturedAdminSupplier))
+				.andReturn(storeLog);
+	}
+
+	private void expectPartitionCount(int partitionCount) {
+		EasyMock.expect(storeLog.partitionCount())
+				.andReturn(partitionCount);
+	}
+
+	// If non-empty, deserializations should be a LinkedHashMap
+	private void expectStart(final List<ConsumerRecord<String, byte[]>> preexistingRecords,
+							 final Map<byte[], Struct> deserializations) {
+		storeLog.start();
+		PowerMock.expectLastCall().andAnswer(() -> {
+			for (ConsumerRecord<String, byte[]> rec : preexistingRecords)
+				capturedConsumedCallback.getValue().onCompletion(null, rec);
+			return null;
+		});
+		for (Map.Entry<byte[], Struct> deserializationEntry : deserializations.entrySet()) {
+			// Note null schema because default settings for internal serialization are schema-less
+			EasyMock.expect(converter.toConnectData(EasyMock.eq(TOPIC), EasyMock.aryEq(deserializationEntry.getKey())))
+					.andReturn(new SchemaAndValue(null, structToMap(deserializationEntry.getValue())));
+		}
+	}
 
     private void expectStop() {
         storeLog.stop();
@@ -810,31 +997,28 @@ public class KafkaConfigBackingStoreTest {
                     .andReturn(serialized);
         storeLog.send(EasyMock.eq(configKey), EasyMock.aryEq(serialized));
         PowerMock.expectLastCall();
-        EasyMock.expect(converter.toConnectData(EasyMock.eq(TOPIC), EasyMock.aryEq(serialized)))
-                .andAnswer(new IAnswer<SchemaAndValue>() {
-                    @Override
-                    public SchemaAndValue answer() throws Throwable {
-                        if (dataFieldName != null)
-                            assertEquals(dataFieldValue, capturedRecord.getValue().get(dataFieldName));
-                        // Note null schema because default settings for internal serialization are schema-less
-                        return new SchemaAndValue(null, serialized == null ? null : structToMap(capturedRecord.getValue()));
-                    }
-                });
+		EasyMock.expect(converter.toConnectData(EasyMock.eq(TOPIC), EasyMock.aryEq(serialized)))
+				.andAnswer(() -> {
+					if (dataFieldName != null)
+						assertEquals(dataFieldValue, capturedRecord.getValue().get(dataFieldName));
+					// Note null schema because default settings for internal serialization are schema-less
+					return new SchemaAndValue(null, serialized == null ? null : structToMap(capturedRecord.getValue()));
+				});
     }
 
     // This map needs to maintain ordering
     private void expectReadToEnd(final LinkedHashMap<String, byte[]> serializedConfigs) {
-        EasyMock.expect(storeLog.readToEnd())
-                .andAnswer(new IAnswer<Future<Void>>() {
-                    @Override
-                    public Future<Void> answer() throws Throwable {
-                        TestFuture<Void> future = new TestFuture<Void>();
-                        for (Map.Entry<String, byte[]> entry : serializedConfigs.entrySet())
-                            capturedConsumedCallback.getValue().onCompletion(null, new ConsumerRecord<>(TOPIC, 0, logOffset++, 0L, TimestampType.CREATE_TIME, 0L, 0, 0, entry.getKey(), entry.getValue()));
-                        future.resolveOnGet((Void) null);
-                        return future;
-                    }
-                });
+		EasyMock.expect(storeLog.readToEnd())
+				.andAnswer(() -> {
+					TestFuture<Void> future = new TestFuture<>();
+					for (Map.Entry<String, byte[]> entry : serializedConfigs.entrySet()) {
+						capturedConsumedCallback.getValue().onCompletion(null,
+								new ConsumerRecord<>(TOPIC, 0, logOffset++, 0L, TimestampType.CREATE_TIME, 0, 0,
+										entry.getKey(), entry.getValue(), new RecordHeaders(), Optional.empty()));
+					}
+					future.resolveOnGet((Void) null);
+					return future;
+				});
     }
 
     private void expectConnectorRemoval(String configKey, String targetStateKey) {
@@ -877,5 +1061,4 @@ public class KafkaConfigBackingStoreTest {
             result.put(field.name(), struct.get(field));
         return result;
     }
-
 }

@@ -17,6 +17,7 @@
 package org.apache.kafka.streams;
 
 import org.apache.kafka.streams.processor.TopicNameExtractor;
+import org.apache.kafka.streams.processor.api.ProcessorSupplier;
 import org.apache.kafka.streams.processor.internals.StreamTask;
 
 import java.util.Set;
@@ -34,14 +35,14 @@ import java.util.regex.Pattern;
  * {@link StreamTask tasks}.
  */
 public interface TopologyDescription {
-    /**
-     * A connected sub-graph of a {@link Topology}.
-     * <p>
-     * Nodes of a {@code Subtopology} are connected {@link Topology#addProcessor(String,
-     * org.apache.kafka.streams.processor.ProcessorSupplier, String...) directly} or indirectly via
-     * {@link Topology#connectProcessorAndStateStores(String, String...) state stores}
-     * (i.e., if multiple processors share the same state).
-     */
+	/**
+	 * A connected sub-graph of a {@link Topology}.
+	 * <p>
+	 * Nodes of a {@code Subtopology} are connected
+	 * {@link Topology#addProcessor(String, ProcessorSupplier, String...) directly} or indirectly via
+	 * {@link Topology#connectProcessorAndStateStores(String, String...) state stores}
+	 * (i.e., if multiple processors share the same state).
+	 */
     interface Subtopology {
         /**
          * Internally assigned unique ID.
@@ -56,16 +57,16 @@ public interface TopologyDescription {
         Set<Node> nodes();
     }
 
-    /**
-     * Represents a {@link Topology#addGlobalStore(org.apache.kafka.streams.state.StoreBuilder, String,
-     * org.apache.kafka.common.serialization.Deserializer, org.apache.kafka.common.serialization.Deserializer, String,
-     * String, org.apache.kafka.streams.processor.ProcessorSupplier) global store}.
-     * Adding a global store results in adding a source node and one stateful processor node.
-     * Note, that all added global stores form a single unit (similar to a {@link Subtopology}) even if different
-     * global stores are not connected to each other.
-     * Furthermore, global stores are available to all processors without connecting them explicitly, and thus global
-     * stores will never be part of any {@link Subtopology}.
-     */
+	/**
+	 * Represents a {@link Topology#addGlobalStore(org.apache.kafka.streams.state.StoreBuilder, String,
+	 * org.apache.kafka.common.serialization.Deserializer, org.apache.kafka.common.serialization.Deserializer, String,
+	 * String, org.apache.kafka.streams.processor.api.ProcessorSupplier) global store}.
+	 * Adding a global store results in adding a source node and one stateful processor node.
+	 * Note, that all added global stores form a single unit (similar to a {@link Subtopology}) even if different
+	 * global stores are not connected to each other.
+	 * Furthermore, global stores are available to all processors without connecting them explicitly, and thus global
+	 * stores will never be part of any {@link Subtopology}.
+	 */
     interface GlobalStore {
         /**
          * The source node reading from a "global" topic.

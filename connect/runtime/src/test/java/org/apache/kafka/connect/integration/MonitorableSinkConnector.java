@@ -77,7 +77,8 @@ public class MonitorableSinkConnector extends TestSinkConnector {
 
     @Override
     public void stop() {
-        connectorHandle.recordConnectorStop();
+        log.info("Stopped {} connector {}", this.getClass().getSimpleName(), connectorName);
+		connectorHandle.recordConnectorStop();
     }
 
     @Override
@@ -85,24 +86,24 @@ public class MonitorableSinkConnector extends TestSinkConnector {
         return new ConfigDef();
     }
 
-    public static class MonitorableSinkTask extends SinkTask {
+	public static class MonitorableSinkTask extends SinkTask {
 
-        private String connectorName;
-        private String taskId;
-        private TaskHandle taskHandle;
-        private Set<TopicPartition> assignments;
-        private Map<TopicPartition, Long> committedOffsets;
-        private Map<String, Map<Integer, TopicPartition>> cachedTopicPartitions;
+		private String connectorName;
+		private String taskId;
+		TaskHandle taskHandle;
+		Set<TopicPartition> assignments;
+		Map<TopicPartition, Long> committedOffsets;
+		Map<String, Map<Integer, TopicPartition>> cachedTopicPartitions;
 
-        public MonitorableSinkTask() {
-            this.assignments = new HashSet<>();
-            this.committedOffsets = new HashMap<>();
-            this.cachedTopicPartitions = new HashMap<>();
-        }
+		public MonitorableSinkTask() {
+			this.assignments = new HashSet<>();
+			this.committedOffsets = new HashMap<>();
+			this.cachedTopicPartitions = new HashMap<>();
+		}
 
-        @Override
-        public String version() {
-            return "unknown";
+		@Override
+		public String version() {
+			return "unknown";
         }
 
         @Override
@@ -124,7 +125,7 @@ public class MonitorableSinkConnector extends TestSinkConnector {
         @Override
         public void put(Collection<SinkRecord> records) {
             for (SinkRecord rec : records) {
-                taskHandle.record();
+				taskHandle.record(rec);
                 TopicPartition tp = cachedTopicPartitions
                         .computeIfAbsent(rec.topic(), v -> new HashMap<>())
                         .computeIfAbsent(rec.kafkaPartition(), v -> new TopicPartition(rec.topic(), rec.kafkaPartition()));
@@ -153,7 +154,8 @@ public class MonitorableSinkConnector extends TestSinkConnector {
 
         @Override
         public void stop() {
-            taskHandle.recordTaskStop();
+			log.info("Stopped {} task {}", this.getClass().getSimpleName(), taskId);
+			taskHandle.recordTaskStop();
         }
     }
 }

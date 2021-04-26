@@ -26,13 +26,18 @@ import org.apache.kafka.streams.processor.ProcessorContext;
  * (e.g., reading from Kafka) should be handled.
  */
 public interface DeserializationExceptionHandler extends Configurable {
-    /**
-     * Inspect a record and the exception received.
-     * @param context processor context
-     * @param record record that failed deserialization
-     * @param exception the actual exception
-     */
-    DeserializationHandlerResponse handle(final ProcessorContext context,
+
+	/**
+	 * Inspect a record and the exception received.
+	 * <p>
+	 * Note, that the passed in {@link ProcessorContext} only allows to access metadata like the task ID.
+	 * However, it cannot be used to emit records via {@link ProcessorContext#forward(Object, Object)};
+	 * calling {@code forward()} (and some other methods) would result in a runtime exception.
+	 * @param context   processor context
+	 * @param record    record that failed deserialization
+	 * @param exception the actual exception
+	 */
+	DeserializationHandlerResponse handle(final ProcessorContext context,
                                           final ConsumerRecord<byte[], byte[]> record,
                                           final Exception exception);
 

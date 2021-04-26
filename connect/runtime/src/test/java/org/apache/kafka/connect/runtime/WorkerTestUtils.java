@@ -64,12 +64,13 @@ public class WorkerTestUtils {
                                                         int connectorNum,
                                                         int taskNum) {
         return new ClusterConfigState(
-                offset,
-                connectorTaskCounts(1, connectorNum, taskNum),
-                connectorConfigs(1, connectorNum),
-                connectorTargetStates(1, connectorNum, TargetState.STARTED),
-                taskConfigs(0, connectorNum, connectorNum * taskNum),
-                Collections.emptySet());
+				offset,
+				null,
+				connectorTaskCounts(1, connectorNum, taskNum),
+				connectorConfigs(1, connectorNum),
+				connectorTargetStates(1, connectorNum, TargetState.STARTED),
+				taskConfigs(0, connectorNum, connectorNum * taskNum),
+				Collections.emptySet());
     }
 
     public static Map<String, ExtendedWorkerState> memberConfigs(String givenLeader,

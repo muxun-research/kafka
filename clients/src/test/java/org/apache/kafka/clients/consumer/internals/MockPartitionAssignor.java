@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.clients.consumer.internals;
 
+import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.common.TopicPartition;
 
 import java.util.List;
@@ -23,16 +24,19 @@ import java.util.Map;
 
 public class MockPartitionAssignor extends AbstractPartitionAssignor {
 
-    private final List<RebalanceProtocol> supportedProtocols;
+	private final List<RebalanceProtocol> supportedProtocols;
 
-    private Map<String, List<TopicPartition>> result = null;
+	private int numAssignment;
 
-    MockPartitionAssignor(final List<RebalanceProtocol> supportedProtocols) {
-        this.supportedProtocols = supportedProtocols;
-    }
+	private Map<String, List<TopicPartition>> result = null;
 
-    @Override
-    public Map<String, List<TopicPartition>> assign(Map<String, Integer> partitionsPerTopic,
+	MockPartitionAssignor(final List<RebalanceProtocol> supportedProtocols) {
+		this.supportedProtocols = supportedProtocols;
+		numAssignment = 0;
+	}
+
+	@Override
+	public Map<String, List<TopicPartition>> assign(Map<String, Integer> partitionsPerTopic,
                                                     Map<String, Subscription> subscriptions) {
         if (result == null)
             throw new IllegalStateException("Call to assign with no result prepared");
@@ -47,14 +51,22 @@ public class MockPartitionAssignor extends AbstractPartitionAssignor {
     @Override
     public List<RebalanceProtocol> supportedProtocols() {
         return supportedProtocols;
-    }
+	}
 
-    public void clear() {
-        this.result = null;
-    }
+	public void clear() {
+		this.result = null;
+	}
 
-    public void prepare(Map<String, List<TopicPartition>> result) {
-        this.result = result;
-    }
+	public void prepare(Map<String, List<TopicPartition>> result) {
+		this.result = result;
+	}
 
+	@Override
+	public void onAssignment(Assignment assignment, ConsumerGroupMetadata metadata) {
+		numAssignment += 1;
+	}
+
+	int numAssignment() {
+		return numAssignment;
+	}
 }

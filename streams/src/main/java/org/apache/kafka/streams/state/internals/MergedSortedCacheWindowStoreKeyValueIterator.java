@@ -31,14 +31,15 @@ class MergedSortedCacheWindowStoreKeyValueIterator
     private final SegmentedCacheFunction cacheFunction;
 
     MergedSortedCacheWindowStoreKeyValueIterator(
-        final PeekingKeyValueIterator<Bytes, LRUCacheEntry> filteredCacheIterator,
-        final KeyValueIterator<Windowed<Bytes>, byte[]> underlyingIterator,
-        final StateSerdes<Bytes, byte[]> serdes,
-        final long windowSize,
-        final SegmentedCacheFunction cacheFunction
-    ) {
-        super(filteredCacheIterator, underlyingIterator);
-        this.serdes = serdes;
+			final PeekingKeyValueIterator<Bytes, LRUCacheEntry> filteredCacheIterator,
+			final KeyValueIterator<Windowed<Bytes>, byte[]> underlyingIterator,
+			final StateSerdes<Bytes, byte[]> serdes,
+			final long windowSize,
+			final SegmentedCacheFunction cacheFunction,
+			final boolean forward
+	) {
+		super(filteredCacheIterator, underlyingIterator, forward);
+		this.serdes = serdes;
         this.windowSize = windowSize;
         this.cacheFunction = cacheFunction;
     }

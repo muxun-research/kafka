@@ -17,9 +17,9 @@
 
 package kafka.server
 
-import com.yammer.metrics.core.Gauge
 import kafka.cluster.BrokerEndPoint
 import kafka.metrics.KafkaMetricsGroup
+import kafka.utils.Implicits._
 import kafka.utils.Logging
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.utils.Utils
@@ -36,56 +36,47 @@ abstract class AbstractFetcherManager[T <: AbstractFetcherThread](val name: Stri
   val failedPartitions = new FailedPartitions
   this.logIdent = "[" + name + "] "
 
-  newGauge(
-    "MaxLag",
-    new Gauge[Long] {
-      // current max lag across all fetchers/topics/partitions
-      def value: Long = fetcherThreadMap.foldLeft(0L)((curMaxAll, fetcherThreadMapEntry) => {
-        fetcherThreadMapEntry._2.fetcherLagStats.stats.foldLeft(0L)((curMaxThread, fetcherLagStatsEntry) => {
-          curMaxThread.max(fetcherLagStatsEntry._2.lag)
-        }).max(curMaxAll)
-      })
-    },
-    Map("clientId" -> clientId)
-  )
+  private val tags = Map("clientId" -> clientId)
 
-  newGauge(
-    "MinFetchRate", {
-      new Gauge[Double] {
-        // current min fetch rate across all fetchers/topics/partitions
-        def value: Double = {
-          val headRate: Double =
-            fetcherThreadMap.headOption.map(_._2.fetcherStats.requestRate.oneMinuteRate).getOrElse(0)
+  newGauge("MaxLag", () => {
+    // current max lag across all fetchers/topics/partitions
+    fetcherThreadMap.values.foldLeft(0L) { (curMaxLagAll, fetcherThread) =>
+      val maxLagThread = fetcherThread.fetcherLagStats.stats.values.foldLeft(0L)((curMaxLagThread, lagMetrics) =>
+        math.max(curMaxLagThread, lagMetrics.lag))
+      math.max(curMaxLagAll, maxLagThread)
+    }
+  }, tags)
 
-          fetcherThreadMap.foldLeft(headRate)((curMinAll, fetcherThreadMapEntry) => {
-            fetcherThreadMapEntry._2.fetcherStats.requestRate.oneMinuteRate.min(curMinAll)
-          })
-        }
-      }
-    },
-    Map("clientId" -> clientId)
-  )
+  newGauge("MinFetchRate", () => {
+    // current min fetch rate across all fetchers/topics/partitions
+    val headRate = fetcherThreadMap.values.headOption.map(_.fetcherStats.requestRate.oneMinuteRate).getOrElse(0.0)
+    fetcherThreadMap.values.foldLeft(headRate)((curMinAll, fetcherThread) =>
+      math.min(curMinAll, fetcherThread.fetcherStats.requestRate.oneMinuteRate))
+  }, tags)
 
-  val failedPartitionsCount = newGauge(
-    "FailedPartitionsCount", {
-      new Gauge[Int] {
-        def value: Int = failedPartitions.size
-      }
-    },
-    Map("clientId" -> clientId)
-  )
+  newGauge("FailedPartitionsCount", () => failedPartitions.size, tags)
+
+  newGauge("DeadThreadCount", () => deadThreadCount, tags)
+
+  private[server] def deadThreadCount: Int = lock synchronized {
+    fetcherThreadMap.values.count(_.isThreadFailed)
+  }
 
   def resizeThreadPool(newSize: Int): Unit = {
     def migratePartitions(newSize: Int): Unit = {
-      fetcherThreadMap.foreach { case (id, thread) =>
-        val removedPartitions = thread.partitionsAndOffsets
-        removeFetcherForPartitions(removedPartitions.keySet)
+      fetcherThreadMap.forKeyValue { (id, thread) =>
+        val partitionStates = removeFetcherForPartitions(thread.partitions)
         if (id.fetcherId >= newSize)
           thread.shutdown()
-        addFetcherForPartitions(removedPartitions)
+        val fetchStates = partitionStates.map { case (topicPartition, currentFetchState) =>
+          val initialFetchState = InitialFetchState(thread.sourceBroker,
+            currentLeaderEpoch = currentFetchState.currentLeaderEpoch,
+            initOffset = currentFetchState.fetchOffset)
+          topicPartition -> initialFetchState
+        }
+        addFetcherForPartitions(fetchStates)
       }
     }
-
     lock synchronized {
       val currentSize = numFetchersPerBroker
       info(s"Resizing fetcher thread pool size from $currentSize to $newSize")
@@ -127,79 +118,57 @@ abstract class AbstractFetcherManager[T <: AbstractFetcherThread](val name: Stri
     }
   }
 
-  /**
-   * 为partition添加拉取器
-   * @param partitionAndOffsets topic-partition及offset信息
-   */
+  // to be defined in subclass to create a specific fetcher
+  def createFetcherThread(fetcherId: Int, sourceBroker: BrokerEndPoint): T
+
   def addFetcherForPartitions(partitionAndOffsets: Map[TopicPartition, InitialFetchState]): Unit = {
-    // 使用同步机制
     lock synchronized {
-      // fetcher-partition维度
       val partitionsPerFetcher = partitionAndOffsets.groupBy { case (topicPartition, brokerAndInitialFetchOffset) =>
         BrokerAndFetcherId(brokerAndInitialFetchOffset.leader, getFetcherId(topicPartition))
       }
 
-      /**
-       * 添加并启动拉取线程
-       * @param brokerAndFetcherId   Broker和Fetcher ID
-       * @param brokerIdAndFetcherId BrokerID和Fetcher ID
-       * @return 拉取线程
-       */
-      def addAndStartFetcherThread(brokerAndFetcherId: BrokerAndFetcherId, brokerIdAndFetcherId: BrokerIdAndFetcherId): AbstractFetcherThread = {
-        // 创建拉取线程
+      def addAndStartFetcherThread(brokerAndFetcherId: BrokerAndFetcherId,
+                                   brokerIdAndFetcherId: BrokerIdAndFetcherId): T = {
         val fetcherThread = createFetcherThread(brokerAndFetcherId.fetcherId, brokerAndFetcherId.broker)
-        // 以brokerId和FetcherId为key放入到已创建拉取线程集合中
         fetcherThreadMap.put(brokerIdAndFetcherId, fetcherThread)
-        // 启动新创建的拉取线程
         fetcherThread.start()
         fetcherThread
       }
 
-      // 对于每个拉取线程的partition信息
       for ((brokerAndFetcherId, initialFetchOffsets) <- partitionsPerFetcher) {
-        // 构建BrokerIdAndFetcherId对象，作为获取拉取线程的key
         val brokerIdAndFetcherId = BrokerIdAndFetcherId(brokerAndFetcherId.broker.id, brokerAndFetcherId.fetcherId)
         val fetcherThread = fetcherThreadMap.get(brokerIdAndFetcherId) match {
           case Some(currentFetcherThread) if currentFetcherThread.sourceBroker == brokerAndFetcherId.broker =>
-            // 如果当前的拉取线程的源broker是当前的broker，则复用当前的拉取线程
+            // reuse the fetcher thread
             currentFetcherThread
           case Some(f) =>
-            // 否则停止并创建一个新的拉取线程
             f.shutdown()
             addAndStartFetcherThread(brokerAndFetcherId, brokerIdAndFetcherId)
           case None =>
-            // 没有拉取线程直接创建一个新的拉取线程
             addAndStartFetcherThread(brokerAndFetcherId, brokerIdAndFetcherId)
         }
-        // 组装初始化拉取的offset和当前leader epoch对象
-        val initialOffsetAndEpochs = initialFetchOffsets.map { case (tp, brokerAndInitOffset) =>
-          tp -> OffsetAndEpoch(brokerAndInitOffset.initOffset, brokerAndInitOffset.currentLeaderEpoch)
-        }
-        // 添加拉取线程关联的partition
-        fetcherThread.addPartitions(initialOffsetAndEpochs)
-        info(s"Added fetcher to broker ${brokerAndFetcherId.broker} for partitions $initialOffsetAndEpochs")
-        // 移除失败的partition
-        failedPartitions.removeAll(partitionAndOffsets.keySet)
+
+        addPartitionsToFetcherThread(fetcherThread, initialFetchOffsets)
       }
     }
   }
 
-  /**
-   * 抽象方法，由子类实现创建特定的拉取器
-   * @param fetcherId    拉取ID
-   * @param sourceBroker 源broker
-   * @return
-   */
-  def createFetcherThread(fetcherId: Int, sourceBroker: BrokerEndPoint): T
+  protected def addPartitionsToFetcherThread(fetcherThread: T,
+                                             initialOffsetAndEpochs: collection.Map[TopicPartition, InitialFetchState]): Unit = {
+    fetcherThread.addPartitions(initialOffsetAndEpochs)
+    info(s"Added fetcher to broker ${fetcherThread.sourceBroker.id} for partitions $initialOffsetAndEpochs")
+  }
 
-  def removeFetcherForPartitions(partitions: Set[TopicPartition]): Unit = {
+  def removeFetcherForPartitions(partitions: Set[TopicPartition]): Map[TopicPartition, PartitionFetchState] = {
+    val fetchStates = mutable.Map.empty[TopicPartition, PartitionFetchState]
     lock synchronized {
       for (fetcher <- fetcherThreadMap.values)
-        fetcher.removePartitions(partitions)
+        fetchStates ++= fetcher.removePartitions(partitions)
       failedPartitions.removeAll(partitions)
     }
     if (partitions.nonEmpty)
       info(s"Removed fetcher for partitions $partitions")
+    fetchStates
   }
 
   def shutdownIdleFetcherThreads(): Unit = {

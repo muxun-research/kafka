@@ -26,27 +26,28 @@ final class TimeDefinitions {
         RECORD_TIME, WINDOW_END_TIME
     }
 
-    /**
-     * This interface should never be instantiated outside of this class.
-     */
-    interface TimeDefinition<K> {
-        long time(final ProcessorContext context, final K key);
+	/**
+	 * This interface should never be instantiated outside of this class.
+	 */
+	interface TimeDefinition<K> {
+		long time(final ProcessorContext context, final K key);
 
-        TimeDefinitionType type();
-    }
+		TimeDefinitionType type();
+	}
 
-    public static class RecordTimeDefintion<K> implements TimeDefinition<K> {
-        private static final RecordTimeDefintion INSTANCE = new RecordTimeDefintion();
+	public static class RecordTimeDefinition<K> implements TimeDefinition<K> {
+		private static final RecordTimeDefinition INSTANCE = new RecordTimeDefinition();
 
-        private RecordTimeDefintion() {}
+		private RecordTimeDefinition() {
+		}
 
-        @SuppressWarnings("unchecked")
-        public static <K> RecordTimeDefintion<K> instance() {
-            return RecordTimeDefintion.INSTANCE;
-        }
+		@SuppressWarnings("unchecked")
+		public static <K> RecordTimeDefinition<K> instance() {
+			return RecordTimeDefinition.INSTANCE;
+		}
 
-        @Override
-        public long time(final ProcessorContext context, final K key) {
+		@Override
+		public long time(final ProcessorContext context, final K key) {
             return context.timestamp();
         }
 

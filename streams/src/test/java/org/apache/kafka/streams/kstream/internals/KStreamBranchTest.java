@@ -24,7 +24,7 @@ import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.TopologyTestDriver;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Predicate;
-import org.apache.kafka.streams.test.ConsumerRecordFactory;
+import org.apache.kafka.streams.TestInputTopic;
 import org.apache.kafka.test.MockProcessor;
 import org.apache.kafka.test.MockProcessorSupplier;
 import org.apache.kafka.test.StreamsTestUtils;
@@ -38,11 +38,10 @@ import static org.junit.Assert.assertEquals;
 public class KStreamBranchTest {
 
     private final String topicName = "topic";
-    private final ConsumerRecordFactory<Integer, String> recordFactory = new ConsumerRecordFactory<>(new IntegerSerializer(), new StringSerializer());
     private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.String(), Serdes.String());
 
-    @SuppressWarnings("unchecked")
-    @Test
+	@SuppressWarnings({"unchecked", "deprecation"})
+	@Test
     public void testKStreamBranch() {
         final StreamsBuilder builder = new StreamsBuilder();
 
@@ -52,33 +51,34 @@ public class KStreamBranchTest {
 
         final int[] expectedKeys = new int[]{1, 2, 3, 4, 5, 6};
 
-        final KStream<Integer, String> stream;
-        final KStream<Integer, String>[] branches;
+		final KStream<Integer, String> stream;
+		final KStream<Integer, String>[] branches;
 
-        stream = builder.stream(topicName, Consumed.with(Serdes.Integer(), Serdes.String()));
-        branches = stream.branch(isEven, isMultipleOfThree, isOdd);
+		stream = builder.stream(topicName, Consumed.with(Serdes.Integer(), Serdes.String()));
+		branches = stream.branch(isEven, isMultipleOfThree, isOdd);
 
-        assertEquals(3, branches.length);
+		assertEquals(3, branches.length);
 
-        final MockProcessorSupplier<Integer, String> supplier = new MockProcessorSupplier<>();
-        for (int i = 0; i < branches.length; i++) {
-            branches[i].process(supplier);
-        }
+		final MockProcessorSupplier<Integer, String> supplier = new MockProcessorSupplier<>();
+		for (final KStream<Integer, String> branch : branches) {
+			branch.process(supplier);
+		}
 
-        try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            for (final int expectedKey : expectedKeys) {
-                driver.pipeInput(recordFactory.create(topicName, expectedKey, "V" + expectedKey));
-            }
-        }
+		try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
+			final TestInputTopic<Integer, String> inputTopic = driver.createInputTopic(topicName, new IntegerSerializer(), new StringSerializer());
+			for (final int expectedKey : expectedKeys) {
+				inputTopic.pipeInput(expectedKey, "V" + expectedKey);
+			}
+		}
 
-        final List<MockProcessor<Integer, String>> processors = supplier.capturedProcessors(3);
-        assertEquals(3, processors.get(0).processed.size());
-        assertEquals(1, processors.get(1).processed.size());
-        assertEquals(2, processors.get(2).processed.size());
-    }
+		final List<MockProcessor<Integer, String>> processors = supplier.capturedProcessors(3);
+		assertEquals(3, processors.get(0).processed().size());
+		assertEquals(1, processors.get(1).processed().size());
+		assertEquals(2, processors.get(2).processed().size());
+	}
 
-    @SuppressWarnings("unchecked")
-    @Test
+	@SuppressWarnings({"unchecked", "deprecation"})
+	@Test
     public void testTypeVariance() {
         final Predicate<Number, Object> positive = (key, value) -> key.doubleValue() > 0;
 

@@ -20,7 +20,8 @@ package org.apache.kafka.server.quota;
  * Types of quotas that may be configured on brokers for client requests.
  */
 public enum ClientQuotaType {
-    PRODUCE,
-    FETCH,
-    REQUEST
+	PRODUCE,
+	FETCH,
+	REQUEST,
+	CONTROLLER_MUTATION
 }

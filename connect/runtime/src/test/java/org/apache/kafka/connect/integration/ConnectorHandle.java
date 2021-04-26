@@ -17,6 +17,7 @@
 package org.apache.kafka.connect.integration;
 
 import org.apache.kafka.connect.errors.DataException;
+import org.apache.kafka.connect.sink.SinkRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,6 +27,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -47,27 +49,36 @@ public class ConnectorHandle {
 
     public ConnectorHandle(String connectorName) {
         this.connectorName = connectorName;
-    }
+	}
 
-    /**
-     * Get or create a task handle for a given task id. The task need not be created when this method is called. If the
-     * handle is called before the task is created, the task will bind to the handle once it starts (or restarts).
-     *
-     * @param taskId the task id
-     * @return a non-null {@link TaskHandle}
-     */
-    public TaskHandle taskHandle(String taskId) {
-        return taskHandles.computeIfAbsent(taskId, k -> new TaskHandle(this, taskId));
-    }
+	/**
+	 * Get or create a task handle for a given task id. The task need not be created when this method is called. If the
+	 * handle is called before the task is created, the task will bind to the handle once it starts (or restarts).
+	 * @param taskId the task id
+	 * @return a non-null {@link TaskHandle}
+	 */
+	public TaskHandle taskHandle(String taskId) {
+		return taskHandle(taskId, null);
+	}
 
-    /**
-     * Get the connector's name corresponding to this handle.
-     *
-     * @return the connector's name
-     */
-    public String name() {
-        return connectorName;
-    }
+	/**
+	 * Get or create a task handle for a given task id. The task need not be created when this method is called. If the
+	 * handle is called before the task is created, the task will bind to the handle once it starts (or restarts).
+	 * @param taskId   the task id
+	 * @param consumer A callback invoked when a sink task processes a record.
+	 * @return a non-null {@link TaskHandle}
+	 */
+	public TaskHandle taskHandle(String taskId, Consumer<SinkRecord> consumer) {
+		return taskHandles.computeIfAbsent(taskId, k -> new TaskHandle(this, taskId, consumer));
+	}
+
+	/**
+	 * Get the connector's name corresponding to this handle.
+	 * @return the connector's name
+	 */
+	public String name() {
+		return connectorName;
+	}
 
     /**
      * Get the list of tasks handles monitored by this connector handle.
@@ -269,48 +280,48 @@ public class ConnectorHandle {
     /**
      * Obtain a {@link StartAndStopLatch} that can be used to wait until the connector using this handle
      * and optionally all tasks using {@link TaskHandle} have completed the minimum number of
-     * stops, starting the counts at the time this method is called.
-     *
-     * <p>A test can call this method, specifying the number of times the connector and tasks
-     * will each be stopped from that point (typically {@code expectedStops(1)}).
-     * The test should then change the connector or otherwise cause the connector to stop (or
-     * restart) one or more times, and then can call
-     * {@link StartAndStopLatch#await(long, TimeUnit)} to wait up to a specified duration for the
-     * connector and all tasks to be started at least the specified number of times.
-     *
-     * <p>This method does not track the number of times the connector and tasks are stopped, and
-     * only tracks the number of times the connector and tasks are <em>started</em>.
-     *
-     * @param expectedStops the minimum number of starts that are expected once this method is
-     *                      called
-     * @return the latch that can be used to wait for the starts to complete; never null
-     */
-    public StartAndStopLatch expectedStops(int expectedStops) {
+	 * stops, starting the counts at the time this method is called.
+	 *
+	 * <p>A test can call this method, specifying the number of times the connector and tasks
+	 * will each be stopped from that point (typically {@code expectedStops(1)}).
+	 * The test should then change the connector or otherwise cause the connector to stop (or
+	 * restart) one or more times, and then can call
+	 * {@link StartAndStopLatch#await(long, TimeUnit)} to wait up to a specified duration for the
+	 * connector and all tasks to be started at least the specified number of times.
+	 *
+	 * <p>This method does not track the number of times the connector and tasks are started, and
+	 * only tracks the number of times the connector and tasks are <em>stopped</em>.
+	 *
+	 * @param expectedStops the minimum number of starts that are expected once this method is
+	 *                      called
+	 * @return the latch that can be used to wait for the starts to complete; never null
+	 */
+	public StartAndStopLatch expectedStops(int expectedStops) {
         return expectedStops(expectedStops, true);
     }
 
     /**
      * Obtain a {@link StartAndStopLatch} that can be used to wait until the connector using this handle
      * and optionally all tasks using {@link TaskHandle} have completed the minimum number of
-     * stops, starting the counts at the time this method is called.
-     *
-     * <p>A test can call this method, specifying the number of times the connector and tasks
-     * will each be stopped from that point (typically {@code expectedStops(1)}).
-     * The test should then change the connector or otherwise cause the connector to stop (or
-     * restart) one or more times, and then can call
-     * {@link StartAndStopLatch#await(long, TimeUnit)} to wait up to a specified duration for the
-     * connector and all tasks to be started at least the specified number of times.
-     *
-     * <p>This method does not track the number of times the connector and tasks are stopped, and
-     * only tracks the number of times the connector and tasks are <em>started</em>.
-     *
-     * @param expectedStops the minimum number of starts that are expected once this method is
-     *                      called
-     * @param includeTasks  true if the latch should also wait for the tasks to be stopped the
-     *                      specified minimum number of times
-     * @return the latch that can be used to wait for the starts to complete; never null
-     */
-    public StartAndStopLatch expectedStops(int expectedStops, boolean includeTasks) {
+	 * stops, starting the counts at the time this method is called.
+	 *
+	 * <p>A test can call this method, specifying the number of times the connector and tasks
+	 * will each be stopped from that point (typically {@code expectedStops(1)}).
+	 * The test should then change the connector or otherwise cause the connector to stop (or
+	 * restart) one or more times, and then can call
+	 * {@link StartAndStopLatch#await(long, TimeUnit)} to wait up to a specified duration for the
+	 * connector and all tasks to be started at least the specified number of times.
+	 *
+	 * <p>This method does not track the number of times the connector and tasks are started, and
+	 * only tracks the number of times the connector and tasks are <em>stopped</em>.
+	 *
+	 * @param expectedStops the minimum number of starts that are expected once this method is
+	 *                      called
+	 * @param includeTasks  true if the latch should also wait for the tasks to be stopped the
+	 *                      specified minimum number of times
+	 * @return the latch that can be used to wait for the starts to complete; never null
+	 */
+	public StartAndStopLatch expectedStops(int expectedStops, boolean includeTasks) {
         List<StartAndStopLatch> taskLatches = null;
         if (includeTasks) {
             taskLatches = taskHandles.values().stream()

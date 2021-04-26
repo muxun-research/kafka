@@ -28,53 +28,27 @@ import java.util.concurrent.TimeoutException;
  * The future result of a record send
  */
 public final class FutureRecordMetadata implements Future<RecordMetadata> {
-	/**
-	 * 生产消息请求结果
-	 */
-    private final ProduceRequestResult result;
-	/**
-	 * 相对偏移量
-	 */
-    private final long relativeOffset;
-	/**
-	 * 创建record的时间戳
-	 * 会根据设置的时间戳类型可能会由Kafka服务端进行修改
-	 */
-    private final long createTimestamp;
-	/**
-	 * 检验码
-	 */
-    private final Long checksum;
-	/**
-	 * 序列化key的大小
-	 */
-    private final int serializedKeySize;
-	/**
-	 * 序列化value的大小
-	 */
-    private final int serializedValueSize;
-	/**
-	 * 时间戳
-	 */
-    private final Time time;
-	/**
-	 * 将batch分为小batch之后的record元数据的连接点
-	 */
-    private volatile FutureRecordMetadata nextRecordMetadata = null;
 
-    public FutureRecordMetadata(ProduceRequestResult result, long relativeOffset, long createTimestamp,
-                                Long checksum, int serializedKeySize, int serializedValueSize, Time time) {
-        this.result = result;
-        this.relativeOffset = relativeOffset;
-        this.createTimestamp = createTimestamp;
-        this.checksum = checksum;
-        this.serializedKeySize = serializedKeySize;
-        this.serializedValueSize = serializedValueSize;
-        this.time = time;
-    }
+	private final ProduceRequestResult result;
+	private final int batchIndex;
+	private final long createTimestamp;
+	private final int serializedKeySize;
+	private final int serializedValueSize;
+	private final Time time;
+	private volatile FutureRecordMetadata nextRecordMetadata = null;
 
-    @Override
-    public boolean cancel(boolean interrupt) {
+	public FutureRecordMetadata(ProduceRequestResult result, int batchIndex, long createTimestamp, int serializedKeySize,
+								int serializedValueSize, Time time) {
+		this.result = result;
+		this.batchIndex = batchIndex;
+		this.createTimestamp = createTimestamp;
+		this.serializedKeySize = serializedKeySize;
+		this.serializedValueSize = serializedValueSize;
+		this.time = time;
+	}
+
+	@Override
+	public boolean cancel(boolean interrupt) {
         return false;
     }
 
@@ -118,22 +92,19 @@ public final class FutureRecordMetadata implements Future<RecordMetadata> {
     }
 
     RecordMetadata valueOrError() throws ExecutionException {
-        if (this.result.error() != null)
-            throw new ExecutionException(this.result.error());
-        else
-            return value();
-    }
-
-    Long checksumOrNull() {
-        return this.checksum;
-    }
+		RuntimeException exception = this.result.error(batchIndex);
+		if (exception != null)
+			throw new ExecutionException(exception);
+		else
+			return value();
+	}
 
     RecordMetadata value() {
-        if (nextRecordMetadata != null)
-            return nextRecordMetadata.value();
-        return new RecordMetadata(result.topicPartition(), this.result.baseOffset(), this.relativeOffset,
-                                  timestamp(), this.checksum, this.serializedKeySize, this.serializedValueSize);
-    }
+		if (nextRecordMetadata != null)
+			return nextRecordMetadata.value();
+		return new RecordMetadata(result.topicPartition(), this.result.baseOffset(), this.batchIndex,
+				timestamp(), this.serializedKeySize, this.serializedValueSize);
+	}
 
     private long timestamp() {
         return result.hasLogAppendTime() ? result.logAppendTime() : createTimestamp;

@@ -20,33 +20,37 @@ import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.serialization.Deserializer;
 
 import java.nio.ByteBuffer;
+import java.util.Objects;
 
-public class ChangedDeserializer<T> implements Deserializer<Change<T>> {
+public class ChangedDeserializer<T> implements Deserializer<Change<T>>, WrappingNullableDeserializer<Change<T>, Void, T> {
 
-    private static final int NEWFLAG_SIZE = 1;
+	private static final int NEWFLAG_SIZE = 1;
 
-    private Deserializer<T> inner;
+	private Deserializer<T> inner;
 
-    public ChangedDeserializer(final Deserializer<T> inner) {
-        this.inner = inner;
-    }
+	public ChangedDeserializer(final Deserializer<T> inner) {
+		this.inner = inner;
+	}
 
-    public Deserializer<T> inner() {
-        return inner;
-    }
+	public Deserializer<T> inner() {
+		return inner;
+	}
 
-    public void setInner(final Deserializer<T> inner) {
-        this.inner = inner;
-    }
+	@Override
+	public void setIfUnset(final Deserializer<Void> defaultKeyDeserializer, final Deserializer<T> defaultValueDeserializer) {
+		if (inner == null) {
+			inner = Objects.requireNonNull(defaultValueDeserializer);
+		}
+	}
 
-    @Override
-    public Change<T> deserialize(final String topic, final Headers headers, final byte[] data) {
+	@Override
+	public Change<T> deserialize(final String topic, final Headers headers, final byte[] data) {
 
-        final byte[] bytes = new byte[data.length - NEWFLAG_SIZE];
+		final byte[] bytes = new byte[data.length - NEWFLAG_SIZE];
 
-        System.arraycopy(data, 0, bytes, 0, bytes.length);
+		System.arraycopy(data, 0, bytes, 0, bytes.length);
 
-        if (ByteBuffer.wrap(data).get(data.length - NEWFLAG_SIZE) != 0) {
+		if (ByteBuffer.wrap(data).get(data.length - NEWFLAG_SIZE) != 0) {
             return new Change<>(inner.deserialize(topic, headers, bytes), null);
         } else {
             return new Change<>(null, inner.deserialize(topic, headers, bytes));

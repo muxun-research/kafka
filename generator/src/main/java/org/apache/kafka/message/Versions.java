@@ -99,34 +99,85 @@ public final class Versions {
     @Override
     public String toString() {
         if (empty()) {
-            return NONE_STRING;
-        } else if (lowest == highest) {
-            return String.valueOf(lowest);
-        } else if (highest == Short.MAX_VALUE) {
-            return String.format("%d+", lowest);
-        } else {
-            return String.format("%d-%d", lowest, highest);
-        }
-    }
+			return NONE_STRING;
+		} else if (lowest == highest) {
+			return String.valueOf(lowest);
+		} else if (highest == Short.MAX_VALUE) {
+			return String.format("%d+", lowest);
+		} else {
+			return String.format("%d-%d", lowest, highest);
+		}
+	}
 
-    public Versions intersect(Versions other) {
-        short newLowest = lowest > other.lowest ? lowest : other.lowest;
-        short newHighest = highest < other.highest ? highest : other.highest;
-        if (newLowest > newHighest) {
-            return Versions.NONE;
-        }
-        return new Versions(newLowest, newHighest);
-    }
+	/**
+	 * Return the intersection of two version ranges.
+	 * @param other The other version range.
+	 * @return A new version range.
+	 */
+	public Versions intersect(Versions other) {
+		short newLowest = lowest > other.lowest ? lowest : other.lowest;
+		short newHighest = highest < other.highest ? highest : other.highest;
+		if (newLowest > newHighest) {
+			return Versions.NONE;
+		}
+		return new Versions(newLowest, newHighest);
+	}
 
-    public boolean contains(short version) {
-        return version >= lowest && version <= highest;
-    }
+	/**
+	 * Return a new version range that trims some versions from this range, if possible.
+	 * We can't trim any versions if the resulting range would be disjoint.
+	 * <p>
+	 * Some examples:
+	 * 1-4.trim(1-2) = 3-4
+	 * 3+.trim(4+) = 3
+	 * 4+.trim(3+) = none
+	 * 1-5.trim(2-4) = null
+	 * @param other The other version range.
+	 * @return A new version range.
+	 */
+	public Versions subtract(Versions other) {
+		if (other.lowest() <= lowest) {
+			if (other.highest >= highest) {
+				// Case 1: other is a superset of this.  Trim everything.
+				return Versions.NONE;
+			} else if (other.highest < lowest) {
+				// Case 2: other is a disjoint version range that is lower than this.  Trim nothing.
+				return this;
+			} else {
+				// Case 3: trim some values from the beginning of this range.
+				//
+				// Note: it is safe to assume that other.highest() + 1 will not overflow.
+				// The reason is because if other.highest() were Short.MAX_VALUE,
+				// other.highest() < highest could not be true.
+				return new Versions((short) (other.highest() + 1), highest);
+			}
+		} else if (other.highest >= highest) {
+			int newHighest = other.lowest - 1;
+			if (newHighest < 0) {
+				// Case 4: other was NONE.  Trim nothing.
+				return this;
+			} else if (newHighest < highest) {
+				// Case 5: trim some values from the end of this range.
+				return new Versions(lowest, (short) newHighest);
+			} else {
+				// Case 6: other is a disjoint range that is higher than this.  Trim nothing.
+				return this;
+			}
+		} else {
+			// Case 7: the difference between this and other would be two ranges, not one.
+			return null;
+		}
+	}
 
-    public boolean contains(Versions other) {
-        if (other.empty()) {
-            return true;
-        }
-        return !((lowest > other.lowest) || (highest < other.highest));
+	public boolean contains(short version) {
+		return version >= lowest && version <= highest;
+	}
+
+	public boolean contains(Versions other) {
+		if (other.empty()) {
+			return true;
+		}
+		return !((lowest > other.lowest) || (highest < other.highest));
     }
 
     @Override

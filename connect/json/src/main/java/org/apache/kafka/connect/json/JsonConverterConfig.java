@@ -22,6 +22,7 @@ import org.apache.kafka.common.config.ConfigDef.Type;
 import org.apache.kafka.common.config.ConfigDef.Width;
 import org.apache.kafka.connect.storage.ConverterConfig;
 
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -29,51 +30,83 @@ import java.util.Map;
  */
 public class JsonConverterConfig extends ConverterConfig {
 
-    public static final String SCHEMAS_ENABLE_CONFIG = "schemas.enable";
-    public static final boolean SCHEMAS_ENABLE_DEFAULT = true;
-    private static final String SCHEMAS_ENABLE_DOC = "Include schemas within each of the serialized values and keys.";
-    private static final String SCHEMAS_ENABLE_DISPLAY = "Enable Schemas";
+	public static final String SCHEMAS_ENABLE_CONFIG = "schemas.enable";
+	public static final boolean SCHEMAS_ENABLE_DEFAULT = true;
+	private static final String SCHEMAS_ENABLE_DOC = "Include schemas within each of the serialized values and keys.";
+	private static final String SCHEMAS_ENABLE_DISPLAY = "Enable Schemas";
 
-    public static final String SCHEMAS_CACHE_SIZE_CONFIG = "schemas.cache.size";
-    public static final int SCHEMAS_CACHE_SIZE_DEFAULT = 1000;
-    private static final String SCHEMAS_CACHE_SIZE_DOC = "The maximum number of schemas that can be cached in this converter instance.";
-    private static final String SCHEMAS_CACHE_SIZE_DISPLAY = "Schema Cache Size";
+	public static final String SCHEMAS_CACHE_SIZE_CONFIG = "schemas.cache.size";
+	public static final int SCHEMAS_CACHE_SIZE_DEFAULT = 1000;
+	private static final String SCHEMAS_CACHE_SIZE_DOC = "The maximum number of schemas that can be cached in this converter instance.";
+	private static final String SCHEMAS_CACHE_SIZE_DISPLAY = "Schema Cache Size";
 
-    private final static ConfigDef CONFIG;
+	public static final String DECIMAL_FORMAT_CONFIG = "decimal.format";
+	public static final String DECIMAL_FORMAT_DEFAULT = DecimalFormat.BASE64.name();
+	private static final String DECIMAL_FORMAT_DOC = "Controls which format this converter will serialize decimals in."
+			+ " This value is case insensitive and can be either 'BASE64' (default) or 'NUMERIC'";
+	private static final String DECIMAL_FORMAT_DISPLAY = "Decimal Format";
 
-    static {
-        String group = "Schemas";
-        int orderInGroup = 0;
-        CONFIG = ConverterConfig.newConfigDef();
-        CONFIG.define(SCHEMAS_ENABLE_CONFIG, Type.BOOLEAN, SCHEMAS_ENABLE_DEFAULT, Importance.HIGH, SCHEMAS_ENABLE_DOC, group,
-                      orderInGroup++, Width.MEDIUM, SCHEMAS_ENABLE_DISPLAY);
-        CONFIG.define(SCHEMAS_CACHE_SIZE_CONFIG, Type.INT, SCHEMAS_CACHE_SIZE_DEFAULT, Importance.HIGH, SCHEMAS_CACHE_SIZE_DOC, group,
-                      orderInGroup++, Width.MEDIUM, SCHEMAS_CACHE_SIZE_DISPLAY);
-    }
+	private final static ConfigDef CONFIG;
 
-    public static ConfigDef configDef() {
-        return CONFIG;
-    }
+	static {
+		String group = "Schemas";
+		int orderInGroup = 0;
+		CONFIG = ConverterConfig.newConfigDef();
+		CONFIG.define(SCHEMAS_ENABLE_CONFIG, Type.BOOLEAN, SCHEMAS_ENABLE_DEFAULT, Importance.HIGH, SCHEMAS_ENABLE_DOC, group,
+				orderInGroup++, Width.MEDIUM, SCHEMAS_ENABLE_DISPLAY);
+		CONFIG.define(SCHEMAS_CACHE_SIZE_CONFIG, Type.INT, SCHEMAS_CACHE_SIZE_DEFAULT, Importance.HIGH, SCHEMAS_CACHE_SIZE_DOC, group,
+				orderInGroup++, Width.MEDIUM, SCHEMAS_CACHE_SIZE_DISPLAY);
 
-    public JsonConverterConfig(Map<String, ?> props) {
-        super(CONFIG, props);
-    }
+		group = "Serialization";
+		orderInGroup = 0;
+		CONFIG.define(
+				DECIMAL_FORMAT_CONFIG, Type.STRING, DECIMAL_FORMAT_DEFAULT,
+				ConfigDef.CaseInsensitiveValidString.in(
+						DecimalFormat.BASE64.name(),
+						DecimalFormat.NUMERIC.name()),
+				Importance.LOW, DECIMAL_FORMAT_DOC, group, orderInGroup++,
+				Width.MEDIUM, DECIMAL_FORMAT_DISPLAY);
+	}
 
-    /**
-     * Return whether schemas are enabled.
-     *
-     * @return true if enabled, or false otherwise
-     */
-    public boolean schemasEnabled() {
-        return getBoolean(SCHEMAS_ENABLE_CONFIG);
-    }
+	public static ConfigDef configDef() {
+		return CONFIG;
+	}
 
-    /**
-     * Get the cache size.
-     *
-     * @return the cache size
-     */
-    public int schemaCacheSize() {
-        return getInt(SCHEMAS_CACHE_SIZE_CONFIG);
-    }
+	// cached config values
+	private final boolean schemasEnabled;
+	private final int schemaCacheSize;
+	private final DecimalFormat decimalFormat;
+
+	public JsonConverterConfig(Map<String, ?> props) {
+		super(CONFIG, props);
+		this.schemasEnabled = getBoolean(SCHEMAS_ENABLE_CONFIG);
+		this.schemaCacheSize = getInt(SCHEMAS_CACHE_SIZE_CONFIG);
+		this.decimalFormat = DecimalFormat.valueOf(getString(DECIMAL_FORMAT_CONFIG).toUpperCase(Locale.ROOT));
+	}
+
+	/**
+	 * Return whether schemas are enabled.
+	 *
+	 * @return true if enabled, or false otherwise
+	 */
+	public boolean schemasEnabled() {
+		return schemasEnabled;
+	}
+
+	/**
+	 * Get the cache size.
+	 * @return the cache size
+	 */
+	public int schemaCacheSize() {
+		return schemaCacheSize;
+	}
+
+	/**
+	 * Get the serialization format for decimal types.
+	 * @return the decimal serialization format
+	 */
+	public DecimalFormat decimalFormat() {
+		return decimalFormat;
+	}
+
 }

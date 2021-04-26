@@ -18,23 +18,26 @@ package org.apache.kafka.streams.state.internals;
 
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.LongDeserializer;
+import org.apache.kafka.streams.kstream.internals.WrappingNullableDeserializer;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
 
 import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.Objects;
 
-class ValueAndTimestampDeserializer<V> implements Deserializer<ValueAndTimestamp<V>> {
-    private final static LongDeserializer LONG_DESERIALIZER = new LongDeserializer();
+import static org.apache.kafka.streams.kstream.internals.WrappingNullableUtils.initNullableDeserializer;
 
-    public final Deserializer<V> valueDeserializer;
-    private final Deserializer<Long> timestampDeserializer;
+class ValueAndTimestampDeserializer<V> implements WrappingNullableDeserializer<ValueAndTimestamp<V>, Void, V> {
+	private final static LongDeserializer LONG_DESERIALIZER = new LongDeserializer();
 
-    ValueAndTimestampDeserializer(final Deserializer<V> valueDeserializer) {
-        Objects.requireNonNull(valueDeserializer);
-        this.valueDeserializer = valueDeserializer;
-        timestampDeserializer = new LongDeserializer();
-    }
+	public final Deserializer<V> valueDeserializer;
+	private final Deserializer<Long> timestampDeserializer;
+
+	ValueAndTimestampDeserializer(final Deserializer<V> valueDeserializer) {
+		Objects.requireNonNull(valueDeserializer);
+		this.valueDeserializer = valueDeserializer;
+		timestampDeserializer = new LongDeserializer();
+	}
 
     @Override
     public void configure(final Map<String, ?> configs,
@@ -71,14 +74,20 @@ class ValueAndTimestampDeserializer<V> implements Deserializer<ValueAndTimestamp
     }
 
     private static byte[] rawTimestamp(final byte[] rawValueAndTimestamp) {
-        return ByteBuffer
-            .allocate(8)
-            .put(rawValueAndTimestamp, 0, 8)
-            .array();
-    }
+		return ByteBuffer
+				.allocate(8)
+				.put(rawValueAndTimestamp, 0, 8)
+				.array();
+	}
 
-    static long timestamp(final byte[] rawValueAndTimestamp) {
-        return LONG_DESERIALIZER.deserialize(null, rawTimestamp(rawValueAndTimestamp));
-    }
+	static long timestamp(final byte[] rawValueAndTimestamp) {
+		return LONG_DESERIALIZER.deserialize(null, rawTimestamp(rawValueAndTimestamp));
+	}
 
+	@Override
+	public void setIfUnset(final Deserializer<Void> defaultKeyDeserializer, final Deserializer<V> defaultValueDeserializer) {
+		// ValueAndTimestampDeserializer never wraps a null deserializer (or configure would throw),
+		// but it may wrap a deserializer that itself wraps a null deserializer.
+		initNullableDeserializer(valueDeserializer, defaultKeyDeserializer, defaultValueDeserializer);
+	}
 }

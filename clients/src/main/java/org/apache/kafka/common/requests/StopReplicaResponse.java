@@ -16,115 +16,68 @@
  */
 package org.apache.kafka.common.requests;
 
-import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.message.StopReplicaResponseData;
+import org.apache.kafka.common.message.StopReplicaResponseData.StopReplicaPartitionError;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.Field;
-import org.apache.kafka.common.protocol.types.Schema;
-import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.kafka.common.protocol.CommonFields.ERROR_CODE;
-import static org.apache.kafka.common.protocol.CommonFields.PARTITION_ID;
-import static org.apache.kafka.common.protocol.CommonFields.TOPIC_NAME;
-
 public class StopReplicaResponse extends AbstractResponse {
-    private static final Field.ComplexArray PARTITIONS = new Field.ComplexArray("partitions", "Response for the requests partitions");
 
-    private static final Field PARTITIONS_V0 = PARTITIONS.withFields(
-            TOPIC_NAME,
-            PARTITION_ID,
-            ERROR_CODE);
-    private static final Schema STOP_REPLICA_RESPONSE_V0 = new Schema(
-            ERROR_CODE,
-            PARTITIONS_V0);
+	/**
+	 * Possible error code:
+	 * - {@link Errors#STALE_CONTROLLER_EPOCH}
+	 * - {@link Errors#STALE_BROKER_EPOCH}
+	 * - {@link Errors#FENCED_LEADER_EPOCH}
+	 * - {@link Errors#KAFKA_STORAGE_ERROR}
+	 */
+	private final StopReplicaResponseData data;
 
-    private static final Schema STOP_REPLICA_RESPONSE_V1 = STOP_REPLICA_RESPONSE_V0;
+	public StopReplicaResponse(StopReplicaResponseData data) {
+		super(ApiKeys.STOP_REPLICA);
+		this.data = data;
+	}
 
+	public List<StopReplicaPartitionError> partitionErrors() {
+		return data.partitionErrors();
+	}
 
-    public static Schema[] schemaVersions() {
-        return new Schema[] {STOP_REPLICA_RESPONSE_V0, STOP_REPLICA_RESPONSE_V1};
-    }
+	public Errors error() {
+		return Errors.forCode(data.errorCode());
+	}
 
-    private final Map<TopicPartition, Errors> responses;
+	@Override
+	public Map<Errors, Integer> errorCounts() {
+		if (data.errorCode() != Errors.NONE.code())
+			// Minor optimization since the top-level error applies to all partitions
+			return Collections.singletonMap(error(), data.partitionErrors().size() + 1);
+		Map<Errors, Integer> errors = errorCounts(data.partitionErrors().stream().map(p -> Errors.forCode(p.errorCode())));
+		updateErrorCounts(errors, Errors.forCode(data.errorCode())); // top level error
+		return errors;
+	}
 
-    /**
-     * Possible error code:
-     *
-     * STALE_CONTROLLER_EPOCH (11)
-     * STALE_BROKER_EPOCH (77)
-     */
-    private final Errors error;
+	public static StopReplicaResponse parse(ByteBuffer buffer, short version) {
+		return new StopReplicaResponse(new StopReplicaResponseData(new ByteBufferAccessor(buffer), version));
+	}
 
-    public StopReplicaResponse(Errors error, Map<TopicPartition, Errors> responses) {
-        this.responses = responses;
-        this.error = error;
-    }
+	@Override
+	public int throttleTimeMs() {
+		return DEFAULT_THROTTLE_TIME;
+	}
 
-    public StopReplicaResponse(Struct struct) {
-        responses = new HashMap<>();
-        for (Object responseDataObj : struct.get(PARTITIONS)) {
-            Struct responseData = (Struct) responseDataObj;
-            String topic = responseData.get(TOPIC_NAME);
-            int partition = responseData.get(PARTITION_ID);
-            Errors error = Errors.forCode(responseData.get(ERROR_CODE));
-            responses.put(new TopicPartition(topic, partition), error);
-        }
+	@Override
+	public StopReplicaResponseData data() {
+		return data;
+	}
 
-        error = Errors.forCode(struct.get(ERROR_CODE));
-    }
-
-    public Map<TopicPartition, Errors> responses() {
-        return responses;
-    }
-
-    public Errors error() {
-        return error;
-    }
-
-    @Override
-    public Map<Errors, Integer> errorCounts() {
-        if (error != Errors.NONE)
-            // Minor optimization since the top-level error applies to all partitions
-            return Collections.singletonMap(error, responses.size());
-        return errorCounts(responses);
-    }
-
-    public static StopReplicaResponse parse(ByteBuffer buffer, short version) {
-        return new StopReplicaResponse(ApiKeys.STOP_REPLICA.parseResponse(version, buffer));
-    }
-
-    @Override
-    protected Struct toStruct(short version) {
-        Struct struct = new Struct(ApiKeys.STOP_REPLICA.responseSchema(version));
-
-        List<Struct> responseDatas = new ArrayList<>(responses.size());
-        for (Map.Entry<TopicPartition, Errors> response : responses.entrySet()) {
-            Struct partitionData = struct.instance(PARTITIONS);
-            TopicPartition partition = response.getKey();
-            partitionData.set(TOPIC_NAME, partition.topic());
-            partitionData.set(PARTITION_ID, partition.partition());
-            partitionData.set(ERROR_CODE, response.getValue().code());
-            responseDatas.add(partitionData);
-        }
-
-        struct.set(PARTITIONS, responseDatas.toArray());
-        struct.set(ERROR_CODE, error.code());
-        return struct;
-    }
-
-    @Override
-    public String toString() {
-        return "StopReplicaResponse(" +
-                "responses=" + responses +
-                ", error=" + error +
-                ")";
-    }
+	@Override
+	public String toString() {
+		return data.toString();
+	}
 
 }

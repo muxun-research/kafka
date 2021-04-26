@@ -20,12 +20,33 @@ package org.apache.kafka.message;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 public enum MessageSpecType {
-    @JsonProperty("request")
-    REQUEST,
+	/**
+	 * Kafka request RPCs.
+	 */
+	@JsonProperty("request")
+	REQUEST,
 
-    @JsonProperty("response")
-    RESPONSE,
+	/**
+	 * Kafka response RPCs.
+	 */
+	@JsonProperty("response")
+	RESPONSE,
 
-    @JsonProperty("header")
-    HEADER;
+	/**
+	 * Kafka RPC headers.
+	 */
+	@JsonProperty("header")
+	HEADER,
+
+	/**
+	 * KIP-631 controller records.
+	 */
+	@JsonProperty("metadata")
+	METADATA,
+
+	/**
+	 * Other message spec types.
+	 */
+	@JsonProperty("data")
+	DATA;
 }

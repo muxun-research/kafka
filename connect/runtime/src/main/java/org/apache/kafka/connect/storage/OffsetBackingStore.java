@@ -51,23 +51,19 @@ public interface OffsetBackingStore {
     void stop();
 
     /**
-     * Get the values for the specified keys
-     * @param keys list of keys to look up
-     * @param callback callback to invoke on completion
-     * @return future for the resulting map from key to value
-     */
-    Future<Map<ByteBuffer, ByteBuffer>> get(
-            Collection<ByteBuffer> keys,
-            Callback<Map<ByteBuffer, ByteBuffer>> callback);
+	 * Get the values for the specified keys
+	 * @param keys list of keys to look up
+	 * @return future for the resulting map from key to value
+	 */
+	Future<Map<ByteBuffer, ByteBuffer>> get(Collection<ByteBuffer> keys);
 
-    /**
-     * Set the specified keys and values.
-     * @param values map from key to value
-     * @param callback callback to invoke on completion
-     * @return void future for the operation
-     */
-    Future<Void> set(Map<ByteBuffer, ByteBuffer> values,
-                            Callback<Void> callback);
+	/**
+	 * Set the specified keys and values.
+	 * @param values   map from key to value
+	 * @param callback callback to invoke on completion
+	 * @return void future for the operation
+	 */
+	Future<Void> set(Map<ByteBuffer, ByteBuffer> values, Callback<Void> callback);
 
     /**
      * Configure class with the given key-value pairs

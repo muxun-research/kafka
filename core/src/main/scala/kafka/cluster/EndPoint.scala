@@ -17,10 +17,10 @@
 
 package kafka.cluster
 
-import org.apache.kafka.common.KafkaException
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.utils.Utils
+import org.apache.kafka.common.{KafkaException, Endpoint => JEndpoint}
 
 import scala.collection.Map
 
@@ -66,9 +66,13 @@ case class EndPoint(host: String, port: Int, listenerName: ListenerName, securit
   def connectionString: String = {
     val hostport =
       if (host == null)
-        ":"+port
+        ":" + port
       else
         Utils.formatAddress(host, port)
     listenerName.value + "://" + hostport
+  }
+
+  def toJava: JEndpoint = {
+    new JEndpoint(listenerName.value, securityProtocol, host, port)
   }
 }

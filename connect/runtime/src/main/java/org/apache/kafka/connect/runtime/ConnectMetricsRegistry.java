@@ -20,8 +20,10 @@ import org.apache.kafka.common.MetricNameTemplate;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class ConnectMetricsRegistry {
@@ -31,26 +33,32 @@ public class ConnectMetricsRegistry {
     public static final String CONNECTOR_GROUP_NAME = "connector-metrics";
     public static final String TASK_GROUP_NAME = "connector-task-metrics";
     public static final String SOURCE_TASK_GROUP_NAME = "source-task-metrics";
-    public static final String SINK_TASK_GROUP_NAME = "sink-task-metrics";
-    public static final String WORKER_GROUP_NAME = "connect-worker-metrics";
-    public static final String WORKER_REBALANCE_GROUP_NAME = "connect-worker-rebalance-metrics";
-    public static final String TASK_ERROR_HANDLING_GROUP_NAME = "task-error-metrics";
+	public static final String SINK_TASK_GROUP_NAME = "sink-task-metrics";
+	public static final String WORKER_GROUP_NAME = "connect-worker-metrics";
+	public static final String WORKER_REBALANCE_GROUP_NAME = "connect-worker-rebalance-metrics";
+	public static final String TASK_ERROR_HANDLING_GROUP_NAME = "task-error-metrics";
 
-    private final List<MetricNameTemplate> allTemplates = new ArrayList<>();
-    public final MetricNameTemplate connectorStatus;
-    public final MetricNameTemplate connectorType;
-    public final MetricNameTemplate connectorClass;
-    public final MetricNameTemplate connectorVersion;
-    public final MetricNameTemplate taskStatus;
-    public final MetricNameTemplate taskRunningRatio;
-    public final MetricNameTemplate taskPauseRatio;
-    public final MetricNameTemplate taskCommitTimeMax;
-    public final MetricNameTemplate taskCommitTimeAvg;
-    public final MetricNameTemplate taskBatchSizeMax;
-    public final MetricNameTemplate taskBatchSizeAvg;
-    public final MetricNameTemplate taskCommitFailurePercentage;
-    public final MetricNameTemplate taskCommitSuccessPercentage;
-    public final MetricNameTemplate sourceRecordPollRate;
+	private final List<MetricNameTemplate> allTemplates = new ArrayList<>();
+	public final MetricNameTemplate connectorStatus;
+	public final MetricNameTemplate connectorType;
+	public final MetricNameTemplate connectorClass;
+	public final MetricNameTemplate connectorVersion;
+	public final MetricNameTemplate connectorTotalTaskCount;
+	public final MetricNameTemplate connectorRunningTaskCount;
+	public final MetricNameTemplate connectorPausedTaskCount;
+	public final MetricNameTemplate connectorFailedTaskCount;
+	public final MetricNameTemplate connectorUnassignedTaskCount;
+	public final MetricNameTemplate connectorDestroyedTaskCount;
+	public final MetricNameTemplate taskStatus;
+	public final MetricNameTemplate taskRunningRatio;
+	public final MetricNameTemplate taskPauseRatio;
+	public final MetricNameTemplate taskCommitTimeMax;
+	public final MetricNameTemplate taskCommitTimeAvg;
+	public final MetricNameTemplate taskBatchSizeMax;
+	public final MetricNameTemplate taskBatchSizeAvg;
+	public final MetricNameTemplate taskCommitFailurePercentage;
+	public final MetricNameTemplate taskCommitSuccessPercentage;
+	public final MetricNameTemplate sourceRecordPollRate;
     public final MetricNameTemplate sourceRecordPollTotal;
     public final MetricNameTemplate sourceRecordWriteRate;
     public final MetricNameTemplate sourceRecordWriteTotal;
@@ -86,31 +94,34 @@ public class ConnectMetricsRegistry {
     public final MetricNameTemplate taskStartupSuccessTotal;
     public final MetricNameTemplate taskStartupSuccessPercentage;
     public final MetricNameTemplate taskStartupFailureTotal;
-    public final MetricNameTemplate taskStartupFailurePercentage;
-    public final MetricNameTemplate leaderName;
+	public final MetricNameTemplate taskStartupFailurePercentage;
+	public final MetricNameTemplate connectProtocol;
+	public final MetricNameTemplate leaderName;
     public final MetricNameTemplate epoch;
     public final MetricNameTemplate rebalanceCompletedTotal;
     public final MetricNameTemplate rebalanceMode;
     public final MetricNameTemplate rebalanceTimeMax;
     public final MetricNameTemplate rebalanceTimeAvg;
-    public final MetricNameTemplate rebalanceTimeSinceLast;
-    public final MetricNameTemplate recordProcessingFailures;
-    public final MetricNameTemplate recordProcessingErrors;
-    public final MetricNameTemplate recordsSkipped;
-    public final MetricNameTemplate retries;
-    public final MetricNameTemplate errorsLogged;
-    public final MetricNameTemplate dlqProduceRequests;
-    public final MetricNameTemplate dlqProduceFailures;
-    public final MetricNameTemplate lastErrorTimestamp;
+	public final MetricNameTemplate rebalanceTimeSinceLast;
+	public final MetricNameTemplate recordProcessingFailures;
+	public final MetricNameTemplate recordProcessingErrors;
+	public final MetricNameTemplate recordsSkipped;
+	public final MetricNameTemplate retries;
+	public final MetricNameTemplate errorsLogged;
+	public final MetricNameTemplate dlqProduceRequests;
+	public final MetricNameTemplate dlqProduceFailures;
+	public final MetricNameTemplate lastErrorTimestamp;
 
-    public ConnectMetricsRegistry() {
-        this(new LinkedHashSet<String>());
-    }
+	public Map<MetricNameTemplate, TaskStatus.State> connectorStatusMetrics;
 
-    public ConnectMetricsRegistry(Set<String> tags) {
-        /***** Connector level *****/
-        Set<String> connectorTags = new LinkedHashSet<>(tags);
-        connectorTags.add(CONNECTOR_TAG_NAME);
+	public ConnectMetricsRegistry() {
+		this(new LinkedHashSet<>());
+	}
+
+	public ConnectMetricsRegistry(Set<String> tags) {
+		/***** Connector level *****/
+		Set<String> connectorTags = new LinkedHashSet<>(tags);
+		connectorTags.add(CONNECTOR_TAG_NAME);
 
         connectorStatus = createTemplate("status", CONNECTOR_GROUP_NAME,
                                          "The status of the connector. One of 'unassigned', 'running', 'paused', 'failed', or " +
@@ -278,24 +289,50 @@ public class ConnectMetricsRegistry {
         connectorStartupFailurePercentage = createTemplate("connector-startup-failure-percentage", WORKER_GROUP_NAME,
                                                       "The average percentage of this worker's connectors starts that failed.", workerTags);
         taskStartupAttemptsTotal = createTemplate("task-startup-attempts-total", WORKER_GROUP_NAME,
-                                                  "The total number of task startups that this worker has attempted.", workerTags);
-        taskStartupSuccessTotal = createTemplate("task-startup-success-total", WORKER_GROUP_NAME,
-                                                 "The total number of task starts that succeeded.", workerTags);
-        taskStartupSuccessPercentage = createTemplate("task-startup-success-percentage", WORKER_GROUP_NAME,
-                                                      "The average percentage of this worker's tasks starts that succeeded.", workerTags);
-        taskStartupFailureTotal = createTemplate("task-startup-failure-total", WORKER_GROUP_NAME,
-                                                 "The total number of task starts that failed.", workerTags);
-        taskStartupFailurePercentage = createTemplate("task-startup-failure-percentage", WORKER_GROUP_NAME,
-                                                      "The average percentage of this worker's tasks starts that failed.", workerTags);
+				"The total number of task startups that this worker has attempted.", workerTags);
+		taskStartupSuccessTotal = createTemplate("task-startup-success-total", WORKER_GROUP_NAME,
+				"The total number of task starts that succeeded.", workerTags);
+		taskStartupSuccessPercentage = createTemplate("task-startup-success-percentage", WORKER_GROUP_NAME,
+				"The average percentage of this worker's tasks starts that succeeded.", workerTags);
+		taskStartupFailureTotal = createTemplate("task-startup-failure-total", WORKER_GROUP_NAME,
+				"The total number of task starts that failed.", workerTags);
+		taskStartupFailurePercentage = createTemplate("task-startup-failure-percentage", WORKER_GROUP_NAME,
+				"The average percentage of this worker's tasks starts that failed.", workerTags);
 
-        /***** Worker rebalance level *****/
-        Set<String> rebalanceTags = new LinkedHashSet<>(tags);
+		Set<String> workerConnectorTags = new LinkedHashSet<>(tags);
+		workerConnectorTags.add(CONNECTOR_TAG_NAME);
+		connectorTotalTaskCount = createTemplate("connector-total-task-count", WORKER_GROUP_NAME,
+				"The number of tasks of the connector on the worker.", workerConnectorTags);
+		connectorRunningTaskCount = createTemplate("connector-running-task-count", WORKER_GROUP_NAME,
+				"The number of running tasks of the connector on the worker.", workerConnectorTags);
+		connectorPausedTaskCount = createTemplate("connector-paused-task-count", WORKER_GROUP_NAME,
+				"The number of paused tasks of the connector on the worker.", workerConnectorTags);
+		connectorFailedTaskCount = createTemplate("connector-failed-task-count", WORKER_GROUP_NAME,
+				"The number of failed tasks of the connector on the worker.", workerConnectorTags);
+		connectorUnassignedTaskCount = createTemplate("connector-unassigned-task-count",
+				WORKER_GROUP_NAME,
+				"The number of unassigned tasks of the connector on the worker.", workerConnectorTags);
+		connectorDestroyedTaskCount = createTemplate("connector-destroyed-task-count",
+				WORKER_GROUP_NAME,
+				"The number of destroyed tasks of the connector on the worker.", workerConnectorTags);
 
-        leaderName = createTemplate("leader-name", WORKER_REBALANCE_GROUP_NAME, "The name of the group leader.", rebalanceTags);
-        epoch = createTemplate("epoch", WORKER_REBALANCE_GROUP_NAME, "The epoch or generation number of this worker.", rebalanceTags);
-        rebalanceCompletedTotal = createTemplate("completed-rebalances-total", WORKER_REBALANCE_GROUP_NAME,
-                                                "The total number of rebalances completed by this worker.", rebalanceTags);
-        rebalanceMode = createTemplate("rebalancing", WORKER_REBALANCE_GROUP_NAME,
+		connectorStatusMetrics = new HashMap<>();
+		connectorStatusMetrics.put(connectorRunningTaskCount, TaskStatus.State.RUNNING);
+		connectorStatusMetrics.put(connectorPausedTaskCount, TaskStatus.State.PAUSED);
+		connectorStatusMetrics.put(connectorFailedTaskCount, TaskStatus.State.FAILED);
+		connectorStatusMetrics.put(connectorUnassignedTaskCount, TaskStatus.State.UNASSIGNED);
+		connectorStatusMetrics.put(connectorDestroyedTaskCount, TaskStatus.State.DESTROYED);
+		connectorStatusMetrics = Collections.unmodifiableMap(connectorStatusMetrics);
+
+		/***** Worker rebalance level *****/
+		Set<String> rebalanceTags = new LinkedHashSet<>(tags);
+
+		connectProtocol = createTemplate("connect-protocol", WORKER_REBALANCE_GROUP_NAME, "The Connect protocol used by this cluster", rebalanceTags);
+		leaderName = createTemplate("leader-name", WORKER_REBALANCE_GROUP_NAME, "The name of the group leader.", rebalanceTags);
+		epoch = createTemplate("epoch", WORKER_REBALANCE_GROUP_NAME, "The epoch or generation number of this worker.", rebalanceTags);
+		rebalanceCompletedTotal = createTemplate("completed-rebalances-total", WORKER_REBALANCE_GROUP_NAME,
+				"The total number of rebalances completed by this worker.", rebalanceTags);
+		rebalanceMode = createTemplate("rebalancing", WORKER_REBALANCE_GROUP_NAME,
                                                "Whether this worker is currently rebalancing.", rebalanceTags);
         rebalanceTimeMax = createTemplate("rebalance-max-time-ms", WORKER_REBALANCE_GROUP_NAME,
                                           "The maximum time in milliseconds spent by this worker to rebalance.", rebalanceTags);

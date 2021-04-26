@@ -16,6 +16,16 @@
  */
 package org.apache.kafka.common.security;
 
+import org.apache.kafka.common.config.SaslConfigs;
+import org.apache.kafka.common.config.types.Password;
+import org.apache.kafka.common.network.ListenerName;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import javax.security.auth.login.AppConfigurationEntry;
+import javax.security.auth.login.AppConfigurationEntry.LoginModuleControlFlag;
+import javax.security.auth.login.Configuration;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -26,20 +36,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import javax.security.auth.login.AppConfigurationEntry;
-import javax.security.auth.login.AppConfigurationEntry.LoginModuleControlFlag;
-import javax.security.auth.login.Configuration;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.fail;
-
-import org.apache.kafka.common.config.SaslConfigs;
-import org.apache.kafka.common.config.types.Password;
-import org.apache.kafka.common.network.ListenerName;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Tests parsing of {@link SaslConfigs#SASL_JAAS_CONFIG} property and verifies that the format
@@ -49,7 +49,7 @@ public class JaasContextTest {
 
     private File jaasConfigFile;
 
-    @Before
+	@BeforeEach
     public void setUp() throws IOException {
         jaasConfigFile = File.createTempFile("jaas", ".conf");
         jaasConfigFile.deleteOnExit();
@@ -57,7 +57,7 @@ public class JaasContextTest {
         Configuration.setConfiguration(null);
     }
 
-    @After
+	@AfterEach
     public void tearDown() throws Exception {
         Files.delete(jaasConfigFile.toPath());
     }
@@ -217,12 +217,12 @@ public class JaasContextTest {
             Collections.emptyMap());
     }
 
-    @Test(expected = IllegalArgumentException.class)
+	@Test
     public void testLoadForServerWithWrongListenerName() throws IOException {
-        writeConfiguration("Server", "test.LoginModule required;");
-        JaasContext.loadServerContext(new ListenerName("plaintext"), "SOME-MECHANISM",
-            Collections.emptyMap());
-    }
+		writeConfiguration("Server", "test.LoginModule required;");
+		assertThrows(IllegalArgumentException.class, () -> JaasContext.loadServerContext(new ListenerName("plaintext"),
+				"SOME-MECHANISM", Collections.emptyMap()));
+	}
 
     private AppConfigurationEntry configurationEntry(JaasContext.Type contextType, String jaasConfigProp) {
         Password saslJaasConfig = jaasConfigProp == null ? null : new Password(jaasConfigProp);
@@ -276,8 +276,8 @@ public class JaasContextTest {
 
     private void checkConfiguration(String jaasConfigProp, String loginModule, LoginModuleControlFlag controlFlag, Map<String, Object> options) throws Exception {
         AppConfigurationEntry dynamicEntry = configurationEntry(JaasContext.Type.CLIENT, jaasConfigProp);
-        checkEntry(dynamicEntry, loginModule, controlFlag, options);
-        assertNull("Static configuration updated", Configuration.getConfiguration().getAppConfigurationEntry(JaasContext.Type.CLIENT.name()));
+		checkEntry(dynamicEntry, loginModule, controlFlag, options);
+		assertNull(Configuration.getConfiguration().getAppConfigurationEntry(JaasContext.Type.CLIENT.name()), "Static configuration updated");
 
         writeConfiguration(JaasContext.Type.SERVER.name(), jaasConfigProp);
         AppConfigurationEntry staticEntry = configurationEntry(JaasContext.Type.SERVER, null);

@@ -22,17 +22,23 @@ import org.apache.kafka.common.protocol.Errors
 import scala.collection._
 
 /**
-  * The delete metadata maintained by the delayed delete operation
-  */
+ * The delete metadata maintained by the delayed delete operation
+ */
 case class DeleteTopicMetadata(topic: String, error: Errors)
 
+object DeleteTopicMetadata {
+  def apply(topic: String, throwable: Throwable): DeleteTopicMetadata = {
+    DeleteTopicMetadata(topic, Errors.forException(throwable))
+  }
+}
+
 /**
-  * A delayed delete topics operation that can be created by the admin manager and watched
-  * in the topic purgatory
-  */
+ * A delayed delete topics operation that can be created by the admin manager and watched
+ * in the topic purgatory
+ */
 class DelayedDeleteTopics(delayMs: Long,
                           deleteMetadata: Seq[DeleteTopicMetadata],
-                          adminManager: AdminManager,
+                          adminManager: ZkAdminManager,
                           responseCallback: Map[String, Errors] => Unit)
   extends DelayedOperation(delayMs) {
 

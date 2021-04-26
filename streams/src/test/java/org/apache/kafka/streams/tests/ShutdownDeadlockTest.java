@@ -23,6 +23,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.Exit;
+import org.apache.kafka.streams.errors.StreamsUncaughtExceptionHandler;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StreamsBuilder;
@@ -45,35 +46,28 @@ public class ShutdownDeadlockTest {
         final Properties props = new Properties();
         props.setProperty(StreamsConfig.APPLICATION_ID_CONFIG, "shouldNotDeadlock");
         props.setProperty(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, kafka);
-        final StreamsBuilder builder = new StreamsBuilder();
-        final KStream<String, String> source = builder.stream(topic, Consumed.with(Serdes.String(), Serdes.String()));
+		final StreamsBuilder builder = new StreamsBuilder();
+		final KStream<String, String> source = builder.stream(topic, Consumed.with(Serdes.String(), Serdes.String()));
 
-        source.foreach(new ForeachAction<String, String>() {
-            @Override
-            public void apply(final String key, final String value) {
-                throw new RuntimeException("KABOOM!");
-            }
-        });
-        final KafkaStreams streams = new KafkaStreams(builder.build(), props);
-        streams.setUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
-            @Override
-            public void uncaughtException(final Thread t, final Throwable e) {
-                Exit.exit(1);
-            }
-        });
+		source.foreach(new ForeachAction<String, String>() {
+			@Override
+			public void apply(final String key, final String value) {
+				throw new RuntimeException("KABOOM!");
+			}
+		});
+		final KafkaStreams streams = new KafkaStreams(builder.build(), props);
+		streams.setUncaughtExceptionHandler(e -> {
+			Exit.exit(1);
+			return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_CLIENT;
+		});
 
-        Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
-            @Override
-            public void run() {
-                streams.close(Duration.ofSeconds(5));
-            }
-        }));
+		Exit.addShutdownHook("streams-shutdown-hook", () -> streams.close(Duration.ofSeconds(5)));
 
-        final Properties producerProps = new Properties();
-        producerProps.put(ProducerConfig.CLIENT_ID_CONFIG, "SmokeTest");
-        producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka);
-        producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+		final Properties producerProps = new Properties();
+		producerProps.put(ProducerConfig.CLIENT_ID_CONFIG, "SmokeTest");
+		producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka);
+		producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+		producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
 
         final KafkaProducer<String, String> producer = new KafkaProducer<>(producerProps);
         producer.send(new ProducerRecord<>(topic, "a", "a"));

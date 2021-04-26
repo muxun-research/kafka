@@ -16,32 +16,32 @@
  */
 package org.apache.kafka.common.network;
 
+import org.apache.kafka.common.config.AbstractConfig;
+import org.apache.kafka.common.metrics.Metrics;
+import org.apache.kafka.common.security.auth.SecurityProtocol;
+import org.apache.kafka.common.security.authenticator.CredentialCache;
+import org.apache.kafka.common.security.token.delegation.internals.DelegationTokenCache;
+import org.apache.kafka.common.utils.LogContext;
+import org.apache.kafka.common.utils.Time;
+import org.apache.kafka.common.utils.Utils;
+import org.apache.kafka.test.TestUtils;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-
-import org.apache.kafka.common.config.AbstractConfig;
-import org.apache.kafka.common.metrics.Metrics;
-import org.apache.kafka.common.security.auth.SecurityProtocol;
-import org.apache.kafka.common.utils.LogContext;
-import org.apache.kafka.common.security.authenticator.CredentialCache;
-import org.apache.kafka.common.security.token.delegation.internals.DelegationTokenCache;
-import org.apache.kafka.common.utils.Time;
-import org.apache.kafka.common.utils.Utils;
-import org.apache.kafka.test.TestUtils;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Common utility functions used by transport layer and authenticator tests.
  */
 public class NetworkTestUtils {
-    public static NioEchoServer createEchoServer(ListenerName listenerName, SecurityProtocol securityProtocol,
-                                                 AbstractConfig serverConfig, CredentialCache credentialCache, Time time) throws Exception {
-        return createEchoServer(listenerName, securityProtocol, serverConfig, credentialCache, 100, time);
-    }
+	public static NioEchoServer createEchoServer(ListenerName listenerName, SecurityProtocol securityProtocol,
+												 AbstractConfig serverConfig, CredentialCache credentialCache, Time time) throws Exception {
+		return createEchoServer(listenerName, securityProtocol, serverConfig, credentialCache, 100, time);
+	}
 
     public static NioEchoServer createEchoServer(ListenerName listenerName, SecurityProtocol securityProtocol,
                                                  AbstractConfig serverConfig, CredentialCache credentialCache,
@@ -70,11 +70,11 @@ public class NetworkTestUtils {
         String prefix = TestUtils.randomString(minMessageSize);
         int requests = 0;
         int responses = 0;
-        selector.send(new NetworkSend(node, ByteBuffer.wrap((prefix + "-0").getBytes(StandardCharsets.UTF_8))));
-        requests++;
+		selector.send(new NetworkSend(node, ByteBufferSend.sizePrefixed(ByteBuffer.wrap((prefix + "-0").getBytes(StandardCharsets.UTF_8)))));
+		requests++;
         while (responses < messageCount) {
-            selector.poll(0L);
-            assertEquals("No disconnects should have occurred.", 0, selector.disconnected().size());
+			selector.poll(0L);
+			assertEquals(0, selector.disconnected().size(), "No disconnects should have occurred ." + selector.disconnected());
 
             for (NetworkReceive receive : selector.completedReceives()) {
                 assertEquals(prefix + "-" + responses, new String(Utils.toArray(receive.payload()), StandardCharsets.UTF_8));
@@ -82,7 +82,7 @@ public class NetworkTestUtils {
             }
 
             for (int i = 0; i < selector.completedSends().size() && requests < messageCount && selector.isChannelReady(node); i++, requests++) {
-                selector.send(new NetworkSend(node, ByteBuffer.wrap((prefix + "-" + requests).getBytes())));
+				selector.send(new NetworkSend(node, ByteBufferSend.sizePrefixed(ByteBuffer.wrap((prefix + "-" + requests).getBytes()))));
             }
         }
     }
@@ -106,7 +106,7 @@ public class NetworkTestUtils {
                 break;
             }
         }
-        assertTrue("Channel was not closed by timeout", closed);
+		assertTrue(closed, "Channel was not closed by timeout");
         ChannelState finalState = selector.disconnected().get(node);
         assertEquals(channelState, finalState.state());
         return finalState;

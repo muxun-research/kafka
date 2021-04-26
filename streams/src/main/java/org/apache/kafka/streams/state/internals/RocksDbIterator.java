@@ -25,24 +25,28 @@ import org.rocksdb.RocksIterator;
 
 import java.util.NoSuchElementException;
 import java.util.Set;
+import java.util.function.Consumer;
 
 class RocksDbIterator extends AbstractIterator<KeyValue<Bytes, byte[]>> implements KeyValueIterator<Bytes, byte[]> {
 
     private final String storeName;
     private final RocksIterator iter;
-    private final Set<KeyValueIterator<Bytes, byte[]>> openIterators;
+	private final Set<KeyValueIterator<Bytes, byte[]>> openIterators;
+	private final Consumer<RocksIterator> advanceIterator;
 
     private volatile boolean open = true;
 
     private KeyValue<Bytes, byte[]> next;
 
-    RocksDbIterator(final String storeName,
-                    final RocksIterator iter,
-                    final Set<KeyValueIterator<Bytes, byte[]>> openIterators) {
-        this.storeName = storeName;
-        this.iter = iter;
-        this.openIterators = openIterators;
-    }
+	RocksDbIterator(final String storeName,
+					final RocksIterator iter,
+					final Set<KeyValueIterator<Bytes, byte[]>> openIterators,
+					final boolean forward) {
+		this.storeName = storeName;
+		this.iter = iter;
+		this.openIterators = openIterators;
+		this.advanceIterator = forward ? RocksIterator::next : RocksIterator::prev;
+	}
 
     @Override
     public synchronized boolean hasNext() {
@@ -57,8 +61,8 @@ class RocksDbIterator extends AbstractIterator<KeyValue<Bytes, byte[]>> implemen
         if (!iter.isValid()) {
             return allDone();
         } else {
-            next = getKeyValue();
-            iter.next();
+			next = getKeyValue();
+			advanceIterator.accept(iter);
             return next;
         }
     }

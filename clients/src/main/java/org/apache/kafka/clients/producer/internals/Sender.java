@@ -24,6 +24,7 @@ import org.apache.kafka.clients.Metadata;
 import org.apache.kafka.clients.NetworkClientUtils;
 import org.apache.kafka.clients.RequestCompletionHandler;
 import org.apache.kafka.common.Cluster;
+import org.apache.kafka.common.InvalidRecordException;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.Node;
@@ -31,13 +32,12 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.errors.ClusterAuthorizationException;
 import org.apache.kafka.common.errors.InvalidMetadataException;
-import org.apache.kafka.common.errors.OutOfOrderSequenceException;
 import org.apache.kafka.common.errors.RetriableException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.errors.TopicAuthorizationException;
+import org.apache.kafka.common.errors.TransactionAbortedException;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
-import org.apache.kafka.common.errors.UnsupportedVersionException;
-import org.apache.kafka.common.message.InitProducerIdRequestData;
+import org.apache.kafka.common.message.ProduceRequestData;
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.metrics.stats.Avg;
 import org.apache.kafka.common.metrics.stats.Max;
@@ -47,8 +47,6 @@ import org.apache.kafka.common.record.MemoryRecords;
 import org.apache.kafka.common.record.RecordBatch;
 import org.apache.kafka.common.requests.AbstractRequest;
 import org.apache.kafka.common.requests.FindCoordinatorRequest;
-import org.apache.kafka.common.requests.InitProducerIdRequest;
-import org.apache.kafka.common.requests.InitProducerIdResponse;
 import org.apache.kafka.common.requests.ProduceRequest;
 import org.apache.kafka.common.requests.ProduceResponse;
 import org.apache.kafka.common.requests.RequestHeader;
@@ -64,35 +62,27 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-
-import static org.apache.kafka.common.record.RecordBatch.NO_TIMESTAMP;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
- * 用于处理发送生产请求到Kafka集群的后台线程
- * 后台线程用于刷新cluster的视图信息，并且将生产请求发送到合适的节点
+ * The background thread that handles the sending of produce requests to the Kafka cluster. This thread makes metadata
+ * requests to renew its view of the cluster and then sends produce requests to the appropriate nodes.
  */
 public class Sender implements Runnable {
 
 	private final Logger log;
 
-	/**
-	 * 连接节点的客户端
-	 */
+	/* the state of each nodes connection */
 	private final KafkaClient client;
 
-	/**
-	 * 记录record的累加器
-	 */
+	/* the record accumulator that batches records */
 	private final RecordAccumulator accumulator;
 
-	/**
-	 * 连接client的元数据
-	 */
+	/* the metadata for the client */
 	private final ProducerMetadata metadata;
 
-	/**
-	 * 是否需要保证生产时的顺序
-	 */
+	/* the flag indicating whether the producer should guarantee the message order on the broker or not. */
 	private final boolean guaranteeMessageOrder;
 
 	/* the maximum request size to attempt to send to the server */
@@ -113,30 +103,22 @@ public class Sender implements Runnable {
 	/* true when the caller wants to ignore all unsent/inflight messages and force close.  */
 	private volatile boolean forceClose;
 
-	/**
-	 * Sender发送数据线程专属计数器
-	 */
+	/* metrics */
 	private final SenderMetrics sensors;
 
 	/* the max time to wait for the server to respond to the request*/
 	private final int requestTimeoutMs;
 
-	/**
-	 * 在失败的情况下，等待或尝试下一个请求的时间
-	 */
+	/* The max time to wait before retrying a request which has failed */
 	private final long retryBackoffMs;
 
 	/* current request API versions supported by the known brokers */
 	private final ApiVersions apiVersions;
 
-	/**
-	 * 和事务有关系的所有状态
-	 * 尤其是producer id, producer epoch, sequence numbers
-	 */
+	/* all the state related to transactions, in particular the producer id, producer epoch, and sequence numbers */
 	private final TransactionManager transactionManager;
 
-	// 针对每个partition的ProducerBatch列表
-	// ProducerBatch列表是根据创建时间进行排序的
+	// A per-partition queue of batches ordered by creation time for tracking the in-flight batches
 	private final Map<TopicPartition, List<ProducerBatch>> inFlightBatches;
 
 	public Sender(LogContext logContext,
@@ -154,35 +136,20 @@ public class Sender implements Runnable {
 				  TransactionManager transactionManager,
 				  ApiVersions apiVersions) {
 		this.log = logContext.logger(Sender.class);
-		// 同Kafka服务端进行交互的客户端
 		this.client = client;
-		// 关联的RecordAccumulator
 		this.accumulator = accumulator;
-		// KafkaProducer的元数据
 		this.metadata = metadata;
-		// 是否需要保证消息的顺序性，与max.in.flight.requests.per.connection参数设置有关
 		this.guaranteeMessageOrder = guaranteeMessageOrder;
-		// 请求允许的最大字节数
 		this.maxRequestSize = maxRequestSize;
-		// 线程的运行状态
 		this.running = true;
-		// 集群副本的必须响应数量
 		this.acks = acks;
-		// 消息发送失败的重试次数
 		this.retries = retries;
-		// 创建时间戳
 		this.time = time;
-		// 发送线程计数器
 		this.sensors = new SenderMetrics(metricsRegistry, metadata, client, time);
-		// 发送请求的等待时间
 		this.requestTimeoutMs = requestTimeoutMs;
-		// 发送失败后的等待时间
 		this.retryBackoffMs = retryBackoffMs;
-		// KafkaProducer的版本
 		this.apiVersions = apiVersions;
-		// 如果开启了，则需要传递事务管理器
 		this.transactionManager = transactionManager;
-		// 初始化Kafka集群未响应的batch集合
 		this.inFlightBatches = new HashMap<>();
 	}
 
@@ -190,7 +157,7 @@ public class Sender implements Runnable {
 		return inFlightBatches.containsKey(tp) ? inFlightBatches.get(tp) : new ArrayList<>();
 	}
 
-	public void maybeRemoveFromInflightBatches(ProducerBatch batch) {
+	private void maybeRemoveFromInflightBatches(ProducerBatch batch) {
 		List<ProducerBatch> batches = inFlightBatches.get(batch.topicPartition);
 		if (batches != null) {
 			batches.remove(batch);
@@ -200,26 +167,29 @@ public class Sender implements Runnable {
 		}
 	}
 
+	private void maybeRemoveAndDeallocateBatch(ProducerBatch batch) {
+		maybeRemoveFromInflightBatches(batch);
+		this.accumulator.deallocate(batch);
+	}
+
 	/**
-	 * 获取已经发送超时的正在运行的batch集合
+	 * Get the in-flight batches that has reached delivery timeout.
 	 */
 	private List<ProducerBatch> getExpiredInflightBatches(long now) {
 		List<ProducerBatch> expiredBatches = new ArrayList<>();
-		// 使用迭代器进行遍历
+
 		for (Iterator<Map.Entry<TopicPartition, List<ProducerBatch>>> batchIt = inFlightBatches.entrySet().iterator(); batchIt.hasNext(); ) {
 			Map.Entry<TopicPartition, List<ProducerBatch>> entry = batchIt.next();
 			List<ProducerBatch> partitionInFlightBatches = entry.getValue();
 			if (partitionInFlightBatches != null) {
-				// 遍历每个partition的ProducerBatch
 				Iterator<ProducerBatch> iter = partitionInFlightBatches.iterator();
 				while (iter.hasNext()) {
 					ProducerBatch batch = iter.next();
-					// 是否已经超过发送超时时长
 					if (batch.hasReachedDeliveryTimeout(accumulator.getDeliveryTimeoutMs(), now)) {
 						iter.remove();
-						// 已经过期的batch，不能继续在正常队列中处理，需要调用#sendProducerData()方法进行处理
-						// batch必须是未发送的
-						// 如果是已发送的，将会抛出异常
+						// expireBatches is called in Sender.sendProducerData, before client.poll.
+						// The !batch.isDone() invariant should always hold. An IllegalStateException
+						// exception will be thrown if the invariant is violated.
 						if (!batch.isDone()) {
 							expiredBatches.add(batch);
 						} else {
@@ -227,12 +197,10 @@ public class Sender implements Runnable {
 									batch.createdMs + " gets unexpected final state " + batch.finalState());
 						}
 					} else {
-						// 由于是按时间顺序进行排序的，如果当前batch没有过期，证明此索引以后的batch也未过期
 						accumulator.maybeUpdateNextBatchExpiryTime(batch);
 						break;
 					}
 				}
-				// 如果batch已经发送，移除当前的partition分类
 				if (partitionInFlightBatches.isEmpty()) {
 					batchIt.remove();
 				}
@@ -252,10 +220,6 @@ public class Sender implements Runnable {
 		}
 	}
 
-	/**
-	 * 添加到运行中的batch
-	 * @param batches 汇总的每个node的batch列表映射
-	 */
 	public void addToInflightBatches(Map<Integer, List<ProducerBatch>> batches) {
 		for (List<ProducerBatch> batchList : batches.values()) {
 			addToInflightBatches(batchList);
@@ -267,12 +231,13 @@ public class Sender implements Runnable {
 	}
 
 	/**
-	 * sender线程核心工作线程
+	 * The main run loop for the sender thread
 	 */
+	@Override
 	public void run() {
 		log.debug("Starting Kafka producer I/O thread.");
 
-		// 主要循环，循环到调用#close()方法
+		// main loop, runs until close is called
 		while (running) {
 			try {
 				runOnce();
@@ -283,10 +248,10 @@ public class Sender implements Runnable {
 
 		log.debug("Beginning shutdown of Kafka producer I/O thread, sending remaining records.");
 
-		// 我们停止接收请求，但是可能还会有请求在事务管理器中、累加器中，或者等待ack
-		// 当前发送线程将一直等待所有请求完成
+		// okay we stopped accepting requests but there may still be
+		// requests in the transaction manager, accumulator or waiting for acknowledgment,
+		// wait until these are completed.
 		while (!forceClose && ((this.accumulator.hasUndrained() || this.client.inFlightRequestCount() > 0) || hasPendingTransactionalRequests())) {
-			// 所有请求完成之后，再执行一次
 			try {
 				runOnce();
 			} catch (Exception e) {
@@ -294,34 +259,30 @@ public class Sender implements Runnable {
 			}
 		}
 
-		// 在任何提交或者中断，没有经过事务管理器的队列情况下，中断事务
+		// Abort the transaction if any commit or abort didn't go through the transaction manager's queue
 		while (!forceClose && transactionManager != null && transactionManager.hasOngoingTransaction()) {
-			// 事务管理器没有完成的情况下，进行中断
 			if (!transactionManager.isCompleting()) {
 				log.info("Aborting incomplete transaction due to shutdown");
 				transactionManager.beginAbort();
 			}
 			try {
-				// 再执行一次发送
 				runOnce();
 			} catch (Exception e) {
 				log.error("Uncaught error in kafka producer I/O thread: ", e);
 			}
 		}
-		// 如果开启了强制关闭
+
 		if (forceClose) {
-			// 存在事务管理器，则关闭事务管理器
-			// 此时，我们需要让所有未完成的事务请求或者batch失败，然后唤醒因为异步请求，现在仍然等待的获取结果的线程
+			// We need to fail all the incomplete transactional requests and batches and wake up the threads waiting on
+			// the futures.
 			if (transactionManager != null) {
 				log.debug("Aborting incomplete transactional requests due to forced shutdown");
 				transactionManager.close();
 			}
 			log.debug("Aborting incomplete batches due to forced shutdown");
-			// 中断没有完成的batch
 			this.accumulator.abortIncompleteBatches();
 		}
 		try {
-			// 关闭client
 			this.client.close();
 		} catch (Exception e) {
 			log.error("Failed to close network client", e);
@@ -331,83 +292,60 @@ public class Sender implements Runnable {
 	}
 
 	/**
-	 * 执行一次发送迭代
+	 * Run a single iteration of sending
 	 */
 	void runOnce() {
-		// 如果需要进行事务处理
 		if (transactionManager != null) {
 			try {
-				// 在需要的情况下，重置producerId
-				transactionManager.resetProducerIdIfNeeded();
-				// 如果事务管理器没有处于事务状态
-				if (!transactionManager.isTransactional()) {
-					// 此时是一个幂等的producer，确保要有producerId
-					maybeWaitForProducerId();
-				} else if (transactionManager.hasUnresolvedSequences() && !transactionManager.hasFatalError()) {
-					// 如果当前事务管理器中还有未发送完的sequence，并且事务管理器的状态不是FETAL_ERROR，则将事务管理器状态更新值FATAL_ERROR
-					transactionManager.transitionToFatalError(
-							new KafkaException("The client hasn't received acknowledgment for " +
-									"some previously sent messages and can no longer retry them. It isn't safe to continue."));
-				} else if (maybeSendAndPollTransactionalRequest()) {
-					// 需要发送和拉取事务请求，则直接返回，等待下一次请求发送
+				transactionManager.maybeResolveSequences();
+
+				// do not continue sending if the transaction manager is in a failed state
+				if (transactionManager.hasFatalError()) {
+					RuntimeException lastError = transactionManager.lastError();
+					if (lastError != null)
+						maybeAbortBatches(lastError);
+					client.poll(retryBackoffMs, time.milliseconds());
 					return;
 				}
 
-				// 在事务管理器状态为FATAL_ERROR，或者在开启幂等功能条件下没有producer id，则无法继续发送
-				if (transactionManager.hasFatalError() || !transactionManager.hasProducerId()) {
-					RuntimeException lastError = transactionManager.lastError();
-					// 获取事务管理器最后一次发生的错误
-					if (lastError != null)
-						// 如果累加器还有未发送的batch，则中断这些batch的发送
-						maybeAbortBatches(lastError);
-					// 拉取Kafka集群返回的响应，并结束本次发送请求
-					client.poll(retryBackoffMs, time.milliseconds());
+				// Check whether we need a new producerId. If so, we will enqueue an InitProducerId
+				// request which will be sent below
+				transactionManager.bumpIdempotentEpochAndResetIdIfNeeded();
+
+				if (maybeSendAndPollTransactionalRequest()) {
 					return;
-				} else if (transactionManager.hasAbortableError()) {
-					// 如果当前事务管理器有中断错误
-					// 中断RecordAccumulator中还没有发送出去的batch
-					accumulator.abortUndrainedBatches(transactionManager.lastError());
 				}
 			} catch (AuthenticationException e) {
-				// 已经以error的方式记录，但是传播到这里来进行一些清理
-				log.trace("Authentication exception while processing transactional request: {}", e);
-				// 设置事务管理器校验失败及异常信息
+				// This is already logged as error, but propagated here to perform any clean ups.
+				log.trace("Authentication exception while processing transactional request", e);
 				transactionManager.authenticationFailed(e);
 			}
 		}
-		// 获取当前时间戳
+
 		long currentTimeMs = time.milliseconds();
-		// 发送生产数据，这里这是构建发送数据请求，然后将请求放入到Channel中，等待执行
 		long pollTimeout = sendProducerData(currentTimeMs);
-		// 真正的执行请求
 		client.poll(pollTimeout, currentTimeMs);
 	}
 
-	/**
-	 * 发送producer数据
-	 * @param now 方法调用时间戳
-	 * @return
-	 */
 	private long sendProducerData(long now) {
-		// 从连接metadata中获取集群信息
 		Cluster cluster = metadata.fetch();
-		// 从累加器中获取处于准备发送状态的partitionrecord累加器
+		// get the list of partitions with data ready to send
 		RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
 
-		// 存在topic leader节点未知的情况下，强制更新metadata
+		// if there are any partitions whose leaders are not known yet, force metadata update
 		if (!result.unknownLeaderTopics.isEmpty()) {
-			// 这个集合既包括了正在选举leader节点的topic，也包括已经失效的topic，
-			// 将它们继续添加到metadata中，以确保被metadata包含在内，然后进行一次metadata更新，因为有消息仍需要发送到这些topic上
+			// The set of topics with unknown leader contains topics with leader election pending as well as
+			// topics which may have expired. Add the topic again to metadata to ensure it is included
+			// and request metadata update, since there are messages to send to the topic.
 			for (String topic : result.unknownLeaderTopics)
-				this.metadata.add(topic);
+				this.metadata.add(topic, now);
 
 			log.debug("Requesting metadata update due to unknown leader topics from the batched records: {}",
 					result.unknownLeaderTopics);
-			// 进行一次metadata更新
 			this.metadata.requestUpdate();
 		}
 
-		// 去除一些没有准备就绪的节点
+		// remove any nodes we aren't ready to send to
 		Iterator<Node> iter = result.readyNodes.iterator();
 		long notReadyTimeout = Long.MAX_VALUE;
 		while (iter.hasNext()) {
@@ -418,107 +356,124 @@ public class Sender implements Runnable {
 			}
 		}
 
-		// 创建生产请求，汇总每个leader节点需要发送的batch列表
+		// create produce requests
 		Map<Integer, List<ProducerBatch>> batches = this.accumulator.drain(cluster, result.readyNodes, this.maxRequestSize, now);
-		// 添加到运行中的batch集合中
 		addToInflightBatches(batches);
-		// 在需要保证消息顺序的情况下
 		if (guaranteeMessageOrder) {
-			// 关闭所有排空的partition
+			// Mute all the partitions drained
 			for (List<ProducerBatch> batchList : batches.values()) {
 				for (ProducerBatch batch : batchList)
 					this.accumulator.mutePartition(batch.topicPartition);
 			}
 		}
-		// 重置下一个batch的失效时间
+
 		accumulator.resetNextBatchExpiryTime();
-		// 获取已经发送超时的正在运行的batch集合
 		List<ProducerBatch> expiredInflightBatches = getExpiredInflightBatches(now);
-		// 获取当前累加器的所有失效的batch集合
 		List<ProducerBatch> expiredBatches = this.accumulator.expiredBatches(now);
-		// 汇总两种情况的失效集合
 		expiredBatches.addAll(expiredInflightBatches);
 
-		// 如果一个失效的batch先前发送过record给broker，重置producer id，同时更新失效batch的统计数据
-		// 请了解@TransactionState.resetProducerId来理解为什么我们在这里需要重置producer id
+		// Reset the producer id if an expired batch has previously been sent to the broker. Also update the metrics
+		// for expired batches. see the documentation of @TransactionState.resetIdempotentProducerId to understand why
+		// we need to reset the producer id here.
 		if (!expiredBatches.isEmpty())
 			log.trace("Expired {} batches in accumulator", expiredBatches.size());
-		// 遍历所有失效的batch，将它们置为失效
 		for (ProducerBatch expiredBatch : expiredBatches) {
 			String errorMessage = "Expiring " + expiredBatch.recordCount + " record(s) for " + expiredBatch.topicPartition
 					+ ":" + (now - expiredBatch.createdMs) + " ms has passed since batch creation";
-			// 对失效batch执行失败操作
-			failBatch(expiredBatch, -1, NO_TIMESTAMP, new TimeoutException(errorMessage), false);
-			// 在拥有事务管理器的情况下，并且失效的batch进入了重试
+			failBatch(expiredBatch, new TimeoutException(errorMessage), false);
 			if (transactionManager != null && expiredBatch.inRetry()) {
-				// 标记一下batch还没有发送成功，不允许接着分配sequence序号
-				transactionManager.markSequenceUnresolved(expiredBatch.topicPartition);
+				// This ensures that no new batches are drained until the current in flight batches are fully resolved.
+				transactionManager.markSequenceUnresolved(expiredBatch);
 			}
 		}
-		// Sender发送数据线程专属计数器，统计发送的batch
 		sensors.updateProduceRequestMetrics(batches);
 
-		// 如果我们拥有一些节点，这些节点已经准备好发送或者拥有可发送的数据，那么调用poll()方法的时间为0，这样可以立即循环，并且尝试发送更多的数据
-		// 其他情况下，poll()方法的超时时间将会是下一个batch的失效时间和检查数据可用性的延长时间，二者的最小值
-		// 请注意，节点可能存在延迟，撤回等问题，导致无法发送数据
-		// 这种特殊的情况不包括拥有可发送数据，但是还没有准备好发送的节点，这样可能导致频繁的循环
+		// If we have any nodes that are ready to send + have sendable data, poll with 0 timeout so this can immediately
+		// loop and try sending more data. Otherwise, the timeout will be the smaller value between next batch expiry
+		// time, and the delay time for checking data availability. Note that the nodes may have data that isn't yet
+		// sendable due to lingering, backing off, etc. This specifically does not include nodes with sendable data
+		// that aren't ready to send since they would cause busy looping.
 		long pollTimeout = Math.min(result.nextReadyCheckDelayMs, notReadyTimeout);
 		pollTimeout = Math.min(pollTimeout, this.accumulator.nextExpiryTimeMs() - now);
-		// 等待时间必须大于0
 		pollTimeout = Math.max(pollTimeout, 0);
-		// 如果有准备就绪的节点，
 		if (!result.readyNodes.isEmpty()) {
 			log.trace("Nodes with data ready to send: {}", result.readyNodes);
-			// 如果一些partition已经准备好发送数据了，select时间为0
-			// 其它情况下，如果一些partition拥有累加的数据，但是还没有就绪，那么select时间为当前时间戳和过期时间之差
-			// 在上述情况的其它情况下，select时间是当前时间戳和集群metadata过期时间之差
+			// if some partitions are already ready to be sent, the select time would be 0;
+			// otherwise if some partition already has some data accumulated but not ready yet,
+			// the select time will be the time difference between now and its linger expiry time;
+			// otherwise the select time will be the time difference between now and the metadata expiry time;
 			pollTimeout = 0;
 		}
-		// 构建生产消息请求，返回获取结果的等待时间
 		sendProduceRequests(batches, now);
 		return pollTimeout;
 	}
 
 	/**
-	 * 如果一个事务request被发送或者获取走，或者一个FindCoordinator请求入队，返回true
+	 * Returns true if a transactional request is sent or polled, or if a FindCoordinator request is enqueued
 	 */
 	private boolean maybeSendAndPollTransactionalRequest() {
-		// 事务管理器有正在发送中的事务请求
-		if (transactionManager.hasInFlightTransactionalRequest()) {
-			// 只要有未完成的事务请求，client就会一直等待#poll()返回
+		if (transactionManager.hasInFlightRequest()) {
+			// as long as there are outstanding transactional requests, we simply wait for them to return
 			client.poll(retryBackoffMs, time.milliseconds());
 			return true;
 		}
-		// 如果事务管理器处于完成状态，并且计数器已经完成
-		if (transactionManager.isCompleting() && accumulator.hasIncomplete()) {
-			// 中断事务管理器
-			if (transactionManager.isAborting())
-				accumulator.abortUndrainedBatches(new KafkaException("Failing batch since transaction was aborted"));
-			// 在充实之后，可能还会有请求遗留，我们无法得知追加到Broker日志的操作是成功还是失败，我们需要在最终状态确认的情况下，重新发送
-			// 如果已经追加到Broker日志，但是没有收到指定的错误，我们的sequence number也是不正确的，我们可能会被引导至OutOfSequenceException异常
-			if (!accumulator.flushInProgress())
-				accumulator.beginFlush();
+
+		if (transactionManager.hasAbortableError() || transactionManager.isAborting()) {
+			if (accumulator.hasIncomplete()) {
+				// Attempt to get the last error that caused this abort.
+				RuntimeException exception = transactionManager.lastError();
+				// If there was no error, but we are still aborting,
+				// then this is most likely a case where there was no fatal error.
+				if (exception == null) {
+					exception = new TransactionAbortedException();
+				}
+				accumulator.abortUndrainedBatches(exception);
+			}
 		}
 
-		TransactionManager.TxnRequestHandler nextRequestHandler = transactionManager.nextRequestHandler(accumulator.hasIncomplete());
+		if (transactionManager.isCompleting() && !accumulator.flushInProgress()) {
+			// There may still be requests left which are being retried. Since we do not know whether they had
+			// been successfully appended to the broker log, we must resend them until their final status is clear.
+			// If they had been appended and we did not receive the error, then our sequence number would no longer
+			// be correct which would lead to an OutOfSequenceException.
+			accumulator.beginFlush();
+		}
+
+		TransactionManager.TxnRequestHandler nextRequestHandler = transactionManager.nextRequest(accumulator.hasIncomplete());
 		if (nextRequestHandler == null)
 			return false;
 
 		AbstractRequest.Builder<?> requestBuilder = nextRequestHandler.requestBuilder();
 		Node targetNode = null;
 		try {
-			targetNode = awaitNodeReady(nextRequestHandler.coordinatorType());
-			if (targetNode == null) {
-				lookupCoordinatorAndRetry(nextRequestHandler);
+			FindCoordinatorRequest.CoordinatorType coordinatorType = nextRequestHandler.coordinatorType();
+			targetNode = coordinatorType != null ?
+					transactionManager.coordinator(coordinatorType) :
+					client.leastLoadedNode(time.milliseconds());
+			if (targetNode != null) {
+				if (!awaitNodeReady(targetNode, coordinatorType)) {
+					log.trace("Target node {} not ready within request timeout, will retry when node is ready.", targetNode);
+					maybeFindCoordinatorAndRetry(nextRequestHandler);
+					return true;
+				}
+			} else if (coordinatorType != null) {
+				log.trace("Coordinator not known for {}, will retry {} after finding coordinator.", coordinatorType, requestBuilder.apiKey());
+				maybeFindCoordinatorAndRetry(nextRequestHandler);
+				return true;
+			} else {
+				log.trace("No nodes available to send requests, will poll and retry when until a node is ready.");
+				transactionManager.retry(nextRequestHandler);
+				client.poll(retryBackoffMs, time.milliseconds());
 				return true;
 			}
 
 			if (nextRequestHandler.isRetry())
 				time.sleep(nextRequestHandler.retryBackoffMs());
+
 			long currentTimeMs = time.milliseconds();
-			ClientRequest clientRequest = client.newClientRequest(
-					targetNode.idString(), requestBuilder, currentTimeMs, true, requestTimeoutMs, nextRequestHandler);
-			log.debug("Sending transactional request {} to node {}", requestBuilder, targetNode);
+			ClientRequest clientRequest = client.newClientRequest(targetNode.idString(), requestBuilder, currentTimeMs,
+					true, requestTimeoutMs, nextRequestHandler);
+			log.debug("Sending transactional request {} to node {} with correlation ID {}", requestBuilder, targetNode, clientRequest.correlationId());
 			client.send(clientRequest, currentTimeMs);
 			transactionManager.setInFlightCorrelationId(clientRequest.correlationId());
 			client.poll(retryBackoffMs, time.milliseconds());
@@ -527,12 +482,12 @@ public class Sender implements Runnable {
 			log.debug("Disconnect from {} while trying to send request {}. Going " +
 					"to back off and retry.", targetNode, requestBuilder, e);
 			// We break here so that we pick up the FindCoordinator request immediately.
-			lookupCoordinatorAndRetry(nextRequestHandler);
+			maybeFindCoordinatorAndRetry(nextRequestHandler);
 			return true;
 		}
 	}
 
-	private void lookupCoordinatorAndRetry(TransactionManager.TxnRequestHandler nextRequestHandler) {
+	private void maybeFindCoordinatorAndRetry(TransactionManager.TxnRequestHandler nextRequestHandler) {
 		if (nextRequestHandler.needsCoordinator()) {
 			transactionManager.lookupCoordinator(nextRequestHandler);
 		} else {
@@ -545,7 +500,6 @@ public class Sender implements Runnable {
 	}
 
 	private void maybeAbortBatches(RuntimeException exception) {
-		// 如果累加器还有未发送的batch，则中断这些batch的发送
 		if (accumulator.hasIncomplete()) {
 			log.error("Aborting producer batches due to fatal error", exception);
 			accumulator.abortBatches(exception);
@@ -575,178 +529,116 @@ public class Sender implements Runnable {
 		return running;
 	}
 
-	private ClientResponse sendAndAwaitInitProducerIdRequest(Node node) throws IOException {
-		String nodeId = node.idString();
-		InitProducerIdRequestData requestData = new InitProducerIdRequestData()
-				.setTransactionalId(null)
-				.setTransactionTimeoutMs(Integer.MAX_VALUE);
-		InitProducerIdRequest.Builder builder = new InitProducerIdRequest.Builder(requestData);
-		ClientRequest request = client.newClientRequest(nodeId, builder, time.milliseconds(), true, requestTimeoutMs, null);
-		return NetworkClientUtils.sendAndReceive(client, request, time);
-	}
-
-	private Node awaitNodeReady(FindCoordinatorRequest.CoordinatorType coordinatorType) throws IOException {
-		Node node = coordinatorType != null ?
-				transactionManager.coordinator(coordinatorType) :
-				client.leastLoadedNode(time.milliseconds());
-
-		if (node != null && NetworkClientUtils.awaitReady(client, node, time, requestTimeoutMs)) {
-			return node;
-		}
-		return null;
-	}
-
-	private void maybeWaitForProducerId() {
-		while (!forceClose && !transactionManager.hasProducerId() && !transactionManager.hasError()) {
-			Node node = null;
-			try {
-				node = awaitNodeReady(null);
-				if (node != null) {
-					ClientResponse response = sendAndAwaitInitProducerIdRequest(node);
-					InitProducerIdResponse initProducerIdResponse = (InitProducerIdResponse) response.responseBody();
-					Errors error = initProducerIdResponse.error();
-					if (error == Errors.NONE) {
-						ProducerIdAndEpoch producerIdAndEpoch = new ProducerIdAndEpoch(
-								initProducerIdResponse.data.producerId(), initProducerIdResponse.data.producerEpoch());
-						transactionManager.setProducerIdAndEpoch(producerIdAndEpoch);
-						return;
-					} else if (error.exception() instanceof RetriableException) {
-						log.debug("Retriable error from InitProducerId response", error.message());
-					} else {
-						transactionManager.transitionToFatalError(error.exception());
-						break;
-					}
-				} else {
-					log.debug("Could not find an available broker to send InitProducerIdRequest to. Will back off and retry.");
-				}
-			} catch (UnsupportedVersionException e) {
-				transactionManager.transitionToFatalError(e);
-				break;
-			} catch (IOException e) {
-				log.debug("Broker {} disconnected while awaiting InitProducerId response", node, e);
+	private boolean awaitNodeReady(Node node, FindCoordinatorRequest.CoordinatorType coordinatorType) throws IOException {
+		if (NetworkClientUtils.awaitReady(client, node, time, requestTimeoutMs)) {
+			if (coordinatorType == FindCoordinatorRequest.CoordinatorType.TRANSACTION) {
+				// Indicate to the transaction manager that the coordinator is ready, allowing it to check ApiVersions
+				// This allows us to bump transactional epochs even if the coordinator is temporarily unavailable at
+				// the time when the abortable error is handled
+				transactionManager.handleCoordinatorReady();
 			}
-			log.trace("Retry InitProducerIdRequest in {}ms.", retryBackoffMs);
-			time.sleep(retryBackoffMs);
-			metadata.requestUpdate();
+			return true;
 		}
+		return false;
 	}
 
 	/**
-	 * 构建返回的生产响应的回调任务
+	 * Handle a produce response
 	 */
 	private void handleProduceResponse(ClientResponse response, Map<TopicPartition, ProducerBatch> batches, long now) {
 		RequestHeader requestHeader = response.requestHeader();
-		long receivedTimeMs = response.receivedTimeMs();
 		int correlationId = requestHeader.correlationId();
 		if (response.wasDisconnected()) {
-			// 响应返回的内容是网络连接断开，则以网络连接异常的失败的原因，取消batch的发送请求
 			log.trace("Cancelled request with header {} due to node {} being disconnected",
 					requestHeader, response.destination());
 			for (ProducerBatch batch : batches.values())
-				completeBatch(batch, new ProduceResponse.PartitionResponse(Errors.NETWORK_EXCEPTION), correlationId, now, 0L);
+				completeBatch(batch, new ProduceResponse.PartitionResponse(Errors.NETWORK_EXCEPTION, String.format("Disconnected from node %s", response.destination())),
+						correlationId, now);
 		} else if (response.versionMismatch() != null) {
-			// 响应返回的内容是客户端版本不匹配，则以不支持的API版本原因，取消batch的发送请求
 			log.warn("Cancelled request {} due to a version mismatch with node {}",
 					response, response.destination(), response.versionMismatch());
 			for (ProducerBatch batch : batches.values())
-				completeBatch(batch, new ProduceResponse.PartitionResponse(Errors.UNSUPPORTED_VERSION), correlationId, now, 0L);
+				completeBatch(batch, new ProduceResponse.PartitionResponse(Errors.UNSUPPORTED_VERSION), correlationId, now);
 		} else {
 			log.trace("Received produce response from node {} with correlation id {}", response.destination(), correlationId);
+			// if we have a response, parse it
 			if (response.hasResponse()) {
-				// 如果存在响应对象，则对响应对象进行解析
+				// Sender should exercise PartitionProduceResponse rather than ProduceResponse.PartitionResponse
+				// https://issues.apache.org/jira/browse/KAFKA-10696
 				ProduceResponse produceResponse = (ProduceResponse) response.responseBody();
-				// 响应中的信息维度是：topic-partition => partitionResponse
-				for (Map.Entry<TopicPartition, ProduceResponse.PartitionResponse> entry : produceResponse.responses().entrySet()) {
-					TopicPartition tp = entry.getKey();
-					ProduceResponse.PartitionResponse partResp = entry.getValue();
-					// 从回调任务传入的topic-partition=>batch列表集合中获取对应的batch列表，并完成每个batch
+				produceResponse.data().responses().forEach(r -> r.partitionResponses().forEach(p -> {
+					TopicPartition tp = new TopicPartition(r.name(), p.index());
+					ProduceResponse.PartitionResponse partResp = new ProduceResponse.PartitionResponse(
+							Errors.forCode(p.errorCode()),
+							p.baseOffset(),
+							p.logAppendTimeMs(),
+							p.logStartOffset(),
+							p.recordErrors()
+									.stream()
+									.map(e -> new ProduceResponse.RecordError(e.batchIndex(), e.batchIndexErrorMessage()))
+									.collect(Collectors.toList()),
+							p.errorMessage());
 					ProducerBatch batch = batches.get(tp);
-					completeBatch(batch, partResp, correlationId, now, receivedTimeMs + produceResponse.throttleTimeMs());
-				}
+					completeBatch(batch, partResp, correlationId, now);
+				}));
 				this.sensors.recordLatency(response.destination(), response.requestLatencyMs());
 			} else {
-				// 此时属于acks=0的条件，完成所有请求即可
+				// this is the acks = 0 case, just complete all requests
 				for (ProducerBatch batch : batches.values()) {
-					completeBatch(batch, new ProduceResponse.PartitionResponse(Errors.NONE), correlationId, now, 0L);
+					completeBatch(batch, new ProduceResponse.PartitionResponse(Errors.NONE), correlationId, now);
 				}
 			}
 		}
 	}
 
 	/**
-	 * 完成或重试指定的batch
-	 * @param batch         存储record的batch
-	 * @param response      生产请求的相应
-	 * @param correlationId 请求的唯一ID
-	 * @param now           当前时间戳
+	 * Complete or retry the given batch of records.
+	 * @param batch         The record batch
+	 * @param response      The produce response
+	 * @param correlationId The correlation id for the request
+	 * @param now           The current POSIX timestamp in milliseconds
 	 */
 	private void completeBatch(ProducerBatch batch, ProduceResponse.PartitionResponse response, long correlationId,
-							   long now, long throttleUntilTimeMs) {
+							   long now) {
 		Errors error = response.error;
-		// 如果返回的错误信息是消息过大，并且当前batch中有多条消息，并且当前batch并没有终结状态，并且消息版本为V2版本或消息已经压缩
+
 		if (error == Errors.MESSAGE_TOO_LARGE && batch.recordCount > 1 && !batch.isDone() &&
 				(batch.magic() >= RecordBatch.MAGIC_VALUE_V2 || batch.isCompressed())) {
-			// 如果batch过大，我们需要将batch分割为多个小batch，并重新进行发送
-			// 在这种情况下，我们不会递减重试发送的次数
+			// If the batch is too large, we split the batch and send the split batches again. We do not decrement
+			// the retry attempts in this case.
 			log.warn(
 					"Got error produce response in correlation id {} on topic-partition {}, splitting and retrying ({} attempts left). Error: {}",
 					correlationId,
 					batch.topicPartition,
 					this.retries - batch.attempts(),
-					error);
+					formatErrMsg(response));
 			if (transactionManager != null)
 				transactionManager.removeInFlightBatch(batch);
-			// 将大batch分割为小batch，重新放入到消息队列中
 			this.accumulator.splitAndReenqueue(batch);
-			// 回收分配的内存
-			this.accumulator.deallocate(batch);
-			// 记录分割出的batch
+			maybeRemoveAndDeallocateBatch(batch);
 			this.sensors.recordBatchSplit();
 		} else if (error != Errors.NONE) {
-			// 如果提交的offset超出了允许的offset范围
 			if (canRetry(batch, response, now)) {
-				// 允许重试的情况下，尝试重新发送batch
 				log.warn(
 						"Got error produce response with correlation id {} on topic-partition {}, retrying ({} attempts left). Error: {}",
 						correlationId,
 						batch.topicPartition,
 						this.retries - batch.attempts() - 1,
-						error);
-				if (transactionManager == null) {
-					// 非事务情况下，重新入队，等待发送
-					reenqueueBatch(batch, now);
-				} else if (transactionManager.hasProducerIdAndEpoch(batch.producerId(), batch.producerEpoch())) {
-					// 开启了幂等功能，只在当前producer id和batch的produce id相等的情况下，重新发送
-					log.debug("Retrying batch to topic-partition {}. ProducerId: {}; Sequence number : {}",
-							batch.topicPartition, batch.producerId(), batch.baseSequence());
-					reenqueueBatch(batch, now);
-				} else {
-					// 其他情况下，不进行重新发送，直接失败
-					failBatch(batch, response, new OutOfOrderSequenceException("Attempted to retry sending a " +
-							"batch but the producer id changed from " + batch.producerId() + " to " +
-							transactionManager.producerIdAndEpoch().producerId + " in the mean time. This batch will be dropped."), false);
-				}
+						formatErrMsg(response));
+				reenqueueBatch(batch, now);
 			} else if (error == Errors.DUPLICATE_SEQUENCE_NUMBER) {
-				// 收到了重复sequence序号的请求
-				// 此时意味着，sequence序号已经超过当前batch的序号，我们还没有保留broker上的batch元数据，来返回正确的offset和时间戳
-				// 现在能做的唯一一件事情是返回success给用户，并不要返回一个合法的offset和的时间戳
+				// If we have received a duplicate sequence error, it means that the sequence number has advanced beyond
+				// the sequence of the current batch, and we haven't retained batch metadata on the broker to return
+				// the correct offset and timestamp.
+				//
+				// The only thing we can do is to return success to the user and not return a valid offset and timestamp.
 				completeBatch(batch, response);
 			} else {
-				// 接下来将会使对失败响应的异常处理
-				final RuntimeException exception;
-				// 包装不同类型的异常，如topic身份验证异常，集群身份验证异常，以及其他异常
-				if (error == Errors.TOPIC_AUTHORIZATION_FAILED)
-					exception = new TopicAuthorizationException(Collections.singleton(batch.topicPartition.topic()));
-				else if (error == Errors.CLUSTER_AUTHORIZATION_FAILED)
-					exception = new ClusterAuthorizationException("The producer is not authorized to do idempotent sends");
-				else
-					exception = error.exception();
-				// 告诉开发者，请求的真实结果
-				// 如果batch没有用完它们的重试机会，我们仅会对sequence序号进行调整
-				// 如果batch用完了它们的重试机会，我们并不清楚序号是否被接受，而此时，重新分配sequence序号也是不安全的，索性直接返回发送失败
-				failBatch(batch, response, exception, batch.attempts() < this.retries);
+				// tell the user the result of their request. We only adjust sequence numbers if the batch didn't exhaust
+				// its retries -- if it did, we don't know whether the sequence number was accepted or not, and
+				// thus it is not safe to reassign the sequence.
+				failBatch(batch, response, batch.attempts() < this.retries);
 			}
-			// 如果返回了非法的元数据信息，则需要重新更新元数据，之后不需要再处理，等待batch的重新发送
 			if (error.exception() instanceof InvalidMetadataException) {
 				if (error.exception() instanceof UnknownTopicOrPartitionException) {
 					log.warn("Received unknown topic or partition error in produce request on partition {}. The " +
@@ -754,18 +646,28 @@ public class Sender implements Runnable {
 							batch.topicPartition);
 				} else {
 					log.warn("Received invalid metadata error in produce request on partition {} due to {}. Going " +
-							"to request metadata update now", batch.topicPartition, error.exception().toString());
+									"to request metadata update now", batch.topicPartition,
+							error.exception(response.errorMessage).toString());
 				}
 				metadata.requestUpdate();
 			}
 		} else {
-			// 此时，响应既不是batch过大，也不没有返回异常信息，视为生产请求成功，正常处理batch的响应
 			completeBatch(batch, response);
 		}
 
-		// 在需要保证消息的顺序的情况下，由于已经处理完了partition的batch，则取消partition的静默状态，
+		// Unmute the completed partition.
 		if (guaranteeMessageOrder)
-			this.accumulator.unmutePartition(batch.topicPartition, throttleUntilTimeMs);
+			this.accumulator.unmutePartition(batch.topicPartition);
+	}
+
+	/**
+	 * Format the error from a {@link ProduceResponse.PartitionResponse} in a user-friendly string
+	 * e.g "NETWORK_EXCEPTION. Error Message: Disconnected from node 0"
+	 */
+	private String formatErrMsg(ProduceResponse.PartitionResponse response) {
+		String errorMessageSuffix = (response.errorMessage == null || response.errorMessage.isEmpty()) ?
+				"" : String.format(". Error Message: %s", response.errorMessage);
+		return String.format("%s%s", response.error, errorMessageSuffix);
 	}
 
 	private void reenqueueBatch(ProducerBatch batch, long currentTimeMs) {
@@ -774,52 +676,93 @@ public class Sender implements Runnable {
 		this.sensors.recordRetries(batch.topicPartition.topic(), batch.recordCount);
 	}
 
-	/**
-	 * 完成指定batch的生产请求
-	 * @param batch    指定batch
-	 * @param response batch生产请求响应
-	 */
 	private void completeBatch(ProducerBatch batch, ProduceResponse.PartitionResponse response) {
-		// 开启事务的情况下，首先处理事务管理器的当前batch
 		if (transactionManager != null) {
 			transactionManager.handleCompletedBatch(batch, response);
 		}
-		// 完成batch，同时移除正在发送缓存中的batch，并释放batch所使用的的内存空间
-		if (batch.done(response.baseOffset, response.logAppendTime, null)) {
-			maybeRemoveFromInflightBatches(batch);
-			this.accumulator.deallocate(batch);
+
+		if (batch.complete(response.baseOffset, response.logAppendTime)) {
+			maybeRemoveAndDeallocateBatch(batch);
 		}
 	}
 
-	/**
-	 * batch发送失败
-	 * @param batch 指定batch
-	 * @param response 失败的相应内容
-	 * @param exception 异常
-	 * @param adjustSequenceNumbers
-	 */
 	private void failBatch(ProducerBatch batch,
 						   ProduceResponse.PartitionResponse response,
-						   RuntimeException exception,
 						   boolean adjustSequenceNumbers) {
-		failBatch(batch, response.baseOffset, response.logAppendTime, exception, adjustSequenceNumbers);
+		final RuntimeException topLevelException;
+		if (response.error == Errors.TOPIC_AUTHORIZATION_FAILED)
+			topLevelException = new TopicAuthorizationException(Collections.singleton(batch.topicPartition.topic()));
+		else if (response.error == Errors.CLUSTER_AUTHORIZATION_FAILED)
+			topLevelException = new ClusterAuthorizationException("The producer is not authorized to do idempotent sends");
+		else
+			topLevelException = response.error.exception(response.errorMessage);
+
+		if (response.recordErrors == null || response.recordErrors.isEmpty()) {
+			failBatch(batch, topLevelException, adjustSequenceNumbers);
+		} else {
+			Map<Integer, RuntimeException> recordErrorMap = new HashMap<>(response.recordErrors.size());
+			for (ProduceResponse.RecordError recordError : response.recordErrors) {
+				// The API leaves us with some awkwardness interpreting the errors in the response.
+				// We cannot differentiate between different error cases (such as INVALID_TIMESTAMP)
+				// from the single error code at the partition level, so instead we use INVALID_RECORD
+				// for all failed records and rely on the message to distinguish the cases.
+				final String errorMessage;
+				if (recordError.message != null) {
+					errorMessage = recordError.message;
+				} else if (response.errorMessage != null) {
+					errorMessage = response.errorMessage;
+				} else {
+					errorMessage = response.error.message();
+				}
+
+				// If the batch contained only a single record error, then we can unambiguously
+				// use the exception type corresponding to the partition-level error code.
+				if (response.recordErrors.size() == 1) {
+					recordErrorMap.put(recordError.batchIndex, response.error.exception(errorMessage));
+				} else {
+					recordErrorMap.put(recordError.batchIndex, new InvalidRecordException(errorMessage));
+				}
+			}
+
+			Function<Integer, RuntimeException> recordExceptions = batchIndex -> {
+				RuntimeException exception = recordErrorMap.get(batchIndex);
+				if (exception != null) {
+					return exception;
+				} else {
+					// If the response contains record errors, then the records which failed validation
+					// will be present in the response. To avoid confusion for the remaining records, we
+					// return a generic exception.
+					return new KafkaException("Failed to append record because it was part of a batch " +
+							"which had one more more invalid records");
+				}
+			};
+
+			failBatch(batch, topLevelException, recordExceptions, adjustSequenceNumbers);
+		}
 	}
 
-	private void failBatch(ProducerBatch batch,
-						   long baseOffset,
-						   long logAppendTime,
-						   RuntimeException exception,
-						   boolean adjustSequenceNumbers) {
+	private void failBatch(
+			ProducerBatch batch,
+			RuntimeException topLevelException,
+			boolean adjustSequenceNumbers
+	) {
+		failBatch(batch, topLevelException, batchIndex -> topLevelException, adjustSequenceNumbers);
+	}
+
+	private void failBatch(
+			ProducerBatch batch,
+			RuntimeException topLevelException,
+			Function<Integer, RuntimeException> recordExceptions,
+			boolean adjustSequenceNumbers
+	) {
 		if (transactionManager != null) {
-			// 开启事务的情况下，由事务管理器处理失败的batch
-			transactionManager.handleFailedBatch(batch, exception, adjustSequenceNumbers);
+			transactionManager.handleFailedBatch(batch, topLevelException, adjustSequenceNumbers);
 		}
-		// Sender线程记录发送失败信息
+
 		this.sensors.recordErrors(batch.topicPartition.topic(), batch.recordCount);
-		// 完成batch，同时移除正在发送缓存中的batch，并释放batch所使用的的内存空间
-		if (batch.done(baseOffset, logAppendTime, exception)) {
-			maybeRemoveFromInflightBatches(batch);
-			this.accumulator.deallocate(batch);
+
+		if (batch.completeExceptionally(topLevelException, recordExceptions)) {
+			maybeRemoveAndDeallocateBatch(batch);
 		}
 	}
 
@@ -832,12 +775,13 @@ public class Sender implements Runnable {
 		return !batch.hasReachedDeliveryTimeout(accumulator.getDeliveryTimeoutMs(), now) &&
 				batch.attempts() < this.retries &&
 				!batch.isDone() &&
-				((response.error.exception() instanceof RetriableException) ||
-						(transactionManager != null && transactionManager.canRetry(response, batch)));
+				(transactionManager == null ?
+						response.error.exception() instanceof RetriableException :
+						transactionManager.canRetry(response, batch));
 	}
 
 	/**
-	 * 以每个节点为基础，将数据通过生产请求的媒介下，将数据传输过去
+	 * Transfer the record batches into a list of produce requests on a per-node basis
 	 */
 	private void sendProduceRequests(Map<Integer, List<ProducerBatch>> collated, long now) {
 		for (Map.Entry<Integer, List<ProducerBatch>> entry : collated.entrySet())
@@ -845,55 +789,61 @@ public class Sender implements Runnable {
 	}
 
 	/**
-	 * 根据给定的record batch集合，创建生产请求
+	 * Create a produce request from the given record batches
 	 */
 	private void sendProduceRequest(long now, int destination, short acks, int timeout, List<ProducerBatch> batches) {
 		if (batches.isEmpty())
 			return;
-		// partition以及partition需要传输的batch集合
-		Map<TopicPartition, MemoryRecords> produceRecordsByPartition = new HashMap<>(batches.size());
-		// partition以及partition传输的batch集合
+
 		final Map<TopicPartition, ProducerBatch> recordsByPartition = new HashMap<>(batches.size());
 
-		// 获取版本号
+		// find the minimum magic version used when creating the record sets
 		byte minUsedMagic = apiVersions.maxUsableProduceMagic();
 		for (ProducerBatch batch : batches) {
-			// 向后兼容
 			if (batch.magic() < minUsedMagic)
 				minUsedMagic = batch.magic();
 		}
-		// 遍历每个batch
+		ProduceRequestData.TopicProduceDataCollection tpd = new ProduceRequestData.TopicProduceDataCollection();
 		for (ProducerBatch batch : batches) {
 			TopicPartition tp = batch.topicPartition;
-			// 获取每个batch的record
 			MemoryRecords records = batch.records();
 
-			// 通常，在producer构建batch和发送写入请求之间，是允许出现一段延迟的，我们还可能会基于过时的metadata选择消息的格式
-			// 在最坏的情况下，我们将会乐观的选择去用新的消息格式，但是发现broker并不支持，所以我们就需要向下转换，以便broker能支持
-			// 向下转换已在处理在集群中中出现的边界case，因为broker可能在不同版本中并不支持同样的消息格式
-			// 举个例子，如果一个partition从一个支持的版本，迁移到一个不支持的版本，我们就需要进行转换
+			// down convert if necessary to the minimum magic used. In general, there can be a delay between the time
+			// that the producer starts building the batch and the time that we send the request, and we may have
+			// chosen the message format based on out-dated metadata. In the worst case, we optimistically chose to use
+			// the new message format, but found that the broker didn't support it, so we need to down-convert on the
+			// client before sending. This is intended to handle edge cases around cluster upgrades where brokers may
+			// not all support the same message format version. For example, if a partition migrates from a broker
+			// which is supporting the new magic version to one which doesn't, then we will need to convert.
 			if (!records.hasMatchingMagic(minUsedMagic))
 				records = batch.records().downConvert(minUsedMagic, 0, time).records();
-			// 向两种集合中添加不同分类的待发送记录
-			produceRecordsByPartition.put(tp, records);
+			ProduceRequestData.TopicProduceData tpData = tpd.find(tp.topic());
+			if (tpData == null) {
+				tpData = new ProduceRequestData.TopicProduceData().setName(tp.topic());
+				tpd.add(tpData);
+			}
+			tpData.partitionData().add(new ProduceRequestData.PartitionProduceData()
+					.setIndex(tp.partition())
+					.setRecords(records));
 			recordsByPartition.put(tp, batch);
 		}
-		// 获取transaction id
+
 		String transactionalId = null;
 		if (transactionManager != null && transactionManager.isTransactional()) {
 			transactionalId = transactionManager.transactionalId();
 		}
-		// 根据版本，构建request
-		ProduceRequest.Builder requestBuilder = ProduceRequest.Builder.forMagic(minUsedMagic, acks, timeout,
-				produceRecordsByPartition, transactionalId);
-		// 构建请求完成后的回调任务
+
+		ProduceRequest.Builder requestBuilder = ProduceRequest.forMagic(minUsedMagic,
+				new ProduceRequestData()
+						.setAcks(acks)
+						.setTimeoutMs(timeout)
+						.setTransactionalId(transactionalId)
+						.setTopicData(tpd));
 		RequestCompletionHandler callback = response -> handleProduceResponse(response, recordsByPartition, time.milliseconds());
 
 		String nodeId = Integer.toString(destination);
-		// 创建请求
 		ClientRequest clientRequest = client.newClientRequest(nodeId, requestBuilder, now, acks != 0,
 				requestTimeoutMs, callback);
-		// 发送请求，请求完成后，会执行回调
 		client.send(clientRequest, now);
 		log.trace("Sent produce request to {}: {}", nodeId, requestBuilder);
 	}

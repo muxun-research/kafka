@@ -27,101 +27,125 @@ import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 public class ProducerMetadata extends Metadata {
-    private static final long TOPIC_EXPIRY_NEEDS_UPDATE = -1L;
-    static final long TOPIC_EXPIRY_MS = 5 * 60 * 1000;
+	// If a topic hasn't been accessed for this many milliseconds, it is removed from the cache.
+	private final long metadataIdleMs;
 
-    /* Topics with expiry time */
-    private final Map<String, Long> topics = new HashMap<>();
-    private final Logger log;
-    private final Time time;
+	/* Topics with expiry time */
+	private final Map<String, Long> topics = new HashMap<>();
+	private final Set<String> newTopics = new HashSet<>();
+	private final Logger log;
+	private final Time time;
 
-    public ProducerMetadata(long refreshBackoffMs,
-                            long metadataExpireMs,
-                            LogContext logContext,
-                            ClusterResourceListeners clusterResourceListeners,
-                            Time time) {
-        super(refreshBackoffMs, metadataExpireMs, logContext, clusterResourceListeners);
-        this.log = logContext.logger(ProducerMetadata.class);
-        this.time = time;
-    }
+	public ProducerMetadata(long refreshBackoffMs,
+							long metadataExpireMs,
+							long metadataIdleMs,
+							LogContext logContext,
+							ClusterResourceListeners clusterResourceListeners,
+							Time time) {
+		super(refreshBackoffMs, metadataExpireMs, logContext, clusterResourceListeners);
+		this.metadataIdleMs = metadataIdleMs;
+		this.log = logContext.logger(ProducerMetadata.class);
+		this.time = time;
+	}
 
-    @Override
-    public synchronized MetadataRequest.Builder newMetadataRequestBuilder() {
-        return new MetadataRequest.Builder(new ArrayList<>(topics.keySet()), true);
-    }
+	@Override
+	public synchronized MetadataRequest.Builder newMetadataRequestBuilder() {
+		return new MetadataRequest.Builder(new ArrayList<>(topics.keySet()), true);
+	}
 
-	/**
-	 * 添加topic
-	 * 如果之前已经缓存过这个topic，更新缓存时间
-	 * 如果之前没有缓存过这个topic，添加topic后，更新cluster信息
-	 */
-	public synchronized void add(String topic) {
+	@Override
+	public synchronized MetadataRequest.Builder newMetadataRequestBuilderForNewTopics() {
+		return new MetadataRequest.Builder(new ArrayList<>(newTopics), true);
+	}
+
+	public synchronized void add(String topic, long nowMs) {
 		Objects.requireNonNull(topic, "topic cannot be null");
-		if (topics.put(topic, TOPIC_EXPIRY_NEEDS_UPDATE) == null) {
+		if (topics.put(topic, nowMs + metadataIdleMs) == null) {
+			newTopics.add(topic);
 			requestUpdateForNewTopics();
 		}
 	}
 
-    // Visible for testing
-    synchronized Set<String> topics() {
-        return topics.keySet();
-    }
+	public synchronized int requestUpdateForTopic(String topic) {
+		if (newTopics.contains(topic)) {
+			return requestUpdateForNewTopics();
+		} else {
+			return requestUpdate();
+		}
+	}
 
-    public synchronized boolean containsTopic(String topic) {
-        return topics.containsKey(topic);
-    }
+	// Visible for testing
+	synchronized Set<String> topics() {
+		return topics.keySet();
+	}
 
-    @Override
-    public synchronized boolean retainTopic(String topic, boolean isInternal, long nowMs) {
-        Long expireMs = topics.get(topic);
-        if (expireMs == null) {
-            return false;
-        } else if (expireMs == TOPIC_EXPIRY_NEEDS_UPDATE) {
-            topics.put(topic, nowMs + TOPIC_EXPIRY_MS);
-            return true;
-        } else if (expireMs <= nowMs) {
-            log.debug("Removing unused topic {} from the metadata list, expiryMs {} now {}", topic, expireMs, nowMs);
-            topics.remove(topic);
-            return false;
-        } else {
-            return true;
-        }
+	// Visible for testing
+	synchronized Set<String> newTopics() {
+		return newTopics;
+	}
+
+	public synchronized boolean containsTopic(String topic) {
+		return topics.containsKey(topic);
+	}
+
+	@Override
+	public synchronized boolean retainTopic(String topic, boolean isInternal, long nowMs) {
+		Long expireMs = topics.get(topic);
+		if (expireMs == null) {
+			return false;
+		} else if (newTopics.contains(topic)) {
+			return true;
+		} else if (expireMs <= nowMs) {
+			log.debug("Removing unused topic {} from the metadata list, expiryMs {} now {}", topic, expireMs, nowMs);
+			topics.remove(topic);
+			return false;
+		} else {
+			return true;
+		}
 	}
 
 	/**
-	 * 等待最新更新版本号，比上一次版本号大
-     */
-    public synchronized void awaitUpdate(final int lastVersion, final long timeoutMs) throws InterruptedException {
-        long currentTimeMs = time.milliseconds();
-        long deadlineMs = currentTimeMs + timeoutMs < 0 ? Long.MAX_VALUE : currentTimeMs + timeoutMs;
-        time.waitObject(this, () -> {
-			// 可能会抛出致命错误
-            maybeThrowFatalException();
-			// 当更新完cluster信息，或者cluster已经关闭的情况下，解除阻塞
-            return updateVersion() > lastVersion || isClosed();
-        }, deadlineMs);
+	 * Wait for metadata update until the current version is larger than the last version we know of
+	 */
+	public synchronized void awaitUpdate(final int lastVersion, final long timeoutMs) throws InterruptedException {
+		long currentTimeMs = time.milliseconds();
+		long deadlineMs = currentTimeMs + timeoutMs < 0 ? Long.MAX_VALUE : currentTimeMs + timeoutMs;
+		time.waitObject(this, () -> {
+			// Throw fatal exceptions, if there are any. Recoverable topic errors will be handled by the caller.
+			maybeThrowFatalException();
+			return updateVersion() > lastVersion || isClosed();
+		}, deadlineMs);
 
         if (isClosed())
             throw new KafkaException("Requested metadata update after close");
     }
 
-    @Override
-    public synchronized void update(int requestVersion, MetadataResponse response, long now) {
-        super.update(requestVersion, response, now);
-        notifyAll();
-    }
+	@Override
+	public synchronized void update(int requestVersion, MetadataResponse response, boolean isPartialUpdate, long nowMs) {
+		super.update(requestVersion, response, isPartialUpdate, nowMs);
 
-    @Override
-    public synchronized void failedUpdate(long now, KafkaException fatalException) {
-        super.failedUpdate(now, fatalException);
-        if (fatalException != null)
-            notifyAll();
-    }
+		// Remove all topics in the response that are in the new topic set. Note that if an error was encountered for a
+		// new topic's metadata, then any work to resolve the error will include the topic in a full metadata update.
+		if (!newTopics.isEmpty()) {
+			for (MetadataResponse.TopicMetadata metadata : response.topicMetadata()) {
+				newTopics.remove(metadata.topic());
+			}
+		}
+
+		notifyAll();
+	}
+
+	@Override
+	public synchronized void fatalError(KafkaException fatalException) {
+		super.fatalError(fatalException);
+		notifyAll();
+	}
 
     /**
      * Close this instance and notify any awaiting threads.

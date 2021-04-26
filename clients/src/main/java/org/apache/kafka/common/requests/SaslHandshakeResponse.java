@@ -18,11 +18,10 @@ package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.message.SaslHandshakeResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -35,11 +34,8 @@ public class SaslHandshakeResponse extends AbstractResponse {
     private final SaslHandshakeResponseData data;
 
     public SaslHandshakeResponse(SaslHandshakeResponseData data) {
-        this.data = data;
-    }
-
-    public SaslHandshakeResponse(Struct struct, short version) {
-        this.data = new SaslHandshakeResponseData(struct, version);
+		super(ApiKeys.SASL_HANDSHAKE);
+		this.data = data;
     }
 
     /*
@@ -47,25 +43,30 @@ public class SaslHandshakeResponse extends AbstractResponse {
     *   UNSUPPORTED_SASL_MECHANISM(33): Client mechanism not enabled in server
     *   ILLEGAL_SASL_STATE(34) : Invalid request during SASL handshake
     */
-    public Errors error() {
-        return Errors.forCode(data.errorCode());
-    }
+	public Errors error() {
+		return Errors.forCode(data.errorCode());
+	}
 
-    @Override
-    public Map<Errors, Integer> errorCounts() {
-        return Collections.singletonMap(Errors.forCode(data.errorCode()), 1);
-    }
+	@Override
+	public Map<Errors, Integer> errorCounts() {
+		return errorCounts(Errors.forCode(data.errorCode()));
+	}
 
-    @Override
-    public Struct toStruct(short version) {
-        return data.toStruct(version);
-    }
+	@Override
+	public int throttleTimeMs() {
+		return DEFAULT_THROTTLE_TIME;
+	}
 
-    public List<String> enabledMechanisms() {
-        return data.mechanisms();
-    }
+	@Override
+	public SaslHandshakeResponseData data() {
+		return data;
+	}
 
-    public static SaslHandshakeResponse parse(ByteBuffer buffer, short version) {
-        return new SaslHandshakeResponse(ApiKeys.SASL_HANDSHAKE.parseResponse(version, buffer), version);
-    }
+	public List<String> enabledMechanisms() {
+		return data.mechanisms();
+	}
+
+	public static SaslHandshakeResponse parse(ByteBuffer buffer, short version) {
+		return new SaslHandshakeResponse(new SaslHandshakeResponseData(new ByteBufferAccessor(buffer), version));
+	}
 }

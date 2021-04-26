@@ -16,14 +16,32 @@
 {
   "apiKey": 10,
   "type": "request",
+  "listeners": [
+    "zkBroker",
+    "broker"
+  ],
   "name": "FindCoordinatorRequest",
   // Version 1 adds KeyType.
+  //
   // Version 2 is the same as version 1.
-  "validVersions": "0-2",
+  //
+  // Version 3 is the first flexible version.
+  "validVersions": "0-3",
+  "flexibleVersions": "3+",
   "fields": [
-    { "name": "Key", "type": "string", "versions": "0+",
-      "about": "The coordinator key." },
-    { "name": "KeyType", "type": "int8", "versions": "1+", "default": "0", "ignorable": false,
-      "about": "The coordinator key type.  (Group, transaction, etc.)" }
+    {
+      "name": "Key",
+      "type": "string",
+      "versions": "0+",
+      "about": "The coordinator key."
+    },
+    {
+      "name": "KeyType",
+      "type": "int8",
+      "versions": "1+",
+      "default": "0",
+      "ignorable": false,
+      "about": "The coordinator key type.  (Group, transaction, etc.)"
+    }
   ]
 }

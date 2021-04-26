@@ -23,26 +23,36 @@ import org.apache.kafka.streams.processor.StateStore;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Collection;
+import java.util.Map;
 
-interface StateManager extends Checkpointable {
-    File baseDir();
+import org.apache.kafka.streams.processor.internals.Task.TaskType;
 
-    /**
-     * @throws IllegalArgumentException if the store name has already been registered or if it is not a valid name
-     * (e.g., when it conflicts with the names of internal topics, like the checkpoint file name)
-     * @throws StreamsException if the store's change log does not contain the partition
-     */
-    void register(final StateStore store, final StateRestoreCallback stateRestoreCallback);
+public interface StateManager {
+	File baseDir();
 
-    void flush();
+	/**
+	 * @throws IllegalArgumentException if the store name has already been registered or if it is not a valid name
+	 *                                  (e.g., when it conflicts with the names of internal topics, like the checkpoint file name)
+	 * @throws StreamsException         if the store's change log does not contain the partition
+	 */
+	void registerStore(final StateStore store, final StateRestoreCallback stateRestoreCallback);
 
-    void reinitializeStateStoresForPartitions(final Collection<TopicPartition> partitions,
-                                              final InternalProcessorContext processorContext);
+	StateStore getStore(final String name);
 
-    void close(final boolean clean) throws IOException;
+	void flush();
 
-    StateStore getGlobalStore(final String name);
+	void updateChangelogOffsets(final Map<TopicPartition, Long> writtenOffsets);
 
-    StateStore getStore(final String name);
+	void checkpoint();
+
+	Map<TopicPartition, Long> changelogOffsets();
+
+	void close() throws IOException;
+
+	TaskType taskType();
+
+	String changelogFor(final String storeName);
+
+	// TODO: we can remove this when consolidating global state manager into processor state manager
+	StateStore getGlobalStore(final String name);
 }

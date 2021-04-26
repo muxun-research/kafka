@@ -27,20 +27,28 @@ import java.util.Set;
  */
 public class OffsetOutOfRangeException extends InvalidOffsetException {
 
-    private static final long serialVersionUID = 1L;
-    private final Map<TopicPartition, Long> offsetOutOfRangePartitions;
+	private static final long serialVersionUID = 1L;
+	private final Map<TopicPartition, Long> offsetOutOfRangePartitions;
 
-    public OffsetOutOfRangeException(Map<TopicPartition, Long> offsetOutOfRangePartitions) {
-        super("Offsets out of range with no configured reset policy for partitions: " + offsetOutOfRangePartitions);
-        this.offsetOutOfRangePartitions = offsetOutOfRangePartitions;
-    }
+	public OffsetOutOfRangeException(Map<TopicPartition, Long> offsetOutOfRangePartitions) {
+		this("Offsets out of range with no configured reset policy for partitions: " +
+				offsetOutOfRangePartitions, offsetOutOfRangePartitions);
+	}
 
-    public Map<TopicPartition, Long> offsetOutOfRangePartitions() {
-        return offsetOutOfRangePartitions;
-    }
+	public OffsetOutOfRangeException(String message, Map<TopicPartition, Long> offsetOutOfRangePartitions) {
+		super(message);
+		this.offsetOutOfRangePartitions = offsetOutOfRangePartitions;
+	}
 
-    @Override
-    public Set<TopicPartition> partitions() {
-        return offsetOutOfRangePartitions.keySet();
-    }
+	/**
+	 * Get a map of the topic partitions and the respective out-of-range fetch offsets.
+	 */
+	public Map<TopicPartition, Long> offsetOutOfRangePartitions() {
+		return offsetOutOfRangePartitions;
+	}
+
+	@Override
+	public Set<TopicPartition> partitions() {
+		return offsetOutOfRangePartitions.keySet();
+	}
 }

@@ -64,17 +64,19 @@ public abstract class Flatten<R extends ConnectRecord<R>> implements Transformat
     public void configure(Map<String, ?> props) {
         final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
         delimiter = config.getString(DELIMITER_CONFIG);
-        schemaUpdateCache = new SynchronizedCache<>(new LRUCache<Schema, Schema>(16));
+		schemaUpdateCache = new SynchronizedCache<>(new LRUCache<>(16));
     }
 
     @Override
     public R apply(R record) {
-        if (operatingSchema(record) == null) {
-            return applySchemaless(record);
-        } else {
-            return applyWithSchema(record);
-        }
-    }
+		if (operatingValue(record) == null) {
+			return record;
+		} else if (operatingSchema(record) == null) {
+			return applySchemaless(record);
+		} else {
+			return applyWithSchema(record);
+		}
+	}
 
     @Override
     public void close() {
@@ -104,7 +106,7 @@ public abstract class Flatten<R extends ConnectRecord<R>> implements Transformat
             Object value = entry.getValue();
             if (value == null) {
                 newRecord.put(fieldName(fieldNamePrefix, entry.getKey()), null);
-                return;
+				continue;
             }
 
             Schema.Type inferredType = ConnectSchema.schemaType(value.getClass());
@@ -193,8 +195,8 @@ public abstract class Flatten<R extends ConnectRecord<R>> implements Transformat
                     buildUpdatedSchema(field.schema(), fieldName, newSchema, fieldIsOptional, (Struct) fieldDefaultValue);
                     break;
                 default:
-                    throw new DataException("Flatten transformation does not support " + field.schema().type()
-                            + " for record without schemas (for field " + fieldName + ").");
+					throw new DataException("Flatten transformation does not support " + field.schema().type()
+							+ " for record with schemas (for field " + fieldName + ").");
             }
         }
     }
@@ -241,8 +243,8 @@ public abstract class Flatten<R extends ConnectRecord<R>> implements Transformat
                     buildWithSchema(record.getStruct(field.name()), fieldName, newRecord);
                     break;
                 default:
-                    throw new DataException("Flatten transformation does not support " + field.schema().type()
-                            + " for record without schemas (for field " + fieldName + ").");
+					throw new DataException("Flatten transformation does not support " + field.schema().type()
+							+ " for record with schemas (for field " + fieldName + ").");
             }
         }
     }

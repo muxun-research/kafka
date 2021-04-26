@@ -56,20 +56,17 @@ public class TimestampRouter<R extends ConnectRecord<R>> implements Transformati
 
     @Override
     public void configure(Map<String, ?> props) {
-        final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
+		final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
 
-        topicFormat = config.getString(ConfigName.TOPIC_FORMAT);
+		topicFormat = config.getString(ConfigName.TOPIC_FORMAT);
 
-        final String timestampFormatStr = config.getString(ConfigName.TIMESTAMP_FORMAT);
-        timestampFormat = new ThreadLocal<SimpleDateFormat>() {
-            @Override
-            protected SimpleDateFormat initialValue() {
-                final SimpleDateFormat fmt = new SimpleDateFormat(timestampFormatStr);
-                fmt.setTimeZone(TimeZone.getTimeZone("UTC"));
-                return fmt;
-            }
-        };
-    }
+		final String timestampFormatStr = config.getString(ConfigName.TIMESTAMP_FORMAT);
+		timestampFormat = ThreadLocal.withInitial(() -> {
+			final SimpleDateFormat fmt = new SimpleDateFormat(timestampFormatStr);
+			fmt.setTimeZone(TimeZone.getTimeZone("UTC"));
+			return fmt;
+		});
+	}
 
     @Override
     public R apply(R record) {
@@ -91,7 +88,7 @@ public class TimestampRouter<R extends ConnectRecord<R>> implements Transformati
 
     @Override
     public void close() {
-        timestampFormat = null;
+		timestampFormat.remove();
     }
 
     @Override

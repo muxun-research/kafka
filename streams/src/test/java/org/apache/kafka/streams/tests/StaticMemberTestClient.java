@@ -17,6 +17,7 @@
 package org.apache.kafka.streams.tests;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StreamsBuilder;
@@ -60,25 +61,22 @@ public class StaticMemberTestClient {
 
         config.putAll(streamsProperties);
 
-        final KafkaStreams streams = new KafkaStreams(builder.build(), config);
-        streams.setStateListener((newState, oldState) -> {
-            if (oldState == KafkaStreams.State.REBALANCING && newState == KafkaStreams.State.RUNNING) {
-                System.out.println("REBALANCING -> RUNNING");
-                System.out.flush();
-            }
-        });
+		final KafkaStreams streams = new KafkaStreams(builder.build(), config);
+		streams.setStateListener((newState, oldState) -> {
+			if (oldState == KafkaStreams.State.REBALANCING && newState == KafkaStreams.State.RUNNING) {
+				System.out.println("REBALANCING -> RUNNING");
+				System.out.flush();
+			}
+		});
 
-        streams.start();
+		streams.start();
 
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-            @Override
-            public void run() {
-                System.out.println("closing Kafka Streams instance");
-                System.out.flush();
-                streams.close();
-                System.out.println("Static membership test closed");
-                System.out.flush();
-            }
-        });
-    }
+		Exit.addShutdownHook("streams-shutdown-hook", () -> {
+			System.out.println("closing Kafka Streams instance");
+			System.out.flush();
+			streams.close();
+			System.out.println("Static membership test closed");
+			System.out.flush();
+		});
+	}
 }

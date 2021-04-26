@@ -21,26 +21,25 @@ import org.apache.kafka.common.message.OffsetFetchResponseData;
 import org.apache.kafka.common.message.OffsetFetchResponseData.OffsetFetchResponsePartition;
 import org.apache.kafka.common.message.OffsetFetchResponseData.OffsetFetchResponseTopic;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.Struct;
 import org.apache.kafka.common.record.RecordBatch;
 import org.apache.kafka.common.requests.OffsetFetchResponse.PartitionData;
-import org.junit.Before;
-import org.junit.Test;
+import org.apache.kafka.common.utils.Utils;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.kafka.common.protocol.CommonFields.ERROR_CODE;
 import static org.apache.kafka.common.requests.AbstractResponse.DEFAULT_THROTTLE_TIME;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class OffsetFetchResponseTest {
-
     private final int throttleTimeMs = 10;
     private final int offset = 100;
     private final String metadata = "metadata";
@@ -54,7 +53,7 @@ public class OffsetFetchResponseTest {
 
     private Map<TopicPartition, PartitionData> partitionDataMap;
 
-    @Before
+	@BeforeEach
     public void setUp() {
         partitionDataMap = new HashMap<>();
         partitionDataMap.put(new TopicPartition(topicOne, partitionOne), new PartitionData(
@@ -73,51 +72,60 @@ public class OffsetFetchResponseTest {
 
     @Test
     public void testConstructor() {
-        OffsetFetchResponse response = new OffsetFetchResponse(throttleTimeMs, Errors.NOT_COORDINATOR, partitionDataMap);
-        assertEquals(Errors.NOT_COORDINATOR, response.error());
-        assertEquals(Collections.singletonMap(Errors.NOT_COORDINATOR, 1), response.errorCounts());
+		OffsetFetchResponse response = new OffsetFetchResponse(throttleTimeMs, Errors.NOT_COORDINATOR, partitionDataMap);
+		assertEquals(Errors.NOT_COORDINATOR, response.error());
+		assertEquals(3, response.errorCounts().size());
+		assertEquals(Utils.mkMap(Utils.mkEntry(Errors.NOT_COORDINATOR, 1),
+				Utils.mkEntry(Errors.TOPIC_AUTHORIZATION_FAILED, 1),
+				Utils.mkEntry(Errors.UNKNOWN_TOPIC_OR_PARTITION, 1)),
+				response.errorCounts());
 
-        assertEquals(throttleTimeMs, response.throttleTimeMs());
+		assertEquals(throttleTimeMs, response.throttleTimeMs());
 
-        Map<TopicPartition, PartitionData> responseData = response.responseData();
-        assertEquals(partitionDataMap, responseData);
-        responseData.forEach(
-            (tp, data) -> assertTrue(data.hasError())
-        );
-    }
+		Map<TopicPartition, PartitionData> responseData = response.responseData();
+		assertEquals(partitionDataMap, responseData);
+		responseData.forEach(
+				(tp, data) -> assertTrue(data.hasError())
+		);
+	}
 
     /**
      * Test behavior changes over the versions. Refer to resources.common.messages.OffsetFetchResponse.json
      */
     @Test
     public void testStructBuild() {
-        partitionDataMap.put(new TopicPartition(topicTwo, partitionTwo), new PartitionData(
-            offset,
-            leaderEpochTwo,
-            metadata,
-            Errors.GROUP_AUTHORIZATION_FAILED
-        ));
+		partitionDataMap.put(new TopicPartition(topicTwo, partitionTwo), new PartitionData(
+				offset,
+				leaderEpochTwo,
+				metadata,
+				Errors.GROUP_AUTHORIZATION_FAILED
+		));
 
-        OffsetFetchResponse latestResponse = new OffsetFetchResponse(throttleTimeMs, Errors.NONE, partitionDataMap);
+		OffsetFetchResponse latestResponse = new OffsetFetchResponse(throttleTimeMs, Errors.NONE, partitionDataMap);
 
-        for (short version = 0; version <= ApiKeys.OFFSET_FETCH.latestVersion(); version++) {
-            Struct struct = latestResponse.data.toStruct(version);
+		for (short version : ApiKeys.OFFSET_FETCH.allVersions()) {
+			OffsetFetchResponseData data = new OffsetFetchResponseData(
+					new ByteBufferAccessor(latestResponse.serialize(version)), version);
 
-            OffsetFetchResponse oldResponse =  new OffsetFetchResponse(struct, version);
+			OffsetFetchResponse oldResponse = new OffsetFetchResponse(data, version);
 
-            if (version <= 1) {
-                assertFalse(struct.hasField(ERROR_CODE));
+			if (version <= 1) {
+				assertEquals(Errors.NONE.code(), data.errorCode());
 
-                // Partition level error populated in older versions.
-                assertEquals(Errors.GROUP_AUTHORIZATION_FAILED, oldResponse.error());
-                assertEquals(Collections.singletonMap(Errors.GROUP_AUTHORIZATION_FAILED, 1), oldResponse.errorCounts());
+				// Partition level error populated in older versions.
+				assertEquals(Errors.GROUP_AUTHORIZATION_FAILED, oldResponse.error());
+				assertEquals(Utils.mkMap(Utils.mkEntry(Errors.GROUP_AUTHORIZATION_FAILED, 2),
+						Utils.mkEntry(Errors.TOPIC_AUTHORIZATION_FAILED, 1)), oldResponse.errorCounts());
 
-            } else {
-                assertTrue(struct.hasField(ERROR_CODE));
+			} else {
+				assertEquals(Errors.NONE.code(), data.errorCode());
 
-                assertEquals(Errors.NONE, oldResponse.error());
-                assertEquals(Collections.singletonMap(Errors.NONE, 1), oldResponse.errorCounts());
-            }
+				assertEquals(Errors.NONE, oldResponse.error());
+				assertEquals(Utils.mkMap(
+						Utils.mkEntry(Errors.NONE, 1),
+						Utils.mkEntry(Errors.GROUP_AUTHORIZATION_FAILED, 1),
+						Utils.mkEntry(Errors.TOPIC_AUTHORIZATION_FAILED, 1)), oldResponse.errorCounts());
+			}
 
             if (version <= 2) {
                 assertEquals(DEFAULT_THROTTLE_TIME, oldResponse.throttleTimeMs());
@@ -139,44 +147,43 @@ public class OffsetFetchResponseTest {
             Map<TopicPartition, PartitionData> responseData = oldResponse.responseData();
             assertEquals(expectedDataMap, responseData);
 
-            responseData.forEach(
-                (tp, data) -> assertTrue(data.hasError())
-            );
+			responseData.forEach((tp, rdata) -> assertTrue(rdata.hasError()));
         }
     }
 
     @Test
     public void testShouldThrottle() {
         OffsetFetchResponse response = new OffsetFetchResponse(throttleTimeMs, Errors.NONE, partitionDataMap);
-        for (short version = 0; version <= ApiKeys.OFFSET_FETCH.latestVersion(); version++) {
-            if (version >= 4) {
-                assertTrue(response.shouldClientThrottle(version));
-            } else {
-                assertFalse(response.shouldClientThrottle(version));
-            }
-        }
+		for (short version : ApiKeys.OFFSET_FETCH.allVersions()) {
+			if (version >= 4) {
+				assertTrue(response.shouldClientThrottle(version));
+			} else {
+				assertFalse(response.shouldClientThrottle(version));
+			}
+		}
     }
 
     @Test
     public void testNullableMetadata() {
-        partitionDataMap.clear();
-        partitionDataMap.put(new TopicPartition(topicOne, partitionOne),
-                             new PartitionData(
-                                 offset,
-                                 leaderEpochOne,
-                                 null,
-                                 Errors.UNKNOWN_TOPIC_OR_PARTITION)
-        );
+		PartitionData pd = new PartitionData(
+				offset,
+				leaderEpochOne,
+				null,
+				Errors.UNKNOWN_TOPIC_OR_PARTITION);
+		// test PartitionData.equals with null metadata
+		assertEquals(pd, pd);
+		partitionDataMap.clear();
+		partitionDataMap.put(new TopicPartition(topicOne, partitionOne), pd);
 
-        OffsetFetchResponse response = new OffsetFetchResponse(throttleTimeMs, Errors.GROUP_AUTHORIZATION_FAILED, partitionDataMap);
-        OffsetFetchResponseData expectedData =
-            new OffsetFetchResponseData()
-                .setErrorCode(Errors.GROUP_AUTHORIZATION_FAILED.code())
-                .setThrottleTimeMs(throttleTimeMs)
-                .setTopics(Collections.singletonList(
-                    new OffsetFetchResponseTopic()
-                        .setName(topicOne)
-                        .setPartitions(Collections.singletonList(
+		OffsetFetchResponse response = new OffsetFetchResponse(throttleTimeMs, Errors.GROUP_AUTHORIZATION_FAILED, partitionDataMap);
+		OffsetFetchResponseData expectedData =
+				new OffsetFetchResponseData()
+						.setErrorCode(Errors.GROUP_AUTHORIZATION_FAILED.code())
+						.setThrottleTimeMs(throttleTimeMs)
+						.setTopics(Collections.singletonList(
+								new OffsetFetchResponseTopic()
+										.setName(topicOne)
+										.setPartitions(Collections.singletonList(
                             new OffsetFetchResponsePartition()
                                 .setPartitionIndex(partitionOne)
                                 .setCommittedOffset(offset)
@@ -185,7 +192,7 @@ public class OffsetFetchResponseTest {
                                 .setMetadata(null))
                         ))
                 );
-        assertEquals(expectedData, response.data);
+		assertEquals(expectedData, response.data());
     }
 
     @Test
@@ -218,6 +225,6 @@ public class OffsetFetchResponseTest {
                             .setMetadata(metadata))
                     ))
                 );
-        assertEquals(expectedData, response.data);
+		assertEquals(expectedData, response.data());
     }
 }

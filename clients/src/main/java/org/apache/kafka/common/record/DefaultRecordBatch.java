@@ -16,8 +16,11 @@
  */
 package org.apache.kafka.common.record;
 
+import org.apache.kafka.common.InvalidRecordException;
 import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.errors.CorruptRecordException;
 import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.utils.BufferSupplier;
 import org.apache.kafka.common.utils.ByteBufferOutputStream;
 import org.apache.kafka.common.utils.ByteUtils;
 import org.apache.kafka.common.utils.CloseableIterator;
@@ -144,12 +147,12 @@ public class DefaultRecordBatch extends AbstractRecordBatch implements MutableRe
     @Override
     public void ensureValid() {
         if (sizeInBytes() < RECORD_BATCH_OVERHEAD)
-            throw new InvalidRecordException("Record batch is corrupt (the size " + sizeInBytes() +
-                    " is smaller than the minimum allowed overhead " + RECORD_BATCH_OVERHEAD + ")");
+			throw new CorruptRecordException("Record batch is corrupt (the size " + sizeInBytes() +
+					" is smaller than the minimum allowed overhead " + RECORD_BATCH_OVERHEAD + ")");
 
         if (!isValid())
-            throw new InvalidRecordException("Record is corrupt (stored crc = " + checksum()
-                    + ", computed crc = " + computeChecksum() + ")");
+			throw new CorruptRecordException("Record is corrupt (stored crc = " + checksum()
+					+ ", computed crc = " + computeChecksum() + ")");
     }
 
     /**
@@ -246,28 +249,31 @@ public class DefaultRecordBatch extends AbstractRecordBatch implements MutableRe
     @Override
     public boolean isControlBatch() {
         return (attributes() & CONTROL_FLAG_MASK) > 0;
-    }
+	}
 
-    @Override
-    public int partitionLeaderEpoch() {
-        return buffer.getInt(PARTITION_LEADER_EPOCH_OFFSET);
-    }
+	@Override
+	public int partitionLeaderEpoch() {
+		return buffer.getInt(PARTITION_LEADER_EPOCH_OFFSET);
+	}
 
-    private CloseableIterator<Record> compressedIterator(BufferSupplier bufferSupplier, boolean skipKeyValue) {
-        final ByteBuffer buffer = this.buffer.duplicate();
-        buffer.position(RECORDS_OFFSET);
-        final DataInputStream inputStream = new DataInputStream(compressionType().wrapForInput(buffer, magic(),
-            bufferSupplier));
+	public DataInputStream recordInputStream(BufferSupplier bufferSupplier) {
+		final ByteBuffer buffer = this.buffer.duplicate();
+		buffer.position(RECORDS_OFFSET);
+		return new DataInputStream(compressionType().wrapForInput(buffer, magic(), bufferSupplier));
+	}
 
-        if (skipKeyValue) {
-            // this buffer is used to skip length delimited fields like key, value, headers
-            byte[] skipArray = new byte[MAX_SKIP_BUFFER_SIZE];
+	private CloseableIterator<Record> compressedIterator(BufferSupplier bufferSupplier, boolean skipKeyValue) {
+		final DataInputStream inputStream = recordInputStream(bufferSupplier);
 
-            return new StreamRecordIterator(inputStream) {
-                @Override
-                protected Record doReadRecord(long baseOffset, long firstTimestamp, int baseSequence, Long logAppendTime) throws IOException {
-                    return DefaultRecord.readPartiallyFrom(inputStream, skipArray, baseOffset, firstTimestamp, baseSequence, logAppendTime);
-                }
+		if (skipKeyValue) {
+			// this buffer is used to skip length delimited fields like key, value, headers
+			byte[] skipArray = new byte[MAX_SKIP_BUFFER_SIZE];
+
+			return new StreamRecordIterator(inputStream) {
+				@Override
+				protected Record doReadRecord(long baseOffset, long firstTimestamp, int baseSequence, Long logAppendTime) throws IOException {
+					return DefaultRecord.readPartiallyFrom(inputStream, skipArray, baseOffset, firstTimestamp, baseSequence, logAppendTime);
+				}
             };
         } else {
             return new StreamRecordIterator(inputStream) {
@@ -433,49 +439,49 @@ public class DefaultRecordBatch extends AbstractRecordBatch implements MutableRe
     }
 
     public static void writeEmptyHeader(ByteBuffer buffer,
-                                        byte magic,
-                                        long producerId,
-                                        short producerEpoch,
-                                        int baseSequence,
-                                        long baseOffset,
-                                        long lastOffset,
-                                        int partitionLeaderEpoch,
-                                        TimestampType timestampType,
-                                        long timestamp,
-                                        boolean isTransactional,
-                                        boolean isControlRecord) {
-        int offsetDelta = (int) (lastOffset - baseOffset);
-        writeHeader(buffer, baseOffset, offsetDelta, DefaultRecordBatch.RECORD_BATCH_OVERHEAD, magic,
-                CompressionType.NONE, timestampType, RecordBatch.NO_TIMESTAMP, timestamp, producerId,
-                producerEpoch, baseSequence, isTransactional, isControlRecord, partitionLeaderEpoch, 0);
-    }
+										byte magic,
+										long producerId,
+										short producerEpoch,
+										int baseSequence,
+										long baseOffset,
+										long lastOffset,
+										int partitionLeaderEpoch,
+										TimestampType timestampType,
+										long timestamp,
+										boolean isTransactional,
+										boolean isControlRecord) {
+		int offsetDelta = (int) (lastOffset - baseOffset);
+		writeHeader(buffer, baseOffset, offsetDelta, DefaultRecordBatch.RECORD_BATCH_OVERHEAD, magic,
+				CompressionType.NONE, timestampType, RecordBatch.NO_TIMESTAMP, timestamp, producerId,
+				producerEpoch, baseSequence, isTransactional, isControlRecord, partitionLeaderEpoch, 0);
+	}
 
-    static void writeHeader(ByteBuffer buffer,
-                            long baseOffset,
-                            int lastOffsetDelta,
-                            int sizeInBytes,
-                            byte magic,
-                            CompressionType compressionType,
-                            TimestampType timestampType,
-                            long firstTimestamp,
-                            long maxTimestamp,
-                            long producerId,
-                            short epoch,
-                            int sequence,
-                            boolean isTransactional,
-                            boolean isControlBatch,
-                            int partitionLeaderEpoch,
-                            int numRecords) {
-        if (magic < RecordBatch.CURRENT_MAGIC_VALUE)
-            throw new IllegalArgumentException("Invalid magic value " + magic);
-        if (firstTimestamp < 0 && firstTimestamp != NO_TIMESTAMP)
-            throw new IllegalArgumentException("Invalid message timestamp " + firstTimestamp);
+	public static void writeHeader(ByteBuffer buffer,
+								   long baseOffset,
+								   int lastOffsetDelta,
+								   int sizeInBytes,
+								   byte magic,
+								   CompressionType compressionType,
+								   TimestampType timestampType,
+								   long firstTimestamp,
+								   long maxTimestamp,
+								   long producerId,
+								   short epoch,
+								   int sequence,
+								   boolean isTransactional,
+								   boolean isControlBatch,
+								   int partitionLeaderEpoch,
+								   int numRecords) {
+		if (magic < RecordBatch.CURRENT_MAGIC_VALUE)
+			throw new IllegalArgumentException("Invalid magic value " + magic);
+		if (firstTimestamp < 0 && firstTimestamp != NO_TIMESTAMP)
+			throw new IllegalArgumentException("Invalid message timestamp " + firstTimestamp);
 
-        short attributes = computeAttributes(compressionType, timestampType, isTransactional, isControlBatch);
+		short attributes = computeAttributes(compressionType, timestampType, isTransactional, isControlBatch);
 
-        int position = buffer.position();
-        buffer.putLong(position + BASE_OFFSET_OFFSET, baseOffset);
-        buffer.putInt(position + LENGTH_OFFSET, sizeInBytes - LOG_OVERHEAD);
+		int position = buffer.position();
+		buffer.putLong(position + BASE_OFFSET_OFFSET, baseOffset);
+		buffer.putInt(position + LENGTH_OFFSET, sizeInBytes - LOG_OVERHEAD);
         buffer.putInt(position + PARTITION_LEADER_EPOCH_OFFSET, partitionLeaderEpoch);
         buffer.put(position + MAGIC_OFFSET, magic);
         buffer.putShort(position + ATTRIBUTES_OFFSET, attributes);
@@ -494,7 +500,9 @@ public class DefaultRecordBatch extends AbstractRecordBatch implements MutableRe
     @Override
     public String toString() {
         return "RecordBatch(magic=" + magic() + ", offsets=[" + baseOffset() + ", " + lastOffset() + "], " +
-                "compression=" + compressionType() + ", timestampType=" + timestampType() + ", crc=" + checksum() + ")";
+				"sequence=[" + baseSequence() + ", " + lastSequence() + "], " +
+				"isTransactional=" + isTransactional() + ", isControlBatch=" + isControlBatch() + ", " +
+				"compression=" + compressionType() + ", timestampType=" + timestampType() + ", crc=" + checksum() + ")";
     }
 
     public static int sizeInBytes(long baseOffset, Iterable<Record> records) {
@@ -535,34 +543,34 @@ public class DefaultRecordBatch extends AbstractRecordBatch implements MutableRe
         return size;
     }
 
-    /**
-     * Get an upper bound on the size of a batch with only a single record using a given key and value. This
-     * is only an estimate because it does not take into account additional overhead from the compression
-     * algorithm used.
-     */
-    static int estimateBatchSizeUpperBound(ByteBuffer key, ByteBuffer value, Header[] headers) {
-        return RECORD_BATCH_OVERHEAD + DefaultRecord.recordSizeUpperBound(key, value, headers);
-    }
+	/**
+	 * Get an upper bound on the size of a batch with only a single record using a given key and value. This
+	 * is only an estimate because it does not take into account additional overhead from the compression
+	 * algorithm used.
+	 */
+	static int estimateBatchSizeUpperBound(ByteBuffer key, ByteBuffer value, Header[] headers) {
+		return RECORD_BATCH_OVERHEAD + DefaultRecord.recordSizeUpperBound(key, value, headers);
+	}
 
-    public static int incrementSequence(int baseSequence, int increment) {
-        if (baseSequence > Integer.MAX_VALUE - increment)
-            return increment - (Integer.MAX_VALUE - baseSequence) - 1;
-        return baseSequence + increment;
-    }
+	public static int incrementSequence(int sequence, int increment) {
+		if (sequence > Integer.MAX_VALUE - increment)
+			return increment - (Integer.MAX_VALUE - sequence) - 1;
+		return sequence + increment;
+	}
 
-    public static int decrementSequence(int baseSequence, int decrement) {
-        if (baseSequence < decrement)
-            return Integer.MAX_VALUE - (decrement - baseSequence) + 1;
-        return baseSequence - decrement;
-    }
+	public static int decrementSequence(int sequence, int decrement) {
+		if (sequence < decrement)
+			return Integer.MAX_VALUE - (decrement - sequence) + 1;
+		return sequence - decrement;
+	}
 
-    private abstract class RecordIterator implements CloseableIterator<Record> {
-        private final Long logAppendTime;
-        private final long baseOffset;
-        private final long firstTimestamp;
-        private final int baseSequence;
-        private final int numRecords;
-        private int readRecords = 0;
+	private abstract class RecordIterator implements CloseableIterator<Record> {
+		private final Long logAppendTime;
+		private final long baseOffset;
+		private final long firstTimestamp;
+		private final int baseSequence;
+		private final int numRecords;
+		private int readRecords = 0;
 
         RecordIterator() {
             this.logAppendTime = timestampType() == TimestampType.LOG_APPEND_TIME ? maxTimestamp() : null;

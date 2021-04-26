@@ -19,7 +19,7 @@ package org.apache.kafka.clients.consumer.internals;
 import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.ClientResponse;
 import org.apache.kafka.clients.FetchSessionHandler;
-import org.apache.kafka.clients.MetadataCache;
+import org.apache.kafka.clients.Metadata;
 import org.apache.kafka.clients.NodeApiVersions;
 import org.apache.kafka.clients.StaleMetadataException;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -29,12 +29,16 @@ import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.OffsetAndTimestamp;
 import org.apache.kafka.clients.consumer.OffsetOutOfRangeException;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
+import org.apache.kafka.clients.consumer.internals.OffsetsForLeaderEpochClient.OffsetForEpochResult;
+import org.apache.kafka.clients.consumer.internals.SubscriptionState.FetchPosition;
 import org.apache.kafka.common.Cluster;
+import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.CorruptRecordException;
 import org.apache.kafka.common.errors.InvalidTopicException;
 import org.apache.kafka.common.errors.RecordTooLargeException;
 import org.apache.kafka.common.errors.RetriableException;
@@ -43,6 +47,11 @@ import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.errors.TopicAuthorizationException;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeaders;
+import org.apache.kafka.common.message.ApiVersionsResponseData.ApiVersion;
+import org.apache.kafka.common.message.FetchResponseData;
+import org.apache.kafka.common.message.ListOffsetsRequestData.ListOffsetsPartition;
+import org.apache.kafka.common.message.ListOffsetsResponseData.ListOffsetsPartitionResponse;
+import org.apache.kafka.common.message.ListOffsetsResponseData.ListOffsetsTopicResponse;
 import org.apache.kafka.common.metrics.Gauge;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.metrics.Sensor;
@@ -54,23 +63,19 @@ import org.apache.kafka.common.metrics.stats.Value;
 import org.apache.kafka.common.metrics.stats.WindowedCount;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.record.BufferSupplier;
 import org.apache.kafka.common.record.ControlRecordType;
-import org.apache.kafka.common.record.InvalidRecordException;
 import org.apache.kafka.common.record.Record;
 import org.apache.kafka.common.record.RecordBatch;
-import org.apache.kafka.common.record.Records;
 import org.apache.kafka.common.record.TimestampType;
-import org.apache.kafka.common.requests.ApiVersionsResponse;
 import org.apache.kafka.common.requests.FetchRequest;
 import org.apache.kafka.common.requests.FetchResponse;
-import org.apache.kafka.common.requests.IsolationLevel;
-import org.apache.kafka.common.requests.ListOffsetRequest;
-import org.apache.kafka.common.requests.ListOffsetResponse;
+import org.apache.kafka.common.requests.ListOffsetsRequest;
+import org.apache.kafka.common.requests.ListOffsetsResponse;
 import org.apache.kafka.common.requests.MetadataRequest;
 import org.apache.kafka.common.requests.MetadataResponse;
 import org.apache.kafka.common.requests.OffsetsForLeaderEpochRequest;
 import org.apache.kafka.common.serialization.Deserializer;
+import org.apache.kafka.common.utils.BufferSupplier;
 import org.apache.kafka.common.utils.CloseableIterator;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
@@ -105,9 +110,9 @@ import java.util.stream.Collectors;
 import static java.util.Collections.emptyList;
 
 /**
- * Broker信息拉取器
- * 是线程安全的
+ * This class manages the fetching process with the brokers.
  * <p>
+ * Thread-safety:
  * Requests and responses of Fetcher may be processed by different threads since heartbeat
  * thread may process responses. Other operations are single-threaded and invoked only from
  * the thread polling the consumer.
@@ -133,9 +138,6 @@ public class Fetcher<K, V> implements Closeable {
 	private final int minBytes;
 	private final int maxBytes;
 	private final int maxWaitMs;
-	/**
-	 * 拉取的数据大小
-	 */
 	private final int fetchSize;
 	private final long retryBackoffMs;
 	private final long requestTimeoutMs;
@@ -144,34 +146,22 @@ public class Fetcher<K, V> implements Closeable {
 	private final String clientRackId;
 	private final ConsumerMetadata metadata;
 	private final FetchManagerMetrics sensors;
-	/**
-	 * 当前消费者的订阅信息
-	 */
 	private final SubscriptionState subscriptions;
-	/**
-	 * 通过sendFetches()拉取到的partition records，用于进一步的分离
-	 */
-	private final ConcurrentLinkedQueue<PartitionRecords> completedFetches;
+	private final ConcurrentLinkedQueue<CompletedFetch> completedFetches;
 	private final BufferSupplier decompressionBufferSupplier = BufferSupplier.create();
 	private final Deserializer<K> keyDeserializer;
 	private final Deserializer<V> valueDeserializer;
 	private final IsolationLevel isolationLevel;
-	/**
-	 * node-会话处理器集合缓存
-	 */
 	private final Map<Integer, FetchSessionHandler> sessionHandlers;
 	private final AtomicReference<RuntimeException> cachedListOffsetsException = new AtomicReference<>();
 	private final AtomicReference<RuntimeException> cachedOffsetForLeaderException = new AtomicReference<>();
 	private final OffsetsForLeaderEpochClient offsetsForLeaderEpochClient;
-	/**
-	 * 在发送请求时，将node id置为挂起请求状态
-	 */
 	private final Set<Integer> nodesWithPendingFetchRequests;
 	private final ApiVersions apiVersions;
-	/**
-	 * 下一个需要处理的partition records
-	 */
-	private PartitionRecords nextInLineRecords = null;
+	private final AtomicInteger metadataUpdateVersion = new AtomicInteger(-1);
+
+
+	private CompletedFetch nextInLineFetch = null;
 
 	public Fetcher(LogContext logContext,
 				   ConsumerNetworkClient client,
@@ -219,13 +209,19 @@ public class Fetcher<K, V> implements Closeable {
 		this.nodesWithPendingFetchRequests = new HashSet<>();
 	}
 
-	public static Sensor throttleTimeSensor(Metrics metrics, FetcherMetricsRegistry metricsRegistry) {
-		Sensor fetchThrottleTimeSensor = metrics.sensor("fetch-throttle-time");
-		fetchThrottleTimeSensor.add(metrics.metricInstance(metricsRegistry.fetchThrottleTimeAvg), new Avg());
+	/**
+	 * Represents data about an offset returned by a broker.
+	 */
+	static class ListOffsetData {
+		final long offset;
+		final Long timestamp; //  null if the broker does not support returning timestamps
+		final Optional<Integer> leaderEpoch; // empty if the leader epoch is not known
 
-		fetchThrottleTimeSensor.add(metrics.metricInstance(metricsRegistry.fetchThrottleTimeMax), new Max());
-
-		return fetchThrottleTimeSensor;
+		ListOffsetData(long offset, Long timestamp, Optional<Integer> leaderEpoch) {
+			this.offset = offset;
+			this.timestamp = timestamp;
+			this.leaderEpoch = leaderEpoch;
+		}
 	}
 
 	/**
@@ -238,150 +234,117 @@ public class Fetcher<K, V> implements Closeable {
 	}
 
 	/**
-	 * 判断我们是否有可取的任何已经完成的fetch
-	 * 这个方法是线程安全的
-	 * @return 有已完成的fetch，返回true，其他情况，返回false
+	 * Return whether we have any completed fetches that are fetchable. This method is thread-safe.
+	 * @return true if there are completed fetches that can be returned, false otherwise
 	 */
 	public boolean hasAvailableFetches() {
 		return completedFetches.stream().anyMatch(fetch -> subscriptions.isFetchable(fetch.partition));
 	}
 
 	/**
-	 * 为那些已经分配分区，但是还没有运行中的fetch或者待处理的fetch数据的任何节点构建一个fetch请求
-	 * 简单来说，就是请求broker拉取records
-	 * @return 构建的fetch请求节点个数
+	 * Set-up a fetch request for any node that we have assigned partitions for which doesn't already have
+	 * an in-flight fetch or pending fetch data.
+	 * @return number of fetches sent
 	 */
 	public synchronized int sendFetches() {
-		// 更新计数器，防止分配发生变化
+		// Update metrics in case there was an assignment change
 		sensors.maybeUpdateAssignment(subscriptions);
-		// 准备拉取请求，节点-节点需要请求的数据
-		Map<Node, FetchSessionHandler.FetchRequestData> fetchRequestMap = prepareFetchRequests();
 
-		// 遍历每个节点需要请求的数据
+		Map<Node, FetchSessionHandler.FetchRequestData> fetchRequestMap = prepareFetchRequests();
 		for (Map.Entry<Node, FetchSessionHandler.FetchRequestData> entry : fetchRequestMap.entrySet()) {
-			// 请求数据节点
 			final Node fetchTarget = entry.getKey();
-			// 请求数据
 			final FetchSessionHandler.FetchRequestData data = entry.getValue();
-			// 根据请求数据构建拉取请求
 			final FetchRequest.Builder request = FetchRequest.Builder
-					// 消费者
 					.forConsumer(this.maxWaitMs, this.minBytes, data.toSend())
-					// 事务等级
 					.isolationLevel(isolationLevel)
-					// 最大拉取字节数
 					.setMaxBytes(this.maxBytes)
-					// 元数据
 					.metadata(data.metadata())
-					// 需要忽略的分区
 					.toForget(data.toForget())
-					// 客户端标识ID
 					.rackId(clientRackId);
 
 			if (log.isDebugEnabled()) {
 				log.debug("Sending {} {} to broker {}", isolationLevel, data.toString(), fetchTarget);
 			}
-			// ConsumerNetworkClient发送请求，并添加请求回调任务
-			client.send(fetchTarget, request)
-					.addListener(new RequestFutureListener<ClientResponse>() {
-						/**
-						 * 请求成功
-						 * @param resp 响应
-						 */
-						@Override
-						public void onSuccess(ClientResponse resp) {
-							synchronized (Fetcher.this) {
-								try {
-									@SuppressWarnings("unchecked")
-									// 获取响应body
-											FetchResponse<Records> response = (FetchResponse<Records>) resp.responseBody();
-									// 获取拉取会话处理器
-									FetchSessionHandler handler = sessionHandler(fetchTarget.id());
-									if (handler == null) {
-										// 如果拉取会话处理器已经失效，处理响应，直接返回
-										log.error("Unable to find FetchSessionHandler for node {}. Ignoring fetch response.",
-												fetchTarget.id());
-										return;
-									}
-									// 处理响应失败，主要是对session的状态分满载，增量进行判断
-									if (!handler.handleResponse(response)) {
-										return;
-									}
-									// 返回的响应数据也是根据topic-partition进行分布的，将topic-partition提取出来
-									Set<TopicPartition> partitions = new HashSet<>(response.responseData().keySet());
-									FetchResponseMetricAggregator metricAggregator = new FetchResponseMetricAggregator(sensors, partitions);
-									// 遍历每个分区的及拉取的数据
-									for (Map.Entry<TopicPartition, FetchResponse.PartitionData<Records>> entry : response.responseData().entrySet()) {
-										TopicPartition partition = entry.getKey();
-										// 获取请求的数据
-										FetchRequest.PartitionData requestData = data.sessionPartitions().get(partition);
-										if (requestData == null) {
-											// 如果请求时的数据为空
-											String message;
-											// 构建错误消息内容
-											if (data.metadata().isFull()) {
-												// 如果是一次完整的拉取请求
-												message = MessageFormatter.arrayFormat(
-														"Response for missing full request partition: partition={}; metadata={}",
-														new Object[]{partition, data.metadata()}).getMessage();
-											} else {
-												// 增量拉取请求
-												message = MessageFormatter.arrayFormat(
-														"Response for missing session request partition: partition={}; metadata={}; toSend={}; toForget={}",
-														new Object[]{partition, data.metadata(), data.toSend(), data.toForget()}).getMessage();
-											}
-
-											// 收到了遗失的会话partition响应
-											throw new IllegalStateException(message);
-										} else {
-											// 获取请求时拉取的offset
-											long fetchOffset = requestData.fetchOffset;
-											// 获取拉取到的分区数据
-											FetchResponse.PartitionData<Records> fetchData = entry.getValue();
-
-											log.debug("Fetch {} at offset {} for partition {} returned fetch data {}",
-													isolationLevel, fetchOffset, partition, fetchData);
-											// 构建当前处理的已完成fetch对象
-											CompletedFetch completedFetch = new CompletedFetch(partition, fetchOffset,
-													fetchData, metricAggregator, resp.requestHeader().apiVersion());
-											// 添加到已拉取的fetch列表中
-											completedFetches.add(parseCompletedFetch(completedFetch));
-										}
-									}
-									// 计数器进行计数
-									sensors.fetchLatency.record(resp.requestLatencyMs());
-								} finally {
-									// 移除当前node节点的挂起请求状态
-									nodesWithPendingFetchRequests.remove(fetchTarget.id());
-								}
-							}
-						}
-
-						/**
-						 * 响应失败
-						 * @param e
-						 */
-						@Override
-						public void onFailure(RuntimeException e) {
-							// 请求失败，进行同步操作
-							synchronized (Fetcher.this) {
-								try {
-									// 获取发送请求节点拉取会话处理器，用处理器处理错误
-									FetchSessionHandler handler = sessionHandler(fetchTarget.id());
-									if (handler != null) {
-										handler.handleError(e);
-									}
-								} finally {
-									// 同时也移除挂起请求的状态
-									nodesWithPendingFetchRequests.remove(fetchTarget.id());
-								}
-							}
-						}
-					});
-			// 添加节点挂起请求状态
+			RequestFuture<ClientResponse> future = client.send(fetchTarget, request);
+			// We add the node to the set of nodes with pending fetch requests before adding the
+			// listener because the future may have been fulfilled on another thread (e.g. during a
+			// disconnection being handled by the heartbeat thread) which will mean the listener
+			// will be invoked synchronously.
 			this.nodesWithPendingFetchRequests.add(entry.getKey().id());
+			future.addListener(new RequestFutureListener<ClientResponse>() {
+				@Override
+				public void onSuccess(ClientResponse resp) {
+					synchronized (Fetcher.this) {
+						try {
+							FetchResponse response = (FetchResponse) resp.responseBody();
+							FetchSessionHandler handler = sessionHandler(fetchTarget.id());
+							if (handler == null) {
+								log.error("Unable to find FetchSessionHandler for node {}. Ignoring fetch response.",
+										fetchTarget.id());
+								return;
+							}
+							if (!handler.handleResponse(response)) {
+								return;
+							}
+
+							Set<TopicPartition> partitions = new HashSet<>(response.responseData().keySet());
+							FetchResponseMetricAggregator metricAggregator = new FetchResponseMetricAggregator(sensors, partitions);
+
+							for (Map.Entry<TopicPartition, FetchResponseData.PartitionData> entry : response.responseData().entrySet()) {
+								TopicPartition partition = entry.getKey();
+								FetchRequest.PartitionData requestData = data.sessionPartitions().get(partition);
+								if (requestData == null) {
+									String message;
+									if (data.metadata().isFull()) {
+										message = MessageFormatter.arrayFormat(
+												"Response for missing full request partition: partition={}; metadata={}",
+												new Object[]{partition, data.metadata()}).getMessage();
+									} else {
+										message = MessageFormatter.arrayFormat(
+												"Response for missing session request partition: partition={}; metadata={}; toSend={}; toForget={}",
+												new Object[]{partition, data.metadata(), data.toSend(), data.toForget()}).getMessage();
+									}
+
+									// Received fetch response for missing session partition
+									throw new IllegalStateException(message);
+								} else {
+									long fetchOffset = requestData.fetchOffset;
+									FetchResponseData.PartitionData partitionData = entry.getValue();
+
+									log.debug("Fetch {} at offset {} for partition {} returned fetch data {}",
+											isolationLevel, fetchOffset, partition, partitionData);
+
+									Iterator<? extends RecordBatch> batches = FetchResponse.recordsOrFail(partitionData).batches().iterator();
+									short responseVersion = resp.requestHeader().apiVersion();
+
+									completedFetches.add(new CompletedFetch(partition, partitionData,
+											metricAggregator, batches, fetchOffset, responseVersion));
+								}
+							}
+
+							sensors.fetchLatency.record(resp.requestLatencyMs());
+						} finally {
+							nodesWithPendingFetchRequests.remove(fetchTarget.id());
+						}
+					}
+				}
+
+				@Override
+				public void onFailure(RuntimeException e) {
+					synchronized (Fetcher.this) {
+						try {
+							FetchSessionHandler handler = sessionHandler(fetchTarget.id());
+							if (handler != null) {
+								handler.handleError(e);
+							}
+						} finally {
+							nodesWithPendingFetchRequests.remove(fetchTarget.id());
+						}
+					}
+				}
+			});
+
 		}
-		// 返回参与请求的节点数量
 		return fetchRequestMap.size();
 	}
 
@@ -472,51 +435,42 @@ public class Fetcher<K, V> implements Closeable {
 			return client.send(node, request);
 	}
 
-	/**
-	 * 计算重置策略时间戳
-	 * @param partition 指定partition
-	 * @return 重置策略时间戳
-	 */
 	private Long offsetResetStrategyTimestamp(final TopicPartition partition) {
-		// 获取指定partition的重置策略
 		OffsetResetStrategy strategy = subscriptions.resetStrategy(partition);
-		// 根据不同的策略，返回相应的时间戳
 		if (strategy == OffsetResetStrategy.EARLIEST)
-			// 最早重置策略
-			return ListOffsetRequest.EARLIEST_TIMESTAMP;
+			return ListOffsetsRequest.EARLIEST_TIMESTAMP;
 		else if (strategy == OffsetResetStrategy.LATEST)
-			// 最近重置策略
-			return ListOffsetRequest.LATEST_TIMESTAMP;
+			return ListOffsetsRequest.LATEST_TIMESTAMP;
 		else
 			return null;
 	}
 
 	private OffsetResetStrategy timestampToOffsetResetStrategy(long timestamp) {
-		if (timestamp == ListOffsetRequest.EARLIEST_TIMESTAMP)
+		if (timestamp == ListOffsetsRequest.EARLIEST_TIMESTAMP)
 			return OffsetResetStrategy.EARLIEST;
-		else if (timestamp == ListOffsetRequest.LATEST_TIMESTAMP)
+		else if (timestamp == ListOffsetsRequest.LATEST_TIMESTAMP)
 			return OffsetResetStrategy.LATEST;
 		else
 			return null;
 	}
 
 	/**
-	 * 重置需要的已分配的partition的offset
-	 * @throws org.apache.kafka.clients.consumer.NoOffsetForPartitionException 如果没有重置策略，或者至少一个partition没有在等待seekToBeginning()或者seekToEnd()
+	 * Reset offsets for all assigned partitions that require it.
+	 * @throws org.apache.kafka.clients.consumer.NoOffsetForPartitionException If no offset reset strategy is defined
+	 *                                                                         and one or more partitions aren't awaiting a seekToBeginning() or seekToEnd().
 	 */
 	public void resetOffsetsIfNeeded() {
-		// 抛出上一次拉取offset产生的错误
+		// Raise exception from previous offset fetch if there is one
 		RuntimeException exception = cachedListOffsetsException.getAndSet(null);
 		if (exception != null)
 			throw exception;
-		// 构建需要重置offset的集合
+
 		Set<TopicPartition> partitions = subscriptions.partitionsNeedingReset(time.milliseconds());
 		if (partitions.isEmpty())
 			return;
 
 		final Map<TopicPartition, Long> offsetResetTimestamps = new HashMap<>();
 		for (final TopicPartition partition : partitions) {
-			// 获取重置策略时间戳
 			Long timestamp = offsetResetStrategyTimestamp(partition);
 			if (timestamp != null)
 				offsetResetTimestamps.put(partition, timestamp);
@@ -526,27 +480,24 @@ public class Fetcher<K, V> implements Closeable {
 	}
 
 	/**
-	 * 如果检测到发生了leader节点变更，需要校验已分配的所有offset
+	 * Validate offsets for all assigned partitions for which a leader change has been detected.
 	 */
 	public void validateOffsetsIfNeeded() {
-		// 出现了leader异常，直接抛出leader异常
 		RuntimeException exception = cachedOffsetForLeaderException.getAndSet(null);
 		if (exception != null)
 			throw exception;
 
-		// 通过当前的leader和leader epoch，校验每个分区的信息
-		subscriptions.assignedPartitions().forEach(topicPartition -> {
-			ConsumerMetadata.LeaderAndEpoch leaderAndEpoch = metadata.leaderAndEpoch(topicPartition);
-			// 判断当前partition是否需要进行校验
-			subscriptions.maybeValidatePositionForCurrentLeader(topicPartition, leaderAndEpoch);
-		});
+		// Validate each partition against the current leader and epoch
+		// If we see a new metadata version, check all partitions
+		validatePositionsOnMetadataChange();
 
-		// 收集以partition维度，需要校验的position，并设置失败重试时间间隔
-		Map<TopicPartition, SubscriptionState.FetchPosition> partitionsToValidate = subscriptions
+		// Collect positions needing validation, with backoff
+		Map<TopicPartition, FetchPosition> partitionsToValidate = subscriptions
 				.partitionsNeedingValidation(time.milliseconds())
 				.stream()
+				.filter(tp -> subscriptions.position(tp) != null)
 				.collect(Collectors.toMap(Function.identity(), subscriptions::position));
-		// 异步校验offset
+
 		validateOffsetsAsync(partitionsToValidate);
 	}
 
@@ -588,35 +539,32 @@ public class Fetcher<K, V> implements Closeable {
 			RequestFuture<ListOffsetResult> future = sendListOffsetsRequests(remainingToSearch, requireTimestamps);
 			client.poll(future, timer);
 
-			if (!future.isDone())
+			if (!future.isDone()) {
 				break;
-
-			if (future.succeeded()) {
+			} else if (future.succeeded()) {
 				ListOffsetResult value = future.value();
 				result.fetchedOffsets.putAll(value.fetchedOffsets);
-				if (value.partitionsToRetry.isEmpty())
-					return result;
-
 				remainingToSearch.keySet().retainAll(value.partitionsToRetry);
 			} else if (!future.isRetriable()) {
 				throw future.exception();
 			}
 
-			if (metadata.updateRequested())
+			if (remainingToSearch.isEmpty()) {
+				return result;
+			} else {
 				client.awaitMetadataUpdate(timer);
-			else
-				timer.sleep(retryBackoffMs);
+			}
 		} while (timer.notExpired());
 
 		throw new TimeoutException("Failed to get offsets by times in " + timer.elapsedMs() + "ms");
 	}
 
 	public Map<TopicPartition, Long> beginningOffsets(Collection<TopicPartition> partitions, Timer timer) {
-		return beginningOrEndOffset(partitions, ListOffsetRequest.EARLIEST_TIMESTAMP, timer);
+		return beginningOrEndOffset(partitions, ListOffsetsRequest.EARLIEST_TIMESTAMP, timer);
 	}
 
 	public Map<TopicPartition, Long> endOffsets(Collection<TopicPartition> partitions, Timer timer) {
-		return beginningOrEndOffset(partitions, ListOffsetRequest.LATEST_TIMESTAMP, timer);
+		return beginningOrEndOffset(partitions, ListOffsetsRequest.LATEST_TIMESTAMP, timer);
 	}
 
 	private Map<TopicPartition, Long> beginningOrEndOffset(Collection<TopicPartition> partitions,
@@ -625,6 +573,7 @@ public class Fetcher<K, V> implements Closeable {
 		metadata.addTransientTopics(topicsForPartitions(partitions));
 		try {
 			Map<TopicPartition, Long> timestampsToSearch = partitions.stream()
+					.distinct()
 					.collect(Collectors.toMap(Function.identity(), tp -> timestamp));
 
 			ListOffsetResult result = fetchOffsetsByTimes(timestampsToSearch, timer, false);
@@ -637,81 +586,67 @@ public class Fetcher<K, V> implements Closeable {
 	}
 
 	/**
-	 * 返回取到的record，清除record buffer，并更新已消费的位置
-	 * 注意：返回空的record集合，保证了已消费位置没有被更新
-	 * @return 分区维度取到的record
-	 * @throws OffsetOutOfRangeException   FetchResponse返回OffsetOutOfRange，并且默认的重置策略为空
-	 * @throws TopicAuthorizationException FetchResponse返回TopicAuthorization错误
+	 * Return the fetched records, empty the record buffer and update the consumed position.
+	 * <p>
+	 * NOTE: returning empty records guarantees the consumed position are NOT updated.
+	 * @return The fetched records per partition
+	 * @throws OffsetOutOfRangeException   If there is OffsetOutOfRange error in fetchResponse and
+	 *                                     the defaultResetPolicy is NONE
+	 * @throws TopicAuthorizationException If there is TopicAuthorization error in fetchResponse.
 	 */
 	public Map<TopicPartition, List<ConsumerRecord<K, V>>> fetchedRecords() {
 		Map<TopicPartition, List<ConsumerRecord<K, V>>> fetched = new HashMap<>();
-		Queue<PartitionRecords> pausedCompletedFetches = new ArrayDeque<>();
-		// 通过max.poll.records设置的最大轮询数量
+		Queue<CompletedFetch> pausedCompletedFetches = new ArrayDeque<>();
 		int recordsRemaining = maxPollRecords;
 
 		try {
 			while (recordsRemaining > 0) {
-				// 如果下一个需要处理的partition records为null或者状态为已取
-				if (nextInLineRecords == null || nextInLineRecords.isFetched) {
-					// 继续从已完成的fetch队列中获取
-					PartitionRecords records = completedFetches.peek();
+				if (nextInLineFetch == null || nextInLineFetch.isConsumed) {
+					CompletedFetch records = completedFetches.peek();
 					if (records == null) break;
-					// 如果records还没有实例化
+
 					if (records.notInitialized()) {
 						try {
-							// 进行实例化，并赋值给下一个需要处理的records
-							nextInLineRecords = initializePartitionRecords(records);
+							nextInLineFetch = initializeCompletedFetch(records);
 						} catch (Exception e) {
-							// 在以下的情况下，如果在解析过程中出现了异常，我们就需要移除这个completedFetch
-							// 1. 它没有包含任何records
-							// 2. 在此异常之前，没有获取到任何实际的record
-							// 第一个条件确认了completedFetches集合不会相同被相同TopicAuthorizationException异常completedFetch阻塞住
-							// 第二个条件确认了没有由于后续record的异常而导致前面部分的record丢失
-							FetchResponse.PartitionData partition = records.completedFetch.partitionData;
-							if (fetched.isEmpty() && (partition.records == null || partition.records.sizeInBytes() == 0)) {
+							// Remove a completedFetch upon a parse with exception if (1) it contains no records, and
+							// (2) there are no fetched records with actual content preceding this exception.
+							// The first condition ensures that the completedFetches is not stuck with the same completedFetch
+							// in cases such as the TopicAuthorizationException, and the second condition ensures that no
+							// potential data loss due to an exception in a following record.
+							FetchResponseData.PartitionData partition = records.partitionData;
+							if (fetched.isEmpty() && FetchResponse.recordsOrFail(partition).sizeInBytes() == 0) {
 								completedFetches.poll();
 							}
 							throw e;
 						}
 					} else {
-						// 已经实例化的records直接赋值给下一个需要处理的records
-						nextInLineRecords = records;
+						nextInLineFetch = records;
 					}
-					// 继续等待获取已完成的fetch
 					completedFetches.poll();
-				} else if (subscriptions.isPaused(nextInLineRecords.partition)) {
-					// 如果开发者暂停了当前分区，我们可以将records添加到completedFetches队列中来代替排空records
-					// 以便于他们可以在partition恢复后，随后的poll()方法中返回
-					log.debug("Skipping fetching records for assigned partition {} because it is paused", nextInLineRecords.partition);
-					// 等待恢复的completedFetches中添加当前处理的records
-					pausedCompletedFetches.add(nextInLineRecords);
-					nextInLineRecords = null;
+				} else if (subscriptions.isPaused(nextInLineFetch.partition)) {
+					// when the partition is paused we add the records back to the completedFetches queue instead of draining
+					// them so that they can be returned on a subsequent poll if the partition is resumed at that time
+					log.debug("Skipping fetching records for assigned partition {} because it is paused", nextInLineFetch.partition);
+					pausedCompletedFetches.add(nextInLineFetch);
+					nextInLineFetch = null;
 				} else {
-					// nextInLineRecords处于正常需要处理的状态
-					// 转换拉取到的数据
-					List<ConsumerRecord<K, V>> records = fetchRecords(nextInLineRecords, recordsRemaining);
-					// 如果需要处理拉取到的数据
+					List<ConsumerRecord<K, V>> records = fetchRecords(nextInLineFetch, recordsRemaining);
+
 					if (!records.isEmpty()) {
-						// 获取当前的topic-partition信息
-						TopicPartition partition = nextInLineRecords.partition;
-						// 检查当前topic-partition是否还有没有处理完成的record
+						TopicPartition partition = nextInLineFetch.partition;
 						List<ConsumerRecord<K, V>> currentRecords = fetched.get(partition);
-						// 如果当前topic-partition没有需要处理的record，处理本次拉取到的record
 						if (currentRecords == null) {
 							fetched.put(partition, records);
 						} else {
-							// 当前topic-partition存在没有需要处理的record
-							// 这种情况不经常发生，因为我们在同一时间对每个分区只会发送一个fetch请求
-							// 但是它却能让人信服地发生在一些罕见的场合，比如partition的leader节点发生了变化
-							// 我们必须拷贝到一个新的list，因为旧的list可能是不可变的
-							// 创建一个新的用于存放record的集合
+							// this case shouldn't usually happen because we only send one fetch at a time per partition,
+							// but it might conceivably happen in some rare cases (such as partition leader changes).
+							// we have to copy to a new list because the old one may be immutable
 							List<ConsumerRecord<K, V>> newRecords = new ArrayList<>(records.size() + currentRecords.size());
 							newRecords.addAll(currentRecords);
 							newRecords.addAll(records);
-							// 新、旧需要处理的record全部添加进去，并覆盖已有的信息
 							fetched.put(partition, newRecords);
 						}
-						// 递减需要处理的record，进行下一个PartitionRecords的处理
 						recordsRemaining -= records.size();
 					}
 				}
@@ -720,132 +655,101 @@ public class Fetcher<K, V> implements Closeable {
 			if (fetched.isEmpty())
 				throw e;
 		} finally {
-			// 将轮询到的已完成的，但是因为种种原因partition处于暂停状态的fetch，重新放回completedFetches中，等待在下一次轮询中重新进行评估
+			// add any polled completed fetches for paused partitions back to the completed fetches queue to be
+			// re-evaluated in the next poll
 			completedFetches.addAll(pausedCompletedFetches);
 		}
 
 		return fetched;
 	}
 
-	/**
-	 * 从已经拉取到的records中处理Record，并返回供消费者处理的record
-	 * @param partitionRecords 当前正在处理的分区record
-	 * @param maxRecords       最大拉取数量
-	 * @return 供消费者处理的record集合
-	 */
-	private List<ConsumerRecord<K, V>> fetchRecords(PartitionRecords partitionRecords, int maxRecords) {
-		// 校验partition状态是否为已分配
-		if (!subscriptions.isAssigned(partitionRecords.partition)) {
-			// 可能会发生在拉取的records返回之前触发了一次分区再平衡
+	private List<ConsumerRecord<K, V>> fetchRecords(CompletedFetch completedFetch, int maxRecords) {
+		if (!subscriptions.isAssigned(completedFetch.partition)) {
+			// this can happen when a rebalance happened before fetched records are returned to the consumer's poll call
 			log.debug("Not returning fetched records for partition {} since it is no longer assigned",
-					partitionRecords.partition);
-		} else if (!subscriptions.isFetchable(partitionRecords.partition)) {
-			// 校验partition状态是否可取
-			// 可能发生于一个partition在拉取records之前暂停，或者offset正在重置
+					completedFetch.partition);
+		} else if (!subscriptions.isFetchable(completedFetch.partition)) {
+			// this can happen when a partition is paused before fetched records are returned to the consumer's
+			// poll call or if the offset is being reset
 			log.debug("Not returning fetched records for assigned partition {} since it is no longer fetchable",
-					partitionRecords.partition);
+					completedFetch.partition);
 		} else {
-			// 正常的拉取操作
-			// 获取当前分区的拉取位置信息
-			SubscriptionState.FetchPosition position = subscriptions.position(partitionRecords.partition);
-			// 如果下一次获取到的fetch offset等于当前consumer存储的offset
-			// partitionRecords中的nextFetchOffset是在收到成功响应时，请求数据的值
-			// position.offset是broker提供的offset
-			if (partitionRecords.nextFetchOffset == position.offset) {
-				// 获取指定数目的records
-				List<ConsumerRecord<K, V>> partRecords = partitionRecords.fetchRecords(maxRecords);
-				// 如果请求时的offset大于订阅列表已有的offset
-				if (partitionRecords.nextFetchOffset > position.offset) {
-					// 设置新的读取offset位置，覆盖订阅列表中的记录的offset
-					SubscriptionState.FetchPosition nextPosition = new SubscriptionState.FetchPosition(
-							partitionRecords.nextFetchOffset,
-							partitionRecords.lastEpoch,
+			FetchPosition position = subscriptions.position(completedFetch.partition);
+			if (position == null) {
+				throw new IllegalStateException("Missing position for fetchable partition " + completedFetch.partition);
+			}
+
+			if (completedFetch.nextFetchOffset == position.offset) {
+				List<ConsumerRecord<K, V>> partRecords = completedFetch.fetchRecords(maxRecords);
+
+				log.trace("Returning {} fetched records at offset {} for assigned partition {}",
+						partRecords.size(), position, completedFetch.partition);
+
+				if (completedFetch.nextFetchOffset > position.offset) {
+					FetchPosition nextPosition = new FetchPosition(
+							completedFetch.nextFetchOffset,
+							completedFetch.lastEpoch,
 							position.currentLeader);
-					log.trace("Returning fetched records at offset {} for assigned partition {} and update " +
-							"position to {}", position, partitionRecords.partition, nextPosition);
-					// 更新订阅的position位置
-					subscriptions.position(partitionRecords.partition, nextPosition);
+					log.trace("Update fetching position to {} for partition {}", nextPosition, completedFetch.partition);
+					subscriptions.position(completedFetch.partition, nextPosition);
 				}
-				//
-				Long partitionLag = subscriptions.partitionLag(partitionRecords.partition, isolationLevel);
+
+				Long partitionLag = subscriptions.partitionLag(completedFetch.partition, isolationLevel);
 				if (partitionLag != null)
-					// 存在消息积压的情况，使用计数器记录消息积压情况
-					this.sensors.recordPartitionLag(partitionRecords.partition, partitionLag);
-				// 获取当前consumer已经消费的offset
-				Long lead = subscriptions.partitionLead(partitionRecords.partition);
-				// 记录当前consumer已经消费的offset
+					this.sensors.recordPartitionLag(completedFetch.partition, partitionLag);
+
+				Long lead = subscriptions.partitionLead(completedFetch.partition);
 				if (lead != null) {
-					this.sensors.recordPartitionLead(partitionRecords.partition, lead);
+					this.sensors.recordPartitionLead(completedFetch.partition, lead);
 				}
-				// 返回已经解析完成的ConsumerRecord集合
+
 				return partRecords;
 			} else {
-				// 这些records并不是基于上一次已消费的位置来进行处理，忽略它们
-				// 这些records一定是来自过时的请求
+				// these records aren't next in line based on the last consumed position, ignore them
+				// they must be from an obsolete request
 				log.debug("Ignoring fetched records for {} at offset {} since the current position is {}",
-						partitionRecords.partition, partitionRecords.nextFetchOffset, position);
+						completedFetch.partition, completedFetch.nextFetchOffset, position);
 			}
 		}
-		// 走到这里，证明命中了上面的异常情况，不处理当前拉取到的PartitionRecord，返回空ConsumerRecord
-		log.trace("Draining fetched records for partition {}", partitionRecords.partition);
-		partitionRecords.drain();
+
+		log.trace("Draining fetched records for partition {}", completedFetch.partition);
+		completedFetch.drain();
 
 		return emptyList();
 	}
 
-	/**
-	 * 重置offset
-	 * @param partition 需要重置offset的partition
-	 * @param requestedResetStrategy 请求重置时的策略
-	 * @param offsetData 进行重置的数据
-	 */
-	private void resetOffsetIfNeeded(TopicPartition partition, OffsetResetStrategy requestedResetStrategy, ListOffsetData offsetData) {
-		// 根据新的offset和leader epoch构建最新的position
-		SubscriptionState.FetchPosition position = new SubscriptionState.FetchPosition(
-				offsetData.offset, offsetData.leaderEpoch, metadata.leaderAndEpoch(partition));
-		// 更新拉取的最新的leader epoch数据
+	// Visible for testing
+	void resetOffsetIfNeeded(TopicPartition partition, OffsetResetStrategy requestedResetStrategy, ListOffsetData offsetData) {
+		FetchPosition position = new FetchPosition(
+				offsetData.offset,
+				Optional.empty(), // This will ensure we skip validation
+				metadata.currentLeader(partition));
 		offsetData.leaderEpoch.ifPresent(epoch -> metadata.updateLastSeenEpochIfNewer(partition, epoch));
-		// 手动修改offset
-		subscriptions.maybeSeekUnvalidated(partition, position.offset, requestedResetStrategy);
+		subscriptions.maybeSeekUnvalidated(partition, position, requestedResetStrategy);
 	}
 
-	/**
-	 * 异步重置offset
-	 * @param partitionResetTimestamps partition重置集合
-	 */
 	private void resetOffsetsAsync(Map<TopicPartition, Long> partitionResetTimestamps) {
-		// 将以partition维度的重置，转换为node维度的
-		Map<Node, Map<TopicPartition, ListOffsetRequest.PartitionData>> timestampsToSearchByNode =
+		Map<Node, Map<TopicPartition, ListOffsetsPartition>> timestampsToSearchByNode =
 				groupListOffsetRequests(partitionResetTimestamps, new HashSet<>());
-		// 遍历每个node
-		for (Map.Entry<Node, Map<TopicPartition, ListOffsetRequest.PartitionData>> entry : timestampsToSearchByNode.entrySet()) {
+		for (Map.Entry<Node, Map<TopicPartition, ListOffsetsPartition>> entry : timestampsToSearchByNode.entrySet()) {
 			Node node = entry.getKey();
-			// 获取每个node的partition-重置时间戳集合
-			final Map<TopicPartition, ListOffsetRequest.PartitionData> resetTimestamps = entry.getValue();
-			// 设置下一次该node下partition重试时间
+			final Map<TopicPartition, ListOffsetsPartition> resetTimestamps = entry.getValue();
 			subscriptions.setNextAllowedRetry(resetTimestamps.keySet(), time.milliseconds() + requestTimeoutMs);
-			// 发送重置请求，并添加响应listener
+
 			RequestFuture<ListOffsetResult> future = sendListOffsetRequest(node, resetTimestamps, false);
-			// 发送请求后，通过回调任务，已经将合法的offset封装进future中，此时将会处理future任务
 			future.addListener(new RequestFutureListener<ListOffsetResult>() {
-				/**
-				 * future完成回调成功任务
-				 * @param result
-				 */
 				@Override
 				public void onSuccess(ListOffsetResult result) {
-					// 处理需要重试重置的partition
 					if (!result.partitionsToRetry.isEmpty()) {
 						subscriptions.requestFailed(result.partitionsToRetry, time.milliseconds() + retryBackoffMs);
-						// 更新metadata
 						metadata.requestUpdate();
 					}
-					// 遍历每个partition最新的offset数据，进行重置
+
 					for (Map.Entry<TopicPartition, ListOffsetData> fetchedOffset : result.fetchedOffsets.entrySet()) {
 						TopicPartition partition = fetchedOffset.getKey();
 						ListOffsetData offsetData = fetchedOffset.getValue();
-						ListOffsetRequest.PartitionData requestedReset = resetTimestamps.get(partition);
-						resetOffsetIfNeeded(partition, timestampToOffsetResetStrategy(requestedReset.timestamp), offsetData);
+						ListOffsetsPartition requestedReset = resetTimestamps.get(partition);
+						resetOffsetIfNeeded(partition, timestampToOffsetResetStrategy(requestedReset.timestamp()), offsetData);
 					}
 				}
 
@@ -861,27 +765,26 @@ public class Fetcher<K, V> implements Closeable {
 		}
 	}
 
-	private boolean hasUsableOffsetForLeaderEpochVersion(NodeApiVersions nodeApiVersions) {
-		ApiVersionsResponse.ApiVersion apiVersion = nodeApiVersions.apiVersion(ApiKeys.OFFSET_FOR_LEADER_EPOCH);
+	static boolean hasUsableOffsetForLeaderEpochVersion(NodeApiVersions nodeApiVersions) {
+		ApiVersion apiVersion = nodeApiVersions.apiVersion(ApiKeys.OFFSET_FOR_LEADER_EPOCH);
 		if (apiVersion == null)
 			return false;
 
-		return OffsetsForLeaderEpochRequest.supportsTopicPermission(apiVersion.maxVersion);
+		return OffsetsForLeaderEpochRequest.supportsTopicPermission(apiVersion.maxVersion());
 	}
 
 	/**
-	 * 对于每一个需要校验的partition，创建一个异步请求，来获得每个partition的尾端点的offset
-	 * 只有在leader epoch小于等于上一次更新的epoch的情况下，才会请求
-	 *
-	 * 以节点的方式进行请求，可以提高效率
+	 * For each partition which needs validation, make an asynchronous request to get the end-offsets for the partition
+	 * with the epoch less than or equal to the epoch the partition last saw.
+	 * <p>
+	 * Requests are grouped by Node for efficiency.
 	 */
-	private void validateOffsetsAsync(Map<TopicPartition, SubscriptionState.FetchPosition> partitionsToValidate) {
-		// 将以partition为维度的更新信息，转换成以node为维度的更新信息
-		final Map<Node, Map<TopicPartition, SubscriptionState.FetchPosition>> regrouped =
+	private void validateOffsetsAsync(Map<TopicPartition, FetchPosition> partitionsToValidate) {
+		final Map<Node, Map<TopicPartition, FetchPosition>> regrouped =
 				regroupFetchPositionsByLeader(partitionsToValidate);
 
-		regrouped.forEach((node, fetchPostitions) -> {
-			// 遍历每个节点，构建请求
+		long nextResetTimeMs = time.milliseconds() + requestTimeoutMs;
+		regrouped.forEach((node, fetchPositions) -> {
 			if (node.isEmpty()) {
 				metadata.requestUpdate();
 				return;
@@ -892,69 +795,78 @@ public class Fetcher<K, V> implements Closeable {
 				client.tryConnect(node);
 				return;
 			}
-			// 如果在当前的leader epoch版本下，没有可用的offset，不请求更新
+
 			if (!hasUsableOffsetForLeaderEpochVersion(nodeApiVersions)) {
 				log.debug("Skipping validation of fetch offsets for partitions {} since the broker does not " +
 								"support the required protocol version (introduced in Kafka 2.3)",
-						fetchPostitions.keySet());
-				for (TopicPartition partition : fetchPostitions.keySet()) {
-					// 修改拉取状态
+						fetchPositions.keySet());
+				for (TopicPartition partition : fetchPositions.keySet()) {
 					subscriptions.completeValidation(partition);
 				}
 				return;
 			}
-			// 设置下一次可进行重试的时间戳
-			subscriptions.setNextAllowedRetry(fetchPostitions.keySet(), time.milliseconds() + requestTimeoutMs);
-			// 发送异步请求，并添加响应事件的listener
-			RequestFuture<OffsetsForLeaderEpochClient.OffsetForEpochResult> future = offsetsForLeaderEpochClient.sendAsyncRequest(node, partitionsToValidate);
-			future.addListener(new RequestFutureListener<OffsetsForLeaderEpochClient.OffsetForEpochResult>() {
-				/**
-				 * 异步获取更新的offset成功
-				 * @param offsetsResult 更新offset结果
-				 */
+
+			subscriptions.setNextAllowedRetry(fetchPositions.keySet(), nextResetTimeMs);
+
+			RequestFuture<OffsetForEpochResult> future =
+					offsetsForLeaderEpochClient.sendAsyncRequest(node, fetchPositions);
+
+			future.addListener(new RequestFutureListener<OffsetForEpochResult>() {
 				@Override
-				public void onSuccess(OffsetsForLeaderEpochClient.OffsetForEpochResult offsetsResult) {
-					Map<TopicPartition, OffsetAndMetadata> truncationWithoutResetPolicy = new HashMap<>();
-					// 处理需要重试的partition
+				public void onSuccess(OffsetForEpochResult offsetsResult) {
+					List<SubscriptionState.LogTruncation> truncations = new ArrayList<>();
 					if (!offsetsResult.partitionsToRetry().isEmpty()) {
 						subscriptions.setNextAllowedRetry(offsetsResult.partitionsToRetry(), time.milliseconds() + retryBackoffMs);
 						metadata.requestUpdate();
 					}
 
-					// 对于每一个OffsetsForLeader响应，首先校验传回来的末尾offset是否小于当前consumer存储的offset
-					// 如果小于，意味着broker经历了日志文件截断，我们需要重新定位offset
-					offsetsResult.endOffsets().forEach((respTopicPartition, respEndOffset) -> {
-						SubscriptionState.FetchPosition requestPosition = fetchPostitions.get(respTopicPartition);
-						Optional<OffsetAndMetadata> divergentOffsetOpt = subscriptions.maybeCompleteValidation(
-								respTopicPartition, requestPosition, respEndOffset);
-						// 需要重新处理的offset
-						divergentOffsetOpt.ifPresent(divergentOffset -> {
-							truncationWithoutResetPolicy.put(respTopicPartition, divergentOffset);
-						});
+					// For each OffsetsForLeader response, check if the end-offset is lower than our current offset
+					// for the partition. If so, it means we have experienced log truncation and need to reposition
+					// that partition's offset.
+					//
+					// In addition, check whether the returned offset and epoch are valid. If not, then we should reset
+					// its offset if reset policy is configured, or throw out of range exception.
+					offsetsResult.endOffsets().forEach((topicPartition, respEndOffset) -> {
+						FetchPosition requestPosition = fetchPositions.get(topicPartition);
+						Optional<SubscriptionState.LogTruncation> truncationOpt =
+								subscriptions.maybeCompleteValidation(topicPartition, requestPosition, respEndOffset);
+						truncationOpt.ifPresent(truncations::add);
 					});
-					// 如果存在需要继续处理的offset，则抛出异常
-					if (!truncationWithoutResetPolicy.isEmpty()) {
-						throw new LogTruncationException(truncationWithoutResetPolicy);
+
+					if (!truncations.isEmpty()) {
+						maybeSetOffsetForLeaderException(buildLogTruncationException(truncations));
 					}
 				}
 
-				/**
-				 * 异步获取更新的offset失败
-				 * @param e
-				 */
 				@Override
 				public void onFailure(RuntimeException e) {
-					// 更新失败，计算下一次重试的时间
-					subscriptions.requestFailed(fetchPostitions.keySet(), time.milliseconds() + retryBackoffMs);
-					// 更新拉取器的metadata
+					subscriptions.requestFailed(fetchPositions.keySet(), time.milliseconds() + retryBackoffMs);
 					metadata.requestUpdate();
 
-					if (!(e instanceof RetriableException) && !cachedOffsetForLeaderException.compareAndSet(null, e)) {
-						log.error("Discarding error in OffsetsForLeaderEpoch because another error is pending", e);
+					if (!(e instanceof RetriableException)) {
+						maybeSetOffsetForLeaderException(e);
 					}
 				}
 			});
 		});
+	}
+
+	private LogTruncationException buildLogTruncationException(List<SubscriptionState.LogTruncation> truncations) {
+		Map<TopicPartition, OffsetAndMetadata> divergentOffsets = new HashMap<>();
+		Map<TopicPartition, Long> truncatedFetchOffsets = new HashMap<>();
+		for (SubscriptionState.LogTruncation truncation : truncations) {
+			truncation.divergentOffsetOpt.ifPresent(divergentOffset ->
+					divergentOffsets.put(truncation.topicPartition, divergentOffset));
+			truncatedFetchOffsets.put(truncation.topicPartition, truncation.fetchPosition.offset);
+		}
+		return new LogTruncationException("Detected truncated partitions: " + truncations,
+				truncatedFetchOffsets, divergentOffsets);
+	}
+
+	private void maybeSetOffsetForLeaderException(RuntimeException e) {
+		if (!cachedOffsetForLeaderException.compareAndSet(null, e)) {
+			log.error("Discarding error in OffsetsForLeaderEpoch because another error is pending", e);
+		}
 	}
 
 	/**
@@ -967,7 +879,7 @@ public class Fetcher<K, V> implements Closeable {
 	private RequestFuture<ListOffsetResult> sendListOffsetsRequests(final Map<TopicPartition, Long> timestampsToSearch,
 																	final boolean requireTimestamps) {
 		final Set<TopicPartition> partitionsToRetry = new HashSet<>();
-		Map<Node, Map<TopicPartition, ListOffsetRequest.PartitionData>> timestampsToSearchByNode =
+		Map<Node, Map<TopicPartition, ListOffsetsPartition>> timestampsToSearchByNode =
 				groupListOffsetRequests(timestampsToSearch, partitionsToRetry);
 		if (timestampsToSearchByNode.isEmpty())
 			return RequestFuture.failure(new StaleMetadataException());
@@ -976,7 +888,7 @@ public class Fetcher<K, V> implements Closeable {
 		final Map<TopicPartition, ListOffsetData> fetchedTimestampOffsets = new HashMap<>();
 		final AtomicInteger remainingResponses = new AtomicInteger(timestampsToSearchByNode.size());
 
-		for (Map.Entry<Node, Map<TopicPartition, ListOffsetRequest.PartitionData>> entry : timestampsToSearchByNode.entrySet()) {
+		for (Map.Entry<Node, Map<TopicPartition, ListOffsetsPartition>> entry : timestampsToSearchByNode.entrySet()) {
 			RequestFuture<ListOffsetResult> future =
 					sendListOffsetRequest(entry.getKey(), entry.getValue(), requireTimestamps);
 			future.addListener(new RequestFutureListener<ListOffsetResult>() {
@@ -1006,209 +918,198 @@ public class Fetcher<K, V> implements Closeable {
 	}
 
 	/**
-	 * 以node维度，聚合需要重置策略的partition的时间戳，前提是leader节点可用
-	 * 如果partition所在的集群的没有leader节点，将添加到partitionsToRetry集合中，等待重试
-	 * @param timestampsToSearch 需要进新转换的时间戳集合
-	 * @param partitionsToRetry  需要进行更新metadata或者重新连接leader节点的partition集合
+	 * Groups timestamps to search by node for topic partitions in `timestampsToSearch` that have
+	 * leaders available. Topic partitions from `timestampsToSearch` that do not have their leader
+	 * available are added to `partitionsToRetry`
+	 * @param timestampsToSearch The mapping from partitions ot the target timestamps
+	 * @param partitionsToRetry  A set of topic partitions that will be extended with partitions
+	 *                           that need metadata update or re-connect to the leader.
 	 */
-	private Map<Node, Map<TopicPartition, ListOffsetRequest.PartitionData>> groupListOffsetRequests(
+	private Map<Node, Map<TopicPartition, ListOffsetsPartition>> groupListOffsetRequests(
 			Map<TopicPartition, Long> timestampsToSearch,
 			Set<TopicPartition> partitionsToRetry) {
-		final Map<TopicPartition, ListOffsetRequest.PartitionData> partitionDataMap = new HashMap<>();
-		// 以下遍历主要进行了状态校验判断
+		final Map<TopicPartition, ListOffsetsPartition> partitionDataMap = new HashMap<>();
 		for (Map.Entry<TopicPartition, Long> entry : timestampsToSearch.entrySet()) {
 			TopicPartition tp = entry.getKey();
 			Long offset = entry.getValue();
-			// 获取当前partition的metadata
-			Optional<MetadataCache.PartitionInfoAndEpoch> currentInfo = metadata.partitionInfoIfCurrent(tp);
-			if (!currentInfo.isPresent()) {
-				log.debug("Leader for partition {} is unknown for fetching offset {}", tp, offset);
-				// 不存在当前partition的metadata，申请进行更新，并等待重试
-				metadata.requestUpdate();
-				partitionsToRetry.add(tp);
-			} else if (currentInfo.get().partitionInfo().leader() == null) {
-				// 如果当前partition所在集群的leader节点为null
-				log.debug("Leader for partition {} is unavailable for fetching offset {}", tp, offset);
-				// 也申请更新metadata，并等待重试
-				metadata.requestUpdate();
-				partitionsToRetry.add(tp);
-			} else if (client.isUnavailable(currentInfo.get().partitionInfo().leader())) {
-				client.maybeThrowAuthFailure(currentInfo.get().partitionInfo().leader());
+			Metadata.LeaderAndEpoch leaderAndEpoch = metadata.currentLeader(tp);
 
-				// 连接是失败了，我们需要等待一段真空期，知道我们我们可以重试，
-				// 我们不需申请更新metadata，因为断连时会更新metadata
-				log.debug("Leader {} for partition {} is unavailable for fetching offset until reconnect backoff expires",
-						currentInfo.get().partitionInfo().leader(), tp);
+			if (!leaderAndEpoch.leader.isPresent()) {
+				log.debug("Leader for partition {} is unknown for fetching offset {}", tp, offset);
+				metadata.requestUpdate();
 				partitionsToRetry.add(tp);
 			} else {
-				partitionDataMap.put(tp,
-						new ListOffsetRequest.PartitionData(offset, Optional.of(currentInfo.get().epoch())));
+				Node leader = leaderAndEpoch.leader.get();
+				if (client.isUnavailable(leader)) {
+					client.maybeThrowAuthFailure(leader);
+
+					// The connection has failed and we need to await the backoff period before we can
+					// try again. No need to request a metadata update since the disconnect will have
+					// done so already.
+					log.debug("Leader {} for partition {} is unavailable for fetching offset until reconnect backoff expires",
+							leader, tp);
+					partitionsToRetry.add(tp);
+				} else {
+					int currentLeaderEpoch = leaderAndEpoch.epoch.orElse(ListOffsetsResponse.UNKNOWN_EPOCH);
+					partitionDataMap.put(tp, new ListOffsetsPartition()
+							.setPartitionIndex(tp.partition())
+							.setTimestamp(offset)
+							.setCurrentLeaderEpoch(currentLeaderEpoch));
+				}
 			}
 		}
-		// 以node为维度，重新聚合
 		return regroupPartitionMapByNode(partitionDataMap);
 	}
 
 	/**
-	 * 向指定broker发送重置offset请求
-	 * @param node               需要请求到的broker
-	 * @param timestampsToSearch 需要发送的请求partition信息集合
+	 * Send the ListOffsetRequest to a specific broker for the partitions and target timestamps.
+	 * @param node               The node to send the ListOffsetRequest to.
+	 * @param timestampsToSearch The mapping from partitions to the target timestamps.
 	 * @param requireTimestamp   True if we require a timestamp in the response.
 	 * @return A response which can be polled to obtain the corresponding timestamps and offsets.
 	 */
 	private RequestFuture<ListOffsetResult> sendListOffsetRequest(final Node node,
-																  final Map<TopicPartition, ListOffsetRequest.PartitionData> timestampsToSearch,
+																  final Map<TopicPartition, ListOffsetsPartition> timestampsToSearch,
 																  boolean requireTimestamp) {
-		// 构建请求
-		ListOffsetRequest.Builder builder = ListOffsetRequest.Builder
+		ListOffsetsRequest.Builder builder = ListOffsetsRequest.Builder
 				.forConsumer(requireTimestamp, isolationLevel)
-				.setTargetTimes(timestampsToSearch);
-		// 发送请求
+				.setTargetTimes(ListOffsetsRequest.toListOffsetsTopics(timestampsToSearch));
+
 		log.debug("Sending ListOffsetRequest {} to broker {}", builder, node);
 		return client.send(node, builder)
 				.compose(new RequestFutureAdapter<ClientResponse, ListOffsetResult>() {
 					@Override
 					public void onSuccess(ClientResponse response, RequestFuture<ListOffsetResult> future) {
-						ListOffsetResponse lor = (ListOffsetResponse) response.responseBody();
+						ListOffsetsResponse lor = (ListOffsetsResponse) response.responseBody();
 						log.trace("Received ListOffsetResponse {} from broker {}", lor, node);
-						// 处理重置offset响应
-						handleListOffsetResponse(timestampsToSearch, lor, future);
+						handleListOffsetResponse(lor, future);
 					}
 				});
 	}
 
 	/**
-	 * 重置offset响应的回调任务
-	 * @param timestampsToSearch partition-目标时间戳的映射集合，请求时的partition-目标时间戳集合
-	 * @param listOffsetResponse broker返回的重置offset响应
-	 * @param future             响应返回时，需要完成的异步任务
-	 *                           需要注意的是，任何partition级别的错误都会失败掉整个异步任务结果
-	 *                           一个异常是UNSUPPORTED_FOR_MESSAGE_FORMAT，证明broker不支持v1版本的消息格式
-	 *                           如果分区有此特定的错误，需要离开异步任务映射集合
-	 *                           还需要注意的是，每个partition对应的时间戳在v0版本的消息格式中可能为null，在v1及以后的版本中，ListOffset API不会返回null时间戳（可能会返回-1）
+	 * Callback for the response of the list offset call above.
+	 * @param listOffsetsResponse The response from the server.
+	 * @param future              The future to be completed when the response returns. Note that any partition-level errors will
+	 *                            generally fail the entire future result. The one exception is UNSUPPORTED_FOR_MESSAGE_FORMAT,
+	 *                            which indicates that the broker does not support the v1 message format. Partitions with this
+	 *                            particular error are simply left out of the future map. Note that the corresponding timestamp
+	 *                            value of each partition may be null only for v0. In v1 and later the ListOffset API would not
+	 *                            return a null timestamp (-1 is returned instead when necessary).
 	 */
-	@SuppressWarnings("deprecation")
-	private void handleListOffsetResponse(Map<TopicPartition, ListOffsetRequest.PartitionData> timestampsToSearch,
-										  ListOffsetResponse listOffsetResponse,
+	private void handleListOffsetResponse(ListOffsetsResponse listOffsetsResponse,
 										  RequestFuture<ListOffsetResult> future) {
 		Map<TopicPartition, ListOffsetData> fetchedOffsets = new HashMap<>();
 		Set<TopicPartition> partitionsToRetry = new HashSet<>();
 		Set<String> unauthorizedTopics = new HashSet<>();
 
-		for (Map.Entry<TopicPartition, ListOffsetRequest.PartitionData> entry : timestampsToSearch.entrySet()) {
-			TopicPartition topicPartition = entry.getKey();
-			// 获取指定partition的partition数据
-			ListOffsetResponse.PartitionData partitionData = listOffsetResponse.responseData().get(topicPartition);
-			Errors error = partitionData.error;
-			// 排除异常情况
-			if (error == Errors.NONE) {
-				// 如果partition数据中包含了offset数据
-				if (partitionData.offsets != null) {
-					// 处理v0版本消息格式的响应内容
-					long offset;
-					// 不允许存在一个partition有多个offset的情况
-					if (partitionData.offsets.size() > 1) {
-						future.raise(new IllegalStateException("Unexpected partitionData response of length " +
-								partitionData.offsets.size()));
-						return;
-						// 没有offset，返回的是一个emptyList
-					} else if (partitionData.offsets.isEmpty()) {
-						// 返回未知的offset结果
-						offset = ListOffsetResponse.UNKNOWN_OFFSET;
-					} else {
-						// 获取这个唯一的offset
-						offset = partitionData.offsets.get(0);
-					}
-					log.debug("Handling v0 ListOffsetResponse response for {}. Fetched offset {}",
-							topicPartition, offset);
-					// 在非位置offset的情况下
-					if (offset != ListOffsetResponse.UNKNOWN_OFFSET) {
-						// 构建offset数据，放入到缓存已拉取的partition-offset数据映射集合中
-						ListOffsetData offsetData = new ListOffsetData(offset, null, Optional.empty());
-						fetchedOffsets.put(topicPartition, offsetData);
-					}
-				} else {
-					// 处理v1版本及以后的响应内容
-					log.debug("Handling ListOffsetResponse response for {}. Fetched offset {}, timestamp {}",
-							topicPartition, partitionData.offset, partitionData.timestamp);
-					if (partitionData.offset != ListOffsetResponse.UNKNOWN_OFFSET) {
-						// 此时是从ListOffsetResponse.PartitionData的offset中获取offset，是一个基本类型成员变量
-						ListOffsetData offsetData = new ListOffsetData(partitionData.offset, partitionData.timestamp,
-								partitionData.leaderEpoch);
-						// 也构建offset数据，放入到缓存已拉取的partition-offset数据映射集合中
-						fetchedOffsets.put(topicPartition, offsetData);
-					}
+		for (ListOffsetsTopicResponse topic : listOffsetsResponse.topics()) {
+			for (ListOffsetsPartitionResponse partition : topic.partitions()) {
+				TopicPartition topicPartition = new TopicPartition(topic.name(), partition.partitionIndex());
+				Errors error = Errors.forCode(partition.errorCode());
+				switch (error) {
+					case NONE:
+						if (!partition.oldStyleOffsets().isEmpty()) {
+							// Handle v0 response with offsets
+							long offset;
+							if (partition.oldStyleOffsets().size() > 1) {
+								future.raise(new IllegalStateException("Unexpected partitionData response of length " +
+										partition.oldStyleOffsets().size()));
+								return;
+							} else {
+								offset = partition.oldStyleOffsets().get(0);
+							}
+							log.debug("Handling v0 ListOffsetResponse response for {}. Fetched offset {}",
+									topicPartition, offset);
+							if (offset != ListOffsetsResponse.UNKNOWN_OFFSET) {
+								ListOffsetData offsetData = new ListOffsetData(offset, null, Optional.empty());
+								fetchedOffsets.put(topicPartition, offsetData);
+							}
+						} else {
+							// Handle v1 and later response or v0 without offsets
+							log.debug("Handling ListOffsetResponse response for {}. Fetched offset {}, timestamp {}",
+									topicPartition, partition.offset(), partition.timestamp());
+							if (partition.offset() != ListOffsetsResponse.UNKNOWN_OFFSET) {
+								Optional<Integer> leaderEpoch = (partition.leaderEpoch() == ListOffsetsResponse.UNKNOWN_EPOCH)
+										? Optional.empty()
+										: Optional.of(partition.leaderEpoch());
+								ListOffsetData offsetData = new ListOffsetData(partition.offset(), partition.timestamp(),
+										leaderEpoch);
+								fetchedOffsets.put(topicPartition, offsetData);
+							}
+						}
+						break;
+					case UNSUPPORTED_FOR_MESSAGE_FORMAT:
+						// The message format on the broker side is before 0.10.0, which means it does not
+						// support timestamps. We treat this case the same as if we weren't able to find an
+						// offset corresponding to the requested timestamp and leave it out of the result.
+						log.debug("Cannot search by timestamp for partition {} because the message format version " +
+								"is before 0.10.0", topicPartition);
+						break;
+					case NOT_LEADER_OR_FOLLOWER:
+					case REPLICA_NOT_AVAILABLE:
+					case KAFKA_STORAGE_ERROR:
+					case OFFSET_NOT_AVAILABLE:
+					case LEADER_NOT_AVAILABLE:
+					case FENCED_LEADER_EPOCH:
+					case UNKNOWN_LEADER_EPOCH:
+						log.debug("Attempt to fetch offsets for partition {} failed due to {}, retrying.",
+								topicPartition, error);
+						partitionsToRetry.add(topicPartition);
+						break;
+					case UNKNOWN_TOPIC_OR_PARTITION:
+						log.warn("Received unknown topic or partition error in ListOffset request for partition {}", topicPartition);
+						partitionsToRetry.add(topicPartition);
+						break;
+					case TOPIC_AUTHORIZATION_FAILED:
+						unauthorizedTopics.add(topicPartition.topic());
+						break;
+					default:
+						log.warn("Attempt to fetch offsets for partition {} failed due to unexpected exception: {}, retrying.",
+								topicPartition, error.message());
+						partitionsToRetry.add(topicPartition);
 				}
-			} else if (error == Errors.UNSUPPORTED_FOR_MESSAGE_FORMAT) {
-				// 如果响应返回了UNSUPPORTED_FOR_MESSAGE_FORMAT异常
-				// broker端的消息格式版本小于0.10.0，意味着不能支持时间戳格式
-				// 我们把这种情况视为没有找到offset，不计入最终结果
-				log.debug("Cannot search by timestamp for partition {} because the message format version " +
-						"is before 0.10.0", topicPartition);
-			} else if (error == Errors.NOT_LEADER_FOR_PARTITION ||
-					error == Errors.REPLICA_NOT_AVAILABLE ||
-					error == Errors.KAFKA_STORAGE_ERROR ||
-					error == Errors.OFFSET_NOT_AVAILABLE ||
-					error == Errors.LEADER_NOT_AVAILABLE) {
-				// 出现NOT_LEADER_FOR_PARTITION、REPLICA_NOT_AVAILABLE、KAFKA_STORAGE_ERROR、OFFSET_NOT_AVAILABLE、LEADER_NOT_AVAILABLE异常，需要进行重试
-				log.debug("Attempt to fetch offsets for partition {} failed due to {}, retrying.",
-						topicPartition, error);
-				partitionsToRetry.add(topicPartition);
-			} else if (error == Errors.FENCED_LEADER_EPOCH ||
-					error == Errors.UNKNOWN_LEADER_EPOCH) {
-				// 出现FENCED_LEADER_EPOCH、UNKNOWN_LEADER_EPOCH，也需要进行重试
-				log.debug("Attempt to fetch offsets for partition {} failed due to {}, retrying.",
-						topicPartition, error);
-				partitionsToRetry.add(topicPartition);
-			} else if (error == Errors.UNKNOWN_TOPIC_OR_PARTITION) {
-				// 出现UNKNOWN_TOPIC_OR_PARTITION，也需要进行重试
-				log.warn("Received unknown topic or partition error in ListOffset request for partition {}", topicPartition);
-				partitionsToRetry.add(topicPartition);
-			} else if (error == Errors.TOPIC_AUTHORIZATION_FAILED) {
-				// 出现TOPIC_AUTHORIZATION_FAILED，视为校验失败
-				unauthorizedTopics.add(topicPartition.topic());
-			} else {
-				log.warn("Attempt to fetch offsets for partition {} failed due to: {}, retrying.", topicPartition, error.message());
-				// 出现了未知异常，也需要进行重试
-				partitionsToRetry.add(topicPartition);
 			}
 		}
-		// 如果存在身份验证问题，抛出身份验证异常
+
 		if (!unauthorizedTopics.isEmpty())
 			future.raise(new TopicAuthorizationException(unauthorizedTopics));
 		else
-			// 否则包装重置offset成功结果
 			future.complete(new ListOffsetResult(fetchedOffsets, partitionsToRetry));
 	}
 
-	/**
-	 * 获取所有可进行拉取操作的partition
-	 * @return 需要拉取的分区
-	 */
+	static class ListOffsetResult {
+		private final Map<TopicPartition, ListOffsetData> fetchedOffsets;
+		private final Set<TopicPartition> partitionsToRetry;
+
+		ListOffsetResult(Map<TopicPartition, ListOffsetData> fetchedOffsets, Set<TopicPartition> partitionsNeedingRetry) {
+			this.fetchedOffsets = fetchedOffsets;
+			this.partitionsToRetry = partitionsNeedingRetry;
+		}
+
+		ListOffsetResult() {
+			this.fetchedOffsets = new HashMap<>();
+			this.partitionsToRetry = new HashSet<>();
+		}
+	}
+
 	private List<TopicPartition> fetchablePartitions() {
 		Set<TopicPartition> exclude = new HashSet<>();
-		// 如果下一个需要处理的records不是可拉取的
-		if (nextInLineRecords != null && !nextInLineRecords.isFetched) {
-			// 将其排除在外
-			exclude.add(nextInLineRecords.partition);
+		if (nextInLineFetch != null && !nextInLineFetch.isConsumed) {
+			exclude.add(nextInLineFetch.partition);
 		}
-		// 遍历剩余的已经拉取的还没处理的fetch
-		for (PartitionRecords completedFetch : completedFetches) {
+		for (CompletedFetch completedFetch : completedFetches) {
 			exclude.add(completedFetch.partition);
 		}
-		// 排除不需要继续拉取的分区
 		return subscriptions.fetchablePartitions(tp -> !exclude.contains(tp));
 	}
 
 	/**
-	 * 确认从哪个副本节点读取数据
+	 * Determine which replica to read from.
 	 */
 	Node selectReadReplica(TopicPartition partition, Node leaderReplica, long currentTimeMs) {
-		// 获取首选的副本节点id
 		Optional<Integer> nodeId = subscriptions.preferredReadReplica(partition, currentTimeMs);
-		// 如果设置了首选的副本节点id
 		if (nodeId.isPresent()) {
-			// 获取此副本节点，在上线的状态下
 			Optional<Node> node = nodeId.flatMap(id -> metadata.fetch().nodeIfOnline(partition, id));
 			if (node.isPresent()) {
 				return node.get();
@@ -1216,66 +1117,78 @@ public class Fetcher<K, V> implements Closeable {
 				log.trace("Not fetching from {} for partition {} since it is marked offline or is missing from our metadata," +
 						" using the leader instead.", nodeId, partition);
 				subscriptions.clearPreferredReadReplica(partition);
-				// 返回leader节点
 				return leaderReplica;
 			}
 		} else {
-			// 没有设置首选的副本节点，使用leader节点
 			return leaderReplica;
 		}
 	}
 
 	/**
-	 * 针对我们已有的已分配的分区，创建拉取请求，排除那些处于发送中请求的分区
+	 * If we have seen new metadata (as tracked by {@link org.apache.kafka.clients.Metadata#updateVersion()}), then
+	 * we should check that all of the assignments have a valid position.
+	 */
+	private void validatePositionsOnMetadataChange() {
+		int newMetadataUpdateVersion = metadata.updateVersion();
+		if (metadataUpdateVersion.getAndSet(newMetadataUpdateVersion) != newMetadataUpdateVersion) {
+			subscriptions.assignedPartitions().forEach(topicPartition -> {
+				ConsumerMetadata.LeaderAndEpoch leaderAndEpoch = metadata.currentLeader(topicPartition);
+				subscriptions.maybeValidatePositionForCurrentLeader(apiVersions, topicPartition, leaderAndEpoch);
+			});
+		}
+	}
+
+	/**
+	 * Create fetch requests for all nodes for which we have assigned partitions
+	 * that have no existing requests in flight.
 	 */
 	private Map<Node, FetchSessionHandler.FetchRequestData> prepareFetchRequests() {
 		Map<Node, FetchSessionHandler.Builder> fetchable = new LinkedHashMap<>();
 
-		// 确认每个订阅的每个分区都有最新的leader
-		subscriptions.assignedPartitions().forEach(
-				tp -> subscriptions.maybeValidatePositionForCurrentLeader(tp, metadata.leaderAndEpoch(tp)));
+		validatePositionsOnMetadataChange();
 
 		long currentTimeMs = time.milliseconds();
-		// 遍历所有需要拉取的分区
+
 		for (TopicPartition partition : fetchablePartitions()) {
-			// 使用首选的已设置的只读副本，或者leader节点
-			// 获取上一次拉取的位置
-			SubscriptionState.FetchPosition position = this.subscriptions.position(partition);
-			// 选择可读副本，没有设置首选节点的情况，会默认使用leader节点
-			Node node = selectReadReplica(partition, position.currentLeader.leader, currentTimeMs);
-			// 如果没有找到可读节点，需要更新cluster metadata
-			if (node == null || node.isEmpty()) {
+			FetchPosition position = this.subscriptions.position(partition);
+			if (position == null) {
+				throw new IllegalStateException("Missing position for fetchable partition " + partition);
+			}
+
+			Optional<Node> leaderOpt = position.currentLeader.leader;
+			if (!leaderOpt.isPresent()) {
+				log.debug("Requesting metadata update for partition {} since the position {} is missing the current leader node", partition, position);
 				metadata.requestUpdate();
-			} else if (client.isUnavailable(node)) {
-				// 如果找到可读节点，但是客户端无法连接
-				// 判断是不是验证失败导致的无法连接
+				continue;
+			}
+
+			// Use the preferred read replica if set, otherwise the position's leader
+			Node node = selectReadReplica(partition, leaderOpt.get(), currentTimeMs);
+			if (client.isUnavailable(node)) {
 				client.maybeThrowAuthFailure(node);
 
-				// 如果我们尝试在重新来南车中断窗口期间发送，那么无论如何该请在发送之前都会失败，因此暂时跳过此次的请求发送
+				// If we try to send during the reconnect backoff window, then the request is just
+				// going to be failed anyway before being sent, so skip the send for now
 				log.trace("Skipping fetch for partition {} because node {} is awaiting reconnect backoff", partition, node);
 			} else if (this.nodesWithPendingFetchRequests.contains(node.id())) {
-				// 如果可读节点处于挂起拉取请求中，也就是正在拉取，也跳过次次发送
 				log.trace("Skipping fetch for partition {} because previous request to {} has not been processed", partition, node);
 			} else {
-				// 排除异常状态，可以构建发送请求了
-				// 判断是否重复构建节点拉取会话处理器
+				// if there is a leader and no in-flight requests, issue a new fetch
 				FetchSessionHandler.Builder builder = fetchable.get(node);
 				if (builder == null) {
-					// 没有构建过，构建一个新的
 					int id = node.id();
-					// 从缓存中获取会话处理器
 					FetchSessionHandler handler = sessionHandler(id);
 					if (handler == null) {
-						// 此次请求没有构建，缓存中也没有，只能创建一个新的
 						handler = new FetchSessionHandler(logContext, id);
 						sessionHandlers.put(id, handler);
 					}
 					builder = handler.newBuilder();
 					fetchable.put(node, builder);
 				}
-				// 处理器添加partition信息
+
 				builder.add(partition, new FetchRequest.PartitionData(position.offset,
-						FetchRequest.INVALID_LOG_START_OFFSET, this.fetchSize, position.currentLeader.epoch));
+						FetchRequest.INVALID_LOG_START_OFFSET, this.fetchSize,
+						position.currentLeader.epoch, Optional.empty()));
 
 				log.debug("Added {} fetch request for partition {} at position {} to node {}", isolationLevel,
 						partition, position, node);
@@ -1283,28 +1196,21 @@ public class Fetcher<K, V> implements Closeable {
 		}
 
 		Map<Node, FetchSessionHandler.FetchRequestData> reqs = new LinkedHashMap<>();
-		// 遍历所有的需要拉取请求的节点和拉取会话处理器，构建一下，返回拉取请求数据
 		for (Map.Entry<Node, FetchSessionHandler.Builder> entry : fetchable.entrySet()) {
 			reqs.put(entry.getKey(), entry.getValue().build());
 		}
-		// 返回节点-节点需要进行的请求数据集合
 		return reqs;
 	}
 
-	private Map<Node, Map<TopicPartition, SubscriptionState.FetchPosition>> regroupFetchPositionsByLeader(
-			Map<TopicPartition, SubscriptionState.FetchPosition> partitionMap) {
+	private Map<Node, Map<TopicPartition, FetchPosition>> regroupFetchPositionsByLeader(
+			Map<TopicPartition, FetchPosition> partitionMap) {
 		return partitionMap.entrySet()
 				.stream()
-				.collect(Collectors.groupingBy(entry -> entry.getValue().currentLeader.leader,
+				.filter(entry -> entry.getValue().currentLeader.leader.isPresent())
+				.collect(Collectors.groupingBy(entry -> entry.getValue().currentLeader.leader.get(),
 						Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)));
 	}
 
-	/**
-	 * 使用lambda进行重新聚合，partition->node维度
-	 * @param partitionMap 重新聚合的partition-时间戳集合
-	 * @param <T>          聚合泛型
-	 * @return node维度的时间戳集合
-	 */
 	private <T> Map<Node, Map<TopicPartition, T>> regroupPartitionMapByNode(Map<TopicPartition, T> partitionMap) {
 		return partitionMap.entrySet()
 				.stream()
@@ -1313,27 +1219,14 @@ public class Fetcher<K, V> implements Closeable {
 	}
 
 	/**
-	 * 处理拉取到的records
-	 * 将CompletedFetch->PartitionRecords
+	 * Initialize a CompletedFetch object.
 	 */
-	private PartitionRecords parseCompletedFetch(CompletedFetch completedFetch) {
-		TopicPartition tp = completedFetch.partition;
-		FetchResponse.PartitionData<Records> partition = completedFetch.partitionData;
-		// 获取到producer发送消息到累加器，然后封装好的RecordBatch
-		Iterator<? extends RecordBatch> batches = partition.records.batches().iterator();
-		return new PartitionRecords(tp, completedFetch, batches);
-	}
-
-	/**
-	 * Initialize a PartitionRecords object.
-	 */
-	private PartitionRecords initializePartitionRecords(PartitionRecords partitionRecordsToInitialize) {
-		CompletedFetch completedFetch = partitionRecordsToInitialize.completedFetch;
-		TopicPartition tp = completedFetch.partition;
-		FetchResponse.PartitionData<Records> partition = completedFetch.partitionData;
-		long fetchOffset = completedFetch.fetchedOffset;
-		PartitionRecords partitionRecords = null;
-		Errors error = partition.error;
+	private CompletedFetch initializeCompletedFetch(CompletedFetch nextCompletedFetch) {
+		TopicPartition tp = nextCompletedFetch.partition;
+		FetchResponseData.PartitionData partition = nextCompletedFetch.partitionData;
+		long fetchOffset = nextCompletedFetch.nextFetchOffset;
+		CompletedFetch completedFetch = null;
+		Errors error = Errors.forCode(partition.errorCode());
 
 		try {
 			if (!subscriptions.hasValidPosition(tp)) {
@@ -1342,7 +1235,7 @@ public class Fetcher<K, V> implements Closeable {
 			} else if (error == Errors.NONE) {
 				// we are interested in this fetch only if the beginning offset matches the
 				// current consumed position
-				SubscriptionState.FetchPosition position = subscriptions.position(tp);
+				FetchPosition position = subscriptions.position(tp);
 				if (position == null || position.offset != fetchOffset) {
 					log.debug("Discarding stale fetch response for partition {} since its offset {} does not match " +
 							"the expected offset {}", tp, fetchOffset, position);
@@ -1350,11 +1243,11 @@ public class Fetcher<K, V> implements Closeable {
 				}
 
 				log.trace("Preparing to read {} bytes of data for partition {} with offset {}",
-						partition.records.sizeInBytes(), tp, position);
-				Iterator<? extends RecordBatch> batches = partition.records.batches().iterator();
-				partitionRecords = partitionRecordsToInitialize;
+						FetchResponse.recordsSize(partition), tp, position);
+				Iterator<? extends RecordBatch> batches = FetchResponse.recordsOrFail(partition).batches().iterator();
+				completedFetch = nextCompletedFetch;
 
-				if (!batches.hasNext() && partition.records.sizeInBytes() > 0) {
+				if (!batches.hasNext() && FetchResponse.recordsSize(partition) > 0) {
 					if (completedFetch.responseVersion < 3) {
 						// Implement the pre KIP-74 behavior of throwing a RecordTooLargeException.
 						Map<TopicPartition, Long> recordTooLargePartitions = Collections.singletonMap(tp, fetchOffset);
@@ -1372,33 +1265,32 @@ public class Fetcher<K, V> implements Closeable {
 					}
 				}
 
-				if (partition.highWatermark >= 0) {
-					log.trace("Updating high watermark for partition {} to {}", tp, partition.highWatermark);
-					subscriptions.updateHighWatermark(tp, partition.highWatermark);
+				if (partition.highWatermark() >= 0) {
+					log.trace("Updating high watermark for partition {} to {}", tp, partition.highWatermark());
+					subscriptions.updateHighWatermark(tp, partition.highWatermark());
 				}
 
-				if (partition.logStartOffset >= 0) {
-					log.trace("Updating log start offset for partition {} to {}", tp, partition.logStartOffset);
-					subscriptions.updateLogStartOffset(tp, partition.logStartOffset);
+				if (partition.logStartOffset() >= 0) {
+					log.trace("Updating log start offset for partition {} to {}", tp, partition.logStartOffset());
+					subscriptions.updateLogStartOffset(tp, partition.logStartOffset());
 				}
 
-				if (partition.lastStableOffset >= 0) {
-					log.trace("Updating last stable offset for partition {} to {}", tp, partition.lastStableOffset);
-					subscriptions.updateLastStableOffset(tp, partition.lastStableOffset);
+				if (partition.lastStableOffset() >= 0) {
+					log.trace("Updating last stable offset for partition {} to {}", tp, partition.lastStableOffset());
+					subscriptions.updateLastStableOffset(tp, partition.lastStableOffset());
 				}
 
-				if (partition.preferredReadReplica.isPresent()) {
-					subscriptions.updatePreferredReadReplica(partitionRecords.partition, partition.preferredReadReplica.get(), () -> {
+				if (FetchResponse.isPreferredReplica(partition)) {
+					subscriptions.updatePreferredReadReplica(completedFetch.partition, partition.preferredReadReplica(), () -> {
 						long expireTimeMs = time.milliseconds() + metadata.metadataExpireMs();
 						log.debug("Updating preferred read replica for partition {} to {}, set to expire at {}",
-								tp, partition.preferredReadReplica.get(), expireTimeMs);
+								tp, partition.preferredReadReplica(), expireTimeMs);
 						return expireTimeMs;
 					});
 				}
 
-
-				partitionRecordsToInitialize.initialized = true;
-			} else if (error == Errors.NOT_LEADER_FOR_PARTITION ||
+				nextCompletedFetch.initialized = true;
+			} else if (error == Errors.NOT_LEADER_OR_FOLLOWER ||
 					error == Errors.REPLICA_NOT_AVAILABLE ||
 					error == Errors.KAFKA_STORAGE_ERROR ||
 					error == Errors.FENCED_LEADER_EPOCH ||
@@ -1412,14 +1304,12 @@ public class Fetcher<K, V> implements Closeable {
 				Optional<Integer> clearedReplicaId = subscriptions.clearPreferredReadReplica(tp);
 				if (!clearedReplicaId.isPresent()) {
 					// If there's no preferred replica to clear, we're fetching from the leader so handle this error normally
-					if (fetchOffset != subscriptions.position(tp).offset) {
+					FetchPosition position = subscriptions.position(tp);
+					if (position == null || fetchOffset != position.offset) {
 						log.debug("Discarding stale fetch response for partition {} since the fetched offset {} " +
-								"does not match the current offset {}", tp, fetchOffset, subscriptions.position(tp));
-					} else if (subscriptions.hasDefaultOffsetResetPolicy()) {
-						log.info("Fetch offset {} is out of range for partition {}, resetting offset", fetchOffset, tp);
-						subscriptions.requestOffsetReset(tp);
+								"does not match the current offset {}", tp, fetchOffset, position);
 					} else {
-						throw new OffsetOutOfRangeException(Collections.singletonMap(tp, fetchOffset));
+						handleOffsetOutOfRange(position, tp);
 					}
 				} else {
 					log.debug("Unset the preferred read replica {} for partition {} since we got {} when fetching {}",
@@ -1432,13 +1322,23 @@ public class Fetcher<K, V> implements Closeable {
 			} else if (error == Errors.UNKNOWN_LEADER_EPOCH) {
 				log.debug("Received unknown leader epoch error in fetch for partition {}", tp);
 			} else if (error == Errors.UNKNOWN_SERVER_ERROR) {
-				log.warn("Unknown error fetching data for topic-partition {}", tp);
+				log.warn("Unknown server error while fetching offset {} for topic-partition {}",
+						fetchOffset, tp);
+			} else if (error == Errors.CORRUPT_MESSAGE) {
+				throw new KafkaException("Encountered corrupt message when fetching offset "
+						+ fetchOffset
+						+ " for topic-partition "
+						+ tp);
 			} else {
-				throw new IllegalStateException("Unexpected error code " + error.code() + " while fetching from partition " + tp);
+				throw new IllegalStateException("Unexpected error code "
+						+ error.code()
+						+ " while fetching at offset "
+						+ fetchOffset
+						+ " from topic-partition " + tp);
 			}
 		} finally {
-			if (partitionRecords == null)
-				completedFetch.metricAggregator.record(tp, 0, 0);
+			if (completedFetch == null)
+				nextCompletedFetch.metricAggregator.record(tp, 0, 0);
 
 			if (error != Errors.NONE)
 				// we move the partition to the end if there was an error. This way, it's more likely that partitions for
@@ -1446,39 +1346,41 @@ public class Fetcher<K, V> implements Closeable {
 				subscriptions.movePartitionToEnd(tp);
 		}
 
-		return partitionRecords;
+		return completedFetch;
+	}
+
+	private void handleOffsetOutOfRange(FetchPosition fetchPosition, TopicPartition topicPartition) {
+		String errorMessage = "Fetch position " + fetchPosition + " is out of range for partition " + topicPartition;
+		if (subscriptions.hasDefaultOffsetResetPolicy()) {
+			log.info("{}, resetting offset", errorMessage);
+			subscriptions.requestOffsetReset(topicPartition);
+		} else {
+			log.info("{}, raising error to the application since no reset policy is configured", errorMessage);
+			throw new OffsetOutOfRangeException(errorMessage,
+					Collections.singletonMap(topicPartition, fetchPosition.offset));
+		}
 	}
 
 	/**
-	 * 解析record元素，进行反序列化
+	 * Parse the record entry, deserializing the key / value fields if necessary
 	 */
 	private ConsumerRecord<K, V> parseRecord(TopicPartition partition,
 											 RecordBatch batch,
 											 Record record) {
 		try {
-			// 获取offset和时间戳
 			long offset = record.offset();
 			long timestamp = record.timestamp();
-			// 获取对应的leader版本号
 			Optional<Integer> leaderEpoch = maybeLeaderEpoch(batch.partitionLeaderEpoch());
-			// 获取batch的时间戳类型
 			TimestampType timestampType = batch.timestampType();
-			// 获取record的请求头部
 			Headers headers = new RecordHeaders(record.headers());
-			// 获取record的请求key
 			ByteBuffer keyBytes = record.key();
-			// 转换成字节数组
 			byte[] keyByteArray = keyBytes == null ? null : Utils.toArray(keyBytes);
-			// 进行反序列化
 			K key = keyBytes == null ? null : this.keyDeserializer.deserialize(partition.topic(), headers, keyByteArray);
-			// 获取record的value
 			ByteBuffer valueBytes = record.value();
-			// 转换成字节数组，进行反序列化
 			byte[] valueByteArray = valueBytes == null ? null : Utils.toArray(valueBytes);
 			V value = valueBytes == null ? null : this.valueDeserializer.deserialize(partition.topic(), headers, valueByteArray);
-			// 构建消费者消费的Record
 			return new ConsumerRecord<>(partition.topic(), partition.partition(), offset,
-					timestamp, timestampType, record.checksumOrNull(),
+					timestamp, timestampType,
 					keyByteArray == null ? ConsumerRecord.NULL_SIZE : keyByteArray.length,
 					valueByteArray == null ? ConsumerRecord.NULL_SIZE : valueByteArray.length,
 					key, value, headers, leaderEpoch);
@@ -1493,109 +1395,279 @@ public class Fetcher<K, V> implements Closeable {
 	}
 
 	/**
-	 * 释放不属于新的分配分区的缓冲区数据
-	 * @param assignedPartitions 新分配的分区数据
+	 * Clear the buffered data which are not a part of newly assigned partitions
+	 * @param assignedPartitions newly assigned {@link TopicPartition}
 	 */
 	public void clearBufferedDataForUnassignedPartitions(Collection<TopicPartition> assignedPartitions) {
-		Iterator<PartitionRecords> completedFetchesItr = completedFetches.iterator();
+		Iterator<CompletedFetch> completedFetchesItr = completedFetches.iterator();
 		while (completedFetchesItr.hasNext()) {
-			PartitionRecords records = completedFetchesItr.next();
+			CompletedFetch records = completedFetchesItr.next();
 			TopicPartition tp = records.partition;
-			// 排除不在新订阅分区的分区record
 			if (!assignedPartitions.contains(tp)) {
 				records.drain();
 				completedFetchesItr.remove();
 			}
 		}
-		if (nextInLineRecords != null && !assignedPartitions.contains(nextInLineRecords.partition)) {
-			nextInLineRecords.drain();
-			nextInLineRecords = null;
+
+		if (nextInLineFetch != null && !assignedPartitions.contains(nextInLineFetch.partition)) {
+			nextInLineFetch.drain();
+			nextInLineFetch = null;
 		}
 	}
 
 	/**
-	 * 清除没有新订阅topic的分区的buffer数据
-	 * @param assignedTopics 指定的topic集合
+	 * Clear the buffered data which are not a part of newly assigned topics
+	 * @param assignedTopics newly assigned topics
 	 */
 	public void clearBufferedDataForUnassignedTopics(Collection<String> assignedTopics) {
 		Set<TopicPartition> currentTopicPartitions = new HashSet<>();
-		// 过滤没有订阅topic的分区
 		for (TopicPartition tp : subscriptions.assignedPartitions()) {
 			if (assignedTopics.contains(tp.topic())) {
-				// 过滤topic
 				currentTopicPartitions.add(tp);
 			}
 		}
 		clearBufferedDataForUnassignedPartitions(currentTopicPartitions);
 	}
 
-	/**
-	 * 构建向节点拉取任务的会话处理器
-	 * @param node 指定节点
-	 * @return 会话处理器
-	 */
+	// Visible for testing
 	protected FetchSessionHandler sessionHandler(int node) {
 		return sessionHandlers.get(node);
 	}
 
-	@Override
-	public void close() {
-		if (nextInLineRecords != null)
-			nextInLineRecords.drain();
-		decompressionBufferSupplier.close();
+	public static Sensor throttleTimeSensor(Metrics metrics, FetcherMetricsRegistry metricsRegistry) {
+		Sensor fetchThrottleTimeSensor = metrics.sensor("fetch-throttle-time");
+		fetchThrottleTimeSensor.add(metrics.metricInstance(metricsRegistry.fetchThrottleTimeAvg), new Avg());
+
+		fetchThrottleTimeSensor.add(metrics.metricInstance(metricsRegistry.fetchThrottleTimeMax), new Max());
+
+		return fetchThrottleTimeSensor;
 	}
 
-	private Set<String> topicsForPartitions(Collection<TopicPartition> partitions) {
-		return partitions.stream().map(TopicPartition::topic).collect(Collectors.toSet());
-	}
-
-	/**
-	 * Represents data about an offset returned by a broker.
-	 */
-	private static class ListOffsetData {
-		final long offset;
-		final Long timestamp; //  null if the broker does not support returning timestamps
-		final Optional<Integer> leaderEpoch; // empty if the leader epoch is not known
-
-		ListOffsetData(long offset, Long timestamp, Optional<Integer> leaderEpoch) {
-			this.offset = offset;
-			this.timestamp = timestamp;
-			this.leaderEpoch = leaderEpoch;
-		}
-	}
-
-	static class ListOffsetResult {
-		private final Map<TopicPartition, ListOffsetData> fetchedOffsets;
-		private final Set<TopicPartition> partitionsToRetry;
-
-		public ListOffsetResult(Map<TopicPartition, ListOffsetData> fetchedOffsets, Set<TopicPartition> partitionsNeedingRetry) {
-			this.fetchedOffsets = fetchedOffsets;
-			this.partitionsToRetry = partitionsNeedingRetry;
-		}
-
-		public ListOffsetResult() {
-			this.fetchedOffsets = new HashMap<>();
-			this.partitionsToRetry = new HashSet<>();
-		}
-	}
-
-	private static class CompletedFetch {
+	private class CompletedFetch {
 		private final TopicPartition partition;
-		private final long fetchedOffset;
-		private final FetchResponse.PartitionData<Records> partitionData;
+		private final Iterator<? extends RecordBatch> batches;
+		private final Set<Long> abortedProducerIds;
+		private final PriorityQueue<FetchResponseData.AbortedTransaction> abortedTransactions;
+		private final FetchResponseData.PartitionData partitionData;
 		private final FetchResponseMetricAggregator metricAggregator;
 		private final short responseVersion;
 
+		private int recordsRead;
+		private int bytesRead;
+		private RecordBatch currentBatch;
+		private Record lastRecord;
+		private CloseableIterator<Record> records;
+		private long nextFetchOffset;
+		private Optional<Integer> lastEpoch;
+		private boolean isConsumed = false;
+		private Exception cachedRecordException = null;
+		private boolean corruptLastRecord = false;
+		private boolean initialized = false;
+
 		private CompletedFetch(TopicPartition partition,
-							   long fetchedOffset,
-							   FetchResponse.PartitionData<Records> partitionData,
+							   FetchResponseData.PartitionData partitionData,
 							   FetchResponseMetricAggregator metricAggregator,
+							   Iterator<? extends RecordBatch> batches,
+							   Long fetchOffset,
 							   short responseVersion) {
 			this.partition = partition;
-			this.fetchedOffset = fetchedOffset;
 			this.partitionData = partitionData;
 			this.metricAggregator = metricAggregator;
+			this.batches = batches;
+			this.nextFetchOffset = fetchOffset;
 			this.responseVersion = responseVersion;
+			this.lastEpoch = Optional.empty();
+			this.abortedProducerIds = new HashSet<>();
+			this.abortedTransactions = abortedTransactions(partitionData);
+		}
+
+		private void drain() {
+			if (!isConsumed) {
+				maybeCloseRecordStream();
+				cachedRecordException = null;
+				this.isConsumed = true;
+				this.metricAggregator.record(partition, bytesRead, recordsRead);
+
+				// we move the partition to the end if we received some bytes. This way, it's more likely that partitions
+				// for the same topic can remain together (allowing for more efficient serialization).
+				if (bytesRead > 0)
+					subscriptions.movePartitionToEnd(partition);
+			}
+		}
+
+		private void maybeEnsureValid(RecordBatch batch) {
+			if (checkCrcs && currentBatch.magic() >= RecordBatch.MAGIC_VALUE_V2) {
+				try {
+					batch.ensureValid();
+				} catch (CorruptRecordException e) {
+					throw new KafkaException("Record batch for partition " + partition + " at offset " +
+							batch.baseOffset() + " is invalid, cause: " + e.getMessage());
+				}
+			}
+		}
+
+		private void maybeEnsureValid(Record record) {
+			if (checkCrcs) {
+				try {
+					record.ensureValid();
+				} catch (CorruptRecordException e) {
+					throw new KafkaException("Record for partition " + partition + " at offset " + record.offset()
+							+ " is invalid, cause: " + e.getMessage());
+				}
+			}
+		}
+
+		private void maybeCloseRecordStream() {
+			if (records != null) {
+				records.close();
+				records = null;
+			}
+		}
+
+		private Record nextFetchedRecord() {
+			while (true) {
+				if (records == null || !records.hasNext()) {
+					maybeCloseRecordStream();
+
+					if (!batches.hasNext()) {
+						// Message format v2 preserves the last offset in a batch even if the last record is removed
+						// through compaction. By using the next offset computed from the last offset in the batch,
+						// we ensure that the offset of the next fetch will point to the next batch, which avoids
+						// unnecessary re-fetching of the same batch (in the worst case, the consumer could get stuck
+						// fetching the same batch repeatedly).
+						if (currentBatch != null)
+							nextFetchOffset = currentBatch.nextOffset();
+						drain();
+						return null;
+					}
+
+					currentBatch = batches.next();
+					lastEpoch = currentBatch.partitionLeaderEpoch() == RecordBatch.NO_PARTITION_LEADER_EPOCH ?
+							Optional.empty() : Optional.of(currentBatch.partitionLeaderEpoch());
+
+					maybeEnsureValid(currentBatch);
+
+					if (isolationLevel == IsolationLevel.READ_COMMITTED && currentBatch.hasProducerId()) {
+						// remove from the aborted transaction queue all aborted transactions which have begun
+						// before the current batch's last offset and add the associated producerIds to the
+						// aborted producer set
+						consumeAbortedTransactionsUpTo(currentBatch.lastOffset());
+
+						long producerId = currentBatch.producerId();
+						if (containsAbortMarker(currentBatch)) {
+							abortedProducerIds.remove(producerId);
+						} else if (isBatchAborted(currentBatch)) {
+							log.debug("Skipping aborted record batch from partition {} with producerId {} and " +
+											"offsets {} to {}",
+									partition, producerId, currentBatch.baseOffset(), currentBatch.lastOffset());
+							nextFetchOffset = currentBatch.nextOffset();
+							continue;
+						}
+					}
+
+					records = currentBatch.streamingIterator(decompressionBufferSupplier);
+				} else {
+					Record record = records.next();
+					// skip any records out of range
+					if (record.offset() >= nextFetchOffset) {
+						// we only do validation when the message should not be skipped.
+						maybeEnsureValid(record);
+
+						// control records are not returned to the user
+						if (!currentBatch.isControlBatch()) {
+							return record;
+						} else {
+							// Increment the next fetch offset when we skip a control batch.
+							nextFetchOffset = record.offset() + 1;
+						}
+					}
+				}
+			}
+		}
+
+		private List<ConsumerRecord<K, V>> fetchRecords(int maxRecords) {
+			// Error when fetching the next record before deserialization.
+			if (corruptLastRecord)
+				throw new KafkaException("Received exception when fetching the next record from " + partition
+						+ ". If needed, please seek past the record to "
+						+ "continue consumption.", cachedRecordException);
+
+			if (isConsumed)
+				return Collections.emptyList();
+
+			List<ConsumerRecord<K, V>> records = new ArrayList<>();
+			try {
+				for (int i = 0; i < maxRecords; i++) {
+					// Only move to next record if there was no exception in the last fetch. Otherwise we should
+					// use the last record to do deserialization again.
+					if (cachedRecordException == null) {
+						corruptLastRecord = true;
+						lastRecord = nextFetchedRecord();
+						corruptLastRecord = false;
+					}
+					if (lastRecord == null)
+						break;
+					records.add(parseRecord(partition, currentBatch, lastRecord));
+					recordsRead++;
+					bytesRead += lastRecord.sizeInBytes();
+					nextFetchOffset = lastRecord.offset() + 1;
+					// In some cases, the deserialization may have thrown an exception and the retry may succeed,
+					// we allow user to move forward in this case.
+					cachedRecordException = null;
+				}
+			} catch (SerializationException se) {
+				cachedRecordException = se;
+				if (records.isEmpty())
+					throw se;
+			} catch (KafkaException e) {
+				cachedRecordException = e;
+				if (records.isEmpty())
+					throw new KafkaException("Received exception when fetching the next record from " + partition
+							+ ". If needed, please seek past the record to "
+							+ "continue consumption.", e);
+			}
+			return records;
+		}
+
+		private void consumeAbortedTransactionsUpTo(long offset) {
+			if (abortedTransactions == null)
+				return;
+
+			while (!abortedTransactions.isEmpty() && abortedTransactions.peek().firstOffset() <= offset) {
+				FetchResponseData.AbortedTransaction abortedTransaction = abortedTransactions.poll();
+				abortedProducerIds.add(abortedTransaction.producerId());
+			}
+		}
+
+		private boolean isBatchAborted(RecordBatch batch) {
+			return batch.isTransactional() && abortedProducerIds.contains(batch.producerId());
+		}
+
+		private PriorityQueue<FetchResponseData.AbortedTransaction> abortedTransactions(FetchResponseData.PartitionData partition) {
+			if (partition.abortedTransactions() == null || partition.abortedTransactions().isEmpty())
+				return null;
+
+			PriorityQueue<FetchResponseData.AbortedTransaction> abortedTransactions = new PriorityQueue<>(
+					partition.abortedTransactions().size(), Comparator.comparingLong(FetchResponseData.AbortedTransaction::firstOffset)
+			);
+			abortedTransactions.addAll(partition.abortedTransactions());
+			return abortedTransactions;
+		}
+
+		private boolean containsAbortMarker(RecordBatch batch) {
+			if (!batch.isControlBatch())
+				return false;
+
+			Iterator<Record> batchIterator = batch.iterator();
+			if (!batchIterator.hasNext())
+				return false;
+
+			Record firstRecord = batchIterator.next();
+			return ControlRecordType.ABORT == ControlRecordType.parse(firstRecord.key());
+		}
+
+		private boolean notInitialized() {
+			return !this.initialized;
 		}
 	}
 
@@ -1660,12 +1732,13 @@ public class Fetcher<K, V> implements Closeable {
 
 	private static class FetchManagerMetrics {
 		private final Metrics metrics;
+		private FetcherMetricsRegistry metricsRegistry;
 		private final Sensor bytesFetched;
 		private final Sensor recordsFetched;
 		private final Sensor fetchLatency;
 		private final Sensor recordsFetchLag;
 		private final Sensor recordsFetchLead;
-		private FetcherMetricsRegistry metricsRegistry;
+
 		private int assignmentId = 0;
 		private Set<TopicPartition> assignedPartitions = Collections.emptySet();
 
@@ -1695,14 +1768,6 @@ public class Fetcher<K, V> implements Closeable {
 
 			this.recordsFetchLead = metrics.sensor("records-lead");
 			this.recordsFetchLead.add(metrics.metricInstance(metricsRegistry.recordsLeadMin), new Min());
-		}
-
-		private static String partitionLagMetricName(TopicPartition tp) {
-			return tp + ".records-lag";
-		}
-
-		private static String partitionLeadMetricName(TopicPartition tp) {
-			return tp + ".records-lead";
 		}
 
 		private void recordTopicFetchMetrics(String topic, int bytes, int records) {
@@ -1754,8 +1819,10 @@ public class Fetcher<K, V> implements Closeable {
 					if (!this.assignedPartitions.contains(tp)) {
 						MetricName metricName = partitionPreferredReadReplicaMetricName(tp);
 						if (metrics.metric(metricName) == null) {
-							metrics.addMetric(metricName, (Gauge<Integer>) (config, now) ->
-									subscription.preferredReadReplica(tp, 0L).orElse(-1));
+							metrics.addMetric(
+									metricName,
+									(Gauge<Integer>) (config, now) -> subscription.preferredReadReplica(tp, 0L).orElse(-1)
+							);
 						}
 					}
 				}
@@ -1798,6 +1865,14 @@ public class Fetcher<K, V> implements Closeable {
 			recordsLag.record(lag);
 		}
 
+		private static String partitionLagMetricName(TopicPartition tp) {
+			return tp + ".records-lag";
+		}
+
+		private static String partitionLeadMetricName(TopicPartition tp) {
+			return tp + ".records-lead";
+		}
+
 		private MetricName partitionPreferredReadReplicaMetricName(TopicPartition tp) {
 			Map<String, String> metricTags = topicPartitionTags(tp);
 			return this.metrics.metricInstance(metricsRegistry.partitionPreferredReadReplica, metricTags);
@@ -1811,281 +1886,15 @@ public class Fetcher<K, V> implements Closeable {
 		}
 	}
 
-	private class PartitionRecords {
-		private final TopicPartition partition;
-		private final CompletedFetch completedFetch;
-		/**
-		 * record的迭代器
-		 */
-		private final Iterator<? extends RecordBatch> batches;
-		private final Set<Long> abortedProducerIds;
-		private final PriorityQueue<FetchResponse.AbortedTransaction> abortedTransactions;
+	@Override
+	public void close() {
+		if (nextInLineFetch != null)
+			nextInLineFetch.drain();
+		decompressionBufferSupplier.close();
+	}
 
-		private int recordsRead;
-		private int bytesRead;
-		private RecordBatch currentBatch;
-		private Record lastRecord;
-		/**
-		 * record的闭环迭代器
-		 */
-		private CloseableIterator<Record> records;
-		private long nextFetchOffset;
-		private Optional<Integer> lastEpoch;
-		private boolean isFetched = false;
-		private Exception cachedRecordException = null;
-		private boolean corruptLastRecord = false;
-		private boolean initialized = false;
-
-		private PartitionRecords(TopicPartition partition,
-								 CompletedFetch completedFetch,
-								 Iterator<? extends RecordBatch> batches) {
-			this.partition = partition;
-			this.completedFetch = completedFetch;
-			this.batches = batches;
-			this.nextFetchOffset = completedFetch.fetchedOffset;
-			this.lastEpoch = Optional.empty();
-			this.abortedProducerIds = new HashSet<>();
-			this.abortedTransactions = abortedTransactions(completedFetch.partitionData);
-		}
-
-		/**
-		 * 排空record
-		 */
-		private void drain() {
-			// 还没有拉取完
-			if (!isFetched) {
-				// 校验是否需要关闭闭环迭代器
-				maybeCloseRecordStream();
-				cachedRecordException = null;
-				// 当前partition-record置为拉取完成
-				this.isFetched = true;
-				// 对完成的fetch进行计数
-				this.completedFetch.metricAggregator.record(partition, bytesRead, recordsRead);
-
-				// 如果我们接收到了字节，我们就把分区移动到订阅列表的尾端，通过这种方法，同一个主题的分区更有可能保持在一起（云讯更有效的序列化）
-				if (bytesRead > 0)
-					subscriptions.movePartitionToEnd(partition);
-			}
-		}
-
-		private Optional<Integer> preferredReadReplica() {
-			return completedFetch.partitionData.preferredReadReplica;
-		}
-
-		/**
-		 * 确认batch是否可用
-		 * @param batch 需要确认的batch
-		 */
-		private void maybeEnsureValid(RecordBatch batch) {
-			if (checkCrcs && currentBatch.magic() >= RecordBatch.MAGIC_VALUE_V2) {
-				try {
-					batch.ensureValid();
-				} catch (InvalidRecordException e) {
-					throw new KafkaException("Record batch for partition " + partition + " at offset " +
-							batch.baseOffset() + " is invalid, cause: " + e.getMessage());
-				}
-			}
-		}
-
-		/**
-		 * 校验record是否合法
-		 * @param record 需要校验的record
-		 */
-		private void maybeEnsureValid(Record record) {
-			if (checkCrcs) {
-				try {
-					record.ensureValid();
-				} catch (InvalidRecordException e) {
-					throw new KafkaException("Record for partition " + partition + " at offset " + record.offset()
-							+ " is invalid, cause: " + e.getMessage());
-				}
-			}
-		}
-
-		private void maybeCloseRecordStream() {
-			if (records != null) {
-				records.close();
-				records = null;
-			}
-		}
-
-		/**
-		 * 获取下一个需要处理的record
-		 * @return 下一个需要处理的record
-		 */
-		private Record nextFetchedRecord() {
-			while (true) {
-				// 如果没有后续record，证明已经读取完了
-				if (records == null || !records.hasNext()) {
-					// 判断是否需要关闭闭环迭代器
-					maybeCloseRecordStream();
-					// 如果record中也没有后续record
-					if (!batches.hasNext()) {
-						// v2版本的消息格式保留了上一次的offset，即使通过压缩删除了最后一条record
-						// 通过使用batch中的上一次的offset计算出的下一次offset，我们确认了下一次fetch的offset会指向下一个batch，这避免了不必要的重新拉取相同的batch
-						// 在最坏的情况下，消费者可能会在重复拉取相同batch时出现阻塞
-						if (currentBatch != null)
-							nextFetchOffset = currentBatch.nextOffset();
-						// 排空当前partition-records，并返回null
-						drain();
-						return null;
-					}
-					// 获取下一个需要处理的batch
-					currentBatch = batches.next();
-					// 获取上一次处理的版本号
-					lastEpoch = currentBatch.partitionLeaderEpoch() == RecordBatch.NO_PARTITION_LEADER_EPOCH ?
-							Optional.empty() : Optional.of(currentBatch.partitionLeaderEpoch());
-					// 确认当前batch是否可用
-					maybeEnsureValid(currentBatch);
-					// 如果事务等级是可重读，并且发送消息时，通过事务管理器，产生了producerId
-					if (isolationLevel == IsolationLevel.READ_COMMITTED && currentBatch.hasProducerId()) {
-						// 从中止的事务队列中删除在当前批次的最后一个偏移之前开始的所有中止的事务，并将关联的生产者ID添加到中止的生产者集合上
-						consumeAbortedTransactionsUpTo(currentBatch.lastOffset());
-						// 获取producerId
-						long producerId = currentBatch.producerId();
-						// 判断是否需要中断
-						if (containsAbortMarker(currentBatch)) {
-							// 需要中断，添加到中断集合中
-							abortedProducerIds.remove(producerId);
-						} else if (isBatchAborted(currentBatch)) {
-							// 如果batch已经中断
-							log.debug("Skipping aborted record batch from partition {} with producerId {} and " +
-											"offsets {} to {}",
-									partition, producerId, currentBatch.baseOffset(), currentBatch.lastOffset());
-							// 越过当前的offset
-							nextFetchOffset = currentBatch.nextOffset();
-							continue;
-						}
-					}
-					// 继续获取record迭代
-					records = currentBatch.streamingIterator(decompressionBufferSupplier);
-				} else {
-					// 从闭环迭代器中获取下一个需要迭代的record
-					Record record = records.next();
-					// 如果record的offset超过了需要处理的offset
-					if (record.offset() >= nextFetchOffset) {
-						// 校验record是否合法
-						maybeEnsureValid(record);
-
-						// 返回非control record
-						if (!currentBatch.isControlBatch()) {
-							return record;
-						} else {
-							// 如果是control record，则移动offset，不进行处理
-							nextFetchOffset = record.offset() + 1;
-						}
-					}
-				}
-			}
-		}
-
-		/**
-		 * 从拉取到的partition record中获取指定数目的record，并封装成供消费者消费的record集合
-		 * @param maxRecords 消费的数目
-		 * @return 供消费者消费的record集合
-		 */
-		private List<ConsumerRecord<K, V>> fetchRecords(int maxRecords) {
-			// 在反序列化之前出现中断错误
-			if (corruptLastRecord)
-				throw new KafkaException("Received exception when fetching the next record from " + partition
-						+ ". If needed, please seek past the record to "
-						+ "continue consumption.", cachedRecordException);
-			// 已经拉取走了，返回空集合
-			if (isFetched)
-				return Collections.emptyList();
-
-			List<ConsumerRecord<K, V>> records = new ArrayList<>();
-			try {
-				// 原始计数器进行遍历，真·每次循环的计数操作
-				for (int i = 0; i < maxRecords; i++) {
-					// 如果在上一次fetch中没有出现异常，仅仅移动一个record
-					// 其他情况下，我们应该使用上一次的record再进行一次反序列化
-					if (cachedRecordException == null) {
-						corruptLastRecord = true;
-						lastRecord = nextFetchedRecord();
-						corruptLastRecord = false;
-					}
-					// 如果没有上一次需要拉取的record，证明已经拉取完了，跳出循环
-					if (lastRecord == null)
-						break;
-					// 构建ConsumerRecord
-					records.add(parseRecord(partition, currentBatch, lastRecord));
-					// 读取的计数器+1
-					recordsRead++;
-					// 累加读取的字节数
-					bytesRead += lastRecord.sizeInBytes();
-					// 累加offset
-					nextFetchOffset = lastRecord.offset() + 1;
-					// In some cases, the deserialization may have thrown an exception and the retry may succeed,
-					// we allow user to move forward in this case.
-					// 在某些场景下，反序列化可能会抛出异常，并且重试可能会成功
-					// 在这写场景下，我们允许开发者继续进行下去
-					cachedRecordException = null;
-				}
-			} catch (SerializationException se) {
-				cachedRecordException = se;
-				if (records.isEmpty())
-					throw se;
-			} catch (KafkaException e) {
-				cachedRecordException = e;
-				if (records.isEmpty())
-					throw new KafkaException("Received exception when fetching the next record from " + partition
-							+ ". If needed, please seek past the record to "
-							+ "continue consumption.", e);
-			}
-			return records;
-		}
-
-		/**
-		 * 中止事务到指定的offset上
-		 * @param offset 事务中止指定的offset
-		 */
-		private void consumeAbortedTransactionsUpTo(long offset) {
-			if (abortedTransactions == null)
-				return;
-			// 遍历，添加到中断集合中，等待中断
-			while (!abortedTransactions.isEmpty() && abortedTransactions.peek().firstOffset <= offset) {
-				FetchResponse.AbortedTransaction abortedTransaction = abortedTransactions.poll();
-				abortedProducerIds.add(abortedTransaction.producerId);
-			}
-		}
-
-		private boolean isBatchAborted(RecordBatch batch) {
-			return batch.isTransactional() && abortedProducerIds.contains(batch.producerId());
-		}
-
-		private PriorityQueue<FetchResponse.AbortedTransaction> abortedTransactions(FetchResponse.PartitionData<?> partition) {
-			if (partition.abortedTransactions == null || partition.abortedTransactions.isEmpty())
-				return null;
-
-			PriorityQueue<FetchResponse.AbortedTransaction> abortedTransactions = new PriorityQueue<>(
-					partition.abortedTransactions.size(), Comparator.comparingLong(o -> o.firstOffset)
-			);
-			abortedTransactions.addAll(partition.abortedTransactions);
-			return abortedTransactions;
-		}
-
-		/**
-		 * 是否包含中断制造者
-		 * @param batch 指定的batch
-		 * @return 当前batch是否是中断制造者
-		 */
-		private boolean containsAbortMarker(RecordBatch batch) {
-			if (!batch.isControlBatch())
-				return false;
-
-			Iterator<Record> batchIterator = batch.iterator();
-			if (!batchIterator.hasNext())
-				return false;
-
-			Record firstRecord = batchIterator.next();
-			// 根据key的表示为来判断record的控制类型
-			return ControlRecordType.ABORT == ControlRecordType.parse(firstRecord.key());
-		}
-
-		private boolean notInitialized() {
-			return !this.initialized;
-		}
+	private Set<String> topicsForPartitions(Collection<TopicPartition> partitions) {
+		return partitions.stream().map(TopicPartition::topic).collect(Collectors.toSet());
 	}
 
 }

@@ -18,11 +18,12 @@ package org.apache.kafka.streams.integration;
 
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.Config;
+import org.apache.kafka.clients.admin.LogDirDescription;
+import org.apache.kafka.clients.admin.ReplicaInfo;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.config.TopicConfig;
-import org.apache.kafka.common.requests.DescribeLogDirsResponse;
 import org.apache.kafka.common.serialization.IntegerSerializer;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.utils.Time;
@@ -37,12 +38,13 @@ import org.apache.kafka.test.MockMapper;
 import org.apache.kafka.test.TestCondition;
 import org.apache.kafka.test.TestUtils;
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -62,26 +64,37 @@ public class PurgeRepartitionTopicIntegrationTest {
 
     private static Admin adminClient;
     private static KafkaStreams kafkaStreams;
-    private static final Integer PURGE_INTERVAL_MS = 10;
-    private static final Integer PURGE_SEGMENT_BYTES = 2000;
+	private static final Integer PURGE_INTERVAL_MS = 10;
+	private static final Integer PURGE_SEGMENT_BYTES = 2000;
 
-    @ClassRule
-    public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(NUM_BROKERS, new Properties() {
-        {
-            put("log.retention.check.interval.ms", PURGE_INTERVAL_MS);
-            put(TopicConfig.FILE_DELETE_DELAY_MS_CONFIG, 0);
-        }
-    });
+	public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(NUM_BROKERS, new Properties() {
+		{
+			put("log.retention.check.interval.ms", PURGE_INTERVAL_MS);
+			put(TopicConfig.FILE_DELETE_DELAY_MS_CONFIG, 0);
+		}
+	});
 
-    private final Time time = CLUSTER.time;
+	@BeforeClass
+	public static void startCluster() throws IOException, InterruptedException {
+		CLUSTER.start();
+		CLUSTER.createTopic(INPUT_TOPIC, 1, 1);
+	}
 
-    private class RepartitionTopicCreatedWithExpectedConfigs implements TestCondition {
-        @Override
-        final public boolean conditionMet() {
-            try {
-                final Set<String> topics = adminClient.listTopics().names().get();
+	@AfterClass
+	public static void closeCluster() {
+		CLUSTER.stop();
+	}
 
-                if (!topics.contains(REPARTITION_TOPIC)) {
+
+	private final Time time = CLUSTER.time;
+
+	private class RepartitionTopicCreatedWithExpectedConfigs implements TestCondition {
+		@Override
+		final public boolean conditionMet() {
+			try {
+				final Set<String> topics = adminClient.listTopics().names().get();
+
+				if (!topics.contains(REPARTITION_TOPIC)) {
                     return false;
                 }
             } catch (final Exception e) {
@@ -120,27 +133,22 @@ public class PurgeRepartitionTopicIntegrationTest {
             time.sleep(PURGE_INTERVAL_MS);
 
             try {
-                final Collection<DescribeLogDirsResponse.LogDirInfo> logDirInfo =
-                    adminClient.describeLogDirs(Collections.singleton(0)).values().get(0).get().values();
+				final Collection<LogDirDescription> logDirInfo =
+						adminClient.describeLogDirs(Collections.singleton(0)).descriptions().get(0).get().values();
 
-                for (final DescribeLogDirsResponse.LogDirInfo partitionInfo : logDirInfo) {
-                    final DescribeLogDirsResponse.ReplicaInfo replicaInfo =
-                        partitionInfo.replicaInfos.get(new TopicPartition(REPARTITION_TOPIC, 0));
-                    if (replicaInfo != null && verifier.verify(replicaInfo.size)) {
-                        return true;
-                    }
-                }
-            } catch (final Exception e) {
+				for (final LogDirDescription partitionInfo : logDirInfo) {
+					final ReplicaInfo replicaInfo =
+							partitionInfo.replicaInfos().get(new TopicPartition(REPARTITION_TOPIC, 0));
+					if (replicaInfo != null && verifier.verify(replicaInfo.size())) {
+						return true;
+					}
+				}
+			} catch (final Exception e) {
                 // swallow
             }
 
             return false;
         }
-    }
-
-    @BeforeClass
-    public static void createTopics() throws Exception {
-        CLUSTER.createTopic(INPUT_TOPIC, 1, 1);
     }
 
     @Before

@@ -27,16 +27,16 @@ import java.util.List;
 import java.util.Objects;
 import java.util.StringJoiner;
 
-public class TransformationChain<R extends ConnectRecord<R>> {
-    private static final Logger log = LoggerFactory.getLogger(TransformationChain.class);
+public class TransformationChain<R extends ConnectRecord<R>> implements AutoCloseable {
+	private static final Logger log = LoggerFactory.getLogger(TransformationChain.class);
 
-    private final List<Transformation<R>> transformations;
-    private final RetryWithToleranceOperator retryWithToleranceOperator;
+	private final List<Transformation<R>> transformations;
+	private final RetryWithToleranceOperator retryWithToleranceOperator;
 
-    public TransformationChain(List<Transformation<R>> transformations, RetryWithToleranceOperator retryWithToleranceOperator) {
-        this.transformations = transformations;
-        this.retryWithToleranceOperator = retryWithToleranceOperator;
-    }
+	public TransformationChain(List<Transformation<R>> transformations, RetryWithToleranceOperator retryWithToleranceOperator) {
+		this.transformations = transformations;
+		this.retryWithToleranceOperator = retryWithToleranceOperator;
+	}
 
     public R apply(R record) {
         if (transformations.isEmpty()) return record;
@@ -55,11 +55,12 @@ public class TransformationChain<R extends ConnectRecord<R>> {
         return record;
     }
 
-    public void close() {
-        for (Transformation<R> transformation : transformations) {
-            transformation.close();
-        }
-    }
+	@Override
+	public void close() {
+		for (Transformation<R> transformation : transformations) {
+			transformation.close();
+		}
+	}
 
     @Override
     public boolean equals(Object o) {

@@ -43,30 +43,30 @@ import org.rocksdb.SstFileManager;
 import org.rocksdb.Statistics;
 import org.rocksdb.TableFormatConfig;
 import org.rocksdb.WALRecoveryMode;
+import org.rocksdb.WriteBufferManager;
+import org.slf4j.LoggerFactory;
 
 import java.util.Collection;
 import java.util.List;
-import org.rocksdb.WriteBufferManager;
-import org.slf4j.LoggerFactory;
 
 /**
  * The generic {@link Options} class allows users to set all configs on one object if only default column family
  * is used. Because we use multiple column families, we need to use {@link DBOptions} and {@link ColumnFamilyOptions}
  * that cover a part of all options each.
- *
+ * <p>
  * This class do the translation between generic {@link Options} into {@link DBOptions} and {@link ColumnFamilyOptions}.
  */
-class RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter extends Options {
-    private final DBOptions dbOptions;
-    private final ColumnFamilyOptions columnFamilyOptions;
+public class RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter extends Options {
+	private final DBOptions dbOptions;
+	private final ColumnFamilyOptions columnFamilyOptions;
 
-    private static final org.slf4j.Logger LOG = LoggerFactory.getLogger(RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter.class);
+	private static final org.slf4j.Logger LOG = LoggerFactory.getLogger(RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter.class);
 
-    RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter(final DBOptions dbOptions,
-                                                               final ColumnFamilyOptions columnFamilyOptions) {
-        this.dbOptions = dbOptions;
-        this.columnFamilyOptions = columnFamilyOptions;
-    }
+	RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter(final DBOptions dbOptions,
+															   final ColumnFamilyOptions columnFamilyOptions) {
+		this.dbOptions = dbOptions;
+		this.columnFamilyOptions = columnFamilyOptions;
+	}
 
     @Override
     public Options setIncreaseParallelism(final int totalThreads) {
@@ -1340,25 +1340,34 @@ class RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter extends Options
     }
 
     @Override
-    public Options setCompactionOptionsFIFO(final CompactionOptionsFIFO compactionOptionsFIFO) {
-        columnFamilyOptions.setCompactionOptionsFIFO(compactionOptionsFIFO);
-        return this;
-    }
+	public Options setCompactionOptionsFIFO(final CompactionOptionsFIFO compactionOptionsFIFO) {
+		logWarning(LOG);
+		columnFamilyOptions.setCompactionOptionsFIFO(compactionOptionsFIFO);
+		return this;
+	}
 
-    @Override
-    public CompactionOptionsFIFO compactionOptionsFIFO() {
-        return columnFamilyOptions.compactionOptionsFIFO();
-    }
+	@Override
+	public CompactionOptionsFIFO compactionOptionsFIFO() {
+		logWarning(LOG);
+		return columnFamilyOptions.compactionOptionsFIFO();
+	}
 
-    @Override
-    public Options setForceConsistencyChecks(final boolean forceConsistencyChecks) {
-        columnFamilyOptions.setForceConsistencyChecks(forceConsistencyChecks);
-        return this;
-    }
+	public static void logWarning(final org.slf4j.Logger log) {
+		log.warn("RocksDB's version will be bumped to version 6+ via KAFKA-8897 in a future release. "
+				+ "If you use `org.rocksdb.CompactionOptionsFIFO#setTtl(long)` or `#ttl()` you will need to rewrite "
+				+ "your code after KAFKA-8897 is resolved and set TTL via `org.rocksdb.Options` "
+				+ "(or `org.rocksdb.ColumnFamilyOptions`).");
+	}
 
-    @Override
-    public boolean forceConsistencyChecks() {
-        return columnFamilyOptions.forceConsistencyChecks();
+	@Override
+	public Options setForceConsistencyChecks(final boolean forceConsistencyChecks) {
+		columnFamilyOptions.setForceConsistencyChecks(forceConsistencyChecks);
+		return this;
+	}
+
+	@Override
+	public boolean forceConsistencyChecks() {
+		return columnFamilyOptions.forceConsistencyChecks();
     }
 
     @Override
@@ -1384,8 +1393,10 @@ class RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter extends Options
 
     @Override
     public void close() {
-        // ColumnFamilyOptions should be closed last
-        dbOptions.close();
-        columnFamilyOptions.close();
-    }
+		// ColumnFamilyOptions should be closed after DBOptions
+		dbOptions.close();
+		columnFamilyOptions.close();
+		// close super last since we initialized it first
+		super.close();
+	}
 }

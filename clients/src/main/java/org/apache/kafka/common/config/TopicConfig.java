@@ -66,32 +66,33 @@ public class TopicConfig {
     public static final String RETENTION_BYTES_DOC = "This configuration controls the maximum size a partition " +
         "(which consists of log segments) can grow to before we will discard old log segments to free up space if we " +
         "are using the \"delete\" retention policy. By default there is no size limit only a time limit. " +
-        "Since this limit is enforced at the partition level, multiply it by the number of partitions to compute " +
-        "the topic retention in bytes.";
+			"Since this limit is enforced at the partition level, multiply it by the number of partitions to compute " +
+			"the topic retention in bytes.";
 
-    public static final String RETENTION_MS_CONFIG = "retention.ms";
-    public static final String RETENTION_MS_DOC = "This configuration controls the maximum time we will retain a " +
-        "log before we will discard old log segments to free up space if we are using the " +
-        "\"delete\" retention policy. This represents an SLA on how soon consumers must read " +
-        "their data. If set to -1, no time limit is applied.";
+	public static final String RETENTION_MS_CONFIG = "retention.ms";
+	public static final String RETENTION_MS_DOC = "This configuration controls the maximum time we will retain a " +
+			"log before we will discard old log segments to free up space if we are using the " +
+			"\"delete\" retention policy. This represents an SLA on how soon consumers must read " +
+			"their data. If set to -1, no time limit is applied.";
 
-    public static final String MAX_MESSAGE_BYTES_CONFIG = "max.message.bytes";
-    public static final String MAX_MESSAGE_BYTES_DOC = "<p>The largest record batch size allowed by Kafka. If this " +
-        "is increased and there are consumers older than 0.10.2, the consumers' fetch size must also be increased so that " +
-        "the they can fetch record batches this large.</p>" +
-        "<p>In the latest message format version, records are always grouped into batches for efficiency. In previous " +
-        "message format versions, uncompressed records are not grouped into batches and this limit only applies to a " +
-        "single record in that case.</p>";
+	public static final String MAX_MESSAGE_BYTES_CONFIG = "max.message.bytes";
+	public static final String MAX_MESSAGE_BYTES_DOC =
+			"The largest record batch size allowed by Kafka (after compression if compression is enabled). " +
+					"If this is increased and there are consumers older than 0.10.2, the consumers' fetch " +
+					"size must also be increased so that they can fetch record batches this large. " +
+					"In the latest message format version, records are always grouped into batches for efficiency. " +
+					"In previous message format versions, uncompressed records are not grouped into batches and this " +
+					"limit only applies to a single record in that case.";
 
-    public static final String INDEX_INTERVAL_BYTES_CONFIG = "index.interval.bytes";
-    public static final String INDEX_INTERVAL_BYTES_DOCS = "This setting controls how frequently " +
-        "Kafka adds an index entry to its offset index. The default setting ensures that we index a " +
-        "message roughly every 4096 bytes. More indexing allows reads to jump closer to the exact " +
-        "position in the log but makes the index larger. You probably don't need to change this.";
+	public static final String INDEX_INTERVAL_BYTES_CONFIG = "index.interval.bytes";
+	public static final String INDEX_INTERVAL_BYTES_DOCS = "This setting controls how frequently " +
+			"Kafka adds an index entry to its offset index. The default setting ensures that we index a " +
+			"message roughly every 4096 bytes. More indexing allows reads to jump closer to the exact " +
+			"position in the log but makes the index larger. You probably don't need to change this.";
 
-    public static final String FILE_DELETE_DELAY_MS_CONFIG = "file.delete.delay.ms";
-    public static final String FILE_DELETE_DELAY_MS_DOC = "The time to wait before deleting a file from the " +
-        "filesystem";
+	public static final String FILE_DELETE_DELAY_MS_CONFIG = "file.delete.delay.ms";
+	public static final String FILE_DELETE_DELAY_MS_DOC = "The time to wait before deleting a file from the " +
+			"filesystem";
 
     public static final String DELETE_RETENTION_MS_CONFIG = "delete.retention.ms";
     public static final String DELETE_RETENTION_MS_DOC = "The amount of time to retain delete tombstone markers " +

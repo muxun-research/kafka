@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.streams.processor.internals.testutil;
 
-
 import org.apache.log4j.AppenderSkeleton;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
@@ -26,53 +25,63 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 
-public class LogCaptureAppender extends AppenderSkeleton {
-    private final LinkedList<LoggingEvent> events = new LinkedList<>();
+public class LogCaptureAppender extends AppenderSkeleton implements AutoCloseable {
+	private final List<LoggingEvent> events = new LinkedList<>();
 
-    @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
-    public static class Event {
-        private String level;
-        private String message;
-        private Optional<String> throwableInfo;
+	@SuppressWarnings("OptionalUsedAsFieldOrParameterType")
+	public static class Event {
+		private final String level;
+		private final String message;
+		private final Optional<String> throwableInfo;
 
-        Event(final String level, final String message, final Optional<String> throwableInfo) {
-            this.level = level;
-            this.message = message;
-            this.throwableInfo = throwableInfo;
-        }
+		Event(final String level, final String message, final Optional<String> throwableInfo) {
+			this.level = level;
+			this.message = message;
+			this.throwableInfo = throwableInfo;
+		}
 
-        public String getLevel() {
-            return level;
-        }
+		public String getLevel() {
+			return level;
+		}
 
         public String getMessage() {
             return message;
         }
 
-        public Optional<String> getThrowableInfo() {
-            return throwableInfo;
-        }
-    }
+		public Optional<String> getThrowableInfo() {
+			return throwableInfo;
+		}
+	}
 
-    public static LogCaptureAppender createAndRegister() {
-        final LogCaptureAppender logCaptureAppender = new LogCaptureAppender();
-        Logger.getRootLogger().addAppender(logCaptureAppender);
-        return logCaptureAppender;
-    }
+	public static LogCaptureAppender createAndRegister() {
+		final LogCaptureAppender logCaptureAppender = new LogCaptureAppender();
+		Logger.getRootLogger().addAppender(logCaptureAppender);
+		return logCaptureAppender;
+	}
 
-    public static void setClassLoggerToDebug(final Class<?> clazz) {
-        Logger.getLogger(clazz).setLevel(Level.DEBUG);
-    }
+	public static LogCaptureAppender createAndRegister(final Class<?> clazz) {
+		final LogCaptureAppender logCaptureAppender = new LogCaptureAppender();
+		Logger.getLogger(clazz).addAppender(logCaptureAppender);
+		return logCaptureAppender;
+	}
 
-    public static void unregister(final LogCaptureAppender logCaptureAppender) {
-        Logger.getRootLogger().removeAppender(logCaptureAppender);
-    }
+	public static void setClassLoggerToDebug(final Class<?> clazz) {
+		Logger.getLogger(clazz).setLevel(Level.DEBUG);
+	}
 
-    @Override
-    protected void append(final LoggingEvent event) {
-        synchronized (events) {
-            events.add(event);
-        }
+	public static void setClassLoggerToTrace(final Class<?> clazz) {
+		Logger.getLogger(clazz).setLevel(Level.TRACE);
+	}
+
+	public static void unregister(final LogCaptureAppender logCaptureAppender) {
+		Logger.getRootLogger().removeAppender(logCaptureAppender);
+	}
+
+	@Override
+	protected void append(final LoggingEvent event) {
+		synchronized (events) {
+			events.add(event);
+		}
     }
 
     public List<String> getMessages() {
@@ -111,7 +120,7 @@ public class LogCaptureAppender extends AppenderSkeleton {
 
     @Override
     public void close() {
-
+		unregister(this);
     }
 
     @Override

@@ -14,9 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.kafka.streams.kstream;
-
 
 import org.apache.kafka.common.serialization.Serde;
 
@@ -34,7 +32,6 @@ public class Grouped<K, V> implements NamedOperation<Grouped<K, V>> {
     protected final Serde<K> keySerde;
     protected final Serde<V> valueSerde;
     protected final String name;
-
 
     private Grouped(final String name,
                     final Serde<K> keySerde,
@@ -63,33 +60,32 @@ public class Grouped<K, V> implements NamedOperation<Grouped<K, V>> {
 
 
     /**
-     * Create a {@link Grouped} instance with the provided keySerde. If {@code null} the default key serde from config will be used.
-     *
-     * @param keySerde the Serde used for serializing the key. If {@code null} the default key serde from config will be used
-     * @return a new {@link Grouped} configured with the keySerde
-     * @see KStream#groupByKey(Grouped)
-     * @see KStream#groupBy(KeyValueMapper, Grouped)
-     * @see KTable#groupBy(KeyValueMapper, Grouped)
-     */
-    public static <K> Grouped keySerde(final Serde<K> keySerde) {
-        return new Grouped<>(null, keySerde, null);
-    }
+	 * Create a {@link Grouped} instance with the provided keySerde. If {@code null} the default key serde from config will be used.
+	 * @param keySerde the Serde used for serializing the key. If {@code null} the default key serde from config will be used
+	 * @return a new {@link Grouped} configured with the keySerde
+	 * @see KStream#groupByKey(Grouped)
+	 * @see KStream#groupBy(KeyValueMapper, Grouped)
+	 * @see KTable#groupBy(KeyValueMapper, Grouped)
+	 */
+	public static <K, V> Grouped<K, V> keySerde(final Serde<K> keySerde) {
+		return new Grouped<>(null, keySerde, null);
+	}
 
 
     /**
-     * Create a {@link Grouped} instance with the provided valueSerde.  If {@code null} the default value serde from config will be used.
-     *
-     * @param valueSerde the {@link Serde} used for serializing the value. If {@code null} the default value serde from config will be used
-     * @return a new {@link Grouped} configured with the valueSerde
-     * @see KStream#groupByKey(Grouped)
-     * @see KStream#groupBy(KeyValueMapper, Grouped)
-     * @see KTable#groupBy(KeyValueMapper, Grouped)
-     */
-    public static <V> Grouped valueSerde(final Serde<V> valueSerde) {
-        return new Grouped<>(null, null, valueSerde);
-    }
+	 * Create a {@link Grouped} instance with the provided valueSerde.  If {@code null} the default value serde from config will be used.
+	 *
+	 * @param valueSerde the {@link Serde} used for serializing the value. If {@code null} the default value serde from config will be used
+	 * @return a new {@link Grouped} configured with the valueSerde
+	 * @see KStream#groupByKey(Grouped)
+	 * @see KStream#groupBy(KeyValueMapper, Grouped)
+	 * @see KTable#groupBy(KeyValueMapper, Grouped)
+	 */
+	public static <K, V> Grouped<K, V> valueSerde(final Serde<V> valueSerde) {
+		return new Grouped<>(null, null, valueSerde);
+	}
 
-    /**
+	/**
      * Create a {@link Grouped} instance with the provided  name, keySerde, and valueSerde. If the keySerde and/or the valueSerde is
      * {@code null} the default value for the respective serde from config will be used.
      *

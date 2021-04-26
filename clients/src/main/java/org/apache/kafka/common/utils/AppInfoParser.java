@@ -16,14 +16,6 @@
  */
 package org.apache.kafka.common.utils;
 
-import java.io.InputStream;
-import java.lang.management.ManagementFactory;
-import java.util.Properties;
-
-import javax.management.JMException;
-import javax.management.MBeanServer;
-import javax.management.ObjectName;
-
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.metrics.Gauge;
 import org.apache.kafka.common.metrics.MetricConfig;
@@ -31,15 +23,22 @@ import org.apache.kafka.common.metrics.Metrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.management.JMException;
+import javax.management.MBeanServer;
+import javax.management.ObjectName;
+import java.io.InputStream;
+import java.lang.management.ManagementFactory;
+import java.util.Properties;
+
 public class AppInfoParser {
-    private static final Logger log = LoggerFactory.getLogger(AppInfoParser.class);
-    private static final String VERSION;
-    private static final String COMMIT_ID;
+	private static final Logger log = LoggerFactory.getLogger(AppInfoParser.class);
+	private static final String VERSION;
+	private static final String COMMIT_ID;
 
-    protected static final String DEFAULT_VALUE = "unknown";
+	protected static final String DEFAULT_VALUE = "unknown";
 
-    static {
-        Properties props = new Properties();
+	static {
+		Properties props = new Properties();
         try (InputStream resourceStream = AppInfoParser.class.getResourceAsStream("/kafka/kafka-version.properties")) {
             props.load(resourceStream);
         } catch (Exception e) {
@@ -71,15 +70,17 @@ public class AppInfoParser {
 
     public static synchronized void unregisterAppInfo(String prefix, String id, Metrics metrics) {
         MBeanServer server = ManagementFactory.getPlatformMBeanServer();
-        try {
-            ObjectName name = new ObjectName(prefix + ":type=app-info,id=" + Sanitizer.jmxSanitize(id));
-            if (server.isRegistered(name))
-                server.unregisterMBean(name);
+		try {
+			ObjectName name = new ObjectName(prefix + ":type=app-info,id=" + Sanitizer.jmxSanitize(id));
+			if (server.isRegistered(name))
+				server.unregisterMBean(name);
 
-            unregisterMetrics(metrics);
-        } catch (JMException e) {
-            log.warn("Error unregistering AppInfo mbean", e);
-        }
+			unregisterMetrics(metrics);
+		} catch (JMException e) {
+			log.warn("Error unregistering AppInfo mbean", e);
+		} finally {
+			log.info("App info {} for {} unregistered", prefix, id);
+		}
     }
 
     private static MetricName metricName(Metrics metrics, String name) {

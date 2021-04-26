@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.clients;
 
+import org.apache.kafka.common.message.RequestHeaderData;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.requests.AbstractRequest;
 import org.apache.kafka.common.requests.RequestHeader;
@@ -82,8 +83,15 @@ public final class ClientRequest {
     }
 
     public RequestHeader makeHeader(short version) {
-        return new RequestHeader(apiKey(), version, clientId, correlationId);
-    }
+		ApiKeys requestApiKey = apiKey();
+		return new RequestHeader(
+				new RequestHeaderData()
+						.setRequestApiKey(requestApiKey.id)
+						.setRequestApiVersion(version)
+						.setClientId(clientId)
+						.setCorrelationId(correlationId),
+				requestApiKey.requestHeaderVersion(version));
+	}
 
     public AbstractRequest.Builder<?> requestBuilder() {
         return requestBuilder;

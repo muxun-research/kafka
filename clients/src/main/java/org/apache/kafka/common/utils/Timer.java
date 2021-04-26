@@ -52,6 +52,7 @@ public class Timer {
     private long startMs;
     private long currentTimeMs;
     private long deadlineMs;
+	private long timeoutMs;
 
     Timer(Time time, long timeoutMs) {
         this.time = time;
@@ -101,22 +102,36 @@ public class Timer {
         if (timeoutMs < 0)
             throw new IllegalArgumentException("Invalid negative timeout " + timeoutMs);
 
-        this.startMs = this.currentTimeMs;
+		this.timeoutMs = timeoutMs;
+		this.startMs = this.currentTimeMs;
 
-        if (currentTimeMs > Long.MAX_VALUE - timeoutMs)
-            this.deadlineMs = Long.MAX_VALUE;
-        else
-            this.deadlineMs = currentTimeMs + timeoutMs;
-    }
+		if (currentTimeMs > Long.MAX_VALUE - timeoutMs)
+			this.deadlineMs = Long.MAX_VALUE;
+		else
+			this.deadlineMs = currentTimeMs + timeoutMs;
+	}
 
-    /**
-     * Use the underlying {@link Time} implementation to update the current cached time. If
-     * the underlying time returns a value which is smaller than the current cached time,
-     * the update will be ignored.
-     */
-    public void update() {
-        update(time.milliseconds());
-    }
+	/**
+	 * Reset the timer's deadline directly.
+	 * @param deadlineMs The new deadline in milliseconds
+	 */
+	public void resetDeadline(long deadlineMs) {
+		if (deadlineMs < 0)
+			throw new IllegalArgumentException("Invalid negative deadline " + deadlineMs);
+
+		this.timeoutMs = Math.max(0, deadlineMs - this.currentTimeMs);
+		this.startMs = this.currentTimeMs;
+		this.deadlineMs = deadlineMs;
+	}
+
+	/**
+	 * Use the underlying {@link Time} implementation to update the current cached time. If
+	 * the underlying time returns a value which is smaller than the current cached time,
+	 * the update will be ignored.
+	 */
+	public void update() {
+		update(time.milliseconds());
+	}
 
     /**
      * Update the cached current time to a specific value. In some contexts, the caller may already
@@ -158,24 +173,31 @@ public class Timer {
 
     /**
      * Get the amount of time that has elapsed since the timer began. If the timer was reset, this
-     * will be the amount of time since the last reset.
-     *
-     * @return The elapsed time since construction or the last reset
-     */
-    public long elapsedMs() {
-        return currentTimeMs - startMs;
-    }
+	 * will be the amount of time since the last reset.
+	 *
+	 * @return The elapsed time since construction or the last reset
+	 */
+	public long elapsedMs() {
+		return currentTimeMs - startMs;
+	}
 
-    /**
-	 * 等待请求的时间范围，并更新计数器
-	 * 不论是sleep了指定的时间范围，还是计数器已经超时，都会正常返回
-	 * @param durationMs 需要sleep的时间
-     */
-    public void sleep(long durationMs) {
-        long sleepDurationMs = Math.min(durationMs, remainingMs());
-		// 阻塞等待
-        time.sleep(sleepDurationMs);
-		// 更新计时器时间戳
-        update();
-    }
+	/**
+	 * Get the current timeout value specified through {@link #reset(long)} or {@link #resetDeadline(long)}.
+	 * This value is constant until altered by one of these API calls.
+	 * @return The timeout in milliseconds
+	 */
+	public long timeoutMs() {
+		return timeoutMs;
+	}
+
+	/**
+	 * Sleep for the requested duration and update the timer. Return when either the duration has
+	 * elapsed or the timer has expired.
+	 * @param durationMs The duration in milliseconds to sleep
+	 */
+	public void sleep(long durationMs) {
+		long sleepDurationMs = Math.min(durationMs, remainingMs());
+		time.sleep(sleepDurationMs);
+		update();
+	}
 }

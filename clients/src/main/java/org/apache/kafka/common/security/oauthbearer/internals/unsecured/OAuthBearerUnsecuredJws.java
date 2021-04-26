@@ -16,6 +16,12 @@
  */
 package org.apache.kafka.common.security.oauthbearer.internals.unsecured;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.JsonNodeType;
+import org.apache.kafka.common.security.oauthbearer.OAuthBearerToken;
+import org.apache.kafka.common.utils.Utils;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -29,12 +35,6 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
-
-import org.apache.kafka.common.security.oauthbearer.OAuthBearerToken;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeType;
 
 /**
  * A simple unsecured JWS implementation. The '{@code nbf}' claim is ignored if
@@ -103,9 +103,9 @@ public class OAuthBearerUnsecuredJws implements OAuthBearerToken {
                     OAuthBearerValidationResult.newFailure("No expiration time in JWT"));
         lifetime = convertClaimTimeInSecondsToMs(expirationTimeSeconds);
         String principalName = claim(this.principalClaimName, String.class);
-        if (principalName == null || principalName.trim().isEmpty())
-            throw new OAuthBearerIllegalTokenException(OAuthBearerValidationResult
-                    .newFailure("No principal name in JWT claim: " + this.principalClaimName));
+		if (Utils.isBlank(principalName))
+			throw new OAuthBearerIllegalTokenException(OAuthBearerValidationResult
+					.newFailure("No principal name in JWT claim: " + this.principalClaimName));
         this.principalName = principalName;
         this.startTimeMs = calculateStartTimeMs();
     }
@@ -345,13 +345,13 @@ public class OAuthBearerUnsecuredJws implements OAuthBearerToken {
         String scopeClaimName = scopeClaimName();
         if (isClaimType(scopeClaimName, String.class)) {
             String scopeClaimValue = claim(scopeClaimName, String.class);
-            if (scopeClaimValue.trim().isEmpty())
-                return Collections.emptySet();
-            else {
-                Set<String> retval = new HashSet<>();
-                retval.add(scopeClaimValue.trim());
-                return Collections.unmodifiableSet(retval);
-            }
+			if (Utils.isBlank(scopeClaimValue))
+				return Collections.emptySet();
+			else {
+				Set<String> retval = new HashSet<>();
+				retval.add(scopeClaimValue.trim());
+				return Collections.unmodifiableSet(retval);
+			}
         }
         List<?> scopeClaimValue = claim(scopeClaimName, List.class);
         if (scopeClaimValue == null || scopeClaimValue.isEmpty())
@@ -360,9 +360,9 @@ public class OAuthBearerUnsecuredJws implements OAuthBearerToken {
         List<String> stringList = (List<String>) scopeClaimValue;
         Set<String> retval = new HashSet<>();
         for (String scope : stringList) {
-            if (scope != null && !scope.trim().isEmpty()) {
-                retval.add(scope.trim());
-            }
+			if (!Utils.isBlank(scope)) {
+				retval.add(scope.trim());
+			}
         }
         return Collections.unmodifiableSet(retval);
     }

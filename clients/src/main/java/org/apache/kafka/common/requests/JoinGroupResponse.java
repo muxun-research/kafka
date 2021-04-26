@@ -18,34 +18,22 @@ package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.message.JoinGroupResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
-import java.util.Collections;
 import java.util.Map;
 
 public class JoinGroupResponse extends AbstractResponse {
 
     private final JoinGroupResponseData data;
 
-    public static final String UNKNOWN_PROTOCOL = "";
-    public static final int UNKNOWN_GENERATION_ID = -1;
-    public static final String UNKNOWN_MEMBER_ID = "";
-
     public JoinGroupResponse(JoinGroupResponseData data) {
-        this.data = data;
+		super(ApiKeys.JOIN_GROUP);
+		this.data = data;
     }
 
-    public JoinGroupResponse(Struct struct) {
-        short latestVersion = (short) (JoinGroupResponseData.SCHEMAS.length - 1);
-        this.data = new JoinGroupResponseData(struct, latestVersion);
-    }
-
-    public JoinGroupResponse(Struct struct, short version) {
-        this.data = new JoinGroupResponseData(struct, version);
-    }
-
+	@Override
     public JoinGroupResponseData data() {
         return data;
     }
@@ -59,31 +47,26 @@ public class JoinGroupResponse extends AbstractResponse {
         return data.throttleTimeMs();
     }
 
-    public Errors error() {
-        return Errors.forCode(data.errorCode());
-    }
+	public Errors error() {
+		return Errors.forCode(data.errorCode());
+	}
 
-    @Override
-    public Map<Errors, Integer> errorCounts() {
-        return Collections.singletonMap(Errors.forCode(data.errorCode()), 1);
-    }
+	@Override
+	public Map<Errors, Integer> errorCounts() {
+		return errorCounts(Errors.forCode(data.errorCode()));
+	}
 
-    public static JoinGroupResponse parse(ByteBuffer buffer, short versionId) {
-        return new JoinGroupResponse(ApiKeys.JOIN_GROUP.parseResponse(versionId, buffer), versionId);
-    }
+	public static JoinGroupResponse parse(ByteBuffer buffer, short version) {
+		return new JoinGroupResponse(new JoinGroupResponseData(new ByteBufferAccessor(buffer), version));
+	}
 
-    @Override
-    protected Struct toStruct(short version) {
-        return data.toStruct(version);
-    }
+	@Override
+	public String toString() {
+		return data.toString();
+	}
 
-    @Override
-    public String toString() {
-        return data.toString();
-    }
-
-    @Override
-    public boolean shouldClientThrottle(short version) {
-        return version >= 3;
+	@Override
+	public boolean shouldClientThrottle(short version) {
+		return version >= 3;
     }
 }

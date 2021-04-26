@@ -21,8 +21,8 @@ import org.apache.kafka.common.message.DeleteGroupsResponseData;
 import org.apache.kafka.common.message.DeleteGroupsResponseData.DeletableGroupResult;
 import org.apache.kafka.common.message.DeleteGroupsResponseData.DeletableGroupResultCollection;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.Struct;
 
 import java.nio.ByteBuffer;
 
@@ -46,49 +46,36 @@ public class DeleteGroupsRequest extends AbstractRequest {
         }
     }
 
-    public final DeleteGroupsRequestData data;
+	private final DeleteGroupsRequestData data;
 
     public DeleteGroupsRequest(DeleteGroupsRequestData data, short version) {
         super(ApiKeys.DELETE_GROUPS, version);
         this.data = data;
     }
 
-    public DeleteGroupsRequest(Struct struct, short version) {
-        super(ApiKeys.DELETE_GROUPS, version);
-        this.data = new DeleteGroupsRequestData(struct, version);
-    }
-
     @Override
     public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-        Errors error = Errors.forException(e);
+		Errors error = Errors.forException(e);
+		DeletableGroupResultCollection groupResults = new DeletableGroupResultCollection();
+		for (String groupId : data.groupsNames()) {
+			groupResults.add(new DeletableGroupResult()
+					.setGroupId(groupId)
+					.setErrorCode(error.code()));
+		}
 
-        switch (version()) {
-            case 0:
-            case 1:
-                DeletableGroupResultCollection groupResults = new DeletableGroupResultCollection();
-                for (String groupId : data.groupsNames()) {
-                    groupResults.add(new DeletableGroupResult()
-                                         .setGroupId(groupId)
-                                         .setErrorCode(error.code()));
-                }
-
-                return new DeleteGroupsResponse(
-                    new DeleteGroupsResponseData()
-                        .setResults(groupResults)
-                        .setThrottleTimeMs(throttleTimeMs)
-                );
-            default:
-                throw new IllegalArgumentException(String.format("Version %d is not valid. Valid versions for %s are 0 to %d",
-                    version(), ApiKeys.DELETE_GROUPS.name, ApiKeys.DELETE_GROUPS.latestVersion()));
-        }
-    }
+		return new DeleteGroupsResponse(
+				new DeleteGroupsResponseData()
+						.setResults(groupResults)
+						.setThrottleTimeMs(throttleTimeMs)
+		);
+	}
 
     public static DeleteGroupsRequest parse(ByteBuffer buffer, short version) {
-        return new DeleteGroupsRequest(ApiKeys.DELETE_GROUPS.parseRequest(version, buffer), version);
+		return new DeleteGroupsRequest(new DeleteGroupsRequestData(new ByteBufferAccessor(buffer), version), version);
     }
 
-    @Override
-    protected Struct toStruct() {
-        return data.toStruct(version());
-    }
+	@Override
+	public DeleteGroupsRequestData data() {
+		return data;
+	}
 }

@@ -51,15 +51,22 @@ public class TaskStatus extends AbstractStatus<ConnectorTaskId> {
         /**
          * Invoked if the task raises an error. No shutdown event will follow.
          * @param id The id of the task
-         * @param cause The error raised by the task.
-         */
-        void onFailure(ConnectorTaskId id, Throwable cause);
+		 * @param cause The error raised by the task.
+		 */
+		void onFailure(ConnectorTaskId id, Throwable cause);
 
-        /**
-         * Invoked after successful shutdown of the task.
-         * @param id The id of the task
-         */
-        void onShutdown(ConnectorTaskId id);
+		/**
+		 * Invoked after successful shutdown of the task.
+		 * @param id The id of the task
+		 */
+		void onShutdown(ConnectorTaskId id);
 
-    }
+		/**
+		 * Invoked after the task has been deleted. Can be called if the
+		 * connector tasks have been reduced, or if the connector itself has
+		 * been deleted.
+		 * @param id The id of the task
+		 */
+		void onDeletion(ConnectorTaskId id);
+	}
 }

@@ -20,7 +20,9 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.streams.KafkaStreams;
 
 import java.util.Collections;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -28,33 +30,57 @@ import java.util.Set;
  */
 public class TaskMetadata {
 
-    private final String taskId;
+	private final String taskId;
 
-    private final Set<TopicPartition> topicPartitions;
+	private final Set<TopicPartition> topicPartitions;
 
-    public TaskMetadata(final String taskId,
-                        final Set<TopicPartition> topicPartitions) {
-        this.taskId = taskId;
-        this.topicPartitions = Collections.unmodifiableSet(topicPartitions);
-    }
+	private final Map<TopicPartition, Long> committedOffsets;
 
-    public String taskId() {
-        return taskId;
-    }
+	private final Map<TopicPartition, Long> endOffsets;
 
-    public Set<TopicPartition> topicPartitions() {
-        return topicPartitions;
-    }
+	private final Optional<Long> timeCurrentIdlingStarted;
 
-    @Override
-    public boolean equals(final Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        final TaskMetadata that = (TaskMetadata) o;
+	public TaskMetadata(final String taskId,
+						final Set<TopicPartition> topicPartitions,
+						final Map<TopicPartition, Long> committedOffsets,
+						final Map<TopicPartition, Long> endOffsets,
+						final Optional<Long> timeCurrentIdlingStarted) {
+		this.taskId = taskId;
+		this.topicPartitions = Collections.unmodifiableSet(topicPartitions);
+		this.committedOffsets = Collections.unmodifiableMap(committedOffsets);
+		this.endOffsets = Collections.unmodifiableMap(endOffsets);
+		this.timeCurrentIdlingStarted = timeCurrentIdlingStarted;
+	}
+
+	public String taskId() {
+		return taskId;
+	}
+
+	public Set<TopicPartition> topicPartitions() {
+		return topicPartitions;
+	}
+
+	public Map<TopicPartition, Long> committedOffsets() {
+		return committedOffsets;
+	}
+
+	public Map<TopicPartition, Long> endOffsets() {
+		return endOffsets;
+	}
+
+	public Optional<Long> timeCurrentIdlingStarted() {
+		return timeCurrentIdlingStarted;
+	}
+
+	@Override
+	public boolean equals(final Object o) {
+		if (this == o) {
+			return true;
+		}
+		if (o == null || getClass() != o.getClass()) {
+			return false;
+		}
+		final TaskMetadata that = (TaskMetadata) o;
         return Objects.equals(taskId, that.taskId) &&
                Objects.equals(topicPartitions, that.topicPartitions);
     }
@@ -67,8 +93,11 @@ public class TaskMetadata {
     @Override
     public String toString() {
         return "TaskMetadata{" +
-                "taskId=" + taskId +
-                ", topicPartitions=" + topicPartitions +
-                '}';
+				"taskId=" + taskId +
+				", topicPartitions=" + topicPartitions +
+				", committedOffsets=" + committedOffsets +
+				", endOffsets=" + endOffsets +
+				", timeCurrentIdlingStarted=" + timeCurrentIdlingStarted +
+				'}';
     }
 }

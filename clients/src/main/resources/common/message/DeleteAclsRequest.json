@@ -16,19 +16,47 @@
 {
   "apiKey": 31,
   "type": "request",
+  "listeners": [
+    "zkBroker"
+  ],
   "name": "DeleteAclsRequest",
   // Version 1 adds the pattern type.
-  "validVersions": "0-1",
+  // Version 2 enables flexible versions.
+  "validVersions": "0-2",
+  "flexibleVersions": "2+",
   "fields": [
-    { "name": "Filters", "type": "[]DeleteAclsFilter", "versions": "0+",
-      "about": "The filters to use when deleting ACLs.", "fields": [
-      { "name": "ResourceTypeFilter", "type": "int8", "versions": "0+",
-        "about": "The resource type." },
-      { "name": "ResourceNameFilter", "type": "string", "versions": "0+", "nullableVersions": "0+",
-        "about": "The resource name." },
-      { "name": "PatternTypeFilter", "type": "int8", "versions": "1+", "default": "3", "ignorable": false,
-        "about": "The pattern type." },
-      { "name": "PrincipalFilter", "type": "string", "versions": "0+", "nullableVersions": "0+",
+    {
+      "name": "Filters",
+      "type": "[]DeleteAclsFilter",
+      "versions": "0+",
+      "about": "The filters to use when deleting ACLs.",
+      "fields": [
+        {
+          "name": "ResourceTypeFilter",
+          "type": "int8",
+          "versions": "0+",
+          "about": "The resource type."
+        },
+        {
+          "name": "ResourceNameFilter",
+          "type": "string",
+          "versions": "0+",
+          "nullableVersions": "0+",
+          "about": "The resource name."
+        },
+        {
+          "name": "PatternTypeFilter",
+          "type": "int8",
+          "versions": "1+",
+          "default": "3",
+          "ignorable": false,
+          "about": "The pattern type."
+        },
+        {
+          "name": "PrincipalFilter",
+          "type": "string",
+          "versions": "0+",
+          "nullableVersions": "0+",
         "about": "The principal filter, or null to accept all principals." },
       { "name": "HostFilter", "type": "string", "versions": "0+", "nullableVersions": "0+",
         "about": "The host filter, or null to accept all hosts." },

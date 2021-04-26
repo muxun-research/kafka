@@ -16,12 +16,13 @@
  */
 package org.apache.kafka.common.security.scram.internals;
 
-import java.nio.charset.StandardCharsets;
-import java.security.InvalidKeyException;
-import java.security.NoSuchAlgorithmException;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Map;
+import org.apache.kafka.common.errors.IllegalSaslStateException;
+import org.apache.kafka.common.security.scram.ScramExtensionsCallback;
+import org.apache.kafka.common.security.scram.internals.ScramMessages.ClientFinalMessage;
+import org.apache.kafka.common.security.scram.internals.ScramMessages.ServerFinalMessage;
+import org.apache.kafka.common.security.scram.internals.ScramMessages.ServerFirstMessage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.security.auth.callback.Callback;
 import javax.security.auth.callback.CallbackHandler;
@@ -31,14 +32,12 @@ import javax.security.auth.callback.UnsupportedCallbackException;
 import javax.security.sasl.SaslClient;
 import javax.security.sasl.SaslClientFactory;
 import javax.security.sasl.SaslException;
-
-import org.apache.kafka.common.errors.IllegalSaslStateException;
-import org.apache.kafka.common.security.scram.ScramExtensionsCallback;
-import org.apache.kafka.common.security.scram.internals.ScramMessages.ClientFinalMessage;
-import org.apache.kafka.common.security.scram.internals.ScramMessages.ServerFinalMessage;
-import org.apache.kafka.common.security.scram.internals.ScramMessages.ServerFirstMessage;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.nio.charset.StandardCharsets;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Map;
 
 /**
  * SaslClient implementation for SASL/SCRAM.
@@ -111,9 +110,9 @@ public class ScramSaslClient implements SaslClient {
                         throw new SaslException("User name or extensions could not be obtained", e);
                     }
 
-                    String username = nameCallback.getName();
-                    String saslName = formatter.saslName(username);
-                    Map<String, String> extensions = extensionsCallback.extensions();
+					String username = nameCallback.getName();
+					String saslName = ScramFormatter.saslName(username);
+					Map<String, String> extensions = extensionsCallback.extensions();
                     this.clientFirstMessage = new ScramMessages.ClientFirstMessage(saslName, clientNonce, extensions);
                     setState(State.RECEIVE_SERVER_FIRST_MESSAGE);
                     return clientFirstMessage.toBytes();
@@ -188,7 +187,7 @@ public class ScramSaslClient implements SaslClient {
 
     private ClientFinalMessage handleServerFirstMessage(char[] password) throws SaslException {
         try {
-            byte[] passwordBytes = formatter.normalize(new String(password));
+			byte[] passwordBytes = ScramFormatter.normalize(new String(password));
             this.saltedPassword = formatter.hi(passwordBytes, serverFirstMessage.salt(), serverFirstMessage.iterations());
 
             ClientFinalMessage clientFinalMessage = new ClientFinalMessage("n,,".getBytes(StandardCharsets.UTF_8), serverFirstMessage.nonce());
@@ -241,7 +240,7 @@ public class ScramSaslClient implements SaslClient {
         @Override
         public String[] getMechanismNames(Map<String, ?> props) {
             Collection<String> mechanisms = ScramMechanism.mechanismNames();
-            return mechanisms.toArray(new String[mechanisms.size()]);
+			return mechanisms.toArray(new String[0]);
         }
     }
 }

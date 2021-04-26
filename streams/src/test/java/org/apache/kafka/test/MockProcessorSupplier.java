@@ -46,10 +46,15 @@ public class MockProcessorSupplier<K, V> implements ProcessorSupplier<K, V> {
 
     @Override
     public Processor<K, V> get() {
-        final MockProcessor<K, V> processor = new MockProcessor<>(punctuationType, scheduleInterval);
-        processors.add(processor);
-        return processor;
-    }
+		final MockProcessor<K, V> processor = new MockProcessor<>(punctuationType, scheduleInterval);
+
+		// to keep tests simple, ignore calls from ApiUtils.checkSupplier
+		if (!StreamsTestUtils.isCheckSupplierCall()) {
+			processors.add(processor);
+		}
+
+		return processor;
+	}
 
     // get the captured processor assuming that only one processor gets returned from this supplier
     public MockProcessor<K, V> theCapturedProcessor() {

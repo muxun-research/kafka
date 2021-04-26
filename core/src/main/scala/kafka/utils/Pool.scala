@@ -21,70 +21,79 @@ import java.util.concurrent._
 
 import org.apache.kafka.common.KafkaException
 
-import scala.collection.JavaConverters._
-import scala.collection.mutable
+import collection.Set
+import scala.jdk.CollectionConverters._
 
-class Pool[K,V](valueFactory: Option[K => V] = None) extends Iterable[(K, V)] {
+class Pool[K, V](valueFactory: Option[K => V] = None) extends Iterable[(K, V)] {
 
   private val pool: ConcurrentMap[K, V] = new ConcurrentHashMap[K, V]
-  
+
   def put(k: K, v: V): V = pool.put(k, v)
-  
+
+  def putAll(map: java.util.Map[K, V]): Unit = pool.putAll(map)
+
   def putIfNotExists(k: K, v: V): V = pool.putIfAbsent(k, v)
 
   /**
-   * 获取给定key有关的value
-   * 如果没有关联的value，就会使用pool的value工厂创建一个value，并关联这个key，返回此value
-   * 开发者可以声明工厂方法为懒加载，如果需要避免副作用的情况下
+   * Gets the value associated with the given key. If there is no associated
+   * value, then create the value using the pool's value factory and return the
+   * value associated with the key. The user should declare the factory method
+   * as lazy if its side-effects need to be avoided.
    * @param key The key to lookup.
    * @return The final value associated with the key.
    */
   def getAndMaybePut(key: K): V = {
-    // 没有value工厂的情况下，抛出异常
     if (valueFactory.isEmpty)
       throw new KafkaException("Empty value factory in pool.")
     getAndMaybePut(key, valueFactory.get(key))
   }
 
   /**
-   * 获取给定key有关的value
-   * 如果没有关联的value，就会使用createValue创建一个value，并关联这个key，返回此value
-   * @param key         需要查找的key
-   * @param createValue value工厂创造value函数
-   * @return 最终与key进行关联的value
+   * Gets the value associated with the given key. If there is no associated
+   * value, then create the value using the provided by `createValue` and return the
+   * value associated with the key.
+   * @param key         The key to lookup.
+   * @param createValue Factory function.
+   * @return The final value associated with the key.
    */
   def getAndMaybePut(key: K, createValue: => V): V =
-    pool.computeIfAbsent(key, new java.util.function.Function[K, V] {
-      override def apply(k: K): V = createValue
-    })
+    pool.computeIfAbsent(key, _ => createValue)
 
   def contains(id: K): Boolean = pool.containsKey(id)
-  
+
   def get(key: K): V = pool.get(key)
-  
+
   def remove(key: K): V = pool.remove(key)
 
   def remove(key: K, value: V): Boolean = pool.remove(key, value)
 
-  def keys: mutable.Set[K] = pool.keySet.asScala
+  def removeAll(keys: Iterable[K]): Unit = pool.keySet.removeAll(keys.asJavaCollection)
+
+  def keys: Set[K] = pool.keySet.asScala
 
   def values: Iterable[V] = pool.values.asScala
 
-  def clear(): Unit = { pool.clear() }
-  
+  def clear(): Unit = {
+    pool.clear()
+  }
+
+  def foreachEntry(f: (K, V) => Unit): Unit = {
+    pool.forEach((k, v) => f(k, v))
+  }
+
   override def size: Int = pool.size
-  
-  override def iterator: Iterator[(K, V)] = new Iterator[(K,V)]() {
-    
+
+  override def iterator: Iterator[(K, V)] = new Iterator[(K, V)]() {
+
     private val iter = pool.entrySet.iterator
-    
+
     def hasNext: Boolean = iter.hasNext
-    
-    def next: (K, V) = {
+
+    def next(): (K, V) = {
       val n = iter.next
       (n.getKey, n.getValue)
     }
-    
+
   }
-    
+
 }

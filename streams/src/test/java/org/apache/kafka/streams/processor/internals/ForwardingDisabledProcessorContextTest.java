@@ -26,36 +26,26 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import static org.junit.Assert.assertThrows;
+
 @RunWith(EasyMockRunner.class)
 public class ForwardingDisabledProcessorContextTest {
-    @Mock(MockType.NICE)
-    private ProcessorContext delegate;
-    private ForwardingDisabledProcessorContext context;
+	@Mock(MockType.NICE)
+	private ProcessorContext delegate;
+	private ForwardingDisabledProcessorContext context;
 
-    @Before
-    public void setUp() {
-        context = new ForwardingDisabledProcessorContext(delegate);
+	@Before
+	public void setUp() {
+		context = new ForwardingDisabledProcessorContext(delegate);
     }
 
-    @Test(expected = StreamsException.class)
+	@Test
     public void shouldThrowOnForward() {
-        context.forward("key", "value");
+		assertThrows(StreamsException.class, () -> context.forward("key", "value"));
     }
 
-    @Test(expected = StreamsException.class)
+	@Test
     public void shouldThrowOnForwardWithTo() {
-        context.forward("key", "value", To.all());
-    }
-
-    @SuppressWarnings("deprecation") // need to test deprecated code until removed
-    @Test(expected = StreamsException.class)
-    public void shouldThrowOnForwardWithChildIndex() {
-        context.forward("key", "value", 1);
-    }
-
-    @SuppressWarnings("deprecation") // need to test deprecated code until removed
-    @Test(expected = StreamsException.class)
-    public void shouldThrowOnForwardWithChildName() {
-        context.forward("key", "value", "child1");
+		assertThrows(StreamsException.class, () -> context.forward("key", "value", To.all()));
     }
 }

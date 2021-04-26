@@ -18,17 +18,18 @@ package org.apache.kafka.common.header.internals;
 
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.Headers;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Iterator;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class RecordHeadersTest {
 
@@ -198,27 +199,33 @@ public class RecordHeadersTest {
         newHeaders.add(new RecordHeader("key", "value2".getBytes()));
 
         //Ensure existing headers are not modified
-        assertHeader("key", "value", headers.lastHeader("key"));
-        assertEquals(1, getCount(headers));
+		assertHeader("key", "value", headers.lastHeader("key"));
+		assertEquals(1, getCount(headers));
 
-        //Ensure new headers are modified
-        assertHeader("key", "value2", newHeaders.lastHeader("key"));
-        assertEquals(2, getCount(newHeaders));
-    }
+		//Ensure new headers are modified
+		assertHeader("key", "value2", newHeaders.lastHeader("key"));
+		assertEquals(2, getCount(newHeaders));
+	}
 
-    @Test(expected = NullPointerException.class)
-    public void shouldThrowNpeWhenAddingNullHeader() {
-        new RecordHeaders().add(null);
-    }
+	@Test
+	public void shouldThrowNpeWhenAddingNullHeader() {
+		final RecordHeaders recordHeaders = new RecordHeaders();
+		assertThrows(NullPointerException.class, () -> recordHeaders.add(null));
+	}
 
-    private int getCount(Headers headers) {
-        int count = 0;
-        Iterator<Header> headerIterator = headers.iterator();
-        while (headerIterator.hasNext()) {
-            headerIterator.next();
-            count++;
-        }
-        return count;
+	@Test
+	public void shouldThrowNpeWhenAddingCollectionWithNullHeader() {
+		assertThrows(NullPointerException.class, () -> new RecordHeaders(new Header[1]));
+	}
+
+	private int getCount(Headers headers) {
+		int count = 0;
+		Iterator<Header> headerIterator = headers.iterator();
+		while (headerIterator.hasNext()) {
+			headerIterator.next();
+			count++;
+		}
+		return count;
     }
     
     static void assertHeader(String key, String value, Header actual) {

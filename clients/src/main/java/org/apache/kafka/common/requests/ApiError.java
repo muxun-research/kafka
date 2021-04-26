@@ -19,10 +19,8 @@ package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.errors.ApiException;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.protocol.types.Struct;
 
-import static org.apache.kafka.common.protocol.CommonFields.ERROR_CODE;
-import static org.apache.kafka.common.protocol.CommonFields.ERROR_MESSAGE;
+import java.util.Objects;
 
 /**
  * Encapsulates an error code (via the Errors enum) and an optional message. Generally, the optional message is only
@@ -38,40 +36,34 @@ public class ApiError {
     private final String message;
 
     public static ApiError fromThrowable(Throwable t) {
-        // Avoid populating the error message if it's a generic one
-        Errors error = Errors.forException(t);
-        String message = error.message().equals(t.getMessage()) ? null : t.getMessage();
-        return new ApiError(error, message);
-    }
+		// Avoid populating the error message if it's a generic one. Also don't populate error
+		// message for UNKNOWN_SERVER_ERROR to ensure we don't leak sensitive information.
+		Errors error = Errors.forException(t);
+		String message = error == Errors.UNKNOWN_SERVER_ERROR || error.message().equals(t.getMessage()) ? null : t.getMessage();
+		return new ApiError(error, message);
+	}
 
-    public ApiError(Struct struct) {
-        error = Errors.forCode(struct.get(ERROR_CODE));
-        // In some cases, the error message field was introduced in newer version
-        message = struct.getOrElse(ERROR_MESSAGE, null);
-    }
+	public ApiError(Errors error) {
+		this(error, error.message());
+	}
 
-    public ApiError(Errors error) {
-        this(error, error.message());
-    }
+	public ApiError(Errors error, String message) {
+		this.error = error;
+		this.message = message;
+	}
 
-    public ApiError(Errors error, String message) {
-        this.error = error;
-        this.message = message;
-    }
+	public ApiError(short code, String message) {
+		this.error = Errors.forCode(code);
+		this.message = message;
+	}
 
-    public void write(Struct struct) {
-        struct.set(ERROR_CODE, error.code());
-        if (error != Errors.NONE)
-            struct.setIfExists(ERROR_MESSAGE, message);
-    }
+	public boolean is(Errors error) {
+		return this.error == error;
+	}
 
-    public boolean is(Errors error) {
-        return this.error == error;
-    }
-
-    public boolean isFailure() {
-        return !isSuccess();
-    }
+	public boolean isFailure() {
+		return !isSuccess();
+	}
 
     public boolean isSuccess() {
         return is(Errors.NONE);
@@ -92,18 +84,33 @@ public class ApiError {
      * If `message` is defined, return it. Otherwise fallback to the default error message associated with the error
      * code.
      */
-    public String messageWithFallback() {
-        if (message == null)
-            return error.message();
-        return message;
-    }
+	public String messageWithFallback() {
+		if (message == null)
+			return error.message();
+		return message;
+	}
 
-    public ApiException exception() {
-        return error.exception(message);
-    }
+	public ApiException exception() {
+		return error.exception(message);
+	}
 
-    @Override
-    public String toString() {
-        return "ApiError(error=" + error + ", message=" + message + ")";
-    }
+	@Override
+	public int hashCode() {
+		return Objects.hash(error, message);
+	}
+
+	@Override
+	public boolean equals(Object o) {
+		if (!(o instanceof ApiError)) {
+			return false;
+		}
+		ApiError other = (ApiError) o;
+		return Objects.equals(error, other.error) &&
+				Objects.equals(message, other.message);
+	}
+
+	@Override
+	public String toString() {
+		return "ApiError(error=" + error + ", message=" + message + ")";
+	}
 }

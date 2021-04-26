@@ -16,59 +16,93 @@
  */
 package org.apache.kafka.streams.processor.internals;
 
+import org.apache.kafka.common.config.TopicConfig;
 import org.apache.kafka.common.internals.Topic;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * InternalTopicConfig captures the properties required for configuring
  * the internal topics we create for change-logs and repartitioning etc.
  */
 public abstract class InternalTopicConfig {
+	final String name;
+	final Map<String, String> topicConfigs;
+	final boolean enforceNumberOfPartitions;
 
-    final String name;
-    final Map<String, String> topicConfigs;
+	private Optional<Integer> numberOfPartitions = Optional.empty();
 
-    private int numberOfPartitions = StreamsPartitionAssignor.UNKNOWN;
+	static final Map<String, String> INTERNAL_TOPIC_DEFAULT_OVERRIDES = new HashMap<>();
 
-    InternalTopicConfig(final String name, final Map<String, String> topicConfigs) {
-        Objects.requireNonNull(name, "name can't be null");
-        Topic.validate(name);
+	static {
+		INTERNAL_TOPIC_DEFAULT_OVERRIDES.put(TopicConfig.MESSAGE_TIMESTAMP_TYPE_CONFIG, "CreateTime");
+	}
 
-        this.name = name;
-        this.topicConfigs = topicConfigs;
-    }
+	InternalTopicConfig(final String name, final Map<String, String> topicConfigs) {
+		this.name = Objects.requireNonNull(name, "name can't be null");
+		Topic.validate(name);
+		this.topicConfigs = Objects.requireNonNull(topicConfigs, "topicConfigs can't be null");
+		this.enforceNumberOfPartitions = false;
+	}
 
-    /**
-     * Get the configured properties for this topic. If retentionMs is set then
-     * we add additionalRetentionMs to work out the desired retention when cleanup.policy=compact,delete
-     *
-     * @param additionalRetentionMs - added to retention to allow for clock drift etc
-     * @return Properties to be used when creating the topic
-     */
-    abstract public Map<String, String> getProperties(final Map<String, String> defaultProperties, final long additionalRetentionMs);
+	InternalTopicConfig(final String name,
+						final Map<String, String> topicConfigs,
+						final int numberOfPartitions,
+						final boolean enforceNumberOfPartitions) {
+		this.name = Objects.requireNonNull(name, "name can't be null");
+		Topic.validate(name);
+		validateNumberOfPartitions(numberOfPartitions);
+		this.topicConfigs = Objects.requireNonNull(topicConfigs, "topicConfigs can't be null");
+		this.numberOfPartitions = Optional.of(numberOfPartitions);
+		this.enforceNumberOfPartitions = enforceNumberOfPartitions;
+	}
 
-    public String name() {
-        return name;
-    }
+	/**
+	 * Get the configured properties for this topic. If retentionMs is set then
+	 * we add additionalRetentionMs to work out the desired retention when cleanup.policy=compact,delete
+	 * @param additionalRetentionMs - added to retention to allow for clock drift etc
+	 * @return Properties to be used when creating the topic
+	 */
+	public abstract Map<String, String> getProperties(final Map<String, String> defaultProperties, final long additionalRetentionMs);
 
-    public int numberOfPartitions() {
-        return numberOfPartitions;
-    }
+	public boolean hasEnforcedNumberOfPartitions() {
+		return enforceNumberOfPartitions;
+	}
 
-    void setNumberOfPartitions(final int numberOfPartitions) {
-        if (numberOfPartitions < 1) {
-            throw new IllegalArgumentException("Number of partitions must be at least 1.");
-        }
-        this.numberOfPartitions = numberOfPartitions;
-    }
+	public String name() {
+		return name;
+	}
 
-    @Override
-    public String toString() {
-        return "InternalTopicConfig(" +
-                "name=" + name +
-                ", topicConfigs=" + topicConfigs +
-                ")";
+	public Optional<Integer> numberOfPartitions() {
+		return numberOfPartitions;
+	}
+
+	public void setNumberOfPartitions(final int numberOfPartitions) {
+		if (hasEnforcedNumberOfPartitions()) {
+			throw new UnsupportedOperationException("number of partitions are enforced on topic " +
+					"" + name() + " and can't be altered.");
+		}
+
+		validateNumberOfPartitions(numberOfPartitions);
+
+		this.numberOfPartitions = Optional.of(numberOfPartitions);
+	}
+
+	private static void validateNumberOfPartitions(final int numberOfPartitions) {
+		if (numberOfPartitions < 1) {
+			throw new IllegalArgumentException("Number of partitions must be at least 1.");
+		}
+	}
+
+	@Override
+	public String toString() {
+		return "InternalTopicConfig(" +
+				"name=" + name +
+				", topicConfigs=" + topicConfigs +
+				", enforceNumberOfPartitions=" + enforceNumberOfPartitions +
+				")";
     }
 }

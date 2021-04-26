@@ -16,11 +16,8 @@
  */
 package org.apache.kafka.streams.state;
 
-import org.apache.kafka.clients.producer.MockProducer;
-import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.metrics.Metrics;
-import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.Serializer;
@@ -31,13 +28,18 @@ import org.apache.kafka.streams.errors.DefaultProductionExceptionHandler;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateRestoreCallback;
 import org.apache.kafka.streams.processor.StateStore;
+import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.processor.StreamPartitioner;
+import org.apache.kafka.streams.processor.TaskId;
+import org.apache.kafka.streams.processor.internals.MockStreamsMetrics;
 import org.apache.kafka.streams.processor.internals.RecordCollector;
 import org.apache.kafka.streams.processor.internals.RecordCollectorImpl;
+import org.apache.kafka.streams.processor.internals.StreamsProducer;
 import org.apache.kafka.streams.state.internals.MeteredKeyValueStore;
-import org.apache.kafka.streams.state.internals.RocksDBKeyValueStoreTest;
 import org.apache.kafka.streams.state.internals.ThreadCache;
 import org.apache.kafka.test.InternalMockProcessorContext;
+import org.apache.kafka.test.MockClientSupplier;
+import org.apache.kafka.test.MockRocksDbConfigSetter;
 import org.apache.kafka.test.MockTimestampExtractor;
 import org.apache.kafka.test.TestUtils;
 
@@ -88,7 +90,7 @@ import java.util.Set;
  * assertEquals("one", driver.flushedEntryStored(1));
  * assertEquals("two", driver.flushedEntryStored(2));
  * assertEquals("four", driver.flushedEntryStored(4));
- * assertEquals(null, driver.flushedEntryStored(5));
+ * assertNull(driver.flushedEntryStored(5));
  *
  * assertEquals(false, driver.flushedEntryRemoved(0));
  * assertEquals(false, driver.flushedEntryRemoved(1));
@@ -186,15 +188,29 @@ public class KeyValueStoreTestDriver<K, V> {
     private final StateSerdes<K, V> stateSerdes;
 
     private KeyValueStoreTestDriver(final StateSerdes<K, V> serdes) {
-        final ByteArraySerializer rawSerializer = new ByteArraySerializer();
-        final Producer<byte[], byte[]> producer = new MockProducer<>(true, rawSerializer, rawSerializer);
+		props = new Properties();
+		props.put(StreamsConfig.APPLICATION_ID_CONFIG, "application-id");
+		props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+		props.put(StreamsConfig.DEFAULT_TIMESTAMP_EXTRACTOR_CLASS_CONFIG, MockTimestampExtractor.class);
+		props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, serdes.keySerde().getClass());
+		props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, serdes.valueSerde().getClass());
+		props.put(StreamsConfig.ROCKSDB_CONFIG_SETTER_CLASS_CONFIG, MockRocksDbConfigSetter.class);
+		props.put(StreamsConfig.METRICS_RECORDING_LEVEL_CONFIG, "DEBUG");
 
-        final RecordCollector recordCollector = new RecordCollectorImpl(
-            "KeyValueStoreTestDriver",
-            new LogContext("KeyValueStoreTestDriver "),
-            new DefaultProductionExceptionHandler(),
-            new Metrics().sensor("skipped-records")
-        ) {
+		final LogContext logContext = new LogContext("KeyValueStoreTestDriver ");
+		final RecordCollector recordCollector = new RecordCollectorImpl(
+				logContext,
+				new TaskId(0, 0),
+				new StreamsProducer(
+						new StreamsConfig(props),
+						"threadId",
+						new MockClientSupplier(),
+						null,
+						null,
+						logContext),
+				new DefaultProductionExceptionHandler(),
+				new MockStreamsMetrics(new Metrics())
+		) {
             @Override
             public <K1, V1> void send(final String topic,
                                       final K1 key,
@@ -224,28 +240,19 @@ public class KeyValueStoreTestDriver<K, V> {
                 throw new UnsupportedOperationException();
             }
         };
-        recordCollector.init(producer);
 
         final File stateDir = TestUtils.tempDirectory();
         //noinspection ResultOfMethodCallIgnored
         stateDir.mkdirs();
         stateSerdes = serdes;
 
-        props = new Properties();
-        props.put(StreamsConfig.APPLICATION_ID_CONFIG, "application-id");
-        props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
-        props.put(StreamsConfig.DEFAULT_TIMESTAMP_EXTRACTOR_CLASS_CONFIG, MockTimestampExtractor.class);
-        props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, serdes.keySerde().getClass());
-        props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, serdes.valueSerde().getClass());
-        props.put(StreamsConfig.ROCKSDB_CONFIG_SETTER_CLASS_CONFIG, RocksDBKeyValueStoreTest.TheRocksDbConfigSetter.class);
-
         context = new InternalMockProcessorContext(stateDir, serdes.keySerde(), serdes.valueSerde(), recordCollector, null) {
-            ThreadCache cache = new ThreadCache(new LogContext("testCache "), 1024 * 1024L, metrics());
+			final ThreadCache cache = new ThreadCache(new LogContext("testCache "), 1024 * 1024L, metrics());
 
-            @Override
-            public ThreadCache getCache() {
-                return cache;
-            }
+			@Override
+			public ThreadCache cache() {
+				return cache;
+			}
 
             @Override
             public Map<String, Object> appConfigs() {
@@ -315,19 +322,19 @@ public class KeyValueStoreTestDriver<K, V> {
     }
 
     /**
-     * Get the context that should be supplied to a {@link KeyValueStore}'s constructor. This context records any messages
-     * written by the store to the Kafka topic, making them available via the {@link #flushedEntryStored(Object)} and
-     * {@link #flushedEntryRemoved(Object)} methods.
-     * <p>
-     * If the {@link KeyValueStore}'s are to be restored upon its startup, be sure to {@link #addEntryToRestoreLog(Object, Object)
-     * add the restore entries} before creating the store with the {@link ProcessorContext} returned by this method.
-     *
-     * @return the processing context; never null
-     * @see #addEntryToRestoreLog(Object, Object)
-     */
-    public ProcessorContext context() {
-        return context;
-    }
+	 * Get the context that should be supplied to a {@link KeyValueStore}'s constructor. This context records any messages
+	 * written by the store to the Kafka topic, making them available via the {@link #flushedEntryStored(Object)} and
+	 * {@link #flushedEntryRemoved(Object)} methods.
+	 * <p>
+	 * If the {@link KeyValueStore}'s are to be restored upon its startup, be sure to {@link #addEntryToRestoreLog(Object, Object)
+	 * add the restore entries} before creating the store with the {@link ProcessorContext} returned by this method.
+	 *
+	 * @return the processing context; never null
+	 * @see #addEntryToRestoreLog(Object, Object)
+	 */
+	public StateStoreContext context() {
+		return context;
+	}
 
     /**
      * Utility method that will count the number of {@link #addEntryToRestoreLog(Object, Object) restore entries} missing from the

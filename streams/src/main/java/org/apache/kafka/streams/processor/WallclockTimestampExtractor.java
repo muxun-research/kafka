@@ -25,10 +25,9 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
  * <p>
  * If you need <i>event-time</i> semantics, use {@link FailOnInvalidTimestamp} with
  * built-in <i>CreateTime</i> or <i>LogAppendTime</i> timestamp (see KIP-32: Add timestamps to Kafka message for details).
- *
  * @see FailOnInvalidTimestamp
  * @see LogAndSkipOnInvalidTimestamp
- * @see UsePreviousTimeOnInvalidTimestamp
+ * @see UsePartitionTimeOnInvalidTimestamp
  */
 public class WallclockTimestampExtractor implements TimestampExtractor {
 

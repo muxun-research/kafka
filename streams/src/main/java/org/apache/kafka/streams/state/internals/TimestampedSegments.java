@@ -16,33 +16,46 @@
  */
 package org.apache.kafka.streams.state.internals;
 
-import org.apache.kafka.streams.processor.internals.InternalProcessorContext;
+import org.apache.kafka.streams.processor.ProcessorContext;
+import org.apache.kafka.streams.processor.internals.ProcessorContextUtils;
+import org.apache.kafka.streams.state.internals.metrics.RocksDBMetricsRecorder;
 
 /**
  * Manages the {@link TimestampedSegment}s that are used by the {@link RocksDBTimestampedSegmentedBytesStore}
  */
 class TimestampedSegments extends AbstractSegments<TimestampedSegment> {
 
-    TimestampedSegments(final String name,
-                        final long retentionPeriod,
-                        final long segmentInterval) {
-        super(name, retentionPeriod, segmentInterval);
-    }
+	private final RocksDBMetricsRecorder metricsRecorder;
 
-    @Override
-    public TimestampedSegment getOrCreateSegment(final long segmentId,
-                                                 final InternalProcessorContext context) {
-        if (segments.containsKey(segmentId)) {
-            return segments.get(segmentId);
-        } else {
-            final TimestampedSegment newSegment = new TimestampedSegment(segmentName(segmentId), name, segmentId);
+	TimestampedSegments(final String name,
+						final String metricsScope,
+						final long retentionPeriod,
+						final long segmentInterval) {
+		super(name, retentionPeriod, segmentInterval);
+		metricsRecorder = new RocksDBMetricsRecorder(metricsScope, name);
+	}
 
-            if (segments.put(segmentId, newSegment) != null) {
-                throw new IllegalStateException("TimestampedSegment already exists. Possible concurrent access.");
-            }
+	@Override
+	public TimestampedSegment getOrCreateSegment(final long segmentId,
+												 final ProcessorContext context) {
+		if (segments.containsKey(segmentId)) {
+			return segments.get(segmentId);
+		} else {
+			final TimestampedSegment newSegment =
+					new TimestampedSegment(segmentName(segmentId), name, segmentId, metricsRecorder);
 
-            newSegment.openDB(context);
-            return newSegment;
-        }
-    }
+			if (segments.put(segmentId, newSegment) != null) {
+				throw new IllegalStateException("TimestampedSegment already exists. Possible concurrent access.");
+			}
+
+			newSegment.openDB(context.appConfigs(), context.stateDir());
+			return newSegment;
+		}
+	}
+
+	@Override
+	public void openExisting(final ProcessorContext context, final long streamTime) {
+		metricsRecorder.init(ProcessorContextUtils.getMetricsImpl(context), context.taskId());
+		super.openExisting(context, streamTime);
+	}
 }

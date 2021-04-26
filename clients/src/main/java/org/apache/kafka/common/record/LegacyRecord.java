@@ -17,6 +17,7 @@
 package org.apache.kafka.common.record;
 
 import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.errors.CorruptRecordException;
 import org.apache.kafka.common.utils.ByteBufferOutputStream;
 import org.apache.kafka.common.utils.ByteUtils;
 import org.apache.kafka.common.utils.Checksums;
@@ -135,12 +136,12 @@ public final class LegacyRecord {
      */
     public void ensureValid() {
         if (sizeInBytes() < RECORD_OVERHEAD_V0)
-            throw new InvalidRecordException("Record is corrupt (crc could not be retrieved as the record is too "
-                    + "small, size = " + sizeInBytes() + ")");
+			throw new CorruptRecordException("Record is corrupt (crc could not be retrieved as the record is too "
+					+ "small, size = " + sizeInBytes() + ")");
 
         if (!isValid())
-            throw new InvalidRecordException("Record is corrupt (stored crc = " + checksum()
-                    + ", computed crc = " + computeChecksum() + ")");
+			throw new CorruptRecordException("Record is corrupt (stored crc = " + checksum()
+					+ ", computed crc = " + computeChecksum() + ")");
     }
 
     /**

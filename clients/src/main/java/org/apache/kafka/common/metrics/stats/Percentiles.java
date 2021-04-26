@@ -16,59 +16,65 @@
  */
 package org.apache.kafka.common.metrics.stats;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import org.apache.kafka.common.metrics.CompoundStat;
-import org.apache.kafka.common.metrics.Measurable;
 import org.apache.kafka.common.metrics.MetricConfig;
 import org.apache.kafka.common.metrics.stats.Histogram.BinScheme;
 import org.apache.kafka.common.metrics.stats.Histogram.ConstantBinScheme;
 import org.apache.kafka.common.metrics.stats.Histogram.LinearBinScheme;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A compound stat that reports one or more percentiles
  */
 public class Percentiles extends SampledStat implements CompoundStat {
 
-    public enum BucketSizing {
-        CONSTANT, LINEAR
-    }
+	private final Logger log = LoggerFactory.getLogger(Percentiles.class);
 
-    private final int buckets;
-    private final Percentile[] percentiles;
-    private final BinScheme binScheme;
+	public enum BucketSizing {
+		CONSTANT, LINEAR
+	}
 
-    public Percentiles(int sizeInBytes, double max, BucketSizing bucketing, Percentile... percentiles) {
-        this(sizeInBytes, 0.0, max, bucketing, percentiles);
-    }
+	private final int buckets;
+	private final Percentile[] percentiles;
+	private final BinScheme binScheme;
+	private final double min;
+	private final double max;
 
-    public Percentiles(int sizeInBytes, double min, double max, BucketSizing bucketing, Percentile... percentiles) {
-        super(0.0);
-        this.percentiles = percentiles;
-        this.buckets = sizeInBytes / 4;
-        if (bucketing == BucketSizing.CONSTANT) {
-            this.binScheme = new ConstantBinScheme(buckets, min, max);
-        } else if (bucketing == BucketSizing.LINEAR) {
-            if (min != 0.0d)
-                throw new IllegalArgumentException("Linear bucket sizing requires min to be 0.0.");
-            this.binScheme = new LinearBinScheme(buckets, max);
-        } else {
-            throw new IllegalArgumentException("Unknown bucket type: " + bucketing);
-        }
-    }
+	public Percentiles(int sizeInBytes, double max, BucketSizing bucketing, Percentile... percentiles) {
+		this(sizeInBytes, 0.0, max, bucketing, percentiles);
+	}
+
+	public Percentiles(int sizeInBytes, double min, double max, BucketSizing bucketing, Percentile... percentiles) {
+		super(0.0);
+		this.percentiles = percentiles;
+		this.buckets = sizeInBytes / 4;
+		this.min = min;
+		this.max = max;
+		if (bucketing == BucketSizing.CONSTANT) {
+			this.binScheme = new ConstantBinScheme(buckets, min, max);
+		} else if (bucketing == BucketSizing.LINEAR) {
+			if (min != 0.0d)
+				throw new IllegalArgumentException("Linear bucket sizing requires min to be 0.0.");
+			this.binScheme = new LinearBinScheme(buckets, max);
+		} else {
+			throw new IllegalArgumentException("Unknown bucket type: " + bucketing);
+		}
+	}
 
     @Override
     public List<NamedMeasurable> stats() {
-        List<NamedMeasurable> ms = new ArrayList<NamedMeasurable>(this.percentiles.length);
+		List<NamedMeasurable> ms = new ArrayList<>(this.percentiles.length);
         for (Percentile percentile : this.percentiles) {
-            final double pct = percentile.percentile();
-            ms.add(new NamedMeasurable(percentile.name(), new Measurable() {
-                public double measure(MetricConfig config, long now) {
-                    return value(config, now, pct / 100.0);
-                }
-            }));
-        }
+			final double pct = percentile.percentile();
+			ms.add(new NamedMeasurable(
+					percentile.name(),
+					(config, now) -> value(config, now, pct / 100.0))
+			);
+		}
         return ms;
     }
 
@@ -105,9 +111,22 @@ public class Percentiles extends SampledStat implements CompoundStat {
 
     @Override
     protected void update(Sample sample, MetricConfig config, double value, long timeMs) {
-        HistogramSample hist = (HistogramSample) sample;
-        hist.histogram.record(value);
-    }
+		final double boundedValue;
+		if (value > max) {
+			log.debug("Received value {} which is greater than max recordable value {}, will be pinned to the max value",
+					value, max);
+			boundedValue = max;
+		} else if (value < min) {
+			log.debug("Received value {} which is less than min recordable value {}, will be pinned to the min value",
+					value, min);
+			boundedValue = min;
+		} else {
+			boundedValue = value;
+		}
+
+		HistogramSample hist = (HistogramSample) sample;
+		hist.histogram.record(boundedValue);
+	}
 
     private static class HistogramSample extends SampledStat.Sample {
         private final Histogram histogram;

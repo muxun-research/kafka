@@ -16,14 +16,17 @@
  */
 package org.apache.kafka.common.security.oauthbearer;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotSame;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.assertNotNull;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verifyZeroInteractions;
+import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.security.auth.AuthenticateCallbackHandler;
+import org.apache.kafka.common.security.auth.SaslExtensions;
+import org.apache.kafka.common.security.auth.SaslExtensionsCallback;
+import org.junit.jupiter.api.Test;
 
+import javax.security.auth.Subject;
+import javax.security.auth.callback.Callback;
+import javax.security.auth.callback.UnsupportedCallbackException;
+import javax.security.auth.login.AppConfigurationEntry;
+import javax.security.auth.login.LoginException;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Iterator;
@@ -32,17 +35,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-import javax.security.auth.Subject;
-import javax.security.auth.callback.Callback;
-import javax.security.auth.callback.UnsupportedCallbackException;
-import javax.security.auth.login.AppConfigurationEntry;
-import javax.security.auth.login.LoginException;
-
-import org.apache.kafka.common.KafkaException;
-import org.apache.kafka.common.security.auth.AuthenticateCallbackHandler;
-import org.apache.kafka.common.security.auth.SaslExtensionsCallback;
-import org.apache.kafka.common.security.auth.SaslExtensions;
-import org.junit.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 public class OAuthBearerLoginModuleTest {
 
@@ -197,19 +196,19 @@ public class OAuthBearerLoginModuleTest {
         publicIterator = publicCredentials.iterator();
         assertNotSame(tokens[0], iterator.next());
         assertNotSame(tokens[0], iterator.next());
-        assertNotSame(extensions[0], publicIterator.next());
-        assertNotSame(extensions[0], publicIterator.next());
-        // finally logout() on loginModule2
-        loginModule2.logout();
-        // Now we should have just the third token
-        assertEquals(1, privateCredentials.size());
-        assertEquals(1, publicCredentials.size());
-        assertSame(tokens[2], privateCredentials.iterator().next());
-        assertSame(extensions[2], publicCredentials.iterator().next());
+		assertNotSame(extensions[0], publicIterator.next());
+		assertNotSame(extensions[0], publicIterator.next());
+		// finally logout() on loginModule2
+		loginModule2.logout();
+		// Now we should have just the third token
+		assertEquals(1, privateCredentials.size());
+		assertEquals(1, publicCredentials.size());
+		assertSame(tokens[2], privateCredentials.iterator().next());
+		assertSame(extensions[2], publicCredentials.iterator().next());
 
-        verifyZeroInteractions((Object[]) tokens);
-        verifyZeroInteractions((Object[]) extensions);
-    }
+		verifyNoInteractions((Object[]) tokens);
+		verifyNoInteractions((Object[]) extensions);
+	}
 
     @Test
     public void login1Commit1Logout1Login2Commit2Logout2() throws LoginException {
@@ -259,19 +258,19 @@ public class OAuthBearerLoginModuleTest {
         assertEquals(0, privateCredentials.size());
         assertEquals(0, publicCredentials.size());
         loginModule2.commit();
-        // Now we should have the second token
-        assertEquals(1, privateCredentials.size());
-        assertEquals(1, publicCredentials.size());
-        assertSame(tokens[1], privateCredentials.iterator().next());
-        assertSame(extensions[1], publicCredentials.iterator().next());
-        loginModule2.logout();
-        // Should have nothing again
-        assertEquals(0, privateCredentials.size());
-        assertEquals(0, publicCredentials.size());
+		// Now we should have the second token
+		assertEquals(1, privateCredentials.size());
+		assertEquals(1, publicCredentials.size());
+		assertSame(tokens[1], privateCredentials.iterator().next());
+		assertSame(extensions[1], publicCredentials.iterator().next());
+		loginModule2.logout();
+		// Should have nothing again
+		assertEquals(0, privateCredentials.size());
+		assertEquals(0, publicCredentials.size());
 
-        verifyZeroInteractions((Object[]) tokens);
-        verifyZeroInteractions((Object[]) extensions);
-    }
+		verifyNoInteractions((Object[]) tokens);
+		verifyNoInteractions((Object[]) extensions);
+	}
 
     @Test
     public void loginAbortLoginCommitLogout() throws LoginException {
@@ -311,19 +310,19 @@ public class OAuthBearerLoginModuleTest {
         assertEquals(0, privateCredentials.size());
         assertEquals(0, publicCredentials.size());
         loginModule.commit();
-        // Now we should have the second token
-        assertEquals(1, privateCredentials.size());
-        assertEquals(1, publicCredentials.size());
-        assertSame(tokens[1], privateCredentials.iterator().next());
-        assertSame(extensions[1], publicCredentials.iterator().next());
-        loginModule.logout();
-        // Should have nothing again
-        assertEquals(0, privateCredentials.size());
-        assertEquals(0, publicCredentials.size());
+		// Now we should have the second token
+		assertEquals(1, privateCredentials.size());
+		assertEquals(1, publicCredentials.size());
+		assertSame(tokens[1], privateCredentials.iterator().next());
+		assertSame(extensions[1], publicCredentials.iterator().next());
+		loginModule.logout();
+		// Should have nothing again
+		assertEquals(0, privateCredentials.size());
+		assertEquals(0, publicCredentials.size());
 
-        verifyZeroInteractions((Object[]) tokens);
-        verifyZeroInteractions((Object[]) extensions);
-    }
+		verifyNoInteractions((Object[]) tokens);
+		verifyNoInteractions((Object[]) extensions);
+	}
 
     @Test
     public void login1Commit1Login2Abort2Login3Commit3Logout3() throws LoginException {
@@ -395,19 +394,19 @@ public class OAuthBearerLoginModuleTest {
         assertNotSame(tokens[1], iterator.next());
         assertNotSame(tokens[1], iterator.next());
         assertEquals(2, publicCredentials.size());
-        Iterator<Object> publicIterator = publicCredentials.iterator();
-        assertNotSame(extensions[1], publicIterator.next());
-        assertNotSame(extensions[1], publicIterator.next());
-        loginModule1.logout();
-        // Now we should have just the third token
-        assertEquals(1, privateCredentials.size());
-        assertSame(tokens[2], privateCredentials.iterator().next());
-        assertEquals(1, publicCredentials.size());
-        assertSame(extensions[2], publicCredentials.iterator().next());
+		Iterator<Object> publicIterator = publicCredentials.iterator();
+		assertNotSame(extensions[1], publicIterator.next());
+		assertNotSame(extensions[1], publicIterator.next());
+		loginModule1.logout();
+		// Now we should have just the third token
+		assertEquals(1, privateCredentials.size());
+		assertSame(tokens[2], privateCredentials.iterator().next());
+		assertEquals(1, publicCredentials.size());
+		assertSame(extensions[2], publicCredentials.iterator().next());
 
-        verifyZeroInteractions((Object[]) tokens);
-        verifyZeroInteractions((Object[]) extensions);
-    }
+		verifyNoInteractions((Object[]) tokens);
+		verifyNoInteractions((Object[]) extensions);
+	}
 
     /**
      * 2.1.0 added customizable SASL extensions and a new callback type.
@@ -434,6 +433,6 @@ public class OAuthBearerLoginModuleTest {
         assertNotNull(extensions);
         assertTrue(extensions.map().isEmpty());
 
-        verifyZeroInteractions((Object[]) tokens);
+		verifyNoInteractions((Object[]) tokens);
     }
 }

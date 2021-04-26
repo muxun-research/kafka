@@ -77,9 +77,9 @@ public class LazyDownConversionRecords implements BaseRecords {
     }
 
     @Override
-    public LazyDownConversionRecordsSend toSend(String destination) {
-        return new LazyDownConversionRecordsSend(destination, this);
-    }
+	public LazyDownConversionRecordsSend toSend() {
+		return new LazyDownConversionRecordsSend(this);
+	}
 
     public TopicPartition topicPartition() {
         return topicPartition;
@@ -97,24 +97,33 @@ public class LazyDownConversionRecords implements BaseRecords {
         return false;
     }
 
-    @Override
-    public int hashCode() {
-        int result = toMagic;
-        result = 31 * result + Long.hashCode(firstOffset);
-        result = 31 * result + topicPartition.hashCode();
-        result = 31 * result + records.hashCode();
-        return result;
-    }
+	@Override
+	public int hashCode() {
+		int result = toMagic;
+		result = 31 * result + Long.hashCode(firstOffset);
+		result = 31 * result + topicPartition.hashCode();
+		result = 31 * result + records.hashCode();
+		return result;
+	}
 
-    public java.util.Iterator<ConvertedRecords<?>> iterator(long maximumReadSize) {
-        // We typically expect only one iterator instance to be created, so null out the first converted batch after
-        // first use to make it available for GC.
-        ConvertedRecords firstBatch = firstConvertedBatch;
-        firstConvertedBatch = null;
-        return new Iterator(records, maximumReadSize, firstBatch);
-    }
+	@Override
+	public String toString() {
+		return "LazyDownConversionRecords(size=" + sizeInBytes +
+				", underlying=" + records +
+				", toMagic=" + toMagic +
+				", firstOffset=" + firstOffset +
+				")";
+	}
 
-    /**
+	public java.util.Iterator<ConvertedRecords<?>> iterator(long maximumReadSize) {
+		// We typically expect only one iterator instance to be created, so null out the first converted batch after
+		// first use to make it available for GC.
+		ConvertedRecords firstBatch = firstConvertedBatch;
+		firstConvertedBatch = null;
+		return new Iterator(records, maximumReadSize, firstBatch);
+	}
+
+	/**
      * Implementation for being able to iterate over down-converted records. Goal of this implementation is to keep
      * it as memory-efficient as possible by not having to maintain all down-converted records in-memory. Maintains
      * a view into batches of down-converted records.

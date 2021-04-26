@@ -259,15 +259,15 @@ public class StoresTest {
     }
 
     @Test
-    public void shouldBuildTimestampedWindowStoreThatWrapsInMemroyWindowStore() {
-        final TimestampedWindowStore<String, String> store = Stores.timestampedWindowStoreBuilder(
-            Stores.inMemoryWindowStore("store", ofMillis(3L), ofMillis(3L), true),
-            Serdes.String(),
-            Serdes.String()
-        ).withLoggingDisabled().withCachingDisabled().build();
-        assertThat(store, not(nullValue()));
-        assertThat(((WrappedStateStore) store).wrapped(), instanceOf(TimestampedBytesStore.class));
-    }
+	public void shouldBuildTimestampedWindowStoreThatWrapsInMemoryWindowStore() {
+		final TimestampedWindowStore<String, String> store = Stores.timestampedWindowStoreBuilder(
+				Stores.inMemoryWindowStore("store", ofMillis(3L), ofMillis(3L), true),
+				Serdes.String(),
+				Serdes.String()
+		).withLoggingDisabled().withCachingDisabled().build();
+		assertThat(store, not(nullValue()));
+		assertThat(((WrappedStateStore) store).wrapped(), instanceOf(TimestampedBytesStore.class));
+	}
 
     @Test
     public void shouldBuildSessionStore() {
