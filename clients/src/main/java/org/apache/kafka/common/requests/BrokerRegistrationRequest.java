@@ -26,47 +26,53 @@ import java.nio.ByteBuffer;
 
 public class BrokerRegistrationRequest extends AbstractRequest {
 
-	public static class Builder extends AbstractRequest.Builder<BrokerRegistrationRequest> {
-		private final BrokerRegistrationRequestData data;
+    public static class Builder extends AbstractRequest.Builder<BrokerRegistrationRequest> {
+        private final BrokerRegistrationRequestData data;
 
-		public Builder(BrokerRegistrationRequestData data) {
-			super(ApiKeys.BROKER_REGISTRATION);
-			this.data = data;
-		}
+        public Builder(BrokerRegistrationRequestData data) {
+            super(ApiKeys.BROKER_REGISTRATION);
+            this.data = data;
+        }
 
-		@Override
-		public BrokerRegistrationRequest build(short version) {
-			return new BrokerRegistrationRequest(data, version);
-		}
+        @Override
+        public short oldestAllowedVersion() {
+            if (data.isMigratingZkBroker()) {
+                return (short) 1;
+            } else {
+                return (short) 0;
+            }
+        }
 
-		@Override
-		public String toString() {
-			return data.toString();
-		}
-	}
+        @Override
+        public BrokerRegistrationRequest build(short version) {
+            return new BrokerRegistrationRequest(data, version);
+        }
 
-	private final BrokerRegistrationRequestData data;
+        @Override
+        public String toString() {
+            return data.toString();
+        }
+    }
 
-	public BrokerRegistrationRequest(BrokerRegistrationRequestData data, short version) {
-		super(ApiKeys.BROKER_REGISTRATION, version);
-		this.data = data;
-	}
+    private final BrokerRegistrationRequestData data;
 
-	@Override
-	public BrokerRegistrationRequestData data() {
-		return data;
-	}
+    public BrokerRegistrationRequest(BrokerRegistrationRequestData data, short version) {
+        super(ApiKeys.BROKER_REGISTRATION, version);
+        this.data = data;
+    }
 
-	@Override
-	public BrokerRegistrationResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-		Errors error = Errors.forException(e);
-		return new BrokerRegistrationResponse(new BrokerRegistrationResponseData()
-				.setThrottleTimeMs(throttleTimeMs)
-				.setErrorCode(error.code()));
-	}
+    @Override
+    public BrokerRegistrationRequestData data() {
+        return data;
+    }
 
-	public static BrokerRegistrationRequest parse(ByteBuffer buffer, short version) {
-		return new BrokerRegistrationRequest(new BrokerRegistrationRequestData(new ByteBufferAccessor(buffer), version),
-				version);
-	}
+    @Override
+    public BrokerRegistrationResponse getErrorResponse(int throttleTimeMs, Throwable e) {
+        Errors error = Errors.forException(e);
+        return new BrokerRegistrationResponse(new BrokerRegistrationResponseData().setThrottleTimeMs(throttleTimeMs).setErrorCode(error.code()));
+    }
+
+    public static BrokerRegistrationRequest parse(ByteBuffer buffer, short version) {
+        return new BrokerRegistrationRequest(new BrokerRegistrationRequestData(new ByteBufferAccessor(buffer), version), version);
+    }
 }

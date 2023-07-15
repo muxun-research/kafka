@@ -108,15 +108,25 @@ public class FetchMetadata {
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (o == null || getClass() != o.getClass())
+            return false;
         FetchMetadata that = (FetchMetadata) o;
         return sessionId == that.sessionId && epoch == that.epoch;
     }
 
     /**
-     * Return the metadata for the next error response.
+     * Return the metadata for the next request. The metadata is set to indicate that the client wants to close the
+     * existing session.
      */
     public FetchMetadata nextCloseExisting() {
+        return new FetchMetadata(sessionId, FINAL_EPOCH);
+    }
+
+    /**
+     * Return the metadata for the next request. The metadata is set to indicate that the client wants to close the
+     * existing session and create a new one if possible.
+     */
+    public FetchMetadata nextCloseExistingAttemptNew() {
         return new FetchMetadata(sessionId, INITIAL_EPOCH);
     }
 

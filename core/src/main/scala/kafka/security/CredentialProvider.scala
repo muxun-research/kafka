@@ -17,14 +17,15 @@
 
 package kafka.security
 
-import java.util.{Collection, Properties}
-
-import org.apache.kafka.common.security.authenticator.CredentialCache
-import org.apache.kafka.common.security.scram.ScramCredential
+import org.apache.kafka.clients.admin.{ScramMechanism => AdminScramMechanism}
 import org.apache.kafka.common.config.ConfigDef
 import org.apache.kafka.common.config.ConfigDef._
+import org.apache.kafka.common.security.authenticator.CredentialCache
+import org.apache.kafka.common.security.scram.ScramCredential
 import org.apache.kafka.common.security.scram.internals.{ScramCredentialUtils, ScramMechanism}
 import org.apache.kafka.common.security.token.delegation.internals.DelegationTokenCache
+
+import java.util.{Collection, Properties}
 
 class CredentialProvider(scramMechanisms: Collection[String], val tokenCache: DelegationTokenCache) {
 
@@ -40,6 +41,25 @@ class CredentialProvider(scramMechanisms: Collection[String], val tokenCache: De
           case c => cache.put(username, ScramCredentialUtils.credentialFromString(c))
         }
       }
+    }
+  }
+
+  def updateCredential(
+                        mechanism: AdminScramMechanism,
+                        name: String,
+                        credential: ScramCredential
+                      ): Unit = {
+    val cache = credentialCache.cache(mechanism.mechanismName(), classOf[ScramCredential])
+    cache.put(name, credential)
+  }
+
+  def removeCredentials(
+                         mechanism: AdminScramMechanism,
+                         name: String
+                       ): Unit = {
+    val cache = credentialCache.cache(mechanism.mechanismName(), classOf[ScramCredential])
+    if (cache != null) {
+      cache.remove(name)
     }
   }
 }

@@ -24,11 +24,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.Serializer;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 
 public class MockRestoreConsumer<K, V> extends MockConsumer<byte[], byte[]> {
     private final Serializer<K> keySerializer;
@@ -122,7 +118,7 @@ public class MockRestoreConsumer<K, V> extends MockConsumer<byte[], byte[]> {
             throw new IllegalArgumentException("RestoreConsumer: offset should not be negative");
 
         if (seekOffset >= 0)
-            throw new IllegalStateException("RestoreConsumer: offset already seeked");
+            throw new IllegalStateException("RestoreConsumer: offset already sought");
 
         seekOffset = offset;
         currentOffset = offset;

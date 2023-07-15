@@ -69,15 +69,15 @@ public class ElectLeadersRequest extends AbstractRequest {
                 .setTimeoutMs(timeoutMs);
 
             if (topicPartitions != null) {
-				topicPartitions.forEach(tp -> {
-					ElectLeadersRequestData.TopicPartitions tps = data.topicPartitions().find(tp.topic());
-					if (tps == null) {
-						tps = new ElectLeadersRequestData.TopicPartitions().setTopic(tp.topic());
-						data.topicPartitions().add(tps);
-					}
-					tps.partitions().add(tp.partition());
-				});
-			} else {
+                topicPartitions.forEach(tp -> {
+                    ElectLeadersRequestData.TopicPartitions tps = data.topicPartitions().find(tp.topic());
+                    if (tps == null) {
+                        tps = new ElectLeadersRequestData.TopicPartitions().setTopic(tp.topic());
+                        data.topicPartitions().add(tps);
+                    }
+                    tps.partitions().add(tp.partition());
+                });
+            } else {
                 data.setTopicPartitions(null);
             }
 
@@ -94,7 +94,7 @@ public class ElectLeadersRequest extends AbstractRequest {
         this.data = data;
     }
 
-	@Override
+    @Override
     public ElectLeadersRequestData data() {
         return data;
     }
@@ -104,26 +104,28 @@ public class ElectLeadersRequest extends AbstractRequest {
         ApiError apiError = ApiError.fromThrowable(e);
         List<ReplicaElectionResult> electionResults = new ArrayList<>();
 
-        for (TopicPartitions topic : data.topicPartitions()) {
-            ReplicaElectionResult electionResult = new ReplicaElectionResult();
+        if (data.topicPartitions() != null) {
+            for (TopicPartitions topic : data.topicPartitions()) {
+                ReplicaElectionResult electionResult = new ReplicaElectionResult();
 
-            electionResult.setTopic(topic.topic());
-			for (Integer partitionId : topic.partitions()) {
-				PartitionResult partitionResult = new PartitionResult();
-				partitionResult.setPartitionId(partitionId);
-				partitionResult.setErrorCode(apiError.error().code());
-				partitionResult.setErrorMessage(apiError.message());
+                electionResult.setTopic(topic.topic());
+                for (Integer partitionId : topic.partitions()) {
+                    PartitionResult partitionResult = new PartitionResult();
+                    partitionResult.setPartitionId(partitionId);
+                    partitionResult.setErrorCode(apiError.error().code());
+                    partitionResult.setErrorMessage(apiError.message());
 
-				electionResult.partitionResult().add(partitionResult);
-			}
+                    electionResult.partitionResult().add(partitionResult);
+                }
 
-            electionResults.add(electionResult);
+                electionResults.add(electionResult);
+            }
         }
 
         return new ElectLeadersResponse(throttleTimeMs, apiError.error().code(), electionResults, version());
     }
 
     public static ElectLeadersRequest parse(ByteBuffer buffer, short version) {
-		return new ElectLeadersRequest(new ElectLeadersRequestData(new ByteBufferAccessor(buffer), version), version);
+        return new ElectLeadersRequest(new ElectLeadersRequestData(new ByteBufferAccessor(buffer), version), version);
     }
 }

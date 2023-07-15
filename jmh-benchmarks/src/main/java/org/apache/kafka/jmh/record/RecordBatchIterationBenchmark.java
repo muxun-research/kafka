@@ -16,23 +16,10 @@
  */
 package org.apache.kafka.jmh.record;
 
-import org.apache.kafka.common.record.CompressionType;
-import org.apache.kafka.common.record.MemoryRecords;
-import org.apache.kafka.common.record.MutableRecordBatch;
-import org.apache.kafka.common.record.Record;
-import org.apache.kafka.common.record.RecordBatch;
+import org.apache.kafka.common.record.*;
 import org.apache.kafka.common.utils.CloseableIterator;
-import org.openjdk.jmh.annotations.Benchmark;
-import org.openjdk.jmh.annotations.Fork;
-import org.openjdk.jmh.annotations.Measurement;
-import org.openjdk.jmh.annotations.OperationsPerInvocation;
-import org.openjdk.jmh.annotations.Param;
-import org.openjdk.jmh.annotations.Scope;
-import org.openjdk.jmh.annotations.State;
-import org.openjdk.jmh.annotations.Warmup;
+import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
-
-import java.io.IOException;
 
 @State(Scope.Benchmark)
 @Fork(value = 1)
@@ -40,31 +27,31 @@ import java.io.IOException;
 @Measurement(iterations = 15)
 public class RecordBatchIterationBenchmark extends BaseRecordBatchBenchmark {
 
-	@Param(value = {"LZ4", "SNAPPY", "GZIP", "ZSTD", "NONE"})
-	private CompressionType compressionType = CompressionType.NONE;
+    @Param(value = {"LZ4", "SNAPPY", "GZIP", "ZSTD", "NONE"})
+    private CompressionType compressionType = CompressionType.NONE;
 
-	@Override
-	CompressionType compressionType() {
-		return compressionType;
-	}
+    @Override
+    CompressionType compressionType() {
+        return compressionType;
+    }
 
-	@Benchmark
-	public void measureIteratorForBatchWithSingleMessage(Blackhole bh) throws IOException {
-		for (RecordBatch batch : MemoryRecords.readableRecords(singleBatchBuffer.duplicate()).batches()) {
-			try (CloseableIterator<Record> iterator = batch.streamingIterator(bufferSupplier)) {
-				while (iterator.hasNext())
-					bh.consume(iterator.next());
-			}
-		}
+    @Benchmark
+    public void measureIteratorForBatchWithSingleMessage(Blackhole bh) {
+        for (RecordBatch batch : MemoryRecords.readableRecords(singleBatchBuffer.duplicate()).batches()) {
+            try (CloseableIterator<Record> iterator = batch.streamingIterator(requestLocal.bufferSupplier())) {
+                while (iterator.hasNext())
+                    bh.consume(iterator.next());
+            }
+        }
     }
 
     @OperationsPerInvocation(value = batchCount)
     @Fork(jvmArgsAppend = "-Xmx8g")
     @Benchmark
-    public void measureStreamingIteratorForVariableBatchSize(Blackhole bh) throws IOException {
+    public void measureStreamingIteratorForVariableBatchSize(Blackhole bh) {
         for (int i = 0; i < batchCount; ++i) {
             for (RecordBatch batch : MemoryRecords.readableRecords(batchBuffers[i].duplicate()).batches()) {
-                try (CloseableIterator<Record> iterator = batch.streamingIterator(bufferSupplier)) {
+                try (CloseableIterator<Record> iterator = batch.streamingIterator(requestLocal.bufferSupplier())) {
                     while (iterator.hasNext())
                         bh.consume(iterator.next());
                 }
@@ -75,10 +62,10 @@ public class RecordBatchIterationBenchmark extends BaseRecordBatchBenchmark {
     @OperationsPerInvocation(value = batchCount)
     @Fork(jvmArgsAppend = "-Xmx8g")
     @Benchmark
-    public void measureSkipIteratorForVariableBatchSize(Blackhole bh) throws IOException {
+    public void measureSkipIteratorForVariableBatchSize(Blackhole bh) {
         for (int i = 0; i < batchCount; ++i) {
             for (MutableRecordBatch batch : MemoryRecords.readableRecords(batchBuffers[i].duplicate()).batches()) {
-                try (CloseableIterator<Record> iterator = batch.skipKeyValueIterator(bufferSupplier)) {
+                try (CloseableIterator<Record> iterator = batch.skipKeyValueIterator(requestLocal.bufferSupplier())) {
                     while (iterator.hasNext())
                         bh.consume(iterator.next());
                 }

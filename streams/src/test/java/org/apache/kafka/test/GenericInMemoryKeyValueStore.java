@@ -25,12 +25,8 @@ import org.apache.kafka.streams.state.internals.CacheFlushListener;
 import org.apache.kafka.streams.state.internals.DelegatingPeekingKeyValueIterator;
 import org.apache.kafka.streams.state.internals.WrappedStateStore;
 
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
-import java.util.NavigableMap;
-import java.util.TreeMap;
 
 /**
  * This class is a generic version of the in-memory key-value store that is useful for testing when you
@@ -58,18 +54,17 @@ public class GenericInMemoryKeyValueStore<K extends Comparable, V>
         return this.name;
     }
 
-	@Deprecated
-	@Override
-	@SuppressWarnings("unchecked")
+    @SuppressWarnings("deprecation")
+    @Deprecated
+    @Override
     /* This is a "dummy" store used for testing;
-       it does not support restoring from changelog since we allow it to be serde-ignorant */
-	public void init(final ProcessorContext context, final StateStore root) {
-		if (root != null) {
-			context.register(root, null);
-		}
+       it does not support restoring from changelog since we allow it to be serde-ignorant */ public void init(final ProcessorContext context, final StateStore root) {
+        if (root != null) {
+            context.register(root, null);
+        }
 
-		this.open = true;
-	}
+        this.open = true;
+    }
 
     @Override
     public boolean setFlushListener(final CacheFlushListener<K, V> listener,

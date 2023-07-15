@@ -38,98 +38,98 @@ import java.io.InputStream;
 @InterfaceStability.Evolving
 public interface RemoteStorageManager extends Configurable, Closeable {
 
-	/**
-	 * Type of the index file.
-	 */
-	enum IndexType {
-		/**
-		 * Represents offset index.
-		 */
-		OFFSET,
+    /**
+     * Type of the index file.
+     */
+    enum IndexType {
+        /**
+         * Represents offset index.
+         */
+        OFFSET,
 
-		/**
-		 * Represents timestamp index.
-		 */
-		TIMESTAMP,
+        /**
+         * Represents timestamp index.
+         */
+        TIMESTAMP,
 
-		/**
-		 * Represents producer snapshot index.
-		 */
-		PRODUCER_SNAPSHOT,
+        /**
+         * Represents producer snapshot index.
+         */
+        PRODUCER_SNAPSHOT,
 
-		/**
-		 * Represents transaction index.
-		 */
-		TRANSACTION,
+        /**
+         * Represents transaction index.
+         */
+        TRANSACTION,
 
-		/**
-		 * Represents leader epoch index.
-		 */
-		LEADER_EPOCH,
-	}
+        /**
+         * Represents leader epoch index.
+         */
+        LEADER_EPOCH,
+    }
 
-	/**
-	 * Copies the given {@link LogSegmentData} provided for the given {@code remoteLogSegmentMetadata}. This includes
-	 * log segment and its auxiliary indexes like offset index, time index, transaction index, leader epoch index, and
-	 * producer snapshot index.
-	 * <p>
-	 * Invoker of this API should always send a unique id as part of {@link RemoteLogSegmentMetadata#remoteLogSegmentId()}
-	 * even when it retries to invoke this method for the same log segment data.
-	 * @param remoteLogSegmentMetadata metadata about the remote log segment.
-	 * @param logSegmentData           data to be copied to tiered storage.
-	 * @throws RemoteStorageException if there are any errors in storing the data of the segment.
-	 */
-	void copyLogSegmentData(RemoteLogSegmentMetadata remoteLogSegmentMetadata,
-							LogSegmentData logSegmentData)
-			throws RemoteStorageException;
+    /**
+     * Copies the given {@link LogSegmentData} provided for the given {@code remoteLogSegmentMetadata}. This includes
+     * log segment and its auxiliary indexes like offset index, time index, transaction index, leader epoch index, and
+     * producer snapshot index.
+     * <p>
+     * Invoker of this API should always send a unique id as part of {@link RemoteLogSegmentMetadata#remoteLogSegmentId()}
+     * even when it retries to invoke this method for the same log segment data.
+     * <p>
+     * This operation is expected to be idempotent. If a copy operation is retried and there is existing content already written,
+     * it should be overwritten, and do not throw {@link RemoteStorageException}
+     * @param remoteLogSegmentMetadata metadata about the remote log segment.
+     * @param logSegmentData           data to be copied to tiered storage.
+     * @throws RemoteStorageException if there are any errors in storing the data of the segment.
+     */
+    void copyLogSegmentData(RemoteLogSegmentMetadata remoteLogSegmentMetadata, LogSegmentData logSegmentData) throws RemoteStorageException;
 
-	/**
-	 * Returns the remote log segment data file/object as InputStream for the given {@link RemoteLogSegmentMetadata}
-	 * starting from the given startPosition. The stream will end at the end of the remote log segment data file/object.
-	 * @param remoteLogSegmentMetadata metadata about the remote log segment.
-	 * @param startPosition            start position of log segment to be read, inclusive.
-	 * @return input stream of the requested log segment data.
-	 * @throws RemoteStorageException          if there are any errors while fetching the desired segment.
-	 * @throws RemoteResourceNotFoundException when there are no resources associated with the given remoteLogSegmentMetadata.
-	 */
-	InputStream fetchLogSegment(RemoteLogSegmentMetadata remoteLogSegmentMetadata,
-								int startPosition) throws RemoteStorageException;
+    /**
+     * Returns the remote log segment data file/object as InputStream for the given {@link RemoteLogSegmentMetadata}
+     * starting from the given startPosition. The stream will end at the end of the remote log segment data file/object.
+     * @param remoteLogSegmentMetadata metadata about the remote log segment.
+     * @param startPosition            start position of log segment to be read, inclusive.
+     * @return input stream of the requested log segment data.
+     * @throws RemoteStorageException          if there are any errors while fetching the desired segment.
+     * @throws RemoteResourceNotFoundException the requested log segment is not found in the remote storage.
+     */
+    InputStream fetchLogSegment(RemoteLogSegmentMetadata remoteLogSegmentMetadata, int startPosition) throws RemoteStorageException;
 
-	/**
-	 * Returns the remote log segment data file/object as InputStream for the given {@link RemoteLogSegmentMetadata}
-	 * starting from the given startPosition. The stream will end at the smaller of endPosition and the end of the
-	 * remote log segment data file/object.
-	 * @param remoteLogSegmentMetadata metadata about the remote log segment.
-	 * @param startPosition            start position of log segment to be read, inclusive.
-	 * @param endPosition              end position of log segment to be read, inclusive.
-	 * @return input stream of the requested log segment data.
-	 * @throws RemoteStorageException          if there are any errors while fetching the desired segment.
-	 * @throws RemoteResourceNotFoundException when there are no resources associated with the given remoteLogSegmentMetadata.
-	 */
-	InputStream fetchLogSegment(RemoteLogSegmentMetadata remoteLogSegmentMetadata,
-								int startPosition,
-								int endPosition) throws RemoteStorageException;
+    /**
+     * Returns the remote log segment data file/object as InputStream for the given {@link RemoteLogSegmentMetadata}
+     * starting from the given startPosition. The stream will end at the smaller of endPosition and the end of the
+     * remote log segment data file/object.
+     * @param remoteLogSegmentMetadata metadata about the remote log segment.
+     * @param startPosition            start position of log segment to be read, inclusive.
+     * @param endPosition              end position of log segment to be read, inclusive.
+     * @return input stream of the requested log segment data.
+     * @throws RemoteStorageException          if there are any errors while fetching the desired segment.
+     * @throws RemoteResourceNotFoundException the requested log segment is not found in the remote storage.
+     */
+    InputStream fetchLogSegment(RemoteLogSegmentMetadata remoteLogSegmentMetadata, int startPosition, int endPosition) throws RemoteStorageException;
 
-	/**
-	 * Returns the index for the respective log segment of {@link RemoteLogSegmentMetadata}.
-	 * @param remoteLogSegmentMetadata metadata about the remote log segment.
-	 * @param indexType                type of the index to be fetched for the segment.
-	 * @return input stream of the requested index.
-	 * @throws RemoteStorageException          if there are any errors while fetching the index.
-	 * @throws RemoteResourceNotFoundException when there are no resources associated with the given remoteLogSegmentMetadata.
-	 */
-	InputStream fetchIndex(RemoteLogSegmentMetadata remoteLogSegmentMetadata,
-						   IndexType indexType) throws RemoteStorageException;
+    /**
+     * Returns the index for the respective log segment of {@link RemoteLogSegmentMetadata}.
+     * @param remoteLogSegmentMetadata metadata about the remote log segment.
+     * @param indexType                type of the index to be fetched for the segment.
+     * @return input stream of the requested index.
+     * @throws RemoteStorageException          if there are any errors while fetching the index.
+     * @throws RemoteResourceNotFoundException the requested index is not found in the remote storage
+     *                                         (e.g. Transaction index may not exist because segments created prior to version 2.8.0 will not have transaction index associated with them.).
+     *                                         The caller of this function are encouraged to re-create the indexes from the segment
+     *                                         as the suggested way of handling this error if the index is expected to be existed.
+     */
+    InputStream fetchIndex(RemoteLogSegmentMetadata remoteLogSegmentMetadata, IndexType indexType) throws RemoteStorageException;
 
-	/**
-	 * Deletes the resources associated with the given {@code remoteLogSegmentMetadata}. Deletion is considered as
-	 * successful if this call returns successfully without any errors. It will throw {@link RemoteStorageException} if
-	 * there are any errors in deleting the file.
-	 * <p>
-	 * @param remoteLogSegmentMetadata metadata about the remote log segment to be deleted.
-	 * @throws RemoteResourceNotFoundException if the requested resource is not found
-	 * @throws RemoteStorageException          if there are any storage related errors occurred.
-	 * @throws RemoteResourceNotFoundException when there are no resources associated with the given remoteLogSegmentMetadata.
-	 */
-	void deleteLogSegmentData(RemoteLogSegmentMetadata remoteLogSegmentMetadata) throws RemoteStorageException;
+    /**
+     * Deletes the resources associated with the given {@code remoteLogSegmentMetadata}. Deletion is considered as
+     * successful if this call returns successfully without any errors. It will throw {@link RemoteStorageException} if
+     * there are any errors in deleting the file.
+     * <p>
+     * This operation is expected to be idempotent. If resources are not found, it is not expected to
+     * throw {@link RemoteResourceNotFoundException} as it may be already removed from a previous attempt.
+     * @param remoteLogSegmentMetadata metadata about the remote log segment to be deleted.
+     * @throws RemoteStorageException if there are any storage related errors occurred.
+     */
+    void deleteLogSegmentData(RemoteLogSegmentMetadata remoteLogSegmentMetadata) throws RemoteStorageException;
 }

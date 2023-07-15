@@ -15,7 +15,7 @@
  limitations under the License.
 -->
 
-  Here is some information on actually running Kafka as a production system based on usage and experience at LinkedIn. Please send us any additional tips you know of.
+Here is some information on actually running Kafka as a production system based on usage and experience at LinkedIn. Please send us any additional tips you know of.
 
 <h3 class="anchor-heading"><a id="basic_ops" class="anchor-link"></a><a href="#basic_ops">6.1 Basic Kafka Operations</a></h3>
 
@@ -30,11 +30,9 @@ You have the option of either adding topics manually or having them be created a
         --partitions 20 --replication-factor 3 --config x=y</code></pre>
 The replication factor controls how many servers will replicate each message that is written. If you have a replication factor of 3 then up to 2 servers can fail before you will lose access to your data. We recommend you use a replication factor of 2 or 3 so that you can transparently bounce machines without interrupting data consumption.
 <p>
-    The partition count controls how many logs the topic will be sharded into. There are several impacts of the partition count. First each partition must fit entirely on a single server. So if you have 20 partitions the full data set (and read and write load) will be handled by no more than 20 servers (not counting replicas). Finally the partition count impacts the maximum parallelism of your
-    consumers. This is discussed in greater detail in the <a href="#intro_consumers">concepts section</a>.
+    The partition count controls how many logs the topic will be sharded into. There are several impacts of the partition count. First each partition must fit entirely on a single server. So if you have 20 partitions the full data set (and read and write load) will be handled by no more than 20 servers (not counting replicas). Finally the partition count impacts the maximum parallelism of your consumers. This is discussed in greater detail in the <a href="#intro_consumers">concepts section</a>.
 <p>
-    Each sharded partition log is placed into its own folder under the Kafka log directory. The name of such folders consists of the topic name, appended by a dash (-) and the partition id. Since a typical folder name can not be over 255 characters long, there will be a limitation on the length of topic names. We assume the number of partitions will not ever be above 100,000. Therefore, topic
-    names cannot be longer than 249 characters. This leaves just enough room in the folder name for a dash and a potentially 5 digit long partition id.
+    Each sharded partition log is placed into its own folder under the Kafka log directory. The name of such folders consists of the topic name, appended by a dash (-) and the partition id. Since a typical folder name can not be over 255 characters long, there will be a limitation on the length of topic names. We assume the number of partitions will not ever be above 100,000. Therefore, topic names cannot be longer than 249 characters. This leaves just enough room in the folder name for a dash and a potentially 5 digit long partition id.
 <p>
     The configurations added on the command line override the default settings the server has for things like the length of time data should be retained. The complete set of per-topic configurations is documented <a href="#topicconfigs">here</a>.
 
@@ -45,8 +43,7 @@ You can change the configuration or partitioning of a topic using the same topic
     To add partitions you can do
 <pre class="line-numbers"><code class="language-bash">  &gt; bin/kafka-topics.sh --bootstrap-server broker_host:port --alter --topic my_topic_name \
         --partitions 40</code></pre>
-Be aware that one use case for partitions is to semantically partition data, and adding partitions doesn't change the partitioning of existing data so this may disturb consumers if they rely on that partition. That is if data is partitioned by <code>hash(key) %
-    number_of_partitions</code> then this partitioning will potentially be shuffled by adding partitions but Kafka will not attempt to automatically redistribute data in any way.
+Be aware that one use case for partitions is to semantically partition data, and adding partitions doesn't change the partitioning of existing data so this may disturb consumers if they rely on that partition. That is if data is partitioned by <code>hash(key) % number_of_partitions</code> then this partitioning will potentially be shuffled by adding partitions but Kafka will not attempt to automatically redistribute data in any way.
 <p>
     To add configs:
 <pre class="line-numbers"><code class="language-bash">  &gt; bin/kafka-configs.sh --bootstrap-server broker_host:port --entity-type topics --entity-name my_topic_name --alter --add-config x=y</code></pre>
@@ -61,13 +58,13 @@ And finally deleting a topic:
 
 <h4 class="anchor-heading"><a id="basic_ops_restarting" class="anchor-link"></a><a href="#basic_ops_restarting">Graceful shutdown</a></h4>
 
-  The Kafka cluster will automatically detect any broker shutdown or failure and elect new leaders for the partitions on that machine. This will occur whether a server fails or it is brought down intentionally for maintenance or configuration changes. For the latter cases Kafka supports a more graceful mechanism for stopping a server than just killing it.
+The Kafka cluster will automatically detect any broker shutdown or failure and elect new leaders for the partitions on that machine. This will occur whether a server fails or it is brought down intentionally for maintenance or configuration changes. For the latter cases Kafka supports a more graceful mechanism for stopping a server than just killing it.
 
-  When a server is stopped gracefully it has two optimizations it will take advantage of:
-  <ol>
-      <li>It will sync all its logs to disk to avoid needing to do any log recovery when it restarts (i.e. validating the checksum for all messages in the tail of the log). Log recovery takes time so this speeds up intentional restarts.
-      <li>It will migrate any partitions the server is the leader for to other replicas prior to shutting down. This will make the leadership transfer faster and minimize the time each partition is unavailable to a few milliseconds.
-  </ol>
+When a server is stopped gracefully it has two optimizations it will take advantage of:
+<ol>
+    <li>It will sync all its logs to disk to avoid needing to do any log recovery when it restarts (i.e. validating the checksum for all messages in the tail of the log). Log recovery takes time so this speeds up intentional restarts.
+    <li>It will migrate any partitions the server is the leader for to other replicas prior to shutting down. This will make the leadership transfer faster and minimize the time each partition is unavailable to a few milliseconds.
+</ol>
 
 Syncing the logs will happen automatically whenever the server is stopped other than by a hard kill, but the controlled leadership migration requires using a special setting:
 <pre class="line-numbers"><code class="language-text">      controlled.shutdown.enable=true</code></pre>
@@ -77,11 +74,11 @@ Note that controlled shutdown will only succeed if <i>all</i> the partitions hos
 
 Whenever a broker stops or crashes, leadership for that broker's partitions transfers to other replicas. When the broker is restarted it will only be a follower for all its partitions, meaning it will not be used for client reads and writes.
 <p>
-    To avoid this imbalance, Kafka has a notion of preferred replicas. If the list of replicas for a partition is 1,5,9 then node 1 is preferred as the leader to either node 5 or 9 because it is earlier in the replica list. By default the Kafka cluster will try to restore leadership to the restored replicas. This behaviour is configured with:
+    To avoid this imbalance, Kafka has a notion of preferred replicas. If the list of replicas for a partition is 1,5,9 then node 1 is preferred as the leader to either node 5 or 9 because it is earlier in the replica list. By default the Kafka cluster will try to restore leadership to the preferred replicas. This behaviour is configured with:
 
 <pre class="line-numbers"><code class="language-text">      auto.leader.rebalance.enable=true</code></pre>
 You can also set this to false, but you will then need to manually restore leadership to the restored replicas by running the command:
-<pre class="line-numbers"><code class="language-bash">  &gt; bin/kafka-preferred-replica-election.sh --bootstrap-server broker_host:port</code></pre>
+<pre class="line-numbers"><code class="language-bash">  &gt; bin/kafka-leader-election.sh --bootstrap-server broker_host:port --election-type preferred --all-topic-partitions</code></pre>
 
 <h4 class="anchor-heading"><a id="basic_ops_racks" class="anchor-link"></a><a href="#basic_ops_racks">Balancing Replicas Across Racks</a></h4>
 The rack awareness feature spreads replicas of the same partition across different racks. This extends the guarantees Kafka provides for broker-failure to cover rack-failure, limiting the risk of data loss should all the brokers on a rack fail at once. The feature can also be applied to other broker groupings such as availability zones in EC2.
@@ -92,7 +89,7 @@ When a topic is <a href="#basic_ops_add_topic">created</a>, <a href="#basic_ops_
 <p></p>
 The algorithm used to assign replicas to brokers ensures that the number of leaders per broker will be constant, regardless of how brokers are distributed across racks. This ensures balanced throughput.
 <p></p>
-  However if racks are assigned different numbers of brokers, the assignment of replicas will not be even. Racks with fewer brokers will get more replicas, meaning they will use more storage and put more resources into replication. Hence it is sensible to configure an equal number of brokers per rack.
+However if racks are assigned different numbers of brokers, the assignment of replicas will not be even. Racks with fewer brokers will get more replicas, meaning they will use more storage and put more resources into replication. Hence it is sensible to configure an equal number of brokers per rack.
 
 <h4 class="anchor-heading"><a id="basic_ops_mirror_maker" class="anchor-link"></a><a href="#basic_ops_mirror_maker">Mirroring data between clusters & Geo-replication</a></h4>
 
@@ -101,7 +98,7 @@ The algorithm used to assign replicas to brokers ensures that the number of lead
 </p>
 
 <h4 class="anchor-heading"><a id="basic_ops_consumer_lag" class="anchor-link"></a><a href="#basic_ops_consumer_lag">Checking consumer position</a></h4>
-  Sometimes it's useful to see the position of your consumers. We have a tool that will show the position of all consumers in a consumer group as well as how far behind the end of the log they are. To run this tool on a consumer group named <i>my-group</i> consuming a topic named <i>my-topic</i> would look like this:
+Sometimes it's useful to see the position of your consumers. We have a tool that will show the position of all consumers in a consumer group as well as how far behind the end of the log they are. To run this tool on a consumer group named <i>my-group</i> consuming a topic named <i>my-topic</i> would look like this:
 <pre class="line-numbers"><code class="language-bash">  &gt; bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group my-group
 
   TOPIC                          PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG        CONSUMER-ID                                       HOST                           CLIENT-ID
@@ -176,25 +173,25 @@ The algorithm used to assign replicas to brokers ensures that the number of lead
     <li>
       (default) to display which offsets to reset.
     </li>
-    <li>
-      --execute : to execute --reset-offsets process.
-    </li>
-    <li>
-      --export : to export the results to a CSV format.
-    </li>
+      <li>
+          --execute : to execute --reset-offsets process.
+      </li>
+      <li>
+          --export : to export the results to a CSV format.
+      </li>
   </ul>
 
-  <p>
-      --reset-offsets also has following scenarios to choose from (at least one scenario must be selected):
+<p>
+    --reset-offsets also has following scenarios to choose from (at least one scenario must be selected):
 <ul>
     <li>
-      --to-datetime &lt;String: datetime&gt; : Reset offsets to offsets from datetime. Format: 'YYYY-MM-DDTHH:mm:SS.sss'
+        --to-datetime &lt;String: datetime&gt; : Reset offsets to offsets from datetime. Format: 'YYYY-MM-DDTHH:mm:SS.sss'
     </li>
     <li>
-      --to-earliest : Reset offsets to earliest offset.
+        --to-earliest : Reset offsets to earliest offset.
     </li>
     <li>
-      --to-latest : Reset offsets to latest offset.
+        --to-latest : Reset offsets to latest offset.
     </li>
     <li>
       --shift-by &lt;Long: number-of-offsets&gt; : Reset offsets shifting current offset by 'n', where 'n' can be positive or negative.
@@ -206,15 +203,15 @@ The algorithm used to assign replicas to brokers ensures that the number of lead
       --to-current : Resets offsets to current offset.
     </li>
     <li>
-      --by-duration &lt;String: duration&gt; : Reset offsets to offset by duration from current timestamp. Format: 'PnDTnHnMnS'
+        --by-duration &lt;String: duration&gt; : Reset offsets to offset by duration from current timestamp. Format: 'PnDTnHnMnS'
     </li>
     <li>
-      --to-offset : Reset offsets to a specific offset.
+        --to-offset : Reset offsets to a specific offset.
     </li>
-  </ul>
+</ul>
 
-  Please note, that out of range offsets will be adjusted to available offset end. For example, if offset end is at 10 and offset shift request is
-  of 15, then, offset at 10 will actually be selected.
+Please note, that out of range offsets will be adjusted to available offset end. For example, if offset end is at 10 and offset shift request is
+of 15, then, offset at 10 will actually be selected.
 
 <p>
     For example, to reset offsets of a consumer group to the latest offset:
@@ -233,22 +230,22 @@ The algorithm used to assign replicas to brokers ensures that the number of lead
 
 <h4 class="anchor-heading"><a id="basic_ops_cluster_expansion" class="anchor-link"></a><a href="#basic_ops_cluster_expansion">Expanding your cluster</a></h4>
 
-  Adding servers to a Kafka cluster is easy, just assign them a unique broker id and start up Kafka on your new servers. However these new servers will not automatically be assigned any data partitions, so unless partitions are moved to them they won't be doing any work until new topics are created. So usually when you add machines to your cluster you will want to migrate some existing data to these machines.
-  <p>
-  The process of migrating data is manually initiated but fully automated. Under the covers what happens is that Kafka will add the new server as a follower of the partition it is migrating and allow it to fully replicate the existing data in that partition. When the new server has fully replicated the contents of this partition and joined the in-sync replica one of the existing replicas will delete their partition's data.
-  <p>
-  The partition reassignment tool can be used to move partitions across brokers. An ideal partition distribution would ensure even data load and partition sizes across all brokers. The partition reassignment tool does not have the capability to automatically study the data distribution in a Kafka cluster and move partitions around to attain an even load distribution. As such, the admin has to figure out which topics or partitions should be moved around.
-  <p>
-  The partition reassignment tool can run in 3 mutually exclusive modes:
+Adding servers to a Kafka cluster is easy, just assign them a unique broker id and start up Kafka on your new servers. However these new servers will not automatically be assigned any data partitions, so unless partitions are moved to them they won't be doing any work until new topics are created. So usually when you add machines to your cluster you will want to migrate some existing data to these machines.
+<p>
+    The process of migrating data is manually initiated but fully automated. Under the covers what happens is that Kafka will add the new server as a follower of the partition it is migrating and allow it to fully replicate the existing data in that partition. When the new server has fully replicated the contents of this partition and joined the in-sync replica one of the existing replicas will delete their partition's data.
+<p>
+    The partition reassignment tool can be used to move partitions across brokers. An ideal partition distribution would ensure even data load and partition sizes across all brokers. The partition reassignment tool does not have the capability to automatically study the data distribution in a Kafka cluster and move partitions around to attain an even load distribution. As such, the admin has to figure out which topics or partitions should be moved around.
+<p>
+    The partition reassignment tool can run in 3 mutually exclusive modes:
 <ul>
     <li>--generate: In this mode, given a list of topics and a list of brokers, the tool generates a candidate reassignment to move all partitions of the specified topics to the new brokers. This option merely provides a convenient way to generate a partition reassignment plan given a list of topics and target brokers.</li>
     <li>--execute: In this mode, the tool kicks off the reassignment of partitions based on the user provided reassignment plan. (using the --reassignment-json-file option). This can either be a custom reassignment plan hand crafted by the admin or provided by using the --generate option</li>
     <li>--verify: In this mode, the tool verifies the status of the reassignment for all partitions listed during the last --execute. The status can be either of successfully completed, failed or in progress</li>
 </ul>
 <h5 class="anchor-heading"><a id="basic_ops_automigrate" class="anchor-link"></a><a href="#basic_ops_automigrate">Automatically migrating data to new machines</a></h5>
-  The partition reassignment tool can be used to move some topics off of the current set of brokers to the newly added brokers. This is typically useful while expanding an existing cluster since it is easier to move entire topics to the new set of brokers, than moving one partition at a time. When used to do this, the user should provide a list of topics that should be moved to the new set of brokers and a target list of new brokers. The tool then evenly distributes all partitions for the given list of topics across the new set of brokers. During this move, the replication factor of the topic is kept constant. Effectively the replicas for all partitions for the input list of topics are moved from the old set of brokers to the newly added brokers.
-  <p>
-  For instance, the following example will move all partitions for topics foo1,foo2 to the new set of brokers 5,6. At the end of this move, all partitions for topics foo1 and foo2 will <i>only</i> exist on brokers 5,6.
+The partition reassignment tool can be used to move some topics off of the current set of brokers to the newly added brokers. This is typically useful while expanding an existing cluster since it is easier to move entire topics to the new set of brokers, than moving one partition at a time. When used to do this, the user should provide a list of topics that should be moved to the new set of brokers and a target list of new brokers. The tool then evenly distributes all partitions for the given list of topics across the new set of brokers. During this move, the replication factor of the topic is kept constant. Effectively the replicas for all partitions for the input list of topics are moved from the old set of brokers to the newly added brokers.
+<p>
+    For instance, the following example will move all partitions for topics foo1,foo2 to the new set of brokers 5,6. At the end of this move, all partitions for topics foo1 and foo2 will <i>only</i> exist on brokers 5,6.
 <p>
     Since the tool accepts the input list of topics as a json file, you first need to identify the topics you want to move and create the json file as follows:
 <pre class="line-numbers"><code class="language-bash">  > cat topics-to-move.json
@@ -256,64 +253,56 @@ The algorithm used to assign replicas to brokers ensures that the number of lead
               {"topic": "foo2"}],
   "version":1
   }</code></pre>
-  Once the json file is ready, use the partition reassignment tool to generate a candidate assignment:
+Once the json file is ready, use the partition reassignment tool to generate a candidate assignment:
 <pre class="line-numbers"><code class="language-bash">  > bin/kafka-reassign-partitions.sh --bootstrap-server localhost:9092 --topics-to-move-json-file topics-to-move.json --broker-list "5,6" --generate
   Current partition replica assignment
 
   {"version":1,
-  "partitions":[{"topic":"foo1","partition":2,"replicas":[1,2]},
-                {"topic":"foo1","partition":0,"replicas":[3,4]},
-                {"topic":"foo2","partition":2,"replicas":[1,2]},
-                {"topic":"foo2","partition":0,"replicas":[3,4]},
-                {"topic":"foo1","partition":1,"replicas":[2,3]},
-                {"topic":"foo2","partition":1,"replicas":[2,3]}]
+  "partitions":[{"topic":"foo1","partition":0,"replicas":[2,1]},
+                {"topic":"foo1","partition":1,"replicas":[1,3]},
+                {"topic":"foo1","partition":2,"replicas":[3,4]},
+                {"topic":"foo2","partition":0,"replicas":[4,2]},
+                {"topic":"foo2","partition":1,"replicas":[2,1]},
+                {"topic":"foo2","partition":2,"replicas":[1,3]}]
   }
 
   Proposed partition reassignment configuration
 
   {"version":1,
-  "partitions":[{"topic":"foo1","partition":2,"replicas":[5,6]},
-                {"topic":"foo1","partition":0,"replicas":[5,6]},
-                {"topic":"foo2","partition":2,"replicas":[5,6]},
-                {"topic":"foo2","partition":0,"replicas":[5,6]},
+  "partitions":[{"topic":"foo1","partition":0,"replicas":[6,5]},
                 {"topic":"foo1","partition":1,"replicas":[5,6]},
-                {"topic":"foo2","partition":1,"replicas":[5,6]}]
+                {"topic":"foo1","partition":2,"replicas":[6,5]},
+                {"topic":"foo2","partition":0,"replicas":[5,6]},
+                {"topic":"foo2","partition":1,"replicas":[6,5]},
+                {"topic":"foo2","partition":2,"replicas":[5,6]}]
   }</code></pre>
 <p>
-    The tool generates a candidate assignment that will move all partitions from topics foo1,foo2 to brokers 5,6. Note, however, that at this point, the partition movement has not started, it merely tells you the current assignment and the proposed new assignment. The current assignment should be saved in case you want to rollback to it. The new assignment should be saved in a json file (e.g.
-    expand-cluster-reassignment.json) to be input to the tool with the --execute option as follows:
+    The tool generates a candidate assignment that will move all partitions from topics foo1,foo2 to brokers 5,6. Note, however, that at this point, the partition movement has not started, it merely tells you the current assignment and the proposed new assignment. The current assignment should be saved in case you want to rollback to it. The new assignment should be saved in a json file (e.g. expand-cluster-reassignment.json) to be input to the tool with the --execute option as follows:
 <pre class="line-numbers"><code class="language-bash">  > bin/kafka-reassign-partitions.sh --bootstrap-server localhost:9092 --reassignment-json-file expand-cluster-reassignment.json --execute
   Current partition replica assignment
 
   {"version":1,
-  "partitions":[{"topic":"foo1","partition":2,"replicas":[1,2]},
-                {"topic":"foo1","partition":0,"replicas":[3,4]},
-                {"topic":"foo2","partition":2,"replicas":[1,2]},
-                {"topic":"foo2","partition":0,"replicas":[3,4]},
-                {"topic":"foo1","partition":1,"replicas":[2,3]},
-                {"topic":"foo2","partition":1,"replicas":[2,3]}]
+  "partitions":[{"topic":"foo1","partition":0,"replicas":[2,1]},
+                {"topic":"foo1","partition":1,"replicas":[1,3]},
+                {"topic":"foo1","partition":2,"replicas":[3,4]},
+                {"topic":"foo2","partition":0,"replicas":[4,2]},
+                {"topic":"foo2","partition":1,"replicas":[2,1]},
+                {"topic":"foo2","partition":2,"replicas":[1,3]}]
   }
 
   Save this to use as the --reassignment-json-file option during rollback
-  Successfully started reassignment of partitions
-  {"version":1,
-  "partitions":[{"topic":"foo1","partition":2,"replicas":[5,6]},
-                {"topic":"foo1","partition":0,"replicas":[5,6]},
-                {"topic":"foo2","partition":2,"replicas":[5,6]},
-                {"topic":"foo2","partition":0,"replicas":[5,6]},
-                {"topic":"foo1","partition":1,"replicas":[5,6]},
-                {"topic":"foo2","partition":1,"replicas":[5,6]}]
-  }</code></pre>
+  Successfully started partition reassignments for foo1-0,foo1-1,foo1-2,foo2-0,foo2-1,foo2-2
+  </code></pre>
 <p>
     Finally, the --verify option can be used with the tool to check the status of the partition reassignment. Note that the same expand-cluster-reassignment.json (used with the --execute option) should be used with the --verify option:
 <pre class="line-numbers"><code class="language-bash">  > bin/kafka-reassign-partitions.sh --bootstrap-server localhost:9092 --reassignment-json-file expand-cluster-reassignment.json --verify
   Status of partition reassignment:
-  Reassignment of partition [foo1,0] completed successfully
-  Reassignment of partition [foo1,1] is in progress
-  Reassignment of partition [foo1,2] is in progress
-  Reassignment of partition [foo2,0] completed successfully
-  Reassignment of partition [foo2,1] completed successfully
-  Reassignment of partition [foo2,2] completed successfully</code></pre>
+  Reassignment of partition [foo1,0] is completed
+  Reassignment of partition [foo1,1] is still in progress
+  Reassignment of partition [foo1,2] is still in progress
+  Reassignment of partition [foo2,0] is completed
+  Reassignment of partition [foo2,1] is completed
+  Reassignment of partition [foo2,2] is completed</code></pre>
 
 <h5 class="anchor-heading"><a id="basic_ops_partitionassignment" class="anchor-link"></a><a href="#basic_ops_partitionassignment">Custom partition assignment and migration</a></h5>
 The partition reassignment tool can also be used to selectively move replicas of a partition to a specific set of brokers. When used in this manner, it is assumed that the user knows the reassignment plan and does not require the tool to generate a candidate reassignment, effectively skipping the --generate step and moving straight to the --execute step
@@ -333,17 +322,14 @@ Then, use the json file with the --execute option to start the reassignment proc
   }
 
   Save this to use as the --reassignment-json-file option during rollback
-  Successfully started reassignment of partitions
-  {"version":1,
-  "partitions":[{"topic":"foo1","partition":0,"replicas":[5,6]},
-                {"topic":"foo2","partition":1,"replicas":[2,3]}]
-  }</code></pre>
+  Successfully started partition reassignments for foo1-0,foo2-1
+  </code></pre>
 <p>
     The --verify option can be used with the tool to check the status of the partition reassignment. Note that the same custom-reassignment.json (used with the --execute option) should be used with the --verify option:
 <pre class="line-numbers"><code class="language-bash">  > bin/kafka-reassign-partitions.sh --bootstrap-server localhost:9092 --reassignment-json-file custom-reassignment.json --verify
   Status of partition reassignment:
-  Reassignment of partition [foo1,0] completed successfully
-  Reassignment of partition [foo2,1] completed successfully</code></pre>
+  Reassignment of partition [foo1,0] is completed
+  Reassignment of partition [foo2,1] is completed</code></pre>
 
 <h4 class="anchor-heading"><a id="basic_ops_decommissioning_brokers" class="anchor-link"></a><a href="#basic_ops_decommissioning_brokers">Decommissioning brokers</a></h4>
 The partition reassignment tool does not have the ability to automatically generate a reassignment plan for decommissioning brokers yet. As such, the admin has to come up with a reassignment plan to move the replica for all partitions hosted on the broker to be decommissioned, to the rest of the brokers. This can be relatively tedious as the reassignment needs to ensure that all the replicas are not moved from the decommissioned broker to only one other broker. To make this process effortless, we plan to add tooling support for decommissioning brokers in the future.
@@ -351,13 +337,13 @@ The partition reassignment tool does not have the ability to automatically gener
 <h4 class="anchor-heading"><a id="basic_ops_increase_replication_factor" class="anchor-link"></a><a href="#basic_ops_increase_replication_factor">Increasing replication factor</a></h4>
 Increasing the replication factor of an existing partition is easy. Just specify the extra replicas in the custom reassignment json file and use it with the --execute option to increase the replication factor of the specified partitions.
 <p>
-  For instance, the following example increases the replication factor of partition 0 of topic foo from 1 to 3. Before increasing the replication factor, the partition's only replica existed on broker 5. As part of increasing the replication factor, we will add more replicas on brokers 6 and 7.
+    For instance, the following example increases the replication factor of partition 0 of topic foo from 1 to 3. Before increasing the replication factor, the partition's only replica existed on broker 5. As part of increasing the replication factor, we will add more replicas on brokers 6 and 7.
 <p>
     The first step is to hand craft the custom reassignment plan in a json file:
 <pre class="line-numbers"><code class="language-bash">  > cat increase-replication-factor.json
   {"version":1,
   "partitions":[{"topic":"foo","partition":0,"replicas":[5,6,7]}]}</code></pre>
-  Then, use the json file with the --execute option to start the reassignment process:
+Then, use the json file with the --execute option to start the reassignment process:
 <pre class="line-numbers"><code class="language-bash">  > bin/kafka-reassign-partitions.sh --bootstrap-server localhost:9092 --reassignment-json-file increase-replication-factor.json --execute
   Current partition replica assignment
 
@@ -365,15 +351,13 @@ Increasing the replication factor of an existing partition is easy. Just specify
   "partitions":[{"topic":"foo","partition":0,"replicas":[5]}]}
 
   Save this to use as the --reassignment-json-file option during rollback
-  Successfully started reassignment of partitions
-  {"version":1,
-  "partitions":[{"topic":"foo","partition":0,"replicas":[5,6,7]}]}</code></pre>
+  Successfully started partition reassignment for foo-0</code></pre>
 <p>
     The --verify option can be used with the tool to check the status of the partition reassignment. Note that the same increase-replication-factor.json (used with the --execute option) should be used with the --verify option:
 <pre class="line-numbers"><code class="language-bash">  > bin/kafka-reassign-partitions.sh --bootstrap-server localhost:9092 --reassignment-json-file increase-replication-factor.json --verify
   Status of partition reassignment:
-  Reassignment of partition [foo,0] completed successfully</code></pre>
-  You can also verify the increase in replication factor with the kafka-topics tool:
+  Reassignment of partition [foo,0] is completed</code></pre>
+You can also verify the increase in replication factor with the kafka-topics tool:
 <pre class="line-numbers"><code class="language-bash">  > bin/kafka-topics.sh --bootstrap-server localhost:9092 --topic foo --describe
   Topic:foo	PartitionCount:1	ReplicationFactor:3	Configs:
     Topic: foo	Partition: 0	Leader: 5	Replicas: 5,6,7	Isr: 5,6,7</code></pre>
@@ -386,12 +370,11 @@ There are two interfaces that can be used to engage a throttle. The simplest, an
 So for example, if you were to execute a rebalance, with the below command, it would move partitions at no more than 50MB/s.
 <pre class="language-bash">$ bin/kafka-reassign-partitions.sh --bootstrap-server localhost:9092 --execute --reassignment-json-file bigger-cluster.json --throttle 50000000</code></pre>
 When you execute this script you will see the throttle engage:
-<pre class="line-numbers"><code class="language-bash">  The throttle limit was set to 50000000 B/s
-  Successfully started reassignment of partitions.</code></pre>
-<p>Should you wish to alter the throttle, during a rebalance, say to increase the throughput so it completes quicker, you can do this by re-running the execute command passing the same reassignment-json-file:</p>
-<pre class="language-bash">$ bin/kafka-reassign-partitions.sh --bootstrap-server localhost:9092  --execute --reassignment-json-file bigger-cluster.json --throttle 700000000
-  There is an existing assignment running.
-  The throttle limit was set to 700000000 B/s</code></pre>
+<pre class="line-numbers"><code class="language-bash">  The inter-broker throttle limit was set to 50000000 B/s
+  Successfully started partition reassignment for foo1-0</code></pre>
+<p>Should you wish to alter the throttle, during a rebalance, say to increase the throughput so it completes quicker, you can do this by re-running the execute command with the --additional option passing the same reassignment-json-file:</p>
+<pre class="language-bash">$ bin/kafka-reassign-partitions.sh --bootstrap-server localhost:9092  --additional --execute --reassignment-json-file bigger-cluster.json --throttle 700000000
+  The inter-broker throttle limit was set to 700000000 B/s</code></pre>
 
 <p>Once the rebalance completes the administrator can check the status of the rebalance using the --verify option.
     If the rebalance has completed, the throttle will be removed via the --verify command. It is important that
@@ -401,9 +384,11 @@ When you execute this script you will see the throttle engage:
 
 <pre class="line-numbers"><code class="language-bash">  > bin/kafka-reassign-partitions.sh --bootstrap-server localhost:9092  --verify --reassignment-json-file bigger-cluster.json
   Status of partition reassignment:
-  Reassignment of partition [my-topic,1] completed successfully
-  Reassignment of partition [mytopic,0] completed successfully
-  Throttle was removed.</code></pre>
+  Reassignment of partition [my-topic,1] is completed
+  Reassignment of partition [my-topic,0] is completed
+
+  Clearing broker-level throttles on brokers 1,2,3
+  Clearing topic-level throttles on topic my-topic</code></pre>
 
 <p>The administrator can also validate the assigned configs using the kafka-configs.sh. There are two pairs of throttle
     configuration used to manage the throttling process. First pair refers to the throttle value itself. This is configured, at a broker
@@ -430,21 +415,21 @@ When you execute this script you will see the throttle engage:
 <p>This shows the throttle applied to both leader and follower side of the replication protocol. By default both sides
     are assigned the same throttled throughput value. </p>
 
-  <p>To view the list of throttled replicas:</p>
+<p>To view the list of throttled replicas:</p>
 
 <pre class="line-numbers"><code class="language-bash">  > bin/kafka-configs.sh --describe --bootstrap-server localhost:9092 --entity-type topics
   Configs for topic 'my-topic' are leader.replication.throttled.replicas=1:102,0:101,
       follower.replication.throttled.replicas=1:101,0:102</code></pre>
 
-  <p>Here we see the leader throttle is applied to partition 1 on broker 102 and partition 0 on broker 101. Likewise the
-      follower throttle is applied to partition 1 on
-      broker 101 and partition 0 on broker 102. </p>
+<p>Here we see the leader throttle is applied to partition 1 on broker 102 and partition 0 on broker 101. Likewise the
+    follower throttle is applied to partition 1 on
+    broker 101 and partition 0 on broker 102. </p>
 
-  <p>By default kafka-reassign-partitions.sh will apply the leader throttle to all replicas that exist before the
-      rebalance, any one of which might be leader.
-      It will apply the follower throttle to all move destinations. So if there is a partition with replicas on brokers
-      101,102, being reassigned to 102,103, a leader throttle,
-      for that partition, would be applied to 101,102 and a follower throttle would be applied to 103 only. </p>
+<p>By default kafka-reassign-partitions.sh will apply the leader throttle to all replicas that exist before the
+    rebalance, any one of which might be leader.
+    It will apply the follower throttle to all move destinations. So if there is a partition with replicas on brokers
+    101,102, being reassigned to 102,103, a leader throttle,
+    for that partition, would be applied to 101,102 and a follower throttle would be applied to 103 only. </p>
 
 
 <p>If required, you can also use the --alter switch on kafka-configs.sh to alter the throttle configurations manually.
@@ -468,9 +453,9 @@ The throttle should be removed in a timely manner once reassignment completes (b
 
 <pre>kafka.server:type=FetcherLagMetrics,name=ConsumerLag,clientId=([-.\w]+),topic=([-.\w]+),partition=([0-9]+)</code></pre>
 
-  <p>The lag should constantly decrease during replication.  If the metric does not decrease the administrator should
-      increase the
-      throttle throughput as described above. </p>
+<p>The lag should constantly decrease during replication. If the metric does not decrease the administrator should
+    increase the
+    throttle throughput as described above. </p>
 
 
 <h4 class="anchor-heading"><a id="quotas" class="anchor-link"></a><a href="#quotas">Setting quotas</a></h4>
@@ -522,11 +507,6 @@ Similarly for (user, client):
 <pre class="line-numbers"><code class="language-bash">  > bin/kafka-configs.sh  --bootstrap-server localhost:9092 --describe --entity-type users --entity-type clients
   Configs for user-principal 'user1', default client-id are producer_byte_rate=1024,consumer_byte_rate=2048,request_percentage=200
   Configs for user-principal 'user1', client-id 'clientA' are producer_byte_rate=1024,consumer_byte_rate=2048,request_percentage=200</code></pre>
-<p>
-    It is possible to set default quotas that apply to all client-ids by setting these configs on the brokers. These properties are applied only if quota overrides or defaults are not configured in Zookeeper. By default, each client-id receives an unlimited quota. The following sets the default quota per producer and consumer client-id to 10MB/sec.
-<pre class="line-numbers"><code class="language-text">    quota.producer.default=10485760
-    quota.consumer.default=10485760</code></pre>
-Note that these properties are being deprecated and may be removed in a future release. Defaults configured using kafka-configs.sh take precedence over these properties.
 
 <h3 class="anchor-heading"><a id="datacenters" class="anchor-link"></a><a href="#datacenters">6.2 Datacenters</a></h3>
 
@@ -538,8 +518,7 @@ Some deployments will need to manage a data pipeline that spans multiple datacen
 <p>
     This is not the only possible deployment pattern. It is possible to read from or write to a remote Kafka cluster over the WAN, though obviously this will add whatever latency is required to get the cluster.
 <p>
-    Kafka naturally batches data in both the producer and consumer so it can achieve high-throughput even over a high-latency connection. To allow this though it may be necessary to increase the TCP socket buffer sizes for the producer, consumer, and broker using the <code>socket.send.buffer.bytes</code> and <code>socket.receive.buffer.bytes</code> configurations. The appropriate way to set this
-    is documented <a href="http://en.wikipedia.org/wiki/Bandwidth-delay_product">here</a>.
+    Kafka naturally batches data in both the producer and consumer so it can achieve high-throughput even over a high-latency connection. To allow this though it may be necessary to increase the TCP socket buffer sizes for the producer, consumer, and broker using the <code>socket.send.buffer.bytes</code> and <code>socket.receive.buffer.bytes</code> configurations. The appropriate way to set this is documented <a href="http://en.wikipedia.org/wiki/Bandwidth-delay_product">here</a>.
 <p>
     It is generally <i>not</i> advisable to run a <i>single</i> Kafka cluster that spans multiple datacenters over a high-latency link. This will incur very high replication latency both for Kafka writes and ZooKeeper writes, and neither Kafka nor ZooKeeper will remain available in all locations if the network between locations is unavailable.
 
@@ -601,7 +580,7 @@ Some deployments will need to manage a data pipeline that spans multiple datacen
 </ul>
 
 <p>
-    By default, a flow replicates all topics and consumer groups. However, each replication flow can be configured independently. For instance, you can define that only specific topics or consumer groups are replicated from the source cluster to the target cluster.
+    By default, a flow replicates all topics and consumer groups (except excluded ones). However, each replication flow can be configured independently. For instance, you can define that only specific topics or consumer groups are replicated from the source cluster to the target cluster.
 </p>
 
 <p>
@@ -622,8 +601,7 @@ primary->secondary.topics = foobar-topic, quux-.*
 <h4 class="anchor-heading"><a id="georeplication-mirrormaker" class="anchor-link"></a><a href="#georeplication-mirrormaker">Configuring Geo-Replication</a></h4>
 
 <p>
-    The following sections describe how to configure and run a dedicated MirrorMaker cluster. If you want to run MirrorMaker within an existing Kafka Connect cluster or other supported deployment setups, please refer to <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-382%3A+MirrorMaker+2.0">KIP-382: MirrorMaker 2.0</a> and be aware that the names of configuration settings may vary
-    between deployment modes.
+    The following sections describe how to configure and run a dedicated MirrorMaker cluster. If you want to run MirrorMaker within an existing Kafka Connect cluster or other supported deployment setups, please refer to <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-382%3A+MirrorMaker+2.0">KIP-382: MirrorMaker 2.0</a> and be aware that the names of configuration settings may vary between deployment modes.
 </p>
 
 <p>
@@ -677,8 +655,7 @@ tasks.max = 5
 </code></pre>
 
 <p>
-    Most of the default Kafka Connect settings work well for MirrorMaker out-of-the-box, with the exception of <code>tasks.max</code>. In order to evenly distribute the workload across more than one MirrorMaker process, it is recommended to set <code>tasks.max</code> to at least <code>2</code> (preferably higher) depending on the available hardware resources and the total number of
-    topic-partitions to be replicated.
+    Most of the default Kafka Connect settings work well for MirrorMaker out-of-the-box, with the exception of <code>tasks.max</code>. In order to evenly distribute the workload across more than one MirrorMaker process, it is recommended to set <code>tasks.max</code> to at least <code>2</code> (preferably higher) depending on the available hardware resources and the total number of topic-partitions to be replicated.
 </p>
 
 <p>
@@ -717,6 +694,45 @@ us-east.producer.buffer.memory = 32768
 us-east.admin.bootstrap.servers = broker8-secondary:9092
 </code></pre>
 
+<h5 class="anchor-heading"><a id="georeplication-exactly_once" class="anchor-link"></a><a href="#georeplication-exactly_once">Exactly once</a></h5>
+
+<p>
+    Exactly-once semantics are supported for dedicated MirrorMaker clusters as of version 3.5.0.</p>
+
+<p>
+    For new MirrorMaker clusters, set the <code>exactly.once.source.support</code> property to enabled for all targeted Kafka clusters that should be written to with exactly-once semantics. For example, to enable exactly-once for writes to cluster </code>us-east</code>, the following configuration can be used:
+</p>
+
+<pre class="line-numbers"><code class="language-text">us-east.exactly.once.source.support = enabled
+</code></pre>
+
+<p>
+    For existing MirrorMaker clusters, a two-step upgrade is necessary. Instead of immediately setting the <code>exactly.once.source.support</code> property to enabled, first set it to <code>preparing</code> on all nodes in the cluster. Once this is complete, it can be set to </code>enabled</code> on all nodes in the cluster, in a second round of restarts.
+</p>
+
+<p>
+    In either case, it is also necessary to enable intra-cluster communication between the MirrorMaker nodes, as described in <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-710%3A+Full+support+for+distributed+mode+in+dedicated+MirrorMaker+2.0+clusters">KIP-710</a>. To do this, the <code>dedicated.mode.enable.internal.rest</code> property must be set to <code>true</code>. In addition, many of the REST-related <a href="https://kafka.apache.org/documentation/#connectconfigs">configuration properties available for Kafka Connect</a> can be specified the MirrorMaker config. For example, to enable intra-cluster communication in MirrorMaker cluster with each node listening on port 8080 of their local machine, the following should be added to the MirrorMaker config file:
+</p>
+
+<pre class="line-numbers"><code class="language-text">dedicated.mode.enable.internal.rest = true
+listeners = http://localhost:8080
+</code></pre>
+
+<p><b>
+    Note that, if intra-cluster communication is enabled in production environments, it is highly recommended to secure the REST servers brought up by each MirrorMaker node. See the <a href="https://kafka.apache.org/documentation/#connectconfigs">configuration properties for Kafka Connect</a> for information on how this can be accomplished.
+</b></p>
+
+<p>
+    It is also recommended to filter records from aborted transactions out from replicated data when running MirrorMaker. To do this, ensure that the consumer used to read from source clusters is configured with <code>isolation.level</code> set to <code>read_committed</code>. If replicating data from cluster <code>us-west</code>, this can be done for all replication flows that read from that cluster by adding the following to the MirrorMaker config file:
+</p>
+
+<pre class="line-numbers"><code class="language-text">us-west.consumer.isolation.level = read_committed
+</code></pre>
+
+<p>
+    As a final note, under the hood, MirrorMaker uses Kafka Connect source connectors to replicate data. For more information on exactly-once support for these kinds of connectors, see the <a href="https://kafka.apache.org/documentation/#connect_exactlyoncesource">relevant docs page</a>.
+</p>
+
 <h5 class="anchor-heading"><a id="georeplication-flow-create" class="anchor-link"></a><a href="#georeplication-flow-create">Creating and Enabling Replication Flows</a></h5>
 
 <p>
@@ -746,8 +762,7 @@ primary->secondary.enabled = true
 </code></pre>
 
 <p>
-    By default, a replication flow will replicate all but a few special topics and consumer groups from the source cluster to the target cluster, and automatically detect any newly created topics and groups. The names of replicated topics in the target cluster will be prefixed with the name of the source cluster (see section further below). For example, the topic <code>foo</code> in the source
-    cluster <code>us-west</code> would be replicated to a topic named <code>us-west.foo</code> in the target cluster <code>us-east</code>.
+    By default, a replication flow will replicate all but a few special topics and consumer groups from the source cluster to the target cluster, and automatically detect any newly created topics and groups. The names of replicated topics in the target cluster will be prefixed with the name of the source cluster (see section further below). For example, the topic <code>foo</code> in the source cluster <code>us-west</code> would be replicated to a topic named <code>us-west.foo</code> in the target cluster <code>us-east</code>.
 </p>
 
 <p>
@@ -757,8 +772,7 @@ primary->secondary.enabled = true
 <h5 class="anchor-heading"><a id="georeplication-flow-configure" class="anchor-link"></a><a href="#georeplication-flow-configure">Configuring Replication Flows</a></h5>
 
 <p>
-    The configuration of a replication flow is a combination of top-level default settings (e.g., <code>topics</code>), on top of which flow-specific settings, if any, are applied (e.g., <code>us-west->us-east.topics</code>). To change the top-level defaults, add the respective top-level setting to the MirrorMaker configuration file. To override the defaults for a specific replication flow only,
-    use the syntax format <code>{source}->{target}.{config.name}</code>.
+    The configuration of a replication flow is a combination of top-level default settings (e.g., <code>topics</code>), on top of which flow-specific settings, if any, are applied (e.g., <code>us-west->us-east.topics</code>). To change the top-level defaults, add the respective top-level setting to the MirrorMaker configuration file. To override the defaults for a specific replication flow only, use the syntax format <code>{source}->{target}.{config.name}</code>.
 </p>
 
 <p>
@@ -791,8 +805,7 @@ us-west->us-east.emit.heartbeats = false
 </code></pre>
 
 <p>
-    Additional configuration settings are supported, some of which are listed below. In most cases, you can leave these settings at their default values. See <a href="https://github.com/apache/kafka/blob/trunk/connect/mirror/src/main/java/org/apache/kafka/connect/mirror/MirrorMakerConfig.java">MirrorMakerConfig</a> and <a
-        href="https://github.com/apache/kafka/blob/trunk/connect/mirror/src/main/java/org/apache/kafka/connect/mirror/MirrorConnectorConfig.java">MirrorConnectorConfig</a> for further details.
+    Additional configuration settings are supported, some of which are listed below. In most cases, you can leave these settings at their default values. See <a href="https://github.com/apache/kafka/blob/trunk/connect/mirror/src/main/java/org/apache/kafka/connect/mirror/MirrorMakerConfig.java">MirrorMakerConfig</a> and <a href="https://github.com/apache/kafka/blob/trunk/connect/mirror/src/main/java/org/apache/kafka/connect/mirror/MirrorConnectorConfig.java">MirrorConnectorConfig</a> for further details.
 </p>
 
 <ul>
@@ -834,8 +847,7 @@ us-east.ssl.key.password=my-secret-password
 <h5 class="anchor-heading"><a id="georeplication-topic-naming" class="anchor-link"></a><a href="#georeplication-topic-naming">Custom Naming of Replicated Topics in Target Clusters</a></h5>
 
 <p>
-    Replicated topics in a target cluster—sometimes called <em>remote</em> topics—are renamed according to a replication policy. MirrorMaker uses this policy to ensure that events (aka records, messages) from different clusters are not written to the same topic-partition. By default as per <a
-        href="https://github.com/apache/kafka/blob/trunk/connect/mirror-client/src/main/java/org/apache/kafka/connect/mirror/DefaultReplicationPolicy.java">DefaultReplicationPolicy</a>, the names of replicated topics in the target clusters have the format <code>{source}.{source_topic_name}</code>:
+    Replicated topics in a target cluster—sometimes called <em>remote</em> topics—are renamed according to a replication policy. MirrorMaker uses this policy to ensure that events (aka records, messages) from different clusters are not written to the same topic-partition. By default as per <a href="https://github.com/apache/kafka/blob/trunk/connect/mirror-client/src/main/java/org/apache/kafka/connect/mirror/DefaultReplicationPolicy.java">DefaultReplicationPolicy</a>, the names of replicated topics in the target clusters have the format <code>{source}.{source_topic_name}</code>:
 </p>
 
 <pre class="line-numbers"><code class="language-text">us-west         us-east
@@ -880,7 +892,7 @@ A->B.topics = bar
 </p>
 
 <p>
-    It is therefore important to keep the MirrorMaker configration consistent across replication flows to the same target cluster. This can be achieved, for example, through automation tooling or by using a single, shared MirrorMaker configuration file for your entire organization.
+    It is therefore important to keep the MirrorMaker configuration consistent across replication flows to the same target cluster. This can be achieved, for example, through automation tooling or by using a single, shared MirrorMaker configuration file for your entire organization.
 </p>
 
 <h5 class="anchor-heading"><a id="georeplication-best-practice" class="anchor-link"></a><a href="#georeplication-best-practice">Best Practice: Consume from Remote, Produce to Local</a></h5>
@@ -943,8 +955,7 @@ us-east->us-west.enabled = true
 <h5 class="anchor-heading"><a id="georeplication-example-multi-cluster" class="anchor-link"></a><a href="#georeplication-example-multi-cluster">Example: Multi-Cluster Geo-Replication</a></h5>
 
 <p>
-    Let's put all the information from the previous sections together in a larger example. Imagine there are three data centers (west, east, north), with two Kafka clusters in each data center (e.g., <code>west-1</code>, <code>west-2</code>). The example in this section shows how to configure MirrorMaker (1) for Active/Active replication within each data center, as well as (2) for Cross Data
-    Center Replication (XDCR).
+    Let's put all the information from the previous sections together in a larger example. Imagine there are three data centers (west, east, north), with two Kafka clusters in each data center (e.g., <code>west-1</code>, <code>west-2</code>). The example in this section shows how to configure MirrorMaker (1) for Active/Active replication within each data center, as well as (2) for Cross Data Center Replication (XDCR).
 </p>
 
 <p>
@@ -1006,8 +1017,7 @@ $ ./bin/connect-mirror-maker.sh connect-mirror-maker.properties --clusters north
 <h4 class="anchor-heading"><a id="georeplication-starting" class="anchor-link"></a><a href="#georeplication-starting">Starting Geo-Replication</a></h4>
 
 <p>
-    You can run as few or as many MirrorMaker processes (think: nodes, servers) as needed. Because MirrorMaker is based on Kafka Connect, MirrorMaker processes that are configured to replicate the same Kafka clusters run in a distributed setup: They will find each other, share configuration (see section below), load balance their work, and so on. If, for example, you want to increase the
-    throughput of replication flows, one option is to run additional MirrorMaker processes in parallel.
+    You can run as few or as many MirrorMaker processes (think: nodes, servers) as needed. Because MirrorMaker is based on Kafka Connect, MirrorMaker processes that are configured to replicate the same Kafka clusters run in a distributed setup: They will find each other, share configuration (see section below), load balance their work, and so on. If, for example, you want to increase the throughput of replication flows, one option is to run additional MirrorMaker processes in parallel.
 </p>
 
 <p>
@@ -1031,8 +1041,7 @@ $ ./bin/connect-mirror-maker.sh connect-mirror-maker.properties \
 </code></pre>
 
 <p>
-    <em>Note when testing replication of consumer groups:</em> By default, MirrorMaker does not replicate consumer groups created by the <code>kafka-console-consumer.sh</code> tool, which you might use to test your MirrorMaker setup on the command line. If you do want to replicate these consumer groups as well, set the <code>groups.exclude</code> configuration accordingly (default: <code>groups.exclude
-    = console-consumer-.*, connect-.*, __.*</code>). Remember to update the configuration again once you completed your testing.
+    <em>Note when testing replication of consumer groups:</em> By default, MirrorMaker does not replicate consumer groups created by the <code>kafka-console-consumer.sh</code> tool, which you might use to test your MirrorMaker setup on the command line. If you do want to replicate these consumer groups as well, set the <code>groups.exclude</code> configuration accordingly (default: <code>groups.exclude = console-consumer-.*, connect-.*, __.*</code>). Remember to update the configuration again once you completed your testing.
 </p>
 
 <h4 class="anchor-heading"><a id="georeplication-stopping" class="anchor-link"></a><a href="#georeplication-stopping">Stopping Geo-Replication</a></h4>
@@ -1053,8 +1062,7 @@ $ ./bin/connect-mirror-maker.sh connect-mirror-maker.properties \
 <h4 class="anchor-heading"><a id="georeplication-monitoring" class="anchor-link"></a><a href="#georeplication-monitoring">Monitoring Geo-Replication</a></h4>
 
 <p>
-    It is recommended to monitor MirrorMaker processes to ensure all defined replication flows are up and running correctly. MirrorMaker is built on the Connect framework and inherits all of Connect's metrics, such <code>source-record-poll-rate</code>. In addition, MirrorMaker produces its own metrics under the <code>kafka.connect.mirror</code> metric group. Metrics are tagged with the following
-    properties:
+    It is recommended to monitor MirrorMaker processes to ensure all defined replication flows are up and running correctly. MirrorMaker is built on the Connect framework and inherits all of Connect's metrics, such <code>source-record-poll-rate</code>. In addition, MirrorMaker produces its own metrics under the <code>kafka.connect.mirror</code> metric group. Metrics are tagged with the following properties:
 </p>
 
 <ul>
@@ -1109,8 +1117,7 @@ checkpoint-latency-ms-avg
 <h4 class="anchor-heading"><a id="multitenancy-overview" class="anchor-link"></a><a href="#multitenancy-overview">Multi-Tenancy Overview</a></h4>
 
 <p>
-    As a highly scalable event streaming platform, Kafka is used by many users as their central nervous system, connecting in real-time a wide range of different systems and applications from various teams and lines of businesses. Such multi-tenant cluster environments command proper control and management to ensure the peaceful coexistence of these different needs. This section highlights
-    features and best practices to set up such shared environments, which should help you operate clusters that meet SLAs/OLAs and that minimize potential collateral damage caused by "noisy neighbors".
+    As a highly scalable event streaming platform, Kafka is used by many users as their central nervous system, connecting in real-time a wide range of different systems and applications from various teams and lines of businesses. Such multi-tenant cluster environments command proper control and management to ensure the peaceful coexistence of these different needs. This section highlights features and best practices to set up such shared environments, which should help you operate clusters that meet SLAs/OLAs and that minimize potential collateral damage caused by "noisy neighbors".
 </p>
 
 <p>
@@ -1133,8 +1140,7 @@ checkpoint-latency-ms-avg
 </p>
 
 <p>
-    In Kafka, the main unit of data is the topic. Users can create and name each topic. They can also delete them, but it is not possible to rename a topic directly. Instead, to rename a topic, the user must create a new topic, move the messages from the original topic to the new, and then delete the original. With this in mind, it is recommended to define logical spaces, based on an hierarchical
-    topic naming structure. This setup can then be combined with security features, such as prefixed ACLs, to isolate different spaces and tenants, while also minimizing the administrative overhead for securing the data in the cluster.
+    In Kafka, the main unit of data is the topic. Users can create and name each topic. They can also delete them, but it is not possible to rename a topic directly. Instead, to rename a topic, the user must create a new topic, move the messages from the original topic to the new, and then delete the original. With this in mind, it is recommended to define logical spaces, based on an hierarchical topic naming structure. This setup can then be combined with security features, such as prefixed ACLs, to isolate different spaces and tenants, while also minimizing the administrative overhead for securing the data in the cluster.
 </p>
 
 <p>
@@ -1175,9 +1181,7 @@ checkpoint-latency-ms-avg
 
 <ul>
     <li>Use <a href="#security_authz">prefix ACLs</a> (cf. <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-290%3A+Support+for+Prefixed+ACLs">KIP-290</a>) to enforce a common prefix for topic names. For example, team A may only be permitted to create topics whose names start with <code>payments.teamA.</code>.</li>
-    <li>Define a custom <code>CreateTopicPolicy</code> (cf. <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-108%3A+Create+Topic+Policy">KIP-108</a> and the setting <a href="#brokerconfigs_create.topic.policy.class.name">create.topic.policy.class.name</a>) to enforce strict naming patterns. These policies provide the most flexibility and can cover complex patterns and rules to match
-        an organization's needs.
-    </li>
+    <li>Define a custom <code>CreateTopicPolicy</code> (cf. <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-108%3A+Create+Topic+Policy">KIP-108</a> and the setting <a href="#brokerconfigs_create.topic.policy.class.name">create.topic.policy.class.name</a>) to enforce strict naming patterns. These policies provide the most flexibility and can cover complex patterns and rules to match an organization's needs.</li>
     <li>Disable topic creation for normal users by denying it with an ACL, and then rely on an external process to create topics on behalf of users (e.g., scripting or your favorite automation toolkit).</li>
     <li>It may also be useful to disable the Kafka feature to auto-create topics on demand by setting <code>auto.create.topics.enable=false</code> in the broker configuration. Note that you should not rely solely on this option.</li>
 </ul>
@@ -1186,8 +1190,7 @@ checkpoint-latency-ms-avg
 <h4 class="anchor-heading"><a id="multitenancy-topic-configs" class="anchor-link"></a><a href="#multitenancy-topic-configs">Configuring Topics: Data Retention And More</a></h4>
 
 <p>
-    Kafka's configuration is very flexible due to its fine granularity, and it supports a plethora of <a href="#topicconfigs">per-topic configuration settings</a> to help administrators set up multi-tenant clusters. For example, administrators often need to define data retention policies to control how much and/or for how long data will be stored in a topic, with settings such as <a
-        href="#retention.bytes">retention.bytes</a> (size) and <a href="#retention.ms">retention.ms</a> (time). This limits storage consumption within the cluster, and helps complying with legal requirements such as GDPR.
+    Kafka's configuration is very flexible due to its fine granularity, and it supports a plethora of <a href="#topicconfigs">per-topic configuration settings</a> to help administrators set up multi-tenant clusters. For example, administrators often need to define data retention policies to control how much and/or for how long data will be stored in a topic, with settings such as <a href="#retention.bytes">retention.bytes</a> (size) and <a href="#retention.ms">retention.ms</a> (time). This limits storage consumption within the cluster, and helps complying with legal requirements such as GDPR.
 </p>
 
 <h4 class="anchor-heading"><a id="multitenancy-security" class="anchor-link"></a><a href="#multitenancy-security">Securing Clusters and Topics: Authentication, Authorization, Encryption</a></h4>
@@ -1203,15 +1206,12 @@ checkpoint-latency-ms-avg
 <ol>
     <li><strong>Encryption</strong> of data transferred between Kafka brokers and Kafka clients, between brokers, between brokers and ZooKeeper nodes, and between brokers and other, optional tools.</li>
     <li><strong>Authentication</strong> of connections from Kafka clients and applications to Kafka brokers, as well as connections from Kafka brokers to ZooKeeper nodes.</li>
-    <li><strong>Authorization</strong> of client operations such as creating, deleting, and altering the configuration of topics; writing events to or reading events from a topic; creating and deleting ACLs. Administrators can also define custom policies to put in place additional restrictions, such as a <code>CreateTopicPolicy</code> and <code>AlterConfigPolicy</code> (see <a
-            href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-108%3A+Create+Topic+Policy">KIP-108</a> and the settings <a href="#brokerconfigs_create.topic.policy.class.name">create.topic.policy.class.name</a>, <a href="#brokerconfigs_alter.config.policy.class.name">alter.config.policy.class.name</a>).
-    </li>
+    <li><strong>Authorization</strong> of client operations such as creating, deleting, and altering the configuration of topics; writing events to or reading events from a topic; creating and deleting ACLs. Administrators can also define custom policies to put in place additional restrictions, such as a <code>CreateTopicPolicy</code> and <code>AlterConfigPolicy</code> (see <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-108%3A+Create+Topic+Policy">KIP-108</a> and the settings <a href="#brokerconfigs_create.topic.policy.class.name">create.topic.policy.class.name</a>, <a href="#brokerconfigs_alter.config.policy.class.name">alter.config.policy.class.name</a>).</li>
 </ol>
 
 <p>
-    When securing a multi-tenant Kafka environment, the most common administrative task is the third category (authorization), i.e., managing the user/client permissions that grant or deny access to certain topics and thus to the data stored by users within a cluster. This task is performed predominantly through the <a href="#security_authz">setting of access control lists (ACLs)</a>. Here,
-    administrators of multi-tenant environments in particular benefit from putting a hierarchical topic naming structure in place as described in a previous section, because they can conveniently control access to topics through prefixed ACLs (<code>--resource-pattern-type Prefixed</code>). This significantly minimizes the administrative overhead of securing topics in multi-tenant environments:
-    administrators can make their own trade-offs between higher developer convenience (more lenient permissions, using fewer and broader ACLs) vs. tighter security (more stringent permissions, using more and narrower ACLs).
+    When securing a multi-tenant Kafka environment, the most common administrative task is the third category (authorization), i.e., managing the user/client permissions that grant or deny access to certain topics and thus to the data stored by users within a cluster. This task is performed predominantly through the <a href="#security_authz">setting of access control lists (ACLs)</a>. Here, administrators of multi-tenant environments in particular benefit from putting a hierarchical topic naming structure in place as described in a previous section, because they can conveniently control access to topics through prefixed ACLs (<code>--resource-pattern-type Prefixed</code>). This significantly minimizes the administrative overhead of securing topics in multi-tenant environments: administrators can make their own trade-offs between higher developer convenience (more lenient permissions, using fewer and broader ACLs) vs. tighter security (more stringent permissions, using more and
+    narrower ACLs).
 </p>
 
 <p>
@@ -1233,20 +1233,16 @@ $ bin/kafka-acls.sh \
 <h4 class="anchor-heading"><a id="multitenancy-isolation" class="anchor-link"></a><a href="#multitenancy-isolation">Isolating Tenants: Quotas, Rate Limiting, Throttling</a></h4>
 
 <p>
-    Multi-tenant clusters should generally be configured with <a href="#design_quotas">quotas</a>, which protect against users (tenants) eating up too many cluster resources, such as when they attempt to write or read very high volumes of data, or create requests to brokers at an excessively high rate. This may cause network saturation, monopolize broker resources, and impact other clients—all of
-    which you want to avoid in a shared environment.
+    Multi-tenant clusters should generally be configured with <a href="#design_quotas">quotas</a>, which protect against users (tenants) eating up too many cluster resources, such as when they attempt to write or read very high volumes of data, or create requests to brokers at an excessively high rate. This may cause network saturation, monopolize broker resources, and impact other clients—all of which you want to avoid in a shared environment.
 </p>
 
 <p>
-    <strong>Client quotas:</strong> Kafka supports different types of (per-user principal) client quotas. Because a client's quotas apply irrespective of which topics the client is writing to or reading from, they are a convenient and effective tool to allocate resources in a multi-tenant cluster. <a href="#design_quotascpu">Request rate quotas</a>, for example, help to limit a user's impact on
-    broker CPU usage by limiting the time a broker spends on the <a href="/protocol.html">request handling path</a> for that user, after which throttling kicks in. In many situations, isolating users with request rate quotas has a bigger impact in multi-tenant clusters than setting incoming/outgoing network bandwidth quotas, because excessive broker CPU usage for processing requests reduces the
-    effective bandwidth the broker can serve. Furthermore, administrators can also define quotas on topic operations—such as create, delete, and alter—to prevent Kafka clusters from being overwhelmed by highly concurrent topic operations (see <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-599%3A+Throttle+Create+Topic%2C+Create+Partition+and+Delete+Topic+Operations">KIP-599</a> and
-    the quota type <code>controller_mutations_rate</code>).
+    <strong>Client quotas:</strong> Kafka supports different types of (per-user principal) client quotas. Because a client's quotas apply irrespective of which topics the client is writing to or reading from, they are a convenient and effective tool to allocate resources in a multi-tenant cluster. <a href="#design_quotascpu">Request rate quotas</a>, for example, help to limit a user's impact on broker CPU usage by limiting the time a broker spends on the <a href="/protocol.html">request handling path</a> for that user, after which throttling kicks in. In many situations, isolating users with request rate quotas has a bigger impact in multi-tenant clusters than setting incoming/outgoing network bandwidth quotas, because excessive broker CPU usage for processing requests reduces the effective bandwidth the broker can serve. Furthermore, administrators can also define quotas on topic operations—such as create, delete, and alter—to prevent Kafka clusters from being overwhelmed by highly
+    concurrent topic operations (see <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-599%3A+Throttle+Create+Topic%2C+Create+Partition+and+Delete+Topic+Operations">KIP-599</a> and the quota type <code>controller_mutation_rate</code>).
 </p>
 
 <p>
-    <strong>Server quotas:</strong> Kafka also supports different types of broker-side quotas. For example, administrators can set a limit on the rate with which the <a href="#brokerconfigs_max.connection.creation.rate">broker accepts new connections</a>, set the <a href="#brokerconfigs_max.connections">maximum number of connections per broker</a>, or set the maximum number of connections allowed
-    <a href="#brokerconfigs_max.connections.per.ip">from a specific IP address</a>.
+    <strong>Server quotas:</strong> Kafka also supports different types of broker-side quotas. For example, administrators can set a limit on the rate with which the <a href="#brokerconfigs_max.connection.creation.rate">broker accepts new connections</a>, set the <a href="#brokerconfigs_max.connections">maximum number of connections per broker</a>, or set the maximum number of connections allowed <a href="#brokerconfigs_max.connections.per.ip">from a specific IP address</a>.
 </p>
 
 <p>
@@ -1256,8 +1252,7 @@ $ bin/kafka-acls.sh \
 <h4 class="anchor-heading"><a id="multitenancy-monitoring" class="anchor-link"></a><a href="#multitenancy-monitoring">Monitoring and Metering</a></h4>
 
 <p>
-    <a href="#monitoring">Monitoring</a> is a broader subject that is covered <a href="#monitoring">elsewhere</a> in the documentation. Administrators of any Kafka environment, but especially multi-tenant ones, should set up monitoring according to these instructions. Kafka supports a wide range of metrics, such as the rate of failed authentication attempts, request latency, consumer lag, total
-    number of consumer groups, metrics on the quotas described in the previous section, and many more.
+    <a href="#monitoring">Monitoring</a> is a broader subject that is covered <a href="#monitoring">elsewhere</a> in the documentation. Administrators of any Kafka environment, but especially multi-tenant ones, should set up monitoring according to these instructions. Kafka supports a wide range of metrics, such as the rate of failed authentication attempts, request latency, consumer lag, total number of consumer groups, metrics on the quotas described in the previous section, and many more.
 </p>
 
 <p>
@@ -1273,9 +1268,7 @@ $ bin/kafka-acls.sh \
 <h4 class="anchor-heading"><a id="multitenancy-more" class="anchor-link"></a><a href="#multitenancy-more">Further considerations</a></h4>
 
 <p>
-    <strong>Data contracts:</strong> You may need to define data contracts between the producers and the consumers of data in a cluster, using event schemas. This ensures that events written to Kafka can always be read properly again, and prevents malformed or corrupt events being written. The best way to achieve this is to deploy a so-called schema registry alongside the cluster. (Kafka does not
-    include a schema registry, but there are third-party implementations available.) A schema registry manages the event schemas and maps the schemas to topics, so that producers know which topics are accepting which types (schemas) of events, and consumers know how to read and parse events in a topic. Some registry implementations provide further functionality, such as schema evolution, storing a
-    history of all schemas, and schema compatibility settings.
+    <strong>Data contracts:</strong> You may need to define data contracts between the producers and the consumers of data in a cluster, using event schemas. This ensures that events written to Kafka can always be read properly again, and prevents malformed or corrupt events being written. The best way to achieve this is to deploy a so-called schema registry alongside the cluster. (Kafka does not include a schema registry, but there are third-party implementations available.) A schema registry manages the event schemas and maps the schemas to topics, so that producers know which topics are accepting which types (schemas) of events, and consumers know how to read and parse events in a topic. Some registry implementations provide further functionality, such as schema evolution, storing a history of all schemas, and schema compatibility settings.
 </p>
 
 
@@ -1294,7 +1287,7 @@ The most important consumer configuration is the fetch size.
     All configurations are documented in the <a href="#configuration">configuration</a> section.
 <p>
 <h4 class="anchor-heading"><a id="prodconfig" class="anchor-link"></a><a href="#prodconfig">A Production Server Config</a></h4>
-  Here is an example production server configuration:
+Here is an example production server configuration:
 <pre class="line-numbers"><code class="language-text">  # ZooKeeper
   zookeeper.connect=[list of ZooKeeper servers]
 
@@ -1314,7 +1307,8 @@ Our client configuration varies a fair amount between different use cases.
 
 <h3 class="anchor-heading"><a id="java" class="anchor-link"></a><a href="#java">6.6 Java Version</a></h3>
 
-Java 8 and Java 11 are supported. Java 11 performs significantly better if TLS is enabled, so it is highly recommended (it also includes a number of other
+Java 8, Java 11, and Java 17 are supported. Note that Java 8 support has been deprecated since Apache Kafka 3.0 and will be removed in Apache Kafka 4.0.
+Java 11 and later versions perform significantly better if TLS is enabled, so they are highly recommended (they also include a number of other
 performance improvements: G1GC, CRC32C, Compact Strings, Thread-Local Handshakes and more).
 
 From a security perspective, we recommend the latest released patch version as older freely available versions have disclosed security vulnerabilities.
@@ -1344,101 +1338,122 @@ We are using dual quad-core Intel Xeon machines with 24GB of memory.
 
 <h4 class="anchor-heading"><a id="os" class="anchor-link"></a><a href="#os">OS</a></h4>
 Kafka should run well on any unix system and has been tested on Linux and Solaris.
-  <p>
-  We have seen a few issues running on Windows and Windows is not currently a well supported platform though we would be happy to change that.
-  <p>
-  It is unlikely to require much OS-level tuning, but there are three potentially important OS-level configurations:
-  <ul>
-      <li>File descriptor limits: Kafka uses file descriptors for log segments and open connections.  If a broker hosts many partitions, consider that the broker needs at least (number_of_partitions)*(partition_size/segment_size) to track all log segments in addition to the number of connections the broker makes. We recommend at least 100000 allowed file descriptors for the broker processes as a starting point. Note: The mmap() function adds an extra reference to the file associated with the file descriptor fildes which is not removed by a subsequent close() on that file descriptor. This reference is removed when there are no more mappings to the file.
-      <li>Max socket buffer size: can be increased to enable high-performance data transfer between data centers as <a href="http://www.psc.edu/index.php/networking/641-tcp-tune">described here</a>.
-      <li>Maximum number of memory map areas a process may have (aka vm.max_map_count). <a href="http://kernel.org/doc/Documentation/sysctl/vm.txt">See the Linux kernel documentation</a>. You should keep an eye at this OS-level property when considering the maximum number of partitions a broker may have. By default, on a number of Linux systems, the value of vm.max_map_count is somewhere around 65535. Each log segment, allocated per partition, requires a pair of index/timeindex files, and each of these files consumes 1 map area. In other words, each log segment uses 2 map areas. Thus, each partition requires minimum 2 map areas, as long as it hosts a single log segment. That is to say, creating 50000 partitions on a broker will result allocation of 100000 map areas and likely cause broker crash with OutOfMemoryError (Map failed) on a system with default vm.max_map_count. Keep in mind that the number of log segments per partition varies depending on the segment size, load intensity, retention policy and, generally, tends to be more than one.
-  </ul>
+<p>
+    We have seen a few issues running on Windows and Windows is not currently a well supported platform though we would be happy to change that.
+<p>
+    It is unlikely to require much OS-level tuning, but there are three potentially important OS-level configurations:
+<ul>
+    <li>File descriptor limits: Kafka uses file descriptors for log segments and open connections. If a broker hosts many partitions, consider that the broker needs at least (number_of_partitions)*(partition_size/segment_size) to track all log segments in addition to the number of connections the broker makes. We recommend at least 100000 allowed file descriptors for the broker processes as a starting point. Note: The mmap() function adds an extra reference to the file associated with the file descriptor fildes which is not removed by a subsequent close() on that file descriptor. This reference is removed when there are no more mappings to the file.
+    <li>Max socket buffer size: can be increased to enable high-performance data transfer between data centers as <a href="http://www.psc.edu/index.php/networking/641-tcp-tune">described here</a>.
+    <li>Maximum number of memory map areas a process may have (aka vm.max_map_count). <a href="http://kernel.org/doc/Documentation/sysctl/vm.txt">See the Linux kernel documentation</a>. You should keep an eye at this OS-level property when considering the maximum number of partitions a broker may have. By default, on a number of Linux systems, the value of vm.max_map_count is somewhere around 65535. Each log segment, allocated per partition, requires a pair of index/timeindex files, and each of these files consumes 1 map area. In other words, each log segment uses 2 map areas. Thus, each partition requires minimum 2 map areas, as long as it hosts a single log segment. That is to say, creating 50000 partitions on a broker will result allocation of 100000 map areas and likely cause broker crash with OutOfMemoryError (Map failed) on a system with default vm.max_map_count. Keep in mind that the number of log segments per partition varies depending on the segment size, load intensity,
+        retention policy and, generally, tends to be more than one.
+</ul>
 <p>
 
 <h4 class="anchor-heading"><a id="diskandfs" class="anchor-link"></a><a href="#diskandfs">Disks and Filesystem</a></h4>
-  We recommend using multiple drives to get good throughput and not sharing the same drives used for Kafka data with application logs or other OS filesystem activity to ensure good latency. You can either RAID these drives together into a single volume or format and mount each drive as its own directory. Since Kafka has replication the redundancy provided by RAID can also be provided at the application level. This choice has several tradeoffs.
-  <p>
-  If you configure multiple data directories partitions will be assigned round-robin to data directories. Each partition will be entirely in one of the data directories. If data is not well balanced among partitions this can lead to load imbalance between disks.
-  <p>
-  RAID can potentially do better at balancing load between disks (although it doesn't always seem to) because it balances load at a lower level. The primary downside of RAID is that it is usually a big performance hit for write throughput and reduces the available disk space.
+We recommend using multiple drives to get good throughput and not sharing the same drives used for Kafka data with application logs or other OS filesystem activity to ensure good latency. You can either RAID these drives together into a single volume or format and mount each drive as its own directory. Since Kafka has replication the redundancy provided by RAID can also be provided at the application level. This choice has several tradeoffs.
+<p>
+    If you configure multiple data directories partitions will be assigned round-robin to data directories. Each partition will be entirely in one of the data directories. If data is not well balanced among partitions this can lead to load imbalance between disks.
+<p>
+    RAID can potentially do better at balancing load between disks (although it doesn't always seem to) because it balances load at a lower level. The primary downside of RAID is that it is usually a big performance hit for write throughput and reduces the available disk space.
 <p>
     Another potential benefit of RAID is the ability to tolerate disk failures. However our experience has been that rebuilding the RAID array is so I/O intensive that it effectively disables the server, so this does not provide much real availability improvement.
 
 <h4 class="anchor-heading"><a id="appvsosflush" class="anchor-link"></a><a href="#appvsosflush">Application vs. OS Flush Management</a></h4>
-  Kafka always immediately writes all data to the filesystem and supports the ability to configure the flush policy that controls when data is forced out of the OS cache and onto disk using the flush. This flush policy can be controlled to force data to disk after a period of time or after a certain number of messages has been written. There are several choices in this configuration.
-  <p>
-  Kafka must eventually call fsync to know that data was flushed. When recovering from a crash for any log segment not known to be fsync'd Kafka will check the integrity of each message by checking its CRC and also rebuild the accompanying offset index file as part of the recovery process executed on startup.
-  <p>
-  Note that durability in Kafka does not require syncing data to disk, as a failed node will always recover from its replicas.
-  <p>
-  We recommend using the default flush settings which disable application fsync entirely. This means relying on the background flush done by the OS and Kafka's own background flush. This provides the best of all worlds for most uses: no knobs to tune, great throughput and latency, and full recovery guarantees. We generally feel that the guarantees provided by replication are stronger than sync to local disk, however the paranoid still may prefer having both and application level fsync policies are still supported.
-  <p>
-  The drawback of using application level flush settings is that it is less efficient in its disk usage pattern (it gives the OS less leeway to re-order writes) and it can introduce latency as fsync in most Linux filesystems blocks writes to the file whereas the background flushing does much more granular page-level locking.
+Kafka always immediately writes all data to the filesystem and supports the ability to configure the flush policy that controls when data is forced out of the OS cache and onto disk using the flush. This flush policy can be controlled to force data to disk after a period of time or after a certain number of messages has been written. There are several choices in this configuration.
+<p>
+    Kafka must eventually call fsync to know that data was flushed. When recovering from a crash for any log segment not known to be fsync'd Kafka will check the integrity of each message by checking its CRC and also rebuild the accompanying offset index file as part of the recovery process executed on startup.
+<p>
+    Note that durability in Kafka does not require syncing data to disk, as a failed node will always recover from its replicas.
+<p>
+    We recommend using the default flush settings which disable application fsync entirely. This means relying on the background flush done by the OS and Kafka's own background flush. This provides the best of all worlds for most uses: no knobs to tune, great throughput and latency, and full recovery guarantees. We generally feel that the guarantees provided by replication are stronger than sync to local disk, however the paranoid still may prefer having both and application level fsync policies are still supported.
+<p>
+    The drawback of using application level flush settings is that it is less efficient in its disk usage pattern (it gives the OS less leeway to re-order writes) and it can introduce latency as fsync in most Linux filesystems blocks writes to the file whereas the background flushing does much more granular page-level locking.
 <p>
     In general you don't need to do any low-level tuning of the filesystem, but in the next few sections we will go over some of this in case it is useful.
 
 <h4 class="anchor-heading"><a id="linuxflush" class="anchor-link"></a><a href="#linuxflush">Understanding Linux OS Flush Behavior</a></h4>
 
-  In Linux, data written to the filesystem is maintained in <a href="http://en.wikipedia.org/wiki/Page_cache">pagecache</a> until it must be written out to disk (due to an application-level fsync or the OS's own flush policy). The flushing of data is done by a set of background threads called pdflush (or in post 2.6.32 kernels "flusher threads").
-  <p>
-  Pdflush has a configurable policy that controls how much dirty data can be maintained in cache and for how long before it must be written back to disk.
-  This policy is described <a href="http://web.archive.org/web/20160518040713/http://www.westnet.com/~gsmith/content/linux-pdflush.htm">here</a>.
-  When Pdflush cannot keep up with the rate of data being written it will eventually cause the writing process to block incurring latency in the writes to slow down the accumulation of data.
+In Linux, data written to the filesystem is maintained in <a href="http://en.wikipedia.org/wiki/Page_cache">pagecache</a> until it must be written out to disk (due to an application-level fsync or the OS's own flush policy). The flushing of data is done by a set of background threads called pdflush (or in post 2.6.32 kernels "flusher threads").
+<p>
+    Pdflush has a configurable policy that controls how much dirty data can be maintained in cache and for how long before it must be written back to disk.
+    This policy is described <a href="http://web.archive.org/web/20160518040713/http://www.westnet.com/~gsmith/content/linux-pdflush.htm">here</a>.
+    When Pdflush cannot keep up with the rate of data being written it will eventually cause the writing process to block incurring latency in the writes to slow down the accumulation of data.
 <p>
     You can see the current state of OS memory usage by doing
 <pre class="language-bash"> &gt; cat /proc/meminfo </code></pre>
-  The meaning of these values are described in the link above.
-  <p>
-  Using pagecache has several advantages over an in-process cache for storing data that will be written out to disk:
-  <ul>
+The meaning of these values are described in the link above.
+<p>
+    Using pagecache has several advantages over an in-process cache for storing data that will be written out to disk:
+<ul>
     <li>The I/O scheduler will batch together consecutive small writes into bigger physical writes which improves throughput.
     <li>The I/O scheduler will attempt to re-sequence writes to minimize movement of the disk head which improves throughput.
     <li>It automatically uses all the free memory on the machine
-  </ul>
+</ul>
 
 <h4 class="anchor-heading"><a id="filesystems" class="anchor-link"></a><a href="#filesystems">Filesystem Selection</a></h4>
 <p>Kafka uses regular files on disk, and as such it has no hard dependency on a specific filesystem. The two filesystems which have the most usage, however, are EXT4 and XFS. Historically, EXT4 has had more usage, but recent improvements to the XFS filesystem have shown it to have better performance characteristics for Kafka's workload with no compromise in stability.</p>
-<p>Comparison testing was performed on a cluster with significant message loads, using a variety of filesystem creation and mount options. The primary metric in Kafka that was monitored was the "Request Local Time", indicating the amount of time append operations were taking. XFS resulted in much better local times (160ms vs. 250ms+ for the best EXT4 configuration), as well as lower average wait
-    times. The XFS performance also showed less variability in disk performance.</p>
+<p>Comparison testing was performed on a cluster with significant message loads, using a variety of filesystem creation and mount options. The primary metric in Kafka that was monitored was the "Request Local Time", indicating the amount of time append operations were taking. XFS resulted in much better local times (160ms vs. 250ms+ for the best EXT4 configuration), as well as lower average wait times. The XFS performance also showed less variability in disk performance.</p>
 <h5 class="anchor-heading"><a id="generalfs" class="anchor-link"></a><a href="#generalfs">General Filesystem Notes</a></h5>
-  For any filesystem used for data directories, on Linux systems, the following options are recommended to be used at mount time:
+For any filesystem used for data directories, on Linux systems, the following options are recommended to be used at mount time:
 <ul>
     <li>noatime: This option disables updating of a file's atime (last access time) attribute when the file is read. This can eliminate a significant number of filesystem writes, especially in the case of bootstrapping consumers. Kafka does not rely on the atime attributes at all, so it is safe to disable this.</li>
 </ul>
 <h5 class="anchor-heading"><a id="xfs" class="anchor-link"></a><a href="#xfs">XFS Notes</a></h5>
-  The XFS filesystem has a significant amount of auto-tuning in place, so it does not require any change in the default settings, either at filesystem creation time or at mount. The only tuning parameters worth considering are:
+The XFS filesystem has a significant amount of auto-tuning in place, so it does not require any change in the default settings, either at filesystem creation time or at mount. The only tuning parameters worth considering are:
 <ul>
     <li>largeio: This affects the preferred I/O size reported by the stat call. While this can allow for higher performance on larger disk writes, in practice it had minimal or no effect on performance.</li>
     <li>nobarrier: For underlying devices that have battery-backed cache, this option can provide a little more performance by disabling periodic write flushes. However, if the underlying device is well-behaved, it will report to the filesystem that it does not require flushes, and this option will have no effect.</li>
 </ul>
 <h5 class="anchor-heading"><a id="ext4" class="anchor-link"></a><a href="#ext4">EXT4 Notes</a></h5>
-  EXT4 is a serviceable choice of filesystem for the Kafka data directories, however getting the most performance out of it will require adjusting several mount options. In addition, these options are generally unsafe in a failure scenario, and will result in much more data loss and corruption. For a single broker failure, this is not much of a concern as the disk can be wiped and the replicas rebuilt from the cluster. In a multiple-failure scenario, such as a power outage, this can mean underlying filesystem (and therefore data) corruption that is not easily recoverable. The following options can be adjusted:
-  <ul>
+EXT4 is a serviceable choice of filesystem for the Kafka data directories, however getting the most performance out of it will require adjusting several mount options. In addition, these options are generally unsafe in a failure scenario, and will result in much more data loss and corruption. For a single broker failure, this is not much of a concern as the disk can be wiped and the replicas rebuilt from the cluster. In a multiple-failure scenario, such as a power outage, this can mean underlying filesystem (and therefore data) corruption that is not easily recoverable. The following options can be adjusted:
+<ul>
     <li>data=writeback: Ext4 defaults to data=ordered which puts a strong order on some writes. Kafka does not require this ordering as it does very paranoid data recovery on all unflushed log. This setting removes the ordering constraint and seems to significantly reduce latency.
     <li>Disabling journaling: Journaling is a tradeoff: it makes reboots faster after server crashes but it introduces a great deal of additional locking which adds variance to write performance. Those who don't care about reboot time and want to reduce a major source of write latency spikes can turn off journaling entirely.
     <li>commit=num_secs: This tunes the frequency with which ext4 commits to its metadata journal. Setting this to a lower value reduces the loss of unflushed data during a crash. Setting this to a higher value will improve throughput.
     <li>nobh: This setting controls additional ordering guarantees when using data=writeback mode. This should be safe with Kafka as we do not depend on write ordering and improves throughput and latency.
     <li>delalloc: Delayed allocation means that the filesystem avoid allocating any blocks until the physical write occurs. This allows ext4 to allocate a large extent instead of smaller pages and helps ensure the data is written sequentially. This feature is great for throughput. It does seem to involve some locking in the filesystem which adds a bit of latency variance.
-  </ul>
+</ul>
+
+<h4 class="anchor-heading"><a id="replace_disk" class="anchor-link"></a><a href="#replace_disk">Replace KRaft Controller Disk</a></h4>
+<p>When Kafka is configured to use KRaft, the controllers store the cluster metadata in the directory specified in <code>metadata.log.dir</code> -- or the first log directory, if <code>metadata.log.dir</code> is not configured. See the documentation for <code>metadata.log.dir</code> for details.</p>
+
+<p>If the data in the cluster metadata directory is lost either because of hardware failure or the hardware needs to be replaced, care should be taken when provisioning the new controller node. The new controller node should not be formatted and started until the majority of the controllers have all of the committed data. To determine if the majority of the controllers have the committed data, run the <code>kafka-metadata-quorum.sh</code> tool to describe the replication status:</p>
+
+<pre class="line-numbers"><code class="language-bash"> &gt; bin/kafka-metadata-quorum.sh --bootstrap-server broker_host:port describe --replication
+ NodeId  LogEndOffset    Lag     LastFetchTimestamp      LastCaughtUpTimestamp   Status
+ 1       25806           0       1662500992757           1662500992757           Leader
+ ...     ...             ...     ...                     ...                     ...
+  </code></pre>
+
+<p>Check and wait until the <code>Lag</code> is small for a majority of the controllers. If the leader's end offset is not increasing, you can wait until the lag is 0 for a majority; otherwise, you can pick the latest leader end offset and wait until all replicas have reached it. Check and wait until the <code>LastFetchTimestamp</code> and <code>LastCaughtUpTimestamp</code> are close to each other for the majority of the controllers. At this point it is safer to format the controller's metadata log directory. This can be done by running the <code>kafka-storage.sh</code> command.</p>
+
+<pre class="line-numbers"><code class="language-bash"> &gt; bin/kafka-storage.sh format --cluster-id uuid --config server_properties</code></pre>
+
+<p>It is possible for the <code>bin/kafka-storage.sh format</code> command above to fail with a message like <code>Log directory ... is already formatted</code>. This can happen when combined mode is used and only the metadata log directory was lost but not the others. In that case and only in that case, can you run the <code>kafka-storage.sh format</code> command with the <code>--ignore-formatted</code> option.</p>
+
+<p>Start the KRaft controller after formatting the log directories.</p>
+
+<pre class="line-numbers"><code class="language-bash"> &gt; /bin/kafka-server-start.sh server_properties</code></pre>
 
 <h3 class="anchor-heading"><a id="monitoring" class="anchor-link"></a><a href="#monitoring">6.8 Monitoring</a></h3>
 
-  Kafka uses Yammer Metrics for metrics reporting in the server. The Java clients use Kafka Metrics, a built-in metrics registry that minimizes transitive dependencies pulled into client applications. Both expose metrics via JMX and can be configured to report stats using pluggable stats reporters to hook up to your monitoring system.
-  <p>
-  All Kafka rate metrics have a corresponding cumulative count metric with suffix <code>-total</code>. For example,
-  <code>records-consumed-rate</code> has a corresponding metric named <code>records-consumed-total</code>.
+Kafka uses Yammer Metrics for metrics reporting in the server. The Java clients use Kafka Metrics, a built-in metrics registry that minimizes transitive dependencies pulled into client applications. Both expose metrics via JMX and can be configured to report stats using pluggable stats reporters to hook up to your monitoring system.
+<p>
+    All Kafka rate metrics have a corresponding cumulative count metric with suffix <code>-total</code>. For example,
+    <code>records-consumed-rate</code> has a corresponding metric named <code>records-consumed-total</code>.
 <p>
     The easiest way to see the available metrics is to fire up jconsole and point it at a running kafka client or server; this will allow browsing all metrics with JMX.
 
 <h4 class="anchor-heading"><a id="remote_jmx" class="anchor-link"></a><a href="#remote_jmx">Security Considerations for Remote Monitoring using JMX</a></h4>
-  Apache Kafka disables remote JMX by default. You can enable remote monitoring using JMX by setting the environment variable
-  <code>JMX_PORT</code> for processes started using the CLI or standard Java system properties to enable remote JMX programmatically.
-  You must enable security when enabling remote JMX in production scenarios to ensure that unauthorized users cannot monitor or
-  control your broker or application as well as the platform on which these are running. Note that authentication is disabled for
-  JMX by default in Kafka and security configs must be overridden for production deployments by setting the environment variable
-  <code>KAFKA_JMX_OPTS</code> for processes started using the CLI or by setting appropriate Java system properties. See
+Apache Kafka disables remote JMX by default. You can enable remote monitoring using JMX by setting the environment variable
+<code>JMX_PORT</code> for processes started using the CLI or standard Java system properties to enable remote JMX programmatically.
+You must enable security when enabling remote JMX in production scenarios to ensure that unauthorized users cannot monitor or
+control your broker or application as well as the platform on which these are running. Note that authentication is disabled for
+JMX by default in Kafka and security configs must be overridden for production deployments by setting the environment variable
+<code>KAFKA_JMX_OPTS</code> for processes started using the CLI or by setting appropriate Java system properties. See
 <a href="https://docs.oracle.com/javase/8/docs/technotes/guides/management/agent.html">Monitoring and Management Using JMX Technology</a>
-  for details on securing JMX.
+for details on securing JMX.
   <p>
   We do graphing and alerting on the following metrics:
   <table class="data-table">
@@ -1447,20 +1462,20 @@ Kafka should run well on any unix system and has been tested on Linux and Solari
         <th>Mbean name</th>
         <th>Normal value</th>
       </tr>
-      <tr>
-        <td>Message in rate</td>
-        <td>kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec</td>
-        <td></td>
-      </tr>
-      <tr>
-          <td>Byte in rate from clients</td>
-          <td>kafka.server:type=BrokerTopicMetrics,name=BytesInPerSec</td>
-          <td></td>
-      </tr>
+  <tr>
+      <td>Message in rate</td>
+      <td>kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec,topic=([-.\w]+)</td>
+      <td>Incoming message rate per topic. Omitting 'topic=(...)' will yield the all-topic rate.</td>
+  </tr>
+  <tr>
+      <td>Byte in rate from clients</td>
+      <td>kafka.server:type=BrokerTopicMetrics,name=BytesInPerSec,topic=([-.\w]+)</td>
+      <td>Byte in (from the clients) rate per topic. Omitting 'topic=(...)' will yield the all-topic rate.</td>
+  </tr>
   <tr>
       <td>Byte in rate from other brokers</td>
-      <td>kafka.server:type=BrokerTopicMetrics,name=ReplicationBytesInPerSec</td>
-      <td></td>
+      <td>kafka.server:type=BrokerTopicMetrics,name=ReplicationBytesInPerSec,topic=([-.\w]+)</td>
+      <td>Byte in (from the other brokers) rate per topic. Omitting 'topic=(...)' will yield the all-topic rate.</td>
   </tr>
   <tr>
       <td>Controller Request rate from Broker</td>
@@ -1494,16 +1509,36 @@ Kafka should run well on any unix system and has been tested on Linux and Solari
           multiple errors, all are counted. error=NONE indicates successful responses.
       </td>
   </tr>
-      <tr>
-        <td>Request size in bytes</td>
-        <td>kafka.network:type=RequestMetrics,name=RequestBytes,request=([-.\w]+)</td>
-        <td>Size of requests for each request type.</td>
-      </tr>
-      <tr>
-        <td>Temporary memory size in bytes</td>
-        <td>kafka.network:type=RequestMetrics,name=TemporaryMemoryBytes,request={Produce|Fetch}</td>
-        <td>Temporary memory used for message format conversions and decompression.</td>
-      </tr>
+  <tr>
+      <td>Produce request rate</td>
+      <td>kafka.server:type=BrokerTopicMetrics,name=TotalProduceRequestsPerSec,topic=([-.\w]+)</td>
+      <td>Produce request rate per topic. Omitting 'topic=(...)' will yield the all-topic rate.</td>
+  </tr>
+  <tr>
+      <td>Fetch request rate</td>
+      <td>kafka.server:type=BrokerTopicMetrics,name=TotalFetchRequestsPerSec,topic=([-.\w]+)</td>
+      <td>Fetch request (from clients or followers) rate per topic. Omitting 'topic=(...)' will yield the all-topic rate.</td>
+  </tr>
+  <tr>
+      <td>Failed produce request rate</td>
+      <td>kafka.server:type=BrokerTopicMetrics,name=FailedProduceRequestsPerSec,topic=([-.\w]+)</td>
+      <td>Failed Produce request rate per topic. Omitting 'topic=(...)' will yield the all-topic rate.</td>
+  </tr>
+  <tr>
+      <td>Failed fetch request rate</td>
+      <td>kafka.server:type=BrokerTopicMetrics,name=FailedFetchRequestsPerSec,topic=([-.\w]+)</td>
+      <td>Failed Fetch request (from clients or followers) rate per topic. Omitting 'topic=(...)' will yield the all-topic rate.</td>
+  </tr>
+  <tr>
+      <td>Request size in bytes</td>
+      <td>kafka.network:type=RequestMetrics,name=RequestBytes,request=([-.\w]+)</td>
+      <td>Size of requests for each request type.</td>
+  </tr>
+  <tr>
+      <td>Temporary memory size in bytes</td>
+      <td>kafka.network:type=RequestMetrics,name=TemporaryMemoryBytes,request={Produce|Fetch}</td>
+      <td>Temporary memory used for message format conversions and decompression.</td>
+  </tr>
   <tr>
       <td>Message conversion time</td>
       <td>kafka.network:type=RequestMetrics,name=MessageConversionsTimeMs,request={Produce|Fetch}</td>
@@ -1512,7 +1547,7 @@ Kafka should run well on any unix system and has been tested on Linux and Solari
   <tr>
       <td>Message conversion rate</td>
       <td>kafka.server:type=BrokerTopicMetrics,name={Produce|Fetch}MessageConversionsPerSec,topic=([-.\w]+)</td>
-      <td>Number of records which required message format conversion.</td>
+      <td>Message format conversion rate, for Produce or Fetch requests, per topic. Omitting 'topic=(...)' will yield the all-topic rate.</td>
   </tr>
   <tr>
       <td>Request Queue Size</td>
@@ -1521,33 +1556,38 @@ Kafka should run well on any unix system and has been tested on Linux and Solari
   </tr>
   <tr>
       <td>Byte out rate to clients</td>
-      <td>kafka.server:type=BrokerTopicMetrics,name=BytesOutPerSec</td>
-      <td></td>
+      <td>kafka.server:type=BrokerTopicMetrics,name=BytesOutPerSec,topic=([-.\w]+)</td>
+      <td>Byte out (to the clients) rate per topic. Omitting 'topic=(...)' will yield the all-topic rate.</td>
   </tr>
   <tr>
       <td>Byte out rate to other brokers</td>
-      <td>kafka.server:type=BrokerTopicMetrics,name=ReplicationBytesOutPerSec</td>
-      <td></td>
+      <td>kafka.server:type=BrokerTopicMetrics,name=ReplicationBytesOutPerSec,topic=([-.\w]+)</td>
+      <td>Byte out (to the other brokers) rate per topic. Omitting 'topic=(...)' will yield the all-topic rate.</td>
+  </tr>
+  <tr>
+      <td>Rejected byte rate</td>
+      <td>kafka.server:type=BrokerTopicMetrics,name=BytesRejectedPerSec,topic=([-.\w]+)</td>
+      <td>Rejected byte rate per topic, due to the record batch size being greater than max.message.bytes configuration. Omitting 'topic=(...)' will yield the all-topic rate.</td>
   </tr>
   <tr>
       <td>Message validation failure rate due to no key specified for compacted topic</td>
       <td>kafka.server:type=BrokerTopicMetrics,name=NoKeyCompactedTopicRecordsPerSec</td>
-      <td></td>
+      <td>0</td>
   </tr>
   <tr>
       <td>Message validation failure rate due to invalid magic number</td>
       <td>kafka.server:type=BrokerTopicMetrics,name=InvalidMagicNumberRecordsPerSec</td>
-      <td></td>
+      <td>0</td>
   </tr>
   <tr>
       <td>Message validation failure rate due to incorrect crc checksum</td>
       <td>kafka.server:type=BrokerTopicMetrics,name=InvalidMessageCrcRecordsPerSec</td>
-      <td></td>
+      <td>0</td>
   </tr>
   <tr>
       <td>Message validation failure rate due to non-continuous offset or sequence number in batch</td>
       <td>kafka.server:type=BrokerTopicMetrics,name=InvalidOffsetOrSequenceRecordsPerSec</td>
-      <td></td>
+      <td>0</td>
   </tr>
   <tr>
       <td>Log flush rate and time</td>
@@ -1555,39 +1595,24 @@ Kafka should run well on any unix system and has been tested on Linux and Solari
       <td></td>
   </tr>
   <tr>
-      <td># of under replicated partitions (the number of non-reassigning replicas - the number of ISR &gt 0)</td>
-      <td>kafka.server:type=ReplicaManager,name=UnderReplicatedPartitions</td>
-        <td>0</td>
-      </tr>
-      <tr>
-        <td># of under minIsr partitions (|ISR| &lt min.insync.replicas)</td>
-        <td>kafka.server:type=ReplicaManager,name=UnderMinIsrPartitionCount</td>
-        <td>0</td>
-      </tr>
-      <tr>
-        <td># of at minIsr partitions (|ISR| = min.insync.replicas)</td>
-        <td>kafka.server:type=ReplicaManager,name=AtMinIsrPartitionCount</td>
-        <td>0</td>
-      </tr>
-      <tr>
-        <td># of offline log directories</td>
-        <td>kafka.log:type=LogManager,name=OfflineLogDirectoryCount</td>
-        <td>0</td>
-      </tr>
-      <tr>
-        <td>Is controller active on broker</td>
-        <td>kafka.controller:type=KafkaController,name=ActiveControllerCount</td>
-        <td>only one broker in the cluster should have 1</td>
-      </tr>
-      <tr>
-          <td>Leader election rate</td>
-          <td>kafka.controller:type=ControllerStats,name=LeaderElectionRateAndTimeMs</td>
-          <td>non-zero when there are broker failures</td>
-      </tr>
+      <td># of offline log directories</td>
+      <td>kafka.log:type=LogManager,name=OfflineLogDirectoryCount</td>
+      <td>0</td>
+  </tr>
+  <tr>
+      <td>Leader election rate</td>
+      <td>kafka.controller:type=ControllerStats,name=LeaderElectionRateAndTimeMs</td>
+      <td>non-zero when there are broker failures</td>
+  </tr>
   <tr>
       <td>Unclean leader election rate</td>
       <td>kafka.controller:type=ControllerStats,name=UncleanLeaderElectionsPerSec</td>
       <td>0</td>
+  </tr>
+  <tr>
+      <td>Is controller active on broker</td>
+      <td>kafka.controller:type=KafkaController,name=ActiveControllerCount</td>
+      <td>only one broker in the cluster should have 1</td>
   </tr>
   <tr>
       <td>Pending topic deletes</td>
@@ -1608,6 +1633,26 @@ Kafka should run well on any unix system and has been tested on Linux and Solari
       <td>Ineligible pending replica deletes</td>
       <td>kafka.controller:type=KafkaController,name=ReplicasIneligibleToDeleteCount</td>
       <td></td>
+  </tr>
+  <tr>
+      <td># of under replicated partitions (|ISR| &lt |all replicas|)</td>
+      <td>kafka.server:type=ReplicaManager,name=UnderReplicatedPartitions</td>
+      <td>0</td>
+  </tr>
+  <tr>
+      <td># of under minIsr partitions (|ISR| &lt min.insync.replicas)</td>
+      <td>kafka.server:type=ReplicaManager,name=UnderMinIsrPartitionCount</td>
+      <td>0</td>
+  </tr>
+  <tr>
+      <td># of at minIsr partitions (|ISR| = min.insync.replicas)</td>
+      <td>kafka.server:type=ReplicaManager,name=AtMinIsrPartitionCount</td>
+      <td>0</td>
+  </tr>
+  <tr>
+      <td>Producer Id counts</td>
+      <td>kafka.server:type=ReplicaManager,name=ProducerIdCount</td>
+      <td>Count of all producer ids created by transactional and idempotent producers in each replica on the broker</td>
   </tr>
   <tr>
       <td>Partition counts</td>
@@ -1652,16 +1697,16 @@ Kafka should run well on any unix system and has been tested on Linux and Solari
       <td>Lag in messages per follower replica</td>
       <td>kafka.server:type=FetcherLagMetrics,name=ConsumerLag,clientId=([-.\w]+),topic=([-.\w]+),partition=([0-9]+)</td>
       <td>lag should be proportional to the maximum batch size of a produce request.</td>
-      </tr>
-      <tr>
-        <td>Requests waiting in the producer purgatory</td>
-        <td>kafka.server:type=DelayedOperationPurgatory,name=PurgatorySize,delayedOperation=Produce</td>
-        <td>non-zero if ack=-1 is used</td>
-      </tr>
-      <tr>
-        <td>Requests waiting in the fetch purgatory</td>
-        <td>kafka.server:type=DelayedOperationPurgatory,name=PurgatorySize,delayedOperation=Fetch</td>
-        <td>size depends on fetch.wait.max.ms in the consumer</td>
+  </tr>
+  <tr>
+      <td>Requests waiting in the producer purgatory</td>
+      <td>kafka.server:type=DelayedOperationPurgatory,name=PurgatorySize,delayedOperation=Produce</td>
+      <td>non-zero if ack=-1 is used</td>
+  </tr>
+  <tr>
+      <td>Requests waiting in the fetch purgatory</td>
+      <td>kafka.server:type=DelayedOperationPurgatory,name=PurgatorySize,delayedOperation=Fetch</td>
+      <td>size depends on fetch.wait.max.ms in the consumer</td>
       </tr>
       <tr>
         <td>Request total time</td>
@@ -1741,7 +1786,7 @@ Kafka should run well on any unix system and has been tested on Linux and Solari
       <tr>
         <td>ZooKeeper client request latency</td>
         <td>kafka.server:type=ZooKeeperClientMetrics,name=ZooKeeperRequestLatencyMs</td>
-        <td>Latency in millseconds for ZooKeeper requests from broker.</td>
+          <td>Latency in milliseconds for ZooKeeper requests from broker.</td>
       </tr>
       <tr>
         <td>ZooKeeper connection status</td>
@@ -1749,16 +1794,16 @@ Kafka should run well on any unix system and has been tested on Linux and Solari
         <td>Connection status of broker's ZooKeeper session which may be one of
             Disconnected|SyncConnected|AuthFailed|ConnectedReadOnly|SaslAuthenticated|Expired.</td>
       </tr>
-      <tr>
-        <td>Max time to load group metadata</td>
-        <td>kafka.server:type=group-coordinator-metrics,name=partition-load-time-max</td>
-          <td>maximum time, in milliseconds, it took to load offsets and group metadata from the consumer offset partitions loaded in the last 30 seconds (including time spent waiting for the loading task to be scheduled)</td>
-      </tr>
-      <tr>
-        <td>Avg time to load group metadata</td>
-        <td>kafka.server:type=group-coordinator-metrics,name=partition-load-time-avg</td>
-          <td>average time, in milliseconds, it took to load offsets and group metadata from the consumer offset partitions loaded in the last 30 seconds (including time spent waiting for the loading task to be scheduled)</td>
-      </tr>
+  <tr>
+      <td>Max time to load group metadata</td>
+      <td>kafka.server:type=group-coordinator-metrics,name=partition-load-time-max</td>
+      <td>maximum time, in milliseconds, it took to load offsets and group metadata from the consumer offset partitions loaded in the last 30 seconds (including time spent waiting for the loading task to be scheduled)</td>
+  </tr>
+  <tr>
+      <td>Avg time to load group metadata</td>
+      <td>kafka.server:type=group-coordinator-metrics,name=partition-load-time-avg</td>
+      <td>average time, in milliseconds, it took to load offsets and group metadata from the consumer offset partitions loaded in the last 30 seconds (including time spent waiting for the loading task to be scheduled)</td>
+  </tr>
   <tr>
       <td>Max time to load transaction metadata</td>
       <td>kafka.server:type=transaction-coordinator-metrics,name=partition-load-time-max</td>
@@ -1792,12 +1837,12 @@ Kafka should run well on any unix system and has been tested on Linux and Solari
   <tr>
       <td>Outgoing byte rate of reassignment traffic</td>
       <td>kafka.server:type=BrokerTopicMetrics,name=ReassignmentBytesOutPerSec</td>
-      <td></td>
+      <td>0; non-zero when a partition reassignment is in progress.</td>
   </tr>
   <tr>
       <td>Incoming byte rate of reassignment traffic</td>
       <td>kafka.server:type=BrokerTopicMetrics,name=ReassignmentBytesInPerSec</td>
-      <td></td>
+      <td>0; non-zero when a partition reassignment is in progress.</td>
   </tr>
   <tr>
       <td>Size of a partition on disk (in bytes)</td>
@@ -1819,20 +1864,222 @@ Kafka should run well on any unix system and has been tested on Linux and Solari
       <td>kafka.log:type=Log,name=LogEndOffset,topic=([-.\w]+),partition=([0-9]+)</td>
       <td>The last offset in a partition.</td>
   </tr>
-  </tbody></table>
+  </tbody>
+  </table>
 
-  <h4><a id="selector_monitoring" href="#selector_monitoring">Common monitoring metrics for producer/consumer/connect/streams</a></h4>
-
-  The following metrics are available on producer/consumer/connector/streams instances.  For specific metrics, please see following sections.
-
-  <table class="data-table">
+<h4 class="anchor-heading"><a id="kraft_monitoring" class="anchor-link"></a><a href="#kraft_monitoring">KRaft Monitoring Metrics</a></h4>
+The set of metrics that allow monitoring of the KRaft quorum and the metadata log.<br>
+Note that some exposed metrics depend on the role of the node as defined by <code>process.roles</code>
+<h5 class="anchor-heading"><a id="kraft_quorum_monitoring" class="anchor-link"></a><a href="#kraft_quorum_monitoring">KRaft Quorum Monitoring Metrics</a></h5>
+These metrics are reported on both Controllers and Brokers in a KRaft Cluster
+<table class="data-table">
     <tbody>
-      <tr>
+    <tr>
         <th>Metric/Attribute name</th>
         <th>Description</th>
         <th>Mbean name</th>
-      </tr>
-      <tr>
+    </tr>
+    <tr>
+        <td>Current State</td>
+        <td>The current state of this member; possible values are leader, candidate, voted, follower, unattached, observer.</td>
+        <td>kafka.server:type=raft-metrics,name=current-state</td>
+    </tr>
+    <tr>
+        <td>Current Leader</td>
+        <td>The current quorum leader's id; -1 indicates unknown.</td>
+        <td>kafka.server:type=raft-metrics,name=current-leader</td>
+    </tr>
+    <tr>
+        <td>Current Voted</td>
+        <td>The current voted leader's id; -1 indicates not voted for anyone.</td>
+        <td>kafka.server:type=raft-metrics,name=current-vote</td>
+    </tr>
+    <tr>
+        <td>Current Epoch</td>
+        <td>The current quorum epoch.</td>
+        <td>kafka.server:type=raft-metrics,name=current-epoch</td>
+    </tr>
+    <tr>
+        <td>High Watermark</td>
+        <td>The high watermark maintained on this member; -1 if it is unknown.</td>
+        <td>kafka.server:type=raft-metrics,name=high-watermark</td>
+    </tr>
+    <tr>
+        <td>Log End Offset</td>
+        <td>The current raft log end offset.</td>
+        <td>kafka.server:type=raft-metrics,name=log-end-offset</td>
+    </tr>
+    <tr>
+        <td>Number of Unknown Voter Connections</td>
+        <td>Number of unknown voters whose connection information is not cached. This value of this metric is always 0.</td>
+        <td>kafka.server:type=raft-metrics,name=number-unknown-voter-connections</td>
+    </tr>
+    <tr>
+        <td>Average Commit Latency</td>
+        <td>The average time in milliseconds to commit an entry in the raft log.</td>
+        <td>kafka.server:type=raft-metrics,name=commit-latency-avg</td>
+    </tr>
+    <tr>
+        <td>Maximum Commit Latency</td>
+        <td>The maximum time in milliseconds to commit an entry in the raft log.</td>
+        <td>kafka.server:type=raft-metrics,name=commit-latency-max</td>
+    </tr>
+    <tr>
+        <td>Average Election Latency</td>
+        <td>The average time in milliseconds spent on electing a new leader.</td>
+        <td>kafka.server:type=raft-metrics,name=election-latency-avg</td>
+    </tr>
+    <tr>
+        <td>Maximum Election Latency</td>
+        <td>The maximum time in milliseconds spent on electing a new leader.</td>
+        <td>kafka.server:type=raft-metrics,name=election-latency-max</td>
+    </tr>
+    <tr>
+        <td>Fetch Records Rate</td>
+        <td>The average number of records fetched from the leader of the raft quorum.</td>
+        <td>kafka.server:type=raft-metrics,name=fetch-records-rate</td>
+    </tr>
+    <tr>
+        <td>Append Records Rate</td>
+        <td>The average number of records appended per sec by the leader of the raft quorum.</td>
+        <td>kafka.server:type=raft-metrics,name=append-records-rate</td>
+    </tr>
+    <tr>
+        <td>Average Poll Idle Ratio</td>
+        <td>The average fraction of time the client's poll() is idle as opposed to waiting for the user code to process records.</td>
+        <td>kafka.server:type=raft-metrics,name=poll-idle-ratio-avg</td>
+    </tr>
+    </tbody>
+</table>
+<h5 class="anchor-heading"><a id="kraft_controller_monitoring" class="anchor-link"></a><a href="#kraft_controller_monitoring">KRaft Controller Monitoring Metrics</a></h5>
+<table class="data-table">
+    <tbody>
+    <tr>
+        <th>Metric/Attribute name</th>
+        <th>Description</th>
+        <th>Mbean name</th>
+    </tr>
+    <tr>
+        <td>Active Controller Count</td>
+        <td>The number of Active Controllers on this node. Valid values are '0' or '1'.</td>
+        <td>kafka.controller:type=KafkaController,name=ActiveControllerCount</td>
+    </tr>
+    <tr>
+        <td>Event Queue Time Ms</td>
+        <td>A Histogram of the time in milliseconds that requests spent waiting in the Controller Event Queue.</td>
+        <td>kafka.controller:type=ControllerEventManager,name=EventQueueTimeMs</td>
+    </tr>
+    <tr>
+        <td>Event Queue Processing Time Ms</td>
+        <td>A Histogram of the time in milliseconds that requests spent being processed in the Controller Event Queue.</td>
+        <td>kafka.controller:type=ControllerEventManager,name=EventQueueProcessingTimeMs</td>
+    </tr>
+    <tr>
+        <td>Fenced Broker Count</td>
+        <td>The number of fenced brokers as observed by this Controller.</td>
+        <td>kafka.controller:type=KafkaController,name=FencedBrokerCount</td>
+    </tr>
+    <tr>
+        <td>Active Broker Count</td>
+        <td>The number of active brokers as observed by this Controller.</td>
+        <td>kafka.controller:type=KafkaController,name=ActiveBrokerCount</td>
+    </tr>
+    <tr>
+        <td>Global Topic Count</td>
+        <td>The number of global topics as observed by this Controller.</td>
+        <td>kafka.controller:type=KafkaController,name=GlobalTopicCount</td>
+    </tr>
+    <tr>
+        <td>Global Partition Count</td>
+        <td>The number of global partitions as observed by this Controller.</td>
+        <td>kafka.controller:type=KafkaController,name=GlobalPartitionCount</td>
+    </tr>
+    <tr>
+        <td>Offline Partition Count</td>
+        <td>The number of offline topic partitions (non-internal) as observed by this Controller.</td>
+        <td>kafka.controller:type=KafkaController,name=OfflinePartitionCount</td>
+    </tr>
+    <tr>
+        <td>Preferred Replica Imbalance Count</td>
+        <td>The count of topic partitions for which the leader is not the preferred leader.</td>
+        <td>kafka.controller:type=KafkaController,name=PreferredReplicaImbalanceCount</td>
+    </tr>
+    <tr>
+        <td>Metadata Error Count</td>
+        <td>The number of times this controller node has encountered an error during metadata log processing.</td>
+        <td>kafka.controller:type=KafkaController,name=MetadataErrorCount</td>
+    </tr>
+    <tr>
+        <td>Last Applied Record Offset</td>
+        <td>The offset of the last record from the cluster metadata partition that was applied by the Controller.</td>
+        <td>kafka.controller:type=KafkaController,name=LastAppliedRecordOffset</td>
+    </tr>
+    <tr>
+        <td>Last Committed Record Offset</td>
+        <td>The offset of the last record committed to this Controller.</td>
+        <td>kafka.controller:type=KafkaController,name=LastCommittedRecordOffset</td>
+    </tr>
+    <tr>
+        <td>Last Applied Record Timestamp</td>
+        <td>The timestamp of the last record from the cluster metadata partition that was applied by the Controller.</td>
+        <td>kafka.controller:type=KafkaController,name=LastAppliedRecordTimestamp</td>
+    </tr>
+    <tr>
+        <td>Last Applied Record Lag Ms</td>
+        <td>The difference between now and the timestamp of the last record from the cluster metadata partition that was applied by the controller.
+            For active Controllers the value of this lag is always zero.
+        </td>
+        <td>kafka.controller:type=KafkaController,name=LastAppliedRecordLagMs</td>
+    </tr>
+    </tbody>
+</table>
+<h5 class="anchor-heading"><a id="kraft_broker_monitoring" class="anchor-link"></a><a href="#kraft_broker_monitoring">KRaft Broker Monitoring Metrics</a></h5>
+<table class="data-table">
+    <tbody>
+    <tr>
+        <th>Metric/Attribute name</th>
+        <th>Description</th>
+        <th>Mbean name</th>
+    </tr>
+    <tr>
+        <td>Last Applied Record Offset</td>
+        <td>The offset of the last record from the cluster metadata partition that was applied by the broker</td>
+        <td>kafka.server:type=broker-metadata-metrics,name=last-applied-record-offset</td>
+    </tr>
+    <tr>
+        <td>Last Applied Record Timestamp</td>
+        <td>The timestamp of the last record from the cluster metadata partition that was applied by the broker.</td>
+        <td>kafka.server:type=broker-metadata-metrics,name=last-applied-record-timestamp</td>
+    </tr>
+    <tr>
+        <td>Last Applied Record Lag Ms</td>
+        <td>The difference between now and the timestamp of the last record from the cluster metadata partition that was applied by the broker</td>
+        <td>kafka.server:type=broker-metadata-metrics,name=last-applied-record-lag-ms</td>
+    </tr>
+    <tr>
+        <td>Metadata Load Error Count</td>
+        <td>The number of errors encountered by the BrokerMetadataListener while loading the metadata log and generating a new MetadataDelta based on it.</td>
+        <td>kafka.server:type=broker-metadata-metrics,name=metadata-load-error-count</td>
+    </tr>
+    <tr>
+        <td>Metadata Apply Error Count</td>
+        <td>The number of errors encountered by the BrokerMetadataPublisher while applying a new MetadataImage based on the latest MetadataDelta.</td>
+        <td>kafka.server:type=broker-metadata-metrics,name=metadata-apply-error-count</td>
+    </tr>
+    </tbody>
+</table>
+<h4><a id="selector_monitoring" href="#selector_monitoring">Common monitoring metrics for producer/consumer/connect/streams</a></h4>
+
+The following metrics are available on producer/consumer/connector/streams instances. For specific metrics, please see following sections.
+
+<table class="data-table">
+    <tbody>
+    <tr>
+        <th>Metric/Attribute name</th>
+        <th>Description</th>
+        <th>Mbean name</th>
+    </tr>
+    <tr>
         <td>connection-close-rate</td>
         <td>Connections closed per second in the window.</td>
         <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
@@ -1915,39 +2162,59 @@ Kafka should run well on any unix system and has been tested on Linux and Solari
       <tr>
         <td>select-rate</td>
         <td>Number of times the I/O layer checked for new I/O to perform per second.</td>
-        <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
+          <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
       </tr>
-      <tr>
+    <tr>
         <td>select-total</td>
         <td>Total number of times the I/O layer checked for new I/O to perform.</td>
         <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+    </tr>
+    <tr>
         <td>io-wait-time-ns-avg</td>
         <td>The average length of time the I/O thread spent waiting for a socket ready for reads or writes in nanoseconds.</td>
         <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+    </tr>
+    <tr>
+        <td>io-wait-time-ns-total</td>
+        <td>The total time the I/O thread spent waiting in nanoseconds.</td>
+        <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
+    </tr>
+    <tr>
+        <td>io-waittime-total</td>
+        <td><b>*Deprecated*</b> The total time the I/O thread spent waiting in nanoseconds. Replacement is <code>io-wait-time-ns-total</code>.</td>
+        <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>io-wait-ratio</td>
         <td>The fraction of time the I/O thread spent waiting.</td>
         <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+    </tr>
+    <tr>
         <td>io-time-ns-avg</td>
         <td>The average length of time for I/O per select call in nanoseconds.</td>
         <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+    </tr>
+    <tr>
+        <td>io-time-ns-total</td>
+        <td>The total time the I/O thread spent doing I/O in nanoseconds.</td>
+        <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
+    </tr>
+    <tr>
+        <td>iotime-total</td>
+        <td><b>*Deprecated*</b> The total time the I/O thread spent doing I/O in nanoseconds. Replacement is <code>io-time-ns-total</code>.</td>
+        <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>io-ratio</td>
         <td>The fraction of time the I/O thread spent doing I/O.</td>
         <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+    </tr>
+    <tr>
         <td>connection-count</td>
         <td>The current number of active connections.</td>
         <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+    </tr>
+    <tr>
         <td>successful-authentication-rate</td>
         <td>Connections per second that were successfully authenticated using SASL or SSL.</td>
         <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
@@ -1997,26 +2264,26 @@ Kafka should run well on any unix system and has been tested on Linux and Solari
         <td>Total connections that failed re-authentication.</td>
         <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
       </tr>
-      <tr>
+    <tr>
         <td>successful-authentication-no-reauth-total</td>
-        <td>Total connections that were successfully authenticated by older, pre-2.2.0 SASL clients that do not support re-authentication.  May only be non-zero </td>
+        <td>Total connections that were successfully authenticated by older, pre-2.2.0 SASL clients that do not support re-authentication. May only be non-zero.</td>
         <td>kafka.[producer|consumer|connect]:type=[producer|consumer|connect]-metrics,client-id=([-.\w]+)</td>
-      </tr>
+    </tr>
     </tbody>
-  </table>
+</table>
 
-  <h4><a id="common_node_monitoring" href="#common_node_monitoring">Common Per-broker metrics for producer/consumer/connect/streams</a></h4>
+<h4><a id="common_node_monitoring" href="#common_node_monitoring">Common Per-broker metrics for producer/consumer/connect/streams</a></h4>
 
-  The following metrics are available on producer/consumer/connector/streams instances.  For specific metrics, please see following sections.
+The following metrics are available on producer/consumer/connector/streams instances. For specific metrics, please see following sections.
 
-  <table class="data-table">
+<table class="data-table">
     <tbody>
-      <tr>
+    <tr>
         <th>Metric/Attribute name</th>
         <th>Description</th>
         <th>Mbean name</th>
-      </tr>
-      <tr>
+    </tr>
+    <tr>
         <td>outgoing-byte-rate</td>
         <td>The average number of outgoing bytes sent per second for a node.</td>
         <td>kafka.[producer|consumer|connect]:type=[consumer|producer|connect]-node-metrics,client-id=([-.\w]+),node-id=([0-9]+)</td>
@@ -2099,25 +2366,66 @@ Kafka should run well on any unix system and has been tested on Linux and Solari
         <td>The maximum amount of buffer memory the client can use (whether or not it is currently used).</td>
         <td>kafka.producer:type=producer-metrics,client-id=([-.\w]+)</td>
       </tr>
-      <tr>
-        <td>buffer-available-bytes</td>
-        <td>The total amount of buffer memory that is not being used (either unallocated or in the free list).</td>
-        <td>kafka.producer:type=producer-metrics,client-id=([-.\w]+)</td>
-      </tr>
-      <tr>
-        <td>bufferpool-wait-time</td>
-        <td>The fraction of time an appender waits for space allocation.</td>
-        <td>kafka.producer:type=producer-metrics,client-id=([-.\w]+)</td>
-      </tr>
+  <tr>
+      <td>buffer-available-bytes</td>
+      <td>The total amount of buffer memory that is not being used (either unallocated or in the free list).</td>
+      <td>kafka.producer:type=producer-metrics,client-id=([-.\w]+)</td>
+  </tr>
+  <tr>
+      <td>bufferpool-wait-time</td>
+      <td>The fraction of time an appender waits for space allocation.</td>
+      <td>kafka.producer:type=producer-metrics,client-id=([-.\w]+)</td>
+  </tr>
+  <tr>
+      <td>bufferpool-wait-time-total</td>
+      <td><b>*Deprecated*</b> The total time an appender waits for space allocation in nanoseconds. Replacement is <code>bufferpool-wait-time-ns-total</code></td>
+      <td>kafka.producer:type=producer-metrics,client-id=([-.\w]+)</td>
+  </tr>
+  <tr>
+      <td>bufferpool-wait-time-ns-total</td>
+      <td>The total time an appender waits for space allocation in nanoseconds.</td>
+      <td>kafka.producer:type=producer-metrics,client-id=([-.\w]+)</td>
+  </tr>
+  <tr>
+      <td>flush-time-ns-total</td>
+      <td>The total time the Producer spent in Producer.flush in nanoseconds.</td>
+      <td>kafka.producer:type=producer-metrics,client-id=([-.\w]+)</td>
+  </tr>
+  <tr>
+      <td>txn-init-time-ns-total</td>
+      <td>The total time the Producer spent initializing transactions in nanoseconds (for EOS).</td>
+      <td>kafka.producer:type=producer-metrics,client-id=([-.\w]+)</td>
+  </tr>
+  <tr>
+      <td>txn-begin-time-ns-total</td>
+      <td>The total time the Producer spent in beginTransaction in nanoseconds (for EOS).</td>
+      <td>kafka.producer:type=producer-metrics,client-id=([-.\w]+)</td>
+  </tr>
+  <tr>
+      <td>txn-send-offsets-time-ns-total</td>
+      <td>The total time the Producer spent sending offsets to transactions in nanoseconds (for EOS).</td>
+      <td>kafka.producer:type=producer-metrics,client-id=([-.\w]+)</td>
+  </tr>
+  <tr>
+      <td>txn-commit-time-ns-total</td>
+      <td>The total time the Producer spent committing transactions in nanoseconds (for EOS).</td>
+      <td>kafka.producer:type=producer-metrics,client-id=([-.\w]+)</td>
+  </tr>
+  <tr>
+      <td>txn-abort-time-ns-total</td>
+      <td>The total time the Producer spent aborting transactions in nanoseconds (for EOS).</td>
+      <td>kafka.producer:type=producer-metrics,client-id=([-.\w]+)</td>
+  </tr>
 
-  </tbody></table>
+  </tbody>
+  </table>
 
 <h5 class="anchor-heading"><a id="producer_sender_monitoring" class="anchor-link"></a><a href="#producer_sender_monitoring">Producer Sender Metrics</a></h5>
 
 <!--#include virtual="generated/producer_metrics.html" -->
 
 
-<h4 class="anchor-heading"><a id="consumer_monitoring" class="anchor-link"></a><a href="#consumer_monitoring">consumer monitoring</a></h4>
+<h4 class="anchor-heading"><a id="consumer_monitoring" class="anchor-link"></a><a href="#consumer_monitoring">Consumer monitoring</a></h4>
 
 The following metrics are available on consumer instances.
 
@@ -2148,6 +2456,16 @@ The following metrics are available on consumer instances.
         <td>The average fraction of time the consumer's poll() is idle as opposed to waiting for the user code to process records.</td>
         <td>kafka.consumer:type=consumer-metrics,client-id=([-.\w]+)</td>
     </tr>
+    <tr>
+        <td>committed-time-ns-total</td>
+        <td>The total time the Consumer spent in committed in nanoseconds.</td>
+        <td>kafka.consumer:type=consumer-metrics,client-id=([-.\w]+)</td>
+    </tr>
+    <tr>
+        <td>commit-sync-time-ns-total</td>
+        <td>The total time the Consumer spent committing offsets in nanoseconds (for AOS).</td>
+        <td>kafka.consumer:type=consumer-metrics,client-id=([-.\w]+)</td>
+    </tr>
     </tbody>
 </table>
 
@@ -2163,13 +2481,13 @@ The following metrics are available on consumer instances.
         <td>commit-latency-avg</td>
         <td>The average time taken for a commit request</td>
         <td>kafka.consumer:type=consumer-coordinator-metrics,client-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+    </tr>
+    <tr>
         <td>commit-latency-max</td>
         <td>The max time taken for a commit request</td>
         <td>kafka.consumer:type=consumer-coordinator-metrics,client-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+    </tr>
+    <tr>
         <td>commit-rate</td>
         <td>The number of commit calls per second</td>
         <td>kafka.consumer:type=consumer-coordinator-metrics,client-id=([-.\w]+)</td>
@@ -2229,11 +2547,11 @@ The following metrics are available on consumer instances.
         <td>The max time taken for a group sync</td>
         <td>kafka.consumer:type=consumer-coordinator-metrics,client-id=([-.\w]+)</td>
       </tr>
-      <tr>
-          <td>sync-rate</td>
-          <td>The number of group syncs per second</td>
-          <td>kafka.consumer:type=consumer-coordinator-metrics,client-id=([-.\w]+)</td>
-      </tr>
+    <tr>
+        <td>sync-rate</td>
+        <td>The number of group syncs per second</td>
+        <td>kafka.consumer:type=consumer-coordinator-metrics,client-id=([-.\w]+)</td>
+    </tr>
     <tr>
         <td>sync-total</td>
         <td>The total number of group syncs</td>
@@ -2315,11 +2633,11 @@ The following metrics are available on consumer instances.
         <td>kafka.consumer:type=consumer-coordinator-metrics,client-id=([-.\w]+)</td>
     </tr>
     </tbody>
-  </table>
+</table>
 
 <h5 class="anchor-heading"><a id="consumer_fetch_monitoring" class="anchor-link"></a><a href="#consumer_fetch_monitoring">Consumer Fetch Metrics</a></h5>
 
-  <!--#include virtual="generated/consumer_metrics.html" -->
+<!--#include virtual="generated/consumer_metrics.html" -->
 
 <h4 class="anchor-heading"><a id="connect_monitoring" class="anchor-link"></a><a href="#connect_monitoring">Connect Monitoring</a></h4>
 
@@ -2331,7 +2649,7 @@ The worker process itself has a number of metrics, while each connector and task
 <h4 class="anchor-heading"><a id="kafka_streams_monitoring" class="anchor-link"></a><a href="#kafka_streams_monitoring">Streams Monitoring</a></h4>
 
 A Kafka Streams instance contains all the producer and consumer metrics as well as additional metrics specific to Streams.
-By default Kafka Streams has metrics with three recording levels: <code>info</code>, <code>debug</code>, and <code>trace</code>.
+The metrics have three recording levels: <code>info</code>, <code>debug</code>, and <code>trace</code>.
 
 <p>
     Note that the metrics have a 4-layer hierarchy. At the top level there are client-level metrics for each started
@@ -2481,19 +2799,29 @@ All of the following metrics have a recording level of <code>info</code>:
         <td>The average number of tasks created per second.</td>
         <td>kafka.streams:type=stream-thread-metrics,thread-id=([-.\w]+)</td>
     </tr>
-      <tr>
+    <tr>
         <td>task-created-total</td>
         <td>The total number of tasks created.</td>
-          <td>kafka.streams:type=stream-thread-metrics,thread-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>kafka.streams:type=stream-thread-metrics,thread-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>task-closed-rate</td>
         <td>The average number of tasks closed per second.</td>
-          <td>kafka.streams:type=stream-thread-metrics,thread-id=([-.\w]+)</td>
-      </tr>
+        <td>kafka.streams:type=stream-thread-metrics,thread-id=([-.\w]+)</td>
+    </tr>
     <tr>
         <td>task-closed-total</td>
         <td>The total number of tasks closed.</td>
+        <td>kafka.streams:type=stream-thread-metrics,thread-id=([-.\w]+)</td>
+    </tr>
+    <tr>
+        <td>blocked-time-ns-total</td>
+        <td>The total time the thread spent blocked on kafka.</td>
+        <td>kafka.streams:type=stream-thread-metrics,thread-id=([-.\w]+)</td>
+    </tr>
+    <tr>
+        <td>thread-start-time</td>
+        <td>The time that the thread was started.</td>
         <td>kafka.streams:type=stream-thread-metrics,thread-id=([-.\w]+)</td>
     </tr>
     </tbody>
@@ -2544,11 +2872,11 @@ active-process-ratio metrics which have a recording level of <code>info</code>:
         <td>The average number of commit calls per second.</td>
         <td>kafka.streams:type=stream-task-metrics,thread-id=([-.\w]+),task-id=([-.\w]+)</td>
     </tr>
-      <tr>
+    <tr>
         <td>commit-total</td>
-        <td>The total number of commit calls. </td>
-          <td>kafka.streams:type=stream-task-metrics,thread-id=([-.\w]+),task-id=([-.\w]+)</td>
-      </tr>
+        <td>The total number of commit calls.</td>
+        <td>kafka.streams:type=stream-task-metrics,thread-id=([-.\w]+),task-id=([-.\w]+)</td>
+    </tr>
     <tr>
         <td>record-lateness-avg</td>
         <td>The average observed lateness of records (stream time - record timestamp).</td>
@@ -2602,6 +2930,16 @@ a recording level of <code>info</code>:
         <th>Mbean name</th>
     </tr>
     <tr>
+        <td>bytes-consumed-total</td>
+        <td>The total number of bytes consumed by a source processor node.</td>
+        <td>kafka.streams:type=stream-processor-node-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),processor-node-id=([-.\w]+),topic=([-.\w]+)</td>
+    </tr>
+    <tr>
+        <td>bytes-produced-total</td>
+        <td>The total number of bytes produced by a sink processor node.</td>
+        <td>kafka.streams:type=stream-processor-node-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),processor-node-id=([-.\w]+),topic=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>process-rate</td>
         <td>The average number of records processed by a source processor node per second.</td>
         <td>kafka.streams:type=stream-processor-node-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),processor-node-id=([-.\w]+)</td>
@@ -2636,11 +2974,21 @@ a recording level of <code>info</code>:
         <td>The minimum end-to-end latency of a record, measured by comparing the record timestamp with the system time when it has been fully processed by the node.</td>
         <td>kafka.streams:type=stream-processor-node-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),processor-node-id=([-.\w]+)</td>
     </tr>
+    <tr>
+        <td>records-consumed-total</td>
+        <td>The total number of records consumed by a source processor node.</td>
+        <td>kafka.streams:type=stream-processor-node-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),processor-node-id=([-.\w]+),topic=([-.\w]+)</td>
+    </tr>
+    <tr>
+        <td>records-produced-total</td>
+        <td>The total number of records produced by a sink processor node.</td>
+        <td>kafka.streams:type=stream-processor-node-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),processor-node-id=([-.\w]+),topic=([-.\w]+)</td>
+    </tr>
     </tbody>
 </table>
 
 <h5 class="anchor-heading"><a id="kafka_streams_store_monitoring" class="anchor-link"></a><a href="#kafka_streams_store_monitoring">State Store Metrics</a></h5>
-All of the following metrics have a recording level of <code>debug</code>, except for the record-e2e-latency-* metrics which have a recording level <code>trace></code>.
+All of the following metrics have a recording level of <code>debug</code>, except for the record-e2e-latency-* metrics which have a recording level <code>trace</code>.
 Note that the <code>store-scope</code> value is specified in <code>StoreSupplier#metricsScope()</code> for user's customized state stores;
 for built-in state stores, currently we have:
 <ul>
@@ -2664,94 +3012,94 @@ are only available for suppression buffers. All other metrics are not available 
     </tr>
     <tr>
         <td>put-latency-avg</td>
-        <td>The average put execution time in ns. </td>
+        <td>The average put execution time in ns.</td>
         <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+    </tr>
+    <tr>
         <td>put-latency-max</td>
-        <td>The maximum put execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>The maximum put execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>put-if-absent-latency-avg</td>
-        <td>The average put-if-absent execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>The average put-if-absent execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>put-if-absent-latency-max</td>
-        <td>The maximum put-if-absent execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>The maximum put-if-absent execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>get-latency-avg</td>
-        <td>The average get execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>The average get execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>get-latency-max</td>
-        <td>The maximum get execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>The maximum get execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>delete-latency-avg</td>
-        <td>The average delete execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>The average delete execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>delete-latency-max</td>
-        <td>The maximum delete execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>The maximum delete execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>put-all-latency-avg</td>
-        <td>The average put-all execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>The average put-all execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>put-all-latency-max</td>
-        <td>The maximum put-all execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>The maximum put-all execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>all-latency-avg</td>
-        <td>The average all operation execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>The average all operation execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>all-latency-max</td>
-        <td>The maximum all operation execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>The maximum all operation execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>range-latency-avg</td>
-        <td>The average range execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>The average range execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>range-latency-max</td>
-        <td>The maximum range execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-       <tr>
+        <td>The maximum range execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>flush-latency-avg</td>
-        <td>The average flush execution time in ns. </td>
-           <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>The average flush execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>flush-latency-max</td>
-        <td>The maximum flush execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>The maximum flush execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>restore-latency-avg</td>
-        <td>The average restore execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
-      <tr>
+        <td>The average restore execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>restore-latency-max</td>
-        <td>The maximum restore execution time in ns. </td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
+        <td>The maximum restore execution time in ns.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
       <tr>
         <td>put-rate</td>
         <td>The average put rate for this store.</td>
@@ -2767,11 +3115,11 @@ are only available for suppression buffers. All other metrics are not available 
         <td>The average get rate for this store.</td>
           <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
       </tr>
-      <tr>
-          <td>delete-rate</td>
-          <td>The average delete rate for this store.</td>
-          <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
-      </tr>
+    <tr>
+        <td>delete-rate</td>
+        <td>The average delete rate for this store.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
     <tr>
         <td>put-all-rate</td>
         <td>The average put-all rate for this store.</td>
@@ -2899,6 +3247,21 @@ each metric reports an aggregation over the RocksDB instances of the state store
         <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
     </tr>
     <tr>
+        <td>memtable-flush-time-avg</td>
+        <td>The average duration of memtable flushes to disc in ms.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
+        <td>memtable-flush-time-min</td>
+        <td>The minimum duration of memtable flushes to disc in ms.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
+        <td>memtable-flush-time-max</td>
+        <td>The maximum duration of memtable flushes to disc in ms.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
         <td>block-cache-data-hit-ratio</td>
         <td>The ratio of block cache hits for data blocks relative to all lookups for data blocks to the block cache.</td>
         <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
@@ -2931,6 +3294,21 @@ each metric reports an aggregation over the RocksDB instances of the state store
     <tr>
         <td>bytes-written-compaction-rate</td>
         <td>The average number of bytes written per second during compaction.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
+        <td>compaction-time-avg</td>
+        <td>The average duration of disc compactions in ms.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
+        <td>compaction-time-min</td>
+        <td>The minimum duration of disc compactions in ms.</td>
+        <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
+    </tr>
+    <tr>
+        <td>compaction-time-max</td>
+        <td>The maximum duration of disc compactions in ms.</td>
         <td>kafka.streams:type=stream-state-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),[store-scope]-id=([-.\w]+)</td>
     </tr>
     <tr>
@@ -3094,7 +3472,7 @@ All of the following metrics have a recording level of <code>debug</code>:
     </tr>
     <tr>
         <td>hit-ratio-min</td>
-        <td>The mininum cache hit ratio.</td>
+        <td>The minimum cache hit ratio.</td>
         <td>kafka.streams:type=stream-record-cache-metrics,thread-id=([-.\w]+),task-id=([-.\w]+),record-cache-id=([-.\w]+)</td>
     </tr>
     <tr>
@@ -3118,16 +3496,325 @@ All of the following metrics have a recording level of <code>debug</code>:
 
 <h4 class="anchor-heading"><a id="zkops" class="anchor-link"></a><a href="#zkops">Operationalizing ZooKeeper</a></h4>
   Operationally, we do the following for a healthy ZooKeeper installation:
-  <ul>
-    <li>Redundancy in the physical/hardware/network layout: try not to put them all in the same rack, decent (but don't go nuts) hardware, try to keep redundant power and network paths, etc. A typical ZooKeeper ensemble has 5 or 7 servers, which tolerates 2 and 3 servers down, respectively. If you have a small deployment, then using 3 servers is acceptable, but keep in mind that you'll only be able to tolerate 1 server down in this case. </li>
+<ul>
+    <li>Redundancy in the physical/hardware/network layout: try not to put them all in the same rack, decent (but don't go nuts) hardware, try to keep redundant power and network paths, etc. A typical ZooKeeper ensemble has 5 or 7 servers, which tolerates 2 and 3 servers down, respectively. If you have a small deployment, then using 3 servers is acceptable, but keep in mind that you'll only be able to tolerate 1 server down in this case.</li>
     <li>I/O segregation: if you do a lot of write type traffic you'll almost definitely want the transaction logs on a dedicated disk group. Writes to the transaction log are synchronous (but batched for performance), and consequently, concurrent writes can significantly affect performance. ZooKeeper snapshots can be one such a source of concurrent writes, and ideally should be written on a disk group separate from the transaction log. Snapshots are written to disk asynchronously, so it is typically ok to share with the operating system and message log files. You can configure a server to use a separate disk group with the dataLogDir parameter.</li>
     <li>Application segregation: Unless you really understand the application patterns of other apps that you want to install on the same box, it can be a good idea to run ZooKeeper in isolation (though this can be a balancing act with the capabilities of the hardware).</li>
     <li>Use care with virtualization: It can work, depending on your cluster layout and read/write patterns and SLAs, but the tiny overheads introduced by the virtualization layer can add up and throw off ZooKeeper, as it can be very time sensitive</li>
     <li>ZooKeeper configuration: It's java, make sure you give it 'enough' heap space (We usually run them with 3-5G, but that's mostly due to the data set size we have here). Unfortunately we don't have a good formula for it, but keep in mind that allowing for more ZooKeeper state means that snapshots can become large, and large snapshots affect recovery time. In fact, if the snapshot becomes too large (a few gigabytes), then you may need to increase the initLimit parameter to give enough time for servers to recover and join the ensemble.</li>
     <li>Monitoring: Both JMX and the 4 letter words (4lw) commands are very useful, they do overlap in some cases (and in those cases we prefer the 4 letter commands, they seem more predictable, or at the very least, they work better with the LI monitoring infrastructure)</li>
     <li>Don't overbuild the cluster: large clusters, especially in a write heavy usage pattern, means a lot of intracluster communication (quorums on the writes and subsequent cluster member updates), but don't underbuild it (and risk swamping the cluster). Having more servers adds to your read capacity.</li>
-  </ul>
-  Overall, we try to keep the ZooKeeper system as small as will handle the load (plus standard growth capacity planning) and as simple as possible. We try not to do anything fancy with the configuration or application layout as compared to the official release as well as keep it as self contained as possible. For these reasons, we tend to skip the OS packaged versions, since it has a tendency to try to put things in the OS standard hierarchy, which can be 'messy', for want of a better way to word it.
+</ul>
+Overall, we try to keep the ZooKeeper system as small as will handle the load (plus standard growth capacity planning) and as simple as possible. We try not to do anything fancy with the configuration or application layout as compared to the official release as well as keep it as self contained as possible. For these reasons, we tend to skip the OS packaged versions, since it has a tendency to try to put things in the OS standard hierarchy, which can be 'messy', for want of a better way to word it.
+
+<h3 class="anchor-heading"><a id="kraft" class="anchor-link"></a><a href="#kraft">6.10 KRaft</a></h3>
+
+<h4 class="anchor-heading"><a id="kraft_config" class="anchor-link"></a><a href="#kraft_config">Configuration</a></h4>
+
+<h5 class="anchor-heading"><a id="kraft_role" class="anchor-link"></a><a href="#kraft_role">Process Roles</a></h5>
+
+<p>In KRaft mode each Kafka server can be configured as a controller, a broker, or both using the <code>process.roles</code> property. This property can have the following values:</p>
+
+<ul>
+    <li>If <code>process.roles</code> is set to <code>broker</code>, the server acts as a broker.</li>
+    <li>If <code>process.roles</code> is set to <code>controller</code>, the server acts as a controller.</li>
+    <li>If <code>process.roles</code> is set to <code>broker,controller</code>, the server acts as both a broker and a controller.</li>
+    <li>If <code>process.roles</code> is not set at all, it is assumed to be in ZooKeeper mode.</li>
+</ul>
+
+<p>Kafka servers that act as both brokers and controllers are referred to as "combined" servers. Combined servers are simpler to operate for small use cases like a development environment. The key disadvantage is that the controller will be less isolated from the rest of the system. For example, it is not possible to roll or scale the controllers separately from the brokers in combined mode. Combined mode is not recommended in critical deployment environments.</p>
+
+
+<h5 class="anchor-heading"><a id="kraft_voter" class="anchor-link"></a><a href="#kraft_voter">Controllers</a></h5>
+
+<p>In KRaft mode, specific Kafka servers are selected to be controllers (unlike the ZooKeeper-based mode, where any server can become the Controller). The servers selected to be controllers will participate in the metadata quorum. Each controller is either an active or a hot standby for the current active controller.</p>
+
+<p>A Kafka admin will typically select 3 or 5 servers for this role, depending on factors like cost and the number of concurrent failures your system should withstand without availability impact. A majority of the controllers must be alive in order to maintain availability. With 3 controllers, the cluster can tolerate 1 controller failure; with 5 controllers, the cluster can tolerate 2 controller failures.</p>
+
+<p>All of the servers in a Kafka cluster discover the quorum voters using the <code>controller.quorum.voters</code> property. This identifies the quorum controller servers that should be used. All the controllers must be enumerated. Each controller is identified with their <code>id</code>, <code>host</code> and <code>port</code> information. For example:</p>
+
+<pre class="line-numbers"><code class="language-bash">controller.quorum.voters=id1@host1:port1,id2@host2:port2,id3@host3:port3</code></pre>
+
+<p>If a Kafka cluster has 3 controllers named controller1, controller2 and controller3, then controller1 may have the following configuration:</p>
+
+<pre class="line-numbers"><code class="language-bash">
+process.roles=controller
+node.id=1
+listeners=CONTROLLER://controller1.example.com:9093
+controller.quorum.voters=1@controller1.example.com:9093,2@controller2.example.com:9093,3@controller3.example.com:9093</code></pre>
+
+<p>Every broker and controller must set the <code>controller.quorum.voters</code> property. The node ID supplied in the <code>controller.quorum.voters</code> property must match the corresponding id on the controller servers. For example, on controller1, node.id must be set to 1, and so forth. Each node ID must be unique across all the servers in a particular cluster. No two servers can have the same node ID regardless of their <code>process.roles</code> values.
+
+<h4 class="anchor-heading"><a id="kraft_storage" class="anchor-link"></a><a href="#kraft_storage">Storage Tool</a></h4>
+<p></p>
+The <code>kafka-storage.sh random-uuid</code> command can be used to generate a cluster ID for your new cluster. This cluster ID must be used when formatting each server in the cluster with the <code>kafka-storage.sh format</code> command.
+
+<p>This is different from how Kafka has operated in the past. Previously, Kafka would format blank storage directories automatically, and also generate a new cluster ID automatically. One reason for the change is that auto-formatting can sometimes obscure an error condition. This is particularly important for the metadata log maintained by the controller and broker servers. If a majority of the controllers were able to start with an empty log directory, a leader might be able to be elected with missing committed data.</p>
+
+<h4 class="anchor-heading"><a id="kraft_debug" class="anchor-link"></a><a href="#kraft_debug">Debugging</a></h4>
+
+<h5 class="anchor-heading"><a id="kraft_metadata_tool" class="anchor-link"></a><a href="#kraft_metadata_tool">Metadata Quorum Tool</a></h5>
+
+<p>The <code>kafka-metadata-quorum</code> tool can be used to describe the runtime state of the cluster metadata partition. For example, the following command displays a summary of the metadata quorum:</p>
+
+<pre class="line-numbers"><code class="language-bash">  &gt; bin/kafka-metadata-quorum.sh --bootstrap-server  broker_host:port describe --status
+ClusterId:              fMCL8kv1SWm87L_Md-I2hg
+LeaderId:               3002
+LeaderEpoch:            2
+HighWatermark:          10
+MaxFollowerLag:         0
+MaxFollowerLagTimeMs:   -1
+CurrentVoters:          [3000,3001,3002]
+CurrentObservers:       [0,1,2]</code></pre>
+
+<h5 class="anchor-heading"><a id="kraft_dump_log" class="anchor-link"></a><a href="#kraft_dump_log">Dump Log Tool</a></h5>
+
+<p>The <code>kafka-dump-log</code> tool can be used to debug the log segments and snapshots for the cluster metadata directory. The tool will scan the provided files and decode the metadata records. For example, this command decodes and prints the records in the first log segment:</p>
+
+<pre class="line-numbers"><code class="language-bash">  &gt; bin/kafka-dump-log.sh --cluster-metadata-decoder --files metadata_log_dir/__cluster_metadata-0/00000000000000000000.log</code></pre>
+
+<p>This command decodes and prints the records in the a cluster metadata snapshot:</p>
+
+<pre class="line-numbers"><code class="language-bash">  &gt; bin/kafka-dump-log.sh --cluster-metadata-decoder --files metadata_log_dir/__cluster_metadata-0/00000000000000000100-0000000001.checkpoint</code></pre>
+
+<h5 class="anchor-heading"><a id="kraft_shell_tool" class="anchor-link"></a><a href="#kraft_shell_tool">Metadata Shell</a></h5>
+
+<p>The <code>kafka-metadata-shell</code> tool can be used to interactively inspect the state of the cluster metadata partition:</p>
+
+<pre class="line-numbers"><code class="language-bash">
+  &gt; bin/kafka-metadata-shell.sh  --snapshot metadata_log_dir/__cluster_metadata-0/00000000000000000000.log
+&gt;&gt; ls /
+brokers  local  metadataQuorum  topicIds  topics
+&gt;&gt; ls /topics
+foo
+&gt;&gt; cat /topics/foo/0/data
+{
+  "partitionId" : 0,
+  "topicId" : "5zoAlv-xEh9xRANKXt1Lbg",
+  "replicas" : [ 1 ],
+  "isr" : [ 1 ],
+  "removingReplicas" : null,
+  "addingReplicas" : null,
+  "leader" : 1,
+  "leaderEpoch" : 0,
+  "partitionEpoch" : 0
+}
+&gt;&gt; exit
+  </code></pre>
+
+<h4 class="anchor-heading"><a id="kraft_deployment" class="anchor-link"></a><a href="#kraft_deployment">Deploying Considerations</a></h4>
+
+<ul>
+    <li>Kafka server's <code>process.role</code> should be set to either <code>broker</code> or <code>controller</code> but not both. Combined mode can be used in development environments, but it should be avoided in critical deployment environments.</li>
+    <li>For redundancy, a Kafka cluster should use 3 controllers. More than 3 controllers is not recommended in critical environments. In the rare case of a partial network failure it is possible for the cluster metadata quorum to become unavailable. This limitation will be addressed in a future release of Kafka.</li>
+    <li>The Kafka controllers store all the metadata for the cluster in memory and on disk. We believe that for a typical Kafka cluster 5GB of main memory and 5GB of disk space on the metadata log director is sufficient.</li>
+</ul>
+
+<h4 class="anchor-heading"><a id="kraft_missing" class="anchor-link"></a><a href="#kraft_missing">Missing Features</a></h4>
+
+<p>The following features are not fully implemented in KRaft mode:</p>
+
+<ul>
+    <li>Supporting JBOD configurations with multiple storage directories</li>
+    <li>Modifying certain dynamic configurations on the standalone KRaft controller</li>
+    <li>Delegation tokens</li>
+</ul>
+
+<h4 class="anchor-heading"><a id="kraft_zk_migration" class="anchor-link"></a><a href="#kraft_zk_migration">ZooKeeper to KRaft Migration</a></h4>
+
+<p>
+    <b>ZooKeeper to KRaft migration is considered an Early Access feature and is not recommended for production clusters.</b>
+</p>
+
+<p>The following features are not yet supported for ZK to KRaft migrations:</p>
+
+<ul>
+    <li>Downgrading to ZooKeeper mode during or after the migration</li>
+    <li>Other features <a href="#kraft_missing">not yet supported in KRaft</a></li>
+</ul>
+
+<p>
+    Please report issues with ZooKeeper to KRaft migration using the
+    <a href="https://issues.apache.org/jira/projects/KAFKA" target="_blank">project JIRA</a> and the "kraft" component.
+</p>
+
+<h3>Terminology</h3>
+<p>
+    We use the term "migration" here to refer to the process of changing a Kafka cluster's metadata
+    system from ZooKeeper to KRaft and migrating existing metadata. An "upgrade" refers to installing a newer version of Kafka. It is not recommended to
+    upgrade the software at the same time as performing a metadata migration.
+</p>
+
+<p>
+    We also use the term "ZK mode" to refer to Kafka brokers which are using ZooKeeper as their metadata
+    system. "KRaft mode" refers Kafka brokers which are using a KRaft controller quorum as their metadata system.
+</p>
+
+<h3>Preparing for migration</h3>
+<p>
+    Before beginning the migration, the Kafka brokers must be upgraded to software version 3.5.0 and have the
+    "inter.broker.protocol.version" configuration set to "3.5". See <a href="#upgrade_3_5_0">Upgrading to 3.5.0</a> for
+    upgrade instructions.
+</p>
+
+<p>
+    It is recommended to enable TRACE level logging for the migration components while the migration is active. This can
+    be done by adding the following log4j configuration to each KRaft controller's "log4j.properties" file.
+</p>
+
+<pre>log4j.logger.org.apache.kafka.metadata.migration=TRACE</pre>
+
+<p>
+    It is generally useful to enable DEBUG logging on the KRaft controllers and the ZK brokers during the migration.
+</p>
+
+<h3>Provisioning the KRaft controller quorum</h3>
+<p>
+    Two things are needed before the migration can begin. First, the brokers must be configured to support the migration and second,
+    a KRaft controller quorum must be deployed. The KRaft controllers should be provisioned with the same cluster ID as
+    the existing Kafka cluster. This can be found by examining one of the "meta.properties" files in the data directories
+    of the brokers, or by running the following command.
+</p>
+
+<pre>./bin/zookeeper-shell.sh localhost:2181 get /cluster/id</pre>
+
+<p>
+    The KRaft controller quorum should also be provisioned with the latest <code>metadata.version</code> of "3.4".
+    For further instructions on KRaft deployment, please refer to <a href="#kraft_config">the above documentation</a>.
+</p>
+
+<p>
+    In addition to the standard KRaft configuration, the KRaft controllers will need to enable support for the migration
+    as well as provide ZooKeeper connection configuration.
+</p>
+
+<p>
+    Here is a sample config for a KRaft controller that is ready for migration:
+</p>
+<pre>
+# Sample KRaft cluster controller.properties listening on 9093
+process.roles=controller
+node.id=3000
+controller.quorum.voters=3000@localhost:9093
+controller.listener.names=CONTROLLER
+listeners=CONTROLLER://:9093
+
+# Enable the migration
+zookeeper.metadata.migration.enable=true
+
+# ZooKeeper client configuration
+zookeeper.connect=localhost:2181
+
+# Other configs ...</pre>
+
+<p><em>Note: The KRaft cluster <code>node.id</code> values must be different from any existing ZK broker <code>broker.id</code>.
+    In KRaft-mode, the brokers and controllers share the same Node ID namespace.</em></p>
+
+<h3>Enabling the migration on the brokers</h3>
+<p>
+    Once the KRaft controller quorum has been started, the brokers will need to be reconfigured and restarted. Brokers
+    may be restarted in a rolling fashion to avoid impacting cluster availability. Each broker requires the
+    following configuration to communicate with the KRaft controllers and to enable the migration.
+</p>
+
+<ul>
+    <li><a href="#brokerconfigs_controller.quorum.voters">controller.quorum.voters</a></li>
+    <li><a href="#brokerconfigs_controller.listener.names">controller.listener.names</a></li>
+    <li>The controller.listener.name should also be added to <a href="#brokerconfigs_listener.security.protocol.map">listener.security.property.map</a></li>
+    <li><a href="#brokerconfigs_zookeeper.metadata.migration.enable">zookeeper.metadata.migration.enable</a></li>
+</ul>
+
+<p>Here is a sample config for a broker that is ready for migration:</p>
+
+<pre>
+# Sample ZK broker server.properties listening on 9092
+broker.id=0
+listeners=PLAINTEXT://:9092
+advertised.listeners=PLAINTEXT://localhost:9092
+listener.security.protocol.map=PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+
+# Set the IBP
+inter.broker.protocol.version=3.5
+
+# Enable the migration
+zookeeper.metadata.migration.enable=true
+
+# ZooKeeper client configuration
+zookeeper.connect=localhost:2181
+
+# KRaft controller quorum configuration
+controller.quorum.voters=3000@localhost:9093
+controller.listener.names=CONTROLLER</pre>
+
+<p>
+    <em>Note: Once the final ZK broker has been restarted with the necessary configuration, the migration will automatically begin.</em>
+    When the migration is complete, an INFO level log can be observed on the active controller:
+</p>
+
+<pre>Completed migration of metadata from Zookeeper to KRaft</pre>
+
+<h3>Migrating brokers to KRaft</h3>
+<p>
+    Once the KRaft controller completes the metadata migration, the brokers will still be running in ZK mode. While the
+    KRaft controller is in migration mode, it will continue sending controller RPCs to the ZK mode brokers. This includes
+    RPCs like UpdateMetadata and LeaderAndIsr.
+</p>
+
+<p>
+    To migrate the brokers to KRaft, they simply need to be reconfigured as KRaft brokers and restarted. Using the above
+    broker configuration as an example, we would replace the <code>broker.id</code> with <code>node.id</code> and add
+    <code>process.roles=broker</code>. It is important that the broker maintain the same Broker/Node ID when it is restarted.
+    The zookeeper configurations should be removed at this point.
+</p>
+
+<pre>
+# Sample KRaft broker server.properties listening on 9092
+process.roles=broker
+node.id=0
+listeners=PLAINTEXT://:9092
+advertised.listeners=PLAINTEXT://localhost:9092
+listener.security.protocol.map=PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+
+# Don't set the IBP, KRaft uses "metadata.version" feature flag
+# inter.broker.protocol.version=3.5
+
+# Remove the migration enabled flag
+# zookeeper.metadata.migration.enable=true
+
+# Remove ZooKeeper client configuration
+# zookeeper.connect=localhost:2181
+
+# Keep the KRaft controller quorum configuration
+controller.quorum.voters=3000@localhost:9093
+controller.listener.names=CONTROLLER</pre>
+
+<p>
+    Each broker is restarted with a KRaft configuration until the entire cluster is running in KRaft mode.
+</p>
+
+<h3>Finalizing the migration</h3>
+<p>
+    Once all brokers have been restarted in KRaft mode, the last step to finalize the migration is to take the
+    KRaft controllers out of migration mode. This is done by removing the "zookeeper.metadata.migration.enable"
+    property from each of their configs and restarting them one at a time.
+</p>
+
+<pre>
+# Sample KRaft cluster controller.properties listening on 9093
+process.roles=controller
+node.id=3000
+controller.quorum.voters=3000@localhost:9093
+controller.listener.names=CONTROLLER
+listeners=CONTROLLER://:9093
+
+# Disable the migration
+# zookeeper.metadata.migration.enable=true
+
+# Remove ZooKeeper client configuration
+# zookeeper.connect=localhost:2181
+
+# Other configs ...</pre>
+
 </script>
 
 <div class="p-ops"></div>

@@ -21,13 +21,7 @@ import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.record.TimestampType;
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -36,24 +30,22 @@ public class ConsumerRecordsTest {
     @Test
     public void iterator() throws Exception {
 
-		Map<TopicPartition, List<ConsumerRecord<Integer, String>>> records = new LinkedHashMap<>();
+        Map<TopicPartition, List<ConsumerRecord<Integer, String>>> records = new LinkedHashMap<>();
 
-		String topic = "topic";
-		records.put(new TopicPartition(topic, 0), new ArrayList<ConsumerRecord<Integer, String>>());
-		ConsumerRecord<Integer, String> record1 = new ConsumerRecord<>(topic, 1, 0, 0L, TimestampType.CREATE_TIME,
-				0, 0, 1, "value1", new RecordHeaders(), Optional.empty());
-		ConsumerRecord<Integer, String> record2 = new ConsumerRecord<>(topic, 1, 1, 0L, TimestampType.CREATE_TIME,
-				0, 0, 2, "value2", new RecordHeaders(), Optional.empty());
-		records.put(new TopicPartition(topic, 1), Arrays.asList(record1, record2));
-		records.put(new TopicPartition(topic, 2), new ArrayList<>());
+        String topic = "topic";
+        records.put(new TopicPartition(topic, 0), new ArrayList<>());
+        ConsumerRecord<Integer, String> record1 = new ConsumerRecord<>(topic, 1, 0, 0L, TimestampType.CREATE_TIME, 0, 0, 1, "value1", new RecordHeaders(), Optional.empty());
+        ConsumerRecord<Integer, String> record2 = new ConsumerRecord<>(topic, 1, 1, 0L, TimestampType.CREATE_TIME, 0, 0, 2, "value2", new RecordHeaders(), Optional.empty());
+        records.put(new TopicPartition(topic, 1), Arrays.asList(record1, record2));
+        records.put(new TopicPartition(topic, 2), new ArrayList<>());
 
-		ConsumerRecords<Integer, String> consumerRecords = new ConsumerRecords<>(records);
-		Iterator<ConsumerRecord<Integer, String>> iter = consumerRecords.iterator();
+        ConsumerRecords<Integer, String> consumerRecords = new ConsumerRecords<>(records);
+        Iterator<ConsumerRecord<Integer, String>> iter = consumerRecords.iterator();
 
-		int c = 0;
-		for (; iter.hasNext(); c++) {
-			ConsumerRecord<Integer, String> record = iter.next();
-			assertEquals(1, record.partition());
+        int c = 0;
+        for (; iter.hasNext(); c++) {
+            ConsumerRecord<Integer, String> record = iter.next();
+            assertEquals(1, record.partition());
             assertEquals(topic, record.topic());
             assertEquals(c, record.offset());
         }

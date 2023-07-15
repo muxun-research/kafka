@@ -16,17 +16,9 @@
  */
 package org.apache.kafka.clients.consumer.internals;
 
-import org.apache.kafka.clients.ClientRequest;
-import org.apache.kafka.clients.ClientResponse;
-import org.apache.kafka.clients.KafkaClient;
-import org.apache.kafka.clients.Metadata;
-import org.apache.kafka.clients.RequestCompletionHandler;
+import org.apache.kafka.clients.*;
 import org.apache.kafka.common.Node;
-import org.apache.kafka.common.errors.AuthenticationException;
-import org.apache.kafka.common.errors.DisconnectException;
-import org.apache.kafka.common.errors.InterruptException;
-import org.apache.kafka.common.errors.TimeoutException;
-import org.apache.kafka.common.errors.WakeupException;
+import org.apache.kafka.common.errors.*;
 import org.apache.kafka.common.requests.AbstractRequest;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
@@ -35,11 +27,7 @@ import org.slf4j.Logger;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
@@ -204,14 +192,27 @@ public class ConsumerNetworkClient implements Closeable {
     /**
      * Block until the provided request future request has finished or the timeout has expired.
      * @param future The request future to wait for
-     * @param timer Timer bounding how long this method can block
+     * @param timer  Timer bounding how long this method can block
      * @return true if the future is done, false otherwise
-     * @throws WakeupException if {@link #wakeup()} is called from another thread
+     * @throws WakeupException    if {@link #wakeup()} is called from another thread
      * @throws InterruptException if the calling thread is interrupted
      */
     public boolean poll(RequestFuture<?> future, Timer timer) {
+        return poll(future, timer, false);
+    }
+
+    /**
+     * Block until the provided request future request has finished or the timeout has expired.
+     * @param future        The request future to wait for
+     * @param timer         Timer bounding how long this method can block
+     * @param disableWakeup true if we should not check for wakeups, false otherwise
+     * @return true if the future is done, false otherwise
+     * @throws WakeupException    if {@link #wakeup()} is called from another thread and `disableWakeup` is false
+     * @throws InterruptException if the calling thread is interrupted
+     */
+    public boolean poll(RequestFuture<?> future, Timer timer, boolean disableWakeup) {
         do {
-            poll(timer, future);
+            poll(timer, future, disableWakeup);
         } while (!future.isDone() && timer.notExpired());
         return future.isDone();
     }

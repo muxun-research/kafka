@@ -31,76 +31,59 @@ import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.transforms.util.SchemaUtil;
 import org.apache.kafka.connect.transforms.util.SimpleConfig;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static org.apache.kafka.connect.transforms.util.Requirements.requireMap;
 import static org.apache.kafka.connect.transforms.util.Requirements.requireStruct;
 
 public abstract class ReplaceField<R extends ConnectRecord<R>> implements Transformation<R> {
 
-    public static final String OVERVIEW_DOC = "Filter or rename fields."
-            + "<p/>Use the concrete transformation type designed for the record key (<code>" + Key.class.getName() + "</code>) "
-            + "or value (<code>" + Value.class.getName() + "</code>).";
+    public static final String OVERVIEW_DOC = "Filter or rename fields." + "<p/>Use the concrete transformation type designed for the record key (<code>" + Key.class.getName() + "</code>) " + "or value (<code>" + Value.class.getName() + "</code>).";
 
-	interface ConfigName {
-		String EXCLUDE = "exclude";
-		String INCLUDE = "include";
+    interface ConfigName {
+        String EXCLUDE = "exclude";
+        String INCLUDE = "include";
 
-		// for backwards compatibility
-		String INCLUDE_ALIAS = "whitelist";
-		String EXCLUDE_ALIAS = "blacklist";
+        // for backwards compatibility
+        String INCLUDE_ALIAS = "whitelist";
+        String EXCLUDE_ALIAS = "blacklist";
 
-		String RENAME = "renames";
-	}
+        String RENAME = "renames";
+    }
 
-    public static final ConfigDef CONFIG_DEF = new ConfigDef()
-			.define(ConfigName.EXCLUDE, ConfigDef.Type.LIST, Collections.emptyList(), ConfigDef.Importance.MEDIUM,
-					"Fields to exclude. This takes precedence over the fields to include.")
-			.define("blacklist", ConfigDef.Type.LIST, null, Importance.LOW,
-					"Deprecated. Use " + ConfigName.EXCLUDE + " instead.")
-			.define(ConfigName.INCLUDE, ConfigDef.Type.LIST, Collections.emptyList(), ConfigDef.Importance.MEDIUM,
-					"Fields to include. If specified, only these fields will be used.")
-			.define("whitelist", ConfigDef.Type.LIST, null, Importance.LOW,
-					"Deprecated. Use " + ConfigName.INCLUDE + " instead.")
-            .define(ConfigName.RENAME, ConfigDef.Type.LIST, Collections.emptyList(), new ConfigDef.Validator() {
-                @SuppressWarnings("unchecked")
-                @Override
-                public void ensureValid(String name, Object value) {
-                    parseRenameMappings((List<String>) value);
-				}
+    public static final ConfigDef CONFIG_DEF = new ConfigDef().define(ConfigName.EXCLUDE, ConfigDef.Type.LIST, Collections.emptyList(), ConfigDef.Importance.MEDIUM, "Fields to exclude. This takes precedence over the fields to include.").define("blacklist", ConfigDef.Type.LIST, null, Importance.LOW, "Deprecated. Use " + ConfigName.EXCLUDE + " instead.").define(ConfigName.INCLUDE, ConfigDef.Type.LIST, Collections.emptyList(), ConfigDef.Importance.MEDIUM, "Fields to include. If specified, only these fields will be used.").define("whitelist", ConfigDef.Type.LIST, null, Importance.LOW, "Deprecated. Use " + ConfigName.INCLUDE + " instead.").define(ConfigName.RENAME, ConfigDef.Type.LIST, Collections.emptyList(), new ConfigDef.Validator() {
+        @SuppressWarnings("unchecked")
+        @Override
+        public void ensureValid(String name, Object value) {
+            parseRenameMappings((List<String>) value);
+        }
 
-				@Override
-				public String toString() {
-					return "list of colon-delimited pairs, e.g. <code>foo:bar,abc:xyz</code>";
-				}
-			}, ConfigDef.Importance.MEDIUM, "Field rename mappings.");
+        @Override
+        public String toString() {
+            return "list of colon-delimited pairs, e.g. <code>foo:bar,abc:xyz</code>";
+        }
+    }, ConfigDef.Importance.MEDIUM, "Field rename mappings.");
 
-	private static final String PURPOSE = "field replacement";
+    private static final String PURPOSE = "field replacement";
 
-	private List<String> exclude;
-	private List<String> include;
-	private Map<String, String> renames;
-	private Map<String, String> reverseRenames;
+    private Set<String> exclude;
+    private Set<String> include;
+    private Map<String, String> renames;
+    private Map<String, String> reverseRenames;
 
-	private Cache<Schema, Schema> schemaUpdateCache;
+    private Cache<Schema, Schema> schemaUpdateCache;
 
-	@Override
-	public void configure(Map<String, ?> configs) {
-		final SimpleConfig config = new SimpleConfig(CONFIG_DEF, ConfigUtils.translateDeprecatedConfigs(configs, new String[][]{
-				{ConfigName.INCLUDE, "whitelist"},
-				{ConfigName.EXCLUDE, "blacklist"},
-		}));
+    @Override
+    public void configure(Map<String, ?> configs) {
+        final SimpleConfig config = new SimpleConfig(CONFIG_DEF, ConfigUtils.translateDeprecatedConfigs(configs, new String[][]{{ConfigName.INCLUDE, "whitelist"}, {ConfigName.EXCLUDE, "blacklist"},}));
 
-		exclude = config.getList(ConfigName.EXCLUDE);
-		include = config.getList(ConfigName.INCLUDE);
-		renames = parseRenameMappings(config.getList(ConfigName.RENAME));
-		reverseRenames = invert(renames);
+        exclude = new HashSet<>(config.getList(ConfigName.EXCLUDE));
+        include = new HashSet<>(config.getList(ConfigName.INCLUDE));
+        renames = parseRenameMappings(config.getList(ConfigName.RENAME));
+        reverseRenames = invert(renames);
 
-		schemaUpdateCache = new SynchronizedCache<>(new LRUCache<>(16));
-	}
+        schemaUpdateCache = new SynchronizedCache<>(new LRUCache<>(16));
+    }
 
     static Map<String, String> parseRenameMappings(List<String> mappings) {
         final Map<String, String> m = new HashMap<>();
@@ -123,7 +106,7 @@ public abstract class ReplaceField<R extends ConnectRecord<R>> implements Transf
     }
 
     boolean filter(String fieldName) {
-		return !exclude.contains(fieldName) && (include.isEmpty() || include.contains(fieldName));
+        return !exclude.contains(fieldName) && (include.isEmpty() || include.contains(fieldName));
     }
 
     String renamed(String fieldName) {
@@ -138,14 +121,14 @@ public abstract class ReplaceField<R extends ConnectRecord<R>> implements Transf
 
     @Override
     public R apply(R record) {
-		if (operatingValue(record) == null) {
-			return record;
-		} else if (operatingSchema(record) == null) {
-			return applySchemaless(record);
-		} else {
-			return applyWithSchema(record);
-		}
-	}
+        if (operatingValue(record) == null) {
+            return record;
+        } else if (operatingSchema(record) == null) {
+            return applySchemaless(record);
+        } else {
+            return applyWithSchema(record);
+        }
+    }
 
     private R applySchemaless(R record) {
         final Map<String, Object> value = requireMap(operatingValue(record), PURPOSE);

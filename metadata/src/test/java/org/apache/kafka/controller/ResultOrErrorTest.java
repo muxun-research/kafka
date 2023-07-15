@@ -22,44 +22,40 @@ import org.apache.kafka.common.requests.ApiError;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 
 @Timeout(value = 40)
 public class ResultOrErrorTest {
-	@Test
-	public void testError() {
-		ResultOrError<Integer> resultOrError =
-				new ResultOrError<>(Errors.INVALID_REQUEST, "missing foobar");
-		assertTrue(resultOrError.isError());
-		assertFalse(resultOrError.isResult());
-		assertEquals(null, resultOrError.result());
-		assertEquals(new ApiError(Errors.INVALID_REQUEST, "missing foobar"),
-				resultOrError.error());
-	}
+    @Test
+    public void testError() {
+        ResultOrError<Integer> resultOrError = new ResultOrError<>(Errors.INVALID_REQUEST, "missing foobar");
+        assertTrue(resultOrError.isError());
+        assertFalse(resultOrError.isResult());
+        assertNull(resultOrError.result());
+        assertEquals(new ApiError(Errors.INVALID_REQUEST, "missing foobar"), resultOrError.error());
+    }
 
-	@Test
-	public void testResult() {
-		ResultOrError<Integer> resultOrError = new ResultOrError<>(123);
-		assertFalse(resultOrError.isError());
-		assertTrue(resultOrError.isResult());
-		assertEquals(123, resultOrError.result());
-		assertEquals(null, resultOrError.error());
-	}
+    @Test
+    public void testResult() {
+        ResultOrError<Integer> resultOrError = new ResultOrError<>(123);
+        assertFalse(resultOrError.isError());
+        assertTrue(resultOrError.isResult());
+        assertEquals(123, resultOrError.result());
+        assertNull(resultOrError.error());
+    }
 
-	@Test
-	public void testEquals() {
-		ResultOrError<String> a = new ResultOrError<>(Errors.INVALID_REQUEST, "missing foobar");
-		ResultOrError<String> b = new ResultOrError<>("abcd");
-		assertFalse(a.equals(b));
-		assertFalse(b.equals(a));
-		assertTrue(a.equals(a));
-		assertTrue(b.equals(b));
-		ResultOrError<String> c = new ResultOrError<>(Errors.INVALID_REQUEST, "missing baz");
-		assertFalse(a.equals(c));
-		assertFalse(c.equals(a));
-		assertTrue(c.equals(c));
-	}
+    @Test
+    public void testEquals() {
+        ResultOrError<String> a = new ResultOrError<>(Errors.INVALID_REQUEST, "missing foobar");
+        ResultOrError<String> b = new ResultOrError<>("abcd");
+        assertNotEquals(a, b);
+        assertNotEquals(b, a);
+        assertEquals(a, a);
+        assertEquals(b, b);
+        ResultOrError<String> c = new ResultOrError<>(Errors.INVALID_REQUEST, "missing baz");
+        assertNotEquals(a, c);
+        assertNotEquals(c, a);
+        assertEquals(c, c);
+    }
 }

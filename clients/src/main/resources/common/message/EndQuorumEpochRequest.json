@@ -21,6 +21,7 @@
   ],
   "name": "EndQuorumEpochRequest",
   "validVersions": "0",
+  "flexibleVersions": "none",
   "fields": [
     {
       "name": "ClusterId",

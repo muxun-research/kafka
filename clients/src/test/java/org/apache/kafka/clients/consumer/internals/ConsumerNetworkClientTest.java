@@ -23,12 +23,7 @@ import org.apache.kafka.clients.NetworkClient;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.Node;
-import org.apache.kafka.common.errors.AuthenticationException;
-import org.apache.kafka.common.errors.DisconnectException;
-import org.apache.kafka.common.errors.InvalidTopicException;
-import org.apache.kafka.common.errors.TimeoutException;
-import org.apache.kafka.common.errors.TopicAuthorizationException;
-import org.apache.kafka.common.errors.WakeupException;
+import org.apache.kafka.common.errors.*;
 import org.apache.kafka.common.internals.ClusterResourceListeners;
 import org.apache.kafka.common.message.HeartbeatRequestData;
 import org.apache.kafka.common.message.HeartbeatResponseData;
@@ -47,16 +42,10 @@ import java.util.Collections;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 public class ConsumerNetworkClientTest {
 
@@ -221,12 +210,7 @@ public class ConsumerNetworkClientTest {
         final RequestFuture<ClientResponse> future = consumerClient.send(node, heartbeat());
 
         client.enableBlockingUntilWakeup(1);
-        Thread t = new Thread() {
-            @Override
-            public void run() {
-                consumerClient.poll(future);
-            }
-        };
+        Thread t = new Thread(() -> consumerClient.poll(future));
         t.start();
 
         consumerClient.disconnectAsync(node);
@@ -284,23 +268,13 @@ public class ConsumerNetworkClientTest {
         consumerClient.pollNoWakeup(); // dequeue and send the request
 
         client.enableBlockingUntilWakeup(2);
-        Thread t1 = new Thread() {
-            @Override
-            public void run() {
-                consumerClient.pollNoWakeup();
-            }
-        };
+        Thread t1 = new Thread(() -> consumerClient.pollNoWakeup());
         t1.start();
 
         // Sleep a little so that t1 is blocking in poll
         Thread.sleep(50);
 
-        Thread t2 = new Thread() {
-            @Override
-            public void run() {
-                consumerClient.poll(future);
-            }
-        };
+        Thread t2 = new Thread(() -> consumerClient.poll(future));
         t2.start();
 
         // Sleep a little so that t2 is awaiting the network client lock

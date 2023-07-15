@@ -16,8 +16,9 @@
  */
 package org.apache.kafka.streams.errors;
 
-import java.util.Map;
 import org.apache.kafka.clients.producer.ProducerRecord;
+
+import java.util.Map;
 
 /**
  * Production exception handler that always instructs streams to continue when an exception
@@ -25,8 +26,12 @@ import org.apache.kafka.clients.producer.ProducerRecord;
  */
 public class AlwaysContinueProductionExceptionHandler implements ProductionExceptionHandler {
     @Override
-    public ProductionExceptionHandlerResponse handle(final ProducerRecord<byte[], byte[]> record,
-                                                     final Exception exception) {
+    public ProductionExceptionHandlerResponse handle(final ProducerRecord<byte[], byte[]> record, final Exception exception) {
+        return ProductionExceptionHandlerResponse.CONTINUE;
+    }
+
+    @Override
+    public ProductionExceptionHandlerResponse handleSerializationException(final ProducerRecord record, final Exception exception) {
         return ProductionExceptionHandlerResponse.CONTINUE;
     }
 

@@ -23,8 +23,7 @@ package org.apache.kafka.connect.components;
 public interface Versioned {
     /**
      * Get the version of this component.
-     *
-     * @return the version, formatted as a String. The version may not be (@code null} or empty.
+     * @return the version, formatted as a String. The version may not be {@code null} or empty.
      */
     String version();
 }

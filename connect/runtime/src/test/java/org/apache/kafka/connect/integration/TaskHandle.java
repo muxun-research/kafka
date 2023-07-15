@@ -16,15 +16,19 @@
  */
 package org.apache.kafka.connect.integration;
 
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collection;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 /**
@@ -37,42 +41,45 @@ public class TaskHandle {
 
     private final String taskId;
     private final ConnectorHandle connectorHandle;
-    private final AtomicInteger partitionsAssigned = new AtomicInteger(0);
-	private final StartAndStopCounter startAndStopCounter = new StartAndStopCounter();
-	private final Consumer<SinkRecord> consumer;
+    private final ConcurrentMap<TopicPartition, PartitionHistory> partitions = new ConcurrentHashMap<>();
+    private final StartAndStopCounter startAndStopCounter = new StartAndStopCounter();
+    private final Consumer<SinkRecord> consumer;
 
     private CountDownLatch recordsRemainingLatch;
     private CountDownLatch recordsToCommitLatch;
-	private int expectedRecords = -1;
-	private int expectedCommits = -1;
+    private int expectedRecords = -1;
+    private int expectedCommits = -1;
 
-	public TaskHandle(ConnectorHandle connectorHandle, String taskId, Consumer<SinkRecord> consumer) {
-		this.taskId = taskId;
-		this.connectorHandle = connectorHandle;
-		this.consumer = consumer;
-	}
+    public TaskHandle(ConnectorHandle connectorHandle, String taskId, Consumer<SinkRecord> consumer) {
+        this.taskId = taskId;
+        this.connectorHandle = connectorHandle;
+        this.consumer = consumer;
+    }
 
-	public void record() {
-		record(null);
-	}
+    public String taskId() {
+        return taskId;
+    }
 
-	/**
-	 * Record a message arrival at the task and the connector overall.
-	 */
-	public void record(SinkRecord record) {
-		if (consumer != null && record != null) {
-			consumer.accept(record);
-		}
-		if (recordsRemainingLatch != null) {
-			recordsRemainingLatch.countDown();
-		}
-		connectorHandle.record();
-	}
+    public void record() {
+        record(null);
+    }
 
-	/**
-	 * Record arrival of a batch of messages at the task and the connector overall.
-	 *
-	 * @param batchSize the number of messages
+    /**
+     * Record a message arrival at the task and the connector overall.
+     */
+    public void record(SinkRecord record) {
+        if (consumer != null && record != null) {
+            consumer.accept(record);
+        }
+        if (recordsRemainingLatch != null) {
+            recordsRemainingLatch.countDown();
+        }
+        connectorHandle.record();
+    }
+
+    /**
+     * Record arrival of a batch of messages at the task and the connector overall.
+     * @param batchSize the number of messages
      */
     public void record(int batchSize) {
         if (recordsRemainingLatch != null) {
@@ -124,25 +131,73 @@ public class TaskHandle {
     }
 
     /**
-     * Set the number of partitions assigned to this task.
-     *
-     * @param numPartitions number of partitions
+     * Adds a set of partitions to the (sink) task's assignment
+     * @param partitions the newly-assigned partitions
      */
-    public void partitionsAssigned(int numPartitions) {
-        partitionsAssigned.set(numPartitions);
+    public void partitionsAssigned(Collection<TopicPartition> partitions) {
+        partitions.forEach(partition -> this.partitions.computeIfAbsent(partition, PartitionHistory::new).assigned());
     }
 
     /**
-     * @return the number of topic partitions assigned to this task.
+     * Removes a set of partitions to the (sink) task's assignment
+     * @param partitions the newly-revoked partitions
      */
-    public int partitionsAssigned() {
-        return partitionsAssigned.get();
+    public void partitionsRevoked(Collection<TopicPartition> partitions) {
+        partitions.forEach(partition -> this.partitions.computeIfAbsent(partition, PartitionHistory::new).revoked());
+    }
+
+    /**
+     * Records offset commits for a (sink) task's partitions
+     * @param partitions the committed partitions
+     */
+    public void partitionsCommitted(Collection<TopicPartition> partitions) {
+        partitions.forEach(partition -> this.partitions.computeIfAbsent(partition, PartitionHistory::new).committed());
+    }
+
+    /**
+     * @return the complete set of partitions currently assigned to this (sink) task
+     */
+    public Collection<TopicPartition> assignment() {
+        return partitions.values().stream().filter(PartitionHistory::isAssigned).map(PartitionHistory::topicPartition).collect(Collectors.toSet());
+    }
+
+    /**
+     * @return the number of topic partitions assigned to this (sink) task.
+     */
+    public int numPartitionsAssigned() {
+        return assignment().size();
+    }
+
+    /**
+     * Returns the number of times the partition has been assigned to this (sink) task.
+     * @param partition the partition
+     * @return the number of times it has been assigned; may be 0 if never assigned
+     */
+    public int timesAssigned(TopicPartition partition) {
+        return partitions.computeIfAbsent(partition, PartitionHistory::new).timesAssigned();
+    }
+
+    /**
+     * Returns the number of times the partition has been revoked from this (sink) task.
+     * @param partition the partition
+     * @return the number of times it has been revoked; may be 0 if never revoked
+     */
+    public int timesRevoked(TopicPartition partition) {
+        return partitions.computeIfAbsent(partition, PartitionHistory::new).timesRevoked();
+    }
+
+    /**
+     * Returns the number of times the framework has committed offsets for this partition
+     * @param partition the partition
+     * @return the number of times it has been committed; may be 0 if never committed
+     */
+    public int timesCommitted(TopicPartition partition) {
+        return partitions.computeIfAbsent(partition, PartitionHistory::new).timesCommitted();
     }
 
     /**
      * Wait up to the specified number of milliseconds for this task to meet the expected number of
      * records as defined by {@code expectedRecords}.
-     *
      * @param timeoutMillis number of milliseconds to wait for records
      * @throws InterruptedException if another threads interrupts this one while waiting for records
      */
@@ -163,16 +218,10 @@ public class TaskHandle {
             throw new IllegalStateException("Illegal state encountered. expectedRecords() was not set for this task?");
         }
         if (!recordsRemainingLatch.await(timeout, unit)) {
-            String msg = String.format(
-                    "Insufficient records seen by task %s in %d millis. Records expected=%d, actual=%d",
-                    taskId,
-                    unit.toMillis(timeout),
-                    expectedRecords,
-                    expectedRecords - recordsRemainingLatch.getCount());
+            String msg = String.format("Insufficient records seen by task %s in %d millis. Records expected=%d, actual=%d", taskId, unit.toMillis(timeout), expectedRecords, expectedRecords - recordsRemainingLatch.getCount());
             throw new DataException(msg);
         }
-        log.debug("Task {} saw {} records, expected {} records",
-                  taskId, expectedRecords - recordsRemainingLatch.getCount(), expectedRecords);
+        log.debug("Task {} saw {} records, expected {} records", taskId, expectedRecords - recordsRemainingLatch.getCount(), expectedRecords);
     }
 
     /**
@@ -199,16 +248,18 @@ public class TaskHandle {
             throw new IllegalStateException("Illegal state encountered. expectedRecords() was not set for this task?");
         }
         if (!recordsToCommitLatch.await(timeout, unit)) {
-            String msg = String.format(
-                    "Insufficient records seen by task %s in %d millis. Records expected=%d, actual=%d",
-                    taskId,
-                    unit.toMillis(timeout),
-                    expectedCommits,
-                    expectedCommits - recordsToCommitLatch.getCount());
+            String msg = String.format("Insufficient records seen by task %s in %d millis. Records expected=%d, actual=%d", taskId, unit.toMillis(timeout), expectedCommits, expectedCommits - recordsToCommitLatch.getCount());
             throw new DataException(msg);
         }
-        log.debug("Task {} saw {} records, expected {} records",
-                  taskId, expectedCommits - recordsToCommitLatch.getCount(), expectedCommits);
+        log.debug("Task {} saw {} records, expected {} records", taskId, expectedCommits - recordsToCommitLatch.getCount(), expectedCommits);
+    }
+
+    /**
+     * Gets the start and stop counter corresponding to this handle.
+     * @return the start and stop counter
+     */
+    public StartAndStopCounter startAndStopCounter() {
+        return startAndStopCounter;
     }
 
     /**
@@ -249,8 +300,52 @@ public class TaskHandle {
 
     @Override
     public String toString() {
-        return "Handle{" +
-                "taskId='" + taskId + '\'' +
-                '}';
+        return "Handle{" + "taskId='" + taskId + '\'' + '}';
+    }
+
+    private static class PartitionHistory {
+        private final TopicPartition topicPartition;
+        private boolean assigned = false;
+        private int timesAssigned = 0;
+        private int timesRevoked = 0;
+        private int timesCommitted = 0;
+
+        public PartitionHistory(TopicPartition topicPartition) {
+            this.topicPartition = topicPartition;
+        }
+
+        public void assigned() {
+            timesAssigned++;
+            assigned = true;
+        }
+
+        public void revoked() {
+            timesRevoked++;
+            assigned = false;
+        }
+
+        public void committed() {
+            timesCommitted++;
+        }
+
+        public TopicPartition topicPartition() {
+            return topicPartition;
+        }
+
+        public boolean isAssigned() {
+            return assigned;
+        }
+
+        public int timesAssigned() {
+            return timesAssigned;
+        }
+
+        public int timesRevoked() {
+            return timesRevoked;
+        }
+
+        public int timesCommitted() {
+            return timesCommitted;
+        }
     }
 }

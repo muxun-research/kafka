@@ -16,12 +16,12 @@
  */
 package org.apache.kafka.streams.scala.serialization
 
+import org.apache.kafka.common.serialization.{Deserializer, Serde, Serializer, Serdes => JSerdes}
+import org.apache.kafka.streams.kstream.WindowedSerdes
+
 import java.nio.ByteBuffer
 import java.util
 import java.util.UUID
-
-import org.apache.kafka.common.serialization.{Deserializer, Serde, Serializer, Serdes => JSerdes}
-import org.apache.kafka.streams.kstream.WindowedSerdes
 
 object Serdes extends LowPrioritySerdes {
   implicit def stringSerde: Serde[String] = JSerdes.String()
@@ -75,8 +75,10 @@ object Serdes extends LowPrioritySerdes {
       }
     )
 
-  def fromFn[T >: Null](serializer: (String, T) => Array[Byte],
-                        deserializer: (String, Array[Byte]) => Option[T]): Serde[T] =
+  def fromFn[T >: Null](
+                         serializer: (String, T) => Array[Byte],
+                         deserializer: (String, Array[Byte]) => Option[T]
+                       ): Serde[T] =
     JSerdes.serdeFrom(
       new Serializer[T] {
         override def serialize(topic: String, data: T): Array[Byte] = serializer(topic, data)
@@ -97,13 +99,13 @@ object Serdes extends LowPrioritySerdes {
 
 trait LowPrioritySerdes {
 
-  implicit val nullSerde: Serde[Null] = {
+  implicit val nullSerde: Serde[Null] =
     Serdes.fromFn[Null](
       { _: Null =>
         null
-      }, { _: Array[Byte] =>
+      },
+      { _: Array[Byte] =>
         None
       }
     )
-  }
 }

@@ -16,16 +16,15 @@
  */
 package kafka.server
 
-import java.net.InetAddress
-
 import kafka.network.RequestChannel.Session
 import kafka.server.QuotaType._
 import org.apache.kafka.common.metrics.Quota
 import org.apache.kafka.common.security.auth.KafkaPrincipal
 import org.apache.kafka.common.utils.Sanitizer
-
 import org.junit.jupiter.api.Assertions._
 import org.junit.jupiter.api.Test
+
+import java.net.InetAddress
 
 class ClientQuotaManagerTest extends BaseClientQuotaManagerTest {
   private val config = ClientQuotaManagerConfig()
@@ -418,7 +417,7 @@ class ClientQuotaManagerTest extends BaseClientQuotaManagerTest {
     }
   }
 
-  private case class UserClient(val user: String, val clientId: String, val configUser: Option[String] = None, val configClientId: Option[String] = None) {
+  private case class UserClient(user: String, clientId: String, configUser: Option[String] = None, configClientId: Option[String] = None) {
     // The class under test expects only sanitized client configs. We pass both the default value (which should not be
     // sanitized to ensure it remains unique) and non-default values, so we need to take care in generating the sanitized
     // client ID

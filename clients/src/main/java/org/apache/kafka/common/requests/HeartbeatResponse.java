@@ -39,13 +39,18 @@ public class HeartbeatResponse extends AbstractResponse {
     private final HeartbeatResponseData data;
 
     public HeartbeatResponse(HeartbeatResponseData data) {
-		super(ApiKeys.HEARTBEAT);
-		this.data = data;
+        super(ApiKeys.HEARTBEAT);
+        this.data = data;
     }
 
     @Override
     public int throttleTimeMs() {
         return data.throttleTimeMs();
+    }
+
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
     }
 
     public Errors error() {
@@ -54,7 +59,7 @@ public class HeartbeatResponse extends AbstractResponse {
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-		return errorCounts(error());
+        return errorCounts(error());
     }
 
 	@Override

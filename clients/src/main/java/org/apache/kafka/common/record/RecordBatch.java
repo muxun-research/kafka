@@ -21,6 +21,7 @@ import org.apache.kafka.common.utils.CloseableIterator;
 
 import java.nio.ByteBuffer;
 import java.util.Iterator;
+import java.util.OptionalLong;
 
 /**
  * RecordBatch是一个用于存储records的容器，
@@ -210,6 +211,12 @@ public interface RecordBatch extends Iterable<Record> {
      * @return true if it is, false otherwise
      */
     boolean isTransactional();
+
+    /**
+     * Get the delete horizon, returns OptionalLong.EMPTY if the first timestamp is not the delete horizon
+     * @return timestamp of the delete horizon
+     */
+    OptionalLong deleteHorizonMs();
 
     /**
      * Get the partition leader epoch of this record batch.

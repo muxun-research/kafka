@@ -49,20 +49,18 @@
               </ul>
           </div>
           <div class="section" id="starting-a-kafka-streams-application">
-              <span id="streams-developer-guide-execution-starting"></span><h2><a class="toc-backref" href="#id3">Starting a Kafka Streams application</a><a class="headerlink" href="#starting-a-kafka-streams-application" title="Permalink to this headline"></a></h2>
+              <span id="streams-developer-guide-execution-starting"></span>
+              <h2><a class="toc-backref" href="#id3">Starting a Kafka Streams application</a><a class="headerlink" href="#starting-a-kafka-streams-application" title="Permalink to this headline"></a></h2>
               <p>You can package your Java application as a fat JAR file and then start the application like this:</p>
-              <div class="highlight-bash">
-                  <div class="highlight"><pre><code><span></span><span class="c1"># Start the application in class `com.example.MyStreamsApp`</span>
-<span class="c1"># from the fat JAR named `path-to-app-fatjar.jar`.</span>
+              <pre class="line-numbers"><code class="language-bash"># Start the application in class `com.example.MyStreamsApp`
+# from the fat JAR named `path-to-app-fatjar.jar`.
 $ java -cp path-to-app-fatjar.jar com.example.MyStreamsApp</code></pre>
-                  </div>
-              </div>
               <p>When you start your application you are launching a Kafka Streams instance of your application. You can run multiple
                   instances of your application. A common scenario is that there are multiple instances of your application running in
                   parallel. For more information, see <a class="reference internal" href="../architecture.html#streams_architecture_tasks"><span class="std std-ref">Parallelism Model</span></a>.</p>
               <p>When the application instance starts running, the defined processor topology will be initialized as one or more stream tasks.
                   If the processor topology defines any state stores, these are also constructed during the initialization period. For
-                  more information, see the  <a class="reference internal" href="#streams-developer-guide-execution-scaling-state-restoration"><span class="std std-ref">State restoration during workload rebalance</span></a> section).</p>
+                  more information, see the <a class="reference internal" href="#streams-developer-guide-execution-scaling-state-restoration"><span class="std std-ref">State restoration during workload rebalance</span></a> section).</p>
           </div>
           <div class="section" id="elastic-scaling-of-your-application">
               <span id="streams-developer-guide-execution-scaling"></span><h2><a class="toc-backref" href="#id4">Elastic scaling of your application</a><a class="headerlink" href="#elastic-scaling-of-your-application" title="Permalink to this headline"></a></h2>
@@ -142,16 +140,16 @@ $ java -cp path-to-app-fatjar.jar com.example.MyStreamsApp</code></pre>
 </div>
 
 
-               </div>
-              </div>
-              <div class="pagination">
-                <a href="/{{version}}/documentation/streams/developer-guide/memory-mgmt" class="pagination__btn pagination__btn__prev">Previous</a>
-                <a href="/{{version}}/documentation/streams/developer-guide/manage-topics" class="pagination__btn pagination__btn__next">Next</a>
-              </div>
-                </script>
+  </div>
+  </div>
+  <div class="pagination">
+      <a href="/{{version}}/documentation/streams/developer-guide/memory-mgmt" class="pagination__btn pagination__btn__prev">Previous</a>
+      <a href="/{{version}}/documentation/streams/developer-guide/manage-topics" class="pagination__btn pagination__btn__next">Next</a>
+  </div>
+</script>
 
-                <!--#include virtual="../../../includes/_header.htm" -->
-                <!--#include virtual="../../../includes/_top.htm" -->
+<!--#include virtual="../../../includes/_header.htm" -->
+<!--#include virtual="../../../includes/_top.htm" -->
 <div class="content documentation ">
     <!--#include virtual="../../../includes/_nav.htm" -->
     <div class="right">
@@ -163,16 +161,16 @@ $ java -cp path-to-app-fatjar.jar com.example.MyStreamsApp</code></pre>
         </ul>
         <div class="p-content"></div>
     </div>
-                    </div>
-                    <!--#include virtual="../../../includes/_footer.htm" -->
-                    <script>
-                    $(function() {
-                        // Show selected style on nav item
-                        $('.b-nav__streams').addClass('selected');
+</div>
+<!--#include virtual="../../../includes/_footer.htm" -->
+<script>
+    $(function () {
+        // Show selected style on nav item
+        $('.b-nav__streams').addClass('selected');
 
-                        //sticky secondary nav
-                        var $navbar = $(".sub-nav-sticky"),
-                            y_pos = $navbar.offset().top,
+        //sticky secondary nav
+        var $navbar = $(".sub-nav-sticky"),
+            y_pos = $navbar.offset().top,
                             height = $navbar.height();
 
                         $(window).scroll(function() {

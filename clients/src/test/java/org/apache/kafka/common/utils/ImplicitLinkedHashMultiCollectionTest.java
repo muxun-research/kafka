@@ -24,11 +24,7 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.Random;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * A unit test for ImplicitLinkedHashMultiCollection.
@@ -87,19 +83,17 @@ public class ImplicitLinkedHashMultiCollectionTest {
     }
 
     static void expectExactTraversal(Iterator<TestElement> iterator, TestElement... sequence) {
-		int i = 0;
-		while (iterator.hasNext()) {
-			TestElement element = iterator.next();
-			assertTrue(i < sequence.length, "Iterator yieled " + (i + 1) + " elements, but only " +
-					sequence.length + " were expected.");
-			if (sequence[i] != element) {
-				fail("Iterator value number " + (i + 1) + " was incorrect.");
-			}
-			i = i + 1;
-		}
-		assertTrue(i == sequence.length, "Iterator yieled " + (i + 1) + " elements, but " +
-				sequence.length + " were expected.");
-	}
+        int i = 0;
+        while (iterator.hasNext()) {
+            TestElement element = iterator.next();
+            assertTrue(i < sequence.length, "Iterator yieled " + (i + 1) + " elements, but only " + sequence.length + " were expected.");
+            if (sequence[i] != element) {
+                fail("Iterator value number " + (i + 1) + " was incorrect.");
+            }
+            i = i + 1;
+        }
+        assertEquals(sequence.length, i, "Iterator yieled " + (i + 1) + " elements, but " + sequence.length + " were expected.");
+    }
 
     @Test
     public void testEnlargement() {
@@ -154,17 +148,14 @@ public class ImplicitLinkedHashMultiCollectionTest {
     }
 
     void expectTraversal(Iterator<TestElement> iter, Iterator<TestElement> expectedIter) {
-		int i = 0;
-		while (iter.hasNext()) {
-			TestElement element = iter.next();
-			assertTrue(expectedIter.hasNext(),
-					"Iterator yieled " + (i + 1) + " elements, but only " + i + " were expected.");
-			TestElement expected = expectedIter.next();
-			assertTrue(expected == element,
-					"Iterator value number " + (i + 1) + " was incorrect.");
-			i = i + 1;
-		}
-		assertFalse(expectedIter.hasNext(),
-				"Iterator yieled " + i + " elements, but at least " + (i + 1) + " were expected.");
-	}
+        int i = 0;
+        while (iter.hasNext()) {
+            TestElement element = iter.next();
+            assertTrue(expectedIter.hasNext(), "Iterator yieled " + (i + 1) + " elements, but only " + i + " were expected.");
+            TestElement expected = expectedIter.next();
+            assertSame(expected, element, "Iterator value number " + (i + 1) + " was incorrect.");
+            i = i + 1;
+        }
+        assertFalse(expectedIter.hasNext(), "Iterator yieled " + i + " elements, but at least " + (i + 1) + " were expected.");
+    }
 }

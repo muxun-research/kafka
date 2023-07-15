@@ -17,72 +17,143 @@
 
 package org.apache.kafka.controller;
 
+import org.apache.kafka.clients.ApiVersions;
+import org.apache.kafka.metadata.bootstrap.BootstrapMetadata;
 import org.apache.kafka.metalog.LocalLogManagerTestEnv;
+import org.apache.kafka.raft.LeaderAndEpoch;
+import org.apache.kafka.server.common.MetadataVersion;
+import org.apache.kafka.server.fault.MockFaultHandler;
 import org.apache.kafka.test.TestUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 public class QuorumControllerTestEnv implements AutoCloseable {
-	private static final Logger log =
-			LoggerFactory.getLogger(QuorumControllerTestEnv.class);
+    private final List<QuorumController> controllers;
+    private final LocalLogManagerTestEnv logEnv;
+    private final Map<Integer, MockFaultHandler> fatalFaultHandlers = new HashMap<>();
+    private final Map<Integer, MockFaultHandler> nonFatalFaultHandlers = new HashMap<>();
 
-	private final List<QuorumController> controllers;
+    public static class Builder {
+        private final LocalLogManagerTestEnv logEnv;
+        private Consumer<QuorumController.Builder> controllerBuilderInitializer = __ -> {
+        };
+        private OptionalLong sessionTimeoutMillis = OptionalLong.empty();
+        private OptionalLong leaderImbalanceCheckIntervalNs = OptionalLong.empty();
+        private BootstrapMetadata bootstrapMetadata = BootstrapMetadata.fromVersion(MetadataVersion.latest(), "test-provided version");
 
-	public QuorumControllerTestEnv(LocalLogManagerTestEnv logEnv,
-								   Consumer<QuorumController.Builder> builderConsumer)
-			throws Exception {
-		int numControllers = logEnv.logManagers().size();
-		this.controllers = new ArrayList<>(numControllers);
-		try {
-			for (int i = 0; i < numControllers; i++) {
-				QuorumController.Builder builder = new QuorumController.Builder(i);
-				builder.setLogManager(logEnv.logManagers().get(i));
-				builderConsumer.accept(builder);
-				this.controllers.add(builder.build());
-			}
-		} catch (Exception e) {
-			close();
-			throw e;
-		}
-	}
+        public Builder(LocalLogManagerTestEnv logEnv) {
+            this.logEnv = logEnv;
+        }
 
-	QuorumController activeController() throws InterruptedException {
-		AtomicReference<QuorumController> value = new AtomicReference<>(null);
-		TestUtils.retryOnExceptionWithTimeout(3, 20000, () -> {
-			QuorumController activeController = null;
-			for (QuorumController controller : controllers) {
-				if (controller.isActive()) {
-					if (activeController != null) {
-						throw new RuntimeException("node " + activeController.nodeId() +
-								" thinks it's the leader, but so does " + controller.nodeId());
-					}
-					activeController = controller;
-				}
-			}
-			if (activeController == null) {
-				throw new RuntimeException("No leader found.");
-			}
-			value.set(activeController);
-		});
-		return value.get();
-	}
+        public Builder setControllerBuilderInitializer(Consumer<QuorumController.Builder> controllerBuilderInitializer) {
+            this.controllerBuilderInitializer = controllerBuilderInitializer;
+            return this;
+        }
 
-	public List<QuorumController> controllers() {
-		return controllers;
-	}
+        public Builder setSessionTimeoutMillis(OptionalLong sessionTimeoutMillis) {
+            this.sessionTimeoutMillis = sessionTimeoutMillis;
+            return this;
+        }
 
-	@Override
-	public void close() throws InterruptedException {
-		for (QuorumController controller : controllers) {
-			controller.beginShutdown();
-		}
-		for (QuorumController controller : controllers) {
-			controller.close();
-		}
-	}
+        public Builder setLeaderImbalanceCheckIntervalNs(OptionalLong leaderImbalanceCheckIntervalNs) {
+            this.leaderImbalanceCheckIntervalNs = leaderImbalanceCheckIntervalNs;
+            return this;
+        }
+
+        public Builder setBootstrapMetadata(BootstrapMetadata bootstrapMetadata) {
+            this.bootstrapMetadata = bootstrapMetadata;
+            return this;
+        }
+
+        public QuorumControllerTestEnv build() throws Exception {
+            return new QuorumControllerTestEnv(logEnv, controllerBuilderInitializer, sessionTimeoutMillis, leaderImbalanceCheckIntervalNs, bootstrapMetadata);
+        }
+    }
+
+    private QuorumControllerTestEnv(LocalLogManagerTestEnv logEnv, Consumer<QuorumController.Builder> controllerBuilderInitializer, OptionalLong sessionTimeoutMillis, OptionalLong leaderImbalanceCheckIntervalNs, BootstrapMetadata bootstrapMetadata) throws Exception {
+        this.logEnv = logEnv;
+        int numControllers = logEnv.logManagers().size();
+        this.controllers = new ArrayList<>(numControllers);
+        try {
+            ApiVersions apiVersions = new ApiVersions();
+            List<Integer> nodeIds = IntStream.range(0, numControllers).boxed().collect(Collectors.toList());
+            for (int nodeId = 0; nodeId < numControllers; nodeId++) {
+                QuorumController.Builder builder = new QuorumController.Builder(nodeId, logEnv.clusterId());
+                builder.setRaftClient(logEnv.logManagers().get(nodeId));
+                builder.setBootstrapMetadata(bootstrapMetadata);
+                builder.setLeaderImbalanceCheckIntervalNs(leaderImbalanceCheckIntervalNs);
+                builder.setQuorumFeatures(new QuorumFeatures(nodeId, apiVersions, QuorumFeatures.defaultFeatureMap(), nodeIds));
+                sessionTimeoutMillis.ifPresent(timeout -> {
+                    builder.setSessionTimeoutNs(NANOSECONDS.convert(timeout, TimeUnit.MILLISECONDS));
+                });
+                MockFaultHandler fatalFaultHandler = new MockFaultHandler("fatalFaultHandler");
+                builder.setFatalFaultHandler(fatalFaultHandler);
+                fatalFaultHandlers.put(nodeId, fatalFaultHandler);
+                MockFaultHandler nonFatalFaultHandler = new MockFaultHandler("nonFatalFaultHandler");
+                builder.setNonFatalFaultHandler(nonFatalFaultHandler);
+                nonFatalFaultHandlers.put(nodeId, fatalFaultHandler);
+                controllerBuilderInitializer.accept(builder);
+                this.controllers.add(builder.build());
+            }
+        } catch (Exception e) {
+            close();
+            throw e;
+        }
+    }
+
+    QuorumController activeController() throws InterruptedException {
+        AtomicReference<QuorumController> value = new AtomicReference<>(null);
+        TestUtils.retryOnExceptionWithTimeout(20000, 3, () -> {
+            LeaderAndEpoch leader = logEnv.leaderAndEpoch();
+            for (QuorumController controller : controllers) {
+                if (OptionalInt.of(controller.nodeId()).equals(leader.leaderId()) && controller.curClaimEpoch() == leader.epoch()) {
+                    value.set(controller);
+                    break;
+                }
+            }
+
+            if (value.get() == null) {
+                throw new RuntimeException(String.format("Expected to see %s as leader", leader));
+            }
+        });
+
+        return value.get();
+    }
+
+    public List<QuorumController> controllers() {
+        return controllers;
+    }
+
+    public MockFaultHandler fatalFaultHandler(Integer nodeId) {
+        return fatalFaultHandlers.get(nodeId);
+    }
+
+    public void ignoreFatalFaults() {
+        for (MockFaultHandler faultHandler : fatalFaultHandlers.values()) {
+            faultHandler.setIgnore(true);
+        }
+    }
+
+    @Override
+    public void close() throws InterruptedException {
+        for (QuorumController controller : controllers) {
+            controller.beginShutdown();
+        }
+        for (QuorumController controller : controllers) {
+            controller.close();
+        }
+        for (MockFaultHandler faultHandler : fatalFaultHandlers.values()) {
+            faultHandler.maybeRethrowFirstException();
+        }
+        for (MockFaultHandler faultHandler : nonFatalFaultHandlers.values()) {
+            faultHandler.maybeRethrowFirstException();
+        }
+    }
 }

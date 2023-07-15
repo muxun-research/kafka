@@ -17,7 +17,9 @@
   "apiKey": 43,
   "type": "request",
   "listeners": [
-    "zkBroker"
+    "zkBroker",
+    "broker",
+    "controller"
   ],
   "name": "ElectLeadersRequest",
   // Version 1 implements multiple leader election types, as described by KIP-460.
@@ -55,7 +57,12 @@
         }
       ]
     },
-    { "name": "TimeoutMs", "type": "int32", "versions": "0+", "default": "60000",
-      "about": "The time in ms to wait for the election to complete." }
+    {
+      "name": "TimeoutMs",
+      "type": "int32",
+      "versions": "0+",
+      "default": "60000",
+      "about": "The time in ms to wait for the election to complete."
+    }
   ]
 }

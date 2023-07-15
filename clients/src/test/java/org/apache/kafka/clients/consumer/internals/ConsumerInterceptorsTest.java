@@ -27,15 +27,9 @@ import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.record.TimestampType;
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class ConsumerInterceptorsTest {
 	private final int filterPartition1 = 5;
@@ -78,7 +72,7 @@ public class ConsumerInterceptorsTest {
                 if (tp.partition() != filterPartition)
                     recordMap.put(tp, records.records(tp));
             }
-            return new ConsumerRecords<K, V>(recordMap);
+            return new ConsumerRecords<>(recordMap);
         }
 
         @Override

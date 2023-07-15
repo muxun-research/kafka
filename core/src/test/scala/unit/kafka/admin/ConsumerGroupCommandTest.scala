@@ -17,23 +17,22 @@
 
 package kafka.admin
 
-import java.time.Duration
-import java.util.concurrent.{ExecutorService, Executors, TimeUnit}
-import java.util.{Collections, Properties}
-
 import kafka.admin.ConsumerGroupCommand.{ConsumerGroupCommandOptions, ConsumerGroupService}
 import kafka.integration.KafkaServerTestHarness
 import kafka.server.KafkaConfig
 import kafka.utils.TestUtils
 import org.apache.kafka.clients.admin.AdminClientConfig
-import org.apache.kafka.clients.consumer.{KafkaConsumer, RangeAssignor}
-import org.apache.kafka.common.{PartitionInfo, TopicPartition}
+import org.apache.kafka.clients.consumer.{Consumer, KafkaConsumer, RangeAssignor}
 import org.apache.kafka.common.errors.WakeupException
 import org.apache.kafka.common.serialization.StringDeserializer
-import org.junit.jupiter.api.{AfterEach, BeforeEach}
+import org.apache.kafka.common.{PartitionInfo, TopicPartition}
+import org.junit.jupiter.api.{AfterEach, BeforeEach, TestInfo}
 
-import scala.jdk.CollectionConverters._
+import java.time.Duration
+import java.util.concurrent.{ExecutorService, Executors, TimeUnit}
+import java.util.{Collections, Properties}
 import scala.collection.mutable.ArrayBuffer
+import scala.jdk.CollectionConverters._
 
 class ConsumerGroupCommandTest extends KafkaServerTestHarness {
   import ConsumerGroupCommandTest._
@@ -46,14 +45,14 @@ class ConsumerGroupCommandTest extends KafkaServerTestHarness {
 
   // configure the servers and clients
   override def generateConfigs = {
-    TestUtils.createBrokerConfigs(1, zkConnect, enableControlledShutdown = false).map { props =>
+    TestUtils.createBrokerConfigs(1, zkConnectOrNull, enableControlledShutdown = false).map { props =>
       KafkaConfig.fromProps(props)
     }
   }
 
   @BeforeEach
-  override def setUp(): Unit = {
-    super.setUp()
+  override def setUp(testInfo: TestInfo): Unit = {
+    super.setUp(testInfo)
     createTopic(topic, 1, 1)
   }
 
@@ -75,9 +74,9 @@ class ConsumerGroupCommandTest extends KafkaServerTestHarness {
     }
   }
 
-  def createNoAutoCommitConsumer(group: String): KafkaConsumer[String, String] = {
+  def createNoAutoCommitConsumer(group: String): Consumer[String, String] = {
     val props = new Properties
-    props.put("bootstrap.servers", brokerList)
+    props.put("bootstrap.servers", bootstrapServers())
     props.put("group.id", group)
     props.put("enable.auto.commit", "false")
     new KafkaConsumer(props, new StringDeserializer, new StringDeserializer)
@@ -96,14 +95,14 @@ class ConsumerGroupCommandTest extends KafkaServerTestHarness {
                                strategy: String = classOf[RangeAssignor].getName,
                                customPropsOpt: Option[Properties] = None,
                                syncCommit: Boolean = false): ConsumerGroupExecutor = {
-    val executor = new ConsumerGroupExecutor(brokerList, numConsumers, group, topic, strategy, customPropsOpt, syncCommit)
+    val executor = new ConsumerGroupExecutor(bootstrapServers(), numConsumers, group, topic, strategy, customPropsOpt, syncCommit)
     addExecutor(executor)
     executor
   }
 
   def addSimpleGroupExecutor(partitions: Iterable[TopicPartition] = Seq(new TopicPartition(topic, 0)),
                              group: String = group): SimpleConsumerGroupExecutor = {
-    val executor = new SimpleConsumerGroupExecutor(brokerList, group, partitions)
+    val executor = new SimpleConsumerGroupExecutor(bootstrapServers(), group, partitions)
     addExecutor(executor)
     executor
   }

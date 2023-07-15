@@ -48,64 +48,58 @@ import java.util.Map;
  * - {@link Errors#OFFSET_NOT_AVAILABLE} The leader's HW has not caught up after recent election (v5+ protocol)
  */
 public class ListOffsetsResponse extends AbstractResponse {
-	public static final long UNKNOWN_TIMESTAMP = -1L;
-	public static final long UNKNOWN_OFFSET = -1L;
-	public static final int UNKNOWN_EPOCH = RecordBatch.NO_PARTITION_LEADER_EPOCH;
+    public static final long UNKNOWN_TIMESTAMP = -1L;
+    public static final long UNKNOWN_OFFSET = -1L;
+    public static final int UNKNOWN_EPOCH = RecordBatch.NO_PARTITION_LEADER_EPOCH;
 
-	private final ListOffsetsResponseData data;
+    private final ListOffsetsResponseData data;
 
-	public ListOffsetsResponse(ListOffsetsResponseData data) {
-		super(ApiKeys.LIST_OFFSETS);
-		this.data = data;
-	}
+    public ListOffsetsResponse(ListOffsetsResponseData data) {
+        super(ApiKeys.LIST_OFFSETS);
+        this.data = data;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
 
-	@Override
-	public ListOffsetsResponseData data() {
-		return data;
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	public List<ListOffsetsTopicResponse> topics() {
-		return data.topics();
-	}
+    @Override
+    public ListOffsetsResponseData data() {
+        return data;
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> errorCounts = new HashMap<>();
-		topics().forEach(topic ->
-				topic.partitions().forEach(partition ->
-						updateErrorCounts(errorCounts, Errors.forCode(partition.errorCode()))
-				)
-		);
-		return errorCounts;
-	}
+    public List<ListOffsetsTopicResponse> topics() {
+        return data.topics();
+    }
 
-	public static ListOffsetsResponse parse(ByteBuffer buffer, short version) {
-		return new ListOffsetsResponse(new ListOffsetsResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        Map<Errors, Integer> errorCounts = new HashMap<>();
+        topics().forEach(topic -> topic.partitions().forEach(partition -> updateErrorCounts(errorCounts, Errors.forCode(partition.errorCode()))));
+        return errorCounts;
+    }
 
-	@Override
-	public String toString() {
-		return data.toString();
-	}
+    public static ListOffsetsResponse parse(ByteBuffer buffer, short version) {
+        return new ListOffsetsResponse(new ListOffsetsResponseData(new ByteBufferAccessor(buffer), version));
+    }
 
-	@Override
-	public boolean shouldClientThrottle(short version) {
-		return version >= 3;
-	}
+    @Override
+    public String toString() {
+        return data.toString();
+    }
 
-	public static ListOffsetsTopicResponse singletonListOffsetsTopicResponse(TopicPartition tp, Errors error, long timestamp, long offset, int epoch) {
-		return new ListOffsetsTopicResponse()
-				.setName(tp.topic())
-				.setPartitions(Collections.singletonList(new ListOffsetsPartitionResponse()
-						.setPartitionIndex(tp.partition())
-						.setErrorCode(error.code())
-						.setTimestamp(timestamp)
-						.setOffset(offset)
-						.setLeaderEpoch(epoch)));
-	}
+    @Override
+    public boolean shouldClientThrottle(short version) {
+        return version >= 3;
+    }
+
+    public static ListOffsetsTopicResponse singletonListOffsetsTopicResponse(TopicPartition tp, Errors error, long timestamp, long offset, int epoch) {
+        return new ListOffsetsTopicResponse().setName(tp.topic()).setPartitions(Collections.singletonList(new ListOffsetsPartitionResponse().setPartitionIndex(tp.partition()).setErrorCode(error.code()).setTimestamp(timestamp).setOffset(offset).setLeaderEpoch(epoch)));
+    }
 }

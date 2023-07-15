@@ -24,9 +24,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class TopicTest {
 
@@ -70,15 +68,21 @@ public class TopicTest {
     public void testTopicHasCollisionChars() {
         List<String> falseTopics = Arrays.asList("start", "end", "middle", "many");
         List<String> trueTopics = Arrays.asList(
-                ".start", "end.", "mid.dle", ".ma.ny.",
-                "_start", "end_", "mid_dle", "_ma_ny."
-        );
+                ".start", "end.", "mid.dle", ".ma.ny.", "_start", "end_", "mid_dle", "_ma_ny.");
 
         for (String topic : falseTopics)
             assertFalse(Topic.hasCollisionChars(topic));
 
         for (String topic : trueTopics)
             assertTrue(Topic.hasCollisionChars(topic));
+    }
+
+    @Test
+    public void testUnifyCollisionChars() {
+        assertEquals("topic", Topic.unifyCollisionChars("topic"));
+        assertEquals("_topic", Topic.unifyCollisionChars(".topic"));
+        assertEquals("_topic", Topic.unifyCollisionChars("_topic"));
+        assertEquals("__topic", Topic.unifyCollisionChars("_.topic"));
     }
 
     @Test

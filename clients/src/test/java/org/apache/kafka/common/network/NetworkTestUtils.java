@@ -31,8 +31,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Common utility functions used by transport layer and authenticator tests.
@@ -82,9 +81,18 @@ public class NetworkTestUtils {
             }
 
             for (int i = 0; i < selector.completedSends().size() && requests < messageCount && selector.isChannelReady(node); i++, requests++) {
-				selector.send(new NetworkSend(node, ByteBufferSend.sizePrefixed(ByteBuffer.wrap((prefix + "-" + requests).getBytes()))));
+                selector.send(new NetworkSend(node, ByteBufferSend.sizePrefixed(ByteBuffer.wrap((prefix + "-" + requests).getBytes()))));
             }
         }
+    }
+
+    public static void waitForChannelConnected(Selector selector, String node) throws IOException {
+        int secondsLeft = 30;
+        while (selector.channel(node) != null && !selector.channel(node).isConnected() && secondsLeft-- > 0) {
+            selector.poll(1000L);
+        }
+        assertNotNull(selector.channel(node));
+        assertTrue(selector.channel(node).isConnected(), String.format("Channel %s was not connected after 30 seconds", node));
     }
 
     public static void waitForChannelReady(Selector selector, String node) throws IOException {
@@ -93,13 +101,18 @@ public class NetworkTestUtils {
         while (!selector.isChannelReady(node) && secondsLeft-- > 0) {
             selector.poll(1000L);
         }
-        assertTrue(selector.isChannelReady(node));
+        assertTrue(selector.isChannelReady(node), String.format("Channel %s was not ready after 30 seconds", node));
     }
 
-    public static ChannelState waitForChannelClose(Selector selector, String node, ChannelState.State channelState)
-            throws IOException {
+    public static ChannelState waitForChannelClose(Selector selector, String node, ChannelState.State channelState) throws IOException {
+        return waitForChannelClose(selector, node, channelState, 0);
+    }
+
+    public static ChannelState waitForChannelClose(Selector selector, String node, ChannelState.State channelState, int delayBetweenPollMs) throws IOException {
         boolean closed = false;
         for (int i = 0; i < 300; i++) {
+            if (delayBetweenPollMs > 0)
+                Utils.sleep(delayBetweenPollMs);
             selector.poll(100L);
             if (selector.channel(node) == null && selector.closingChannel(node) == null) {
                 closed = true;

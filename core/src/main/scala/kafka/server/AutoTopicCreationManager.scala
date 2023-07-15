@@ -18,18 +18,15 @@
 package kafka.server
 
 import kafka.controller.KafkaController
-import kafka.coordinator.group.GroupCoordinator
 import kafka.coordinator.transaction.TransactionCoordinator
 import kafka.utils.Logging
 import org.apache.kafka.clients.ClientResponse
 import org.apache.kafka.common.errors.InvalidTopicException
 import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.internals.Topic.{GROUP_METADATA_TOPIC_NAME, TRANSACTION_STATE_TOPIC_NAME}
-import org.apache.kafka.common.message.CreateTopicsRequestData
-import org.apache.kafka.common.message.CreateTopicsRequestData.{CreatableTopic, CreateableTopicConfig, CreateableTopicConfigCollection}
-import org.apache.kafka.common.message.MetadataResponseData.MetadataResponseTopic
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 import org.apache.kafka.common.requests.{ApiError, CreateTopicsRequest, RequestContext, RequestHeader}
+import org.apache.kafka.coordinator.group.GroupCoordinator
 
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
@@ -169,13 +166,19 @@ class DefaultAutoTopicCreationManager(
 
     val requestCompletionHandler = new ControllerRequestCompletionHandler {
       override def onTimeout(): Unit = {
-        debug(s"Auto topic creation timed out for ${creatableTopics.keys}.")
         clearInflightRequests(creatableTopics)
+        debug(s"Auto topic creation timed out for ${creatableTopics.keys}.")
       }
 
       override def onComplete(response: ClientResponse): Unit = {
-        debug(s"Auto topic creation completed for ${creatableTopics.keys} with response ${response.responseBody.toString}.")
         clearInflightRequests(creatableTopics)
+        if (response.authenticationException() != null) {
+          warn(s"Auto topic creation failed for ${creatableTopics.keys} with authentication exception")
+        } else if (response.versionMismatch() != null) {
+          warn(s"Auto topic creation failed for ${creatableTopics.keys} with invalid version exception")
+        } else {
+          debug(s"Auto topic creation completed for ${creatableTopics.keys} with response ${response.responseBody}.")
+        }
       }
     }
 
@@ -229,7 +232,7 @@ class DefaultAutoTopicCreationManager(
           .setName(topic)
           .setNumPartitions(config.offsetsTopicPartitions)
           .setReplicationFactor(config.offsetsTopicReplicationFactor)
-          .setConfigs(convertToTopicConfigCollections(groupCoordinator.offsetsTopicConfigs))
+          .setConfigs(convertToTopicConfigCollections(groupCoordinator.groupMetadataTopicConfigs))
       case TRANSACTION_STATE_TOPIC_NAME =>
         new CreatableTopic()
           .setName(topic)

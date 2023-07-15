@@ -17,24 +17,57 @@
 
 package kafka.server
 
-import java.util.{Arrays, Collections}
-
 import kafka.network.SocketServer
 import kafka.utils._
 import org.apache.kafka.common.Uuid
-import org.apache.kafka.common.message.DeleteTopicsRequestData
-import org.apache.kafka.common.message.DeleteTopicsRequestData.DeleteTopicState
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.requests.{DeleteTopicsRequest, DeleteTopicsResponse, MetadataRequest, MetadataResponse}
 import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 
+import java.util.{Arrays, Collections}
 import scala.jdk.CollectionConverters._
 
-class DeleteTopicsRequestTest extends BaseRequestTest {
+class DeleteTopicsRequestTest extends BaseRequestTest with Logging {
 
-  @Test
-  def testValidDeleteTopicRequests(): Unit = {
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
+  @ValueSource(strings = Array("zk", "kraft"))
+  def testTopicDeletionClusterHasOfflinePartitions(quorum: String): Unit = {
+    // Create a two topics with one partition/replica. Make one of them offline.
+    val offlineTopic = "topic-1"
+    val onlineTopic = "topic-2"
+    createTopicWithAssignment(offlineTopic, Map[Int, Seq[Int]](0 -> Seq(0)))
+    createTopicWithAssignment(onlineTopic, Map[Int, Seq[Int]](0 -> Seq(1)))
+    killBroker(0)
+    ensureConsistentKRaftMetadata()
+
+    // Ensure one topic partition is offline.
+    TestUtils.waitUntilTrue(() => {
+      aliveBrokers.head.metadataCache.getPartitionInfo(onlineTopic, 0).exists(_.leader() == 1) &&
+        aliveBrokers.head.metadataCache.getPartitionInfo(offlineTopic, 0).exists(_.leader() ==
+          MetadataResponse.NO_LEADER_ID)
+    }, "Topic partition is not offline")
+
+    // Delete the newly created topic and topic with offline partition. See the deletion is
+    // successful.
+    deleteTopic(onlineTopic)
+    deleteTopic(offlineTopic)
+    ensureConsistentKRaftMetadata()
+
+    // Restart the dead broker.
+    restartDeadBrokers()
+
+    // Make sure the brokers no longer see any deleted topics.
+    TestUtils.waitUntilTrue(() =>
+      !aliveBrokers.forall(_.metadataCache.contains(onlineTopic)) &&
+        !aliveBrokers.forall(_.metadataCache.contains(offlineTopic)),
+      "The topics are found in the Broker's cache")
+  }
+
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
+  @ValueSource(strings = Array("zk", "kraft"))
+  def testValidDeleteTopicRequests(quorum: String): Unit = {
     val timeout = 10000
     // Single topic
     createTopic("topic-1", 1, 1)
@@ -66,6 +99,9 @@ class DeleteTopicsRequestTest extends BaseRequestTest {
     val response = sendDeleteTopicsRequest(request)
     val error = response.errorCounts.asScala.find(_._1 != Errors.NONE)
     assertTrue(error.isEmpty, s"There should be no errors, found ${response.data.responses.asScala}")
+
+    ensureConsistentKRaftMetadata()
+
     request.data.topicNames.forEach { topic =>
       validateTopicIsDeleted(topic)
     }
@@ -75,13 +111,20 @@ class DeleteTopicsRequestTest extends BaseRequestTest {
     val response = sendDeleteTopicsRequest(request)
     val error = response.errorCounts.asScala.find(_._1 != Errors.NONE)
     assertTrue(error.isEmpty, s"There should be no errors, found ${response.data.responses.asScala}")
+
+    ensureConsistentKRaftMetadata()
+
     response.data.responses.forEach { response =>
       validateTopicIsDeleted(response.name())
     }
   }
 
-  @Test
-  def testErrorDeleteTopicRequests(): Unit = {
+  /*
+   * Only run this test against ZK cluster. The KRaft controller doesn't perform operations that have timed out.
+   */
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
+  @ValueSource(strings = Array("zk"))
+  def testErrorDeleteTopicRequests(quorum: String): Unit = {
     val timeout = 30000
     val timeoutTopic = "invalid-timeout"
 
@@ -89,7 +132,7 @@ class DeleteTopicsRequestTest extends BaseRequestTest {
     validateErrorDeleteTopicRequests(new DeleteTopicsRequest.Builder(
       new DeleteTopicsRequestData()
         .setTopicNames(Arrays.asList("invalid-topic"))
-          .setTimeoutMs(timeout)).build(),
+        .setTimeoutMs(timeout)).build(),
       Map("invalid-topic" -> Errors.UNKNOWN_TOPIC_OR_PARTITION))
 
     // Partial
@@ -128,7 +171,7 @@ class DeleteTopicsRequestTest extends BaseRequestTest {
         .setTimeoutMs(0)).build(),
       Map(timeoutTopic -> Errors.REQUEST_TIMED_OUT))
     // The topic should still get deleted eventually
-    TestUtils.waitUntilTrue(() => !servers.head.metadataCache.contains(timeoutTopic), s"Topic $timeoutTopic is never deleted")
+    TestUtils.waitUntilTrue(() => !brokers.head.metadataCache.contains(timeoutTopic), s"Topic $timeoutTopic is never deleted")
     validateTopicIsDeleted(timeoutTopic)
   }
 
@@ -166,16 +209,22 @@ class DeleteTopicsRequestTest extends BaseRequestTest {
     }
   }
 
-  @Test
-  def testNotController(): Unit = {
+  /*
+   * Only run this test against ZK clusters. KRaft doesn't have this behavior of returning NOT_CONTROLLER.
+   * Instead, the request is forwarded.
+   */
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
+  @ValueSource(strings = Array("zk", "zkMigration"))
+  def testNotController(quorum: String): Unit = {
     val request = new DeleteTopicsRequest.Builder(
       new DeleteTopicsRequestData()
         .setTopicNames(Collections.singletonList("not-controller"))
         .setTimeoutMs(1000)).build()
     val response = sendDeleteTopicsRequest(request, notControllerSocketServer)
 
+    val expectedError = if (isZkMigrationTest()) Errors.NONE else Errors.NOT_CONTROLLER
     val error = response.data.responses.find("not-controller").errorCode()
-    assertEquals(Errors.NOT_CONTROLLER.code, error, "Expected controller error when routed incorrectly")
+    assertEquals(expectedError.code(), error)
   }
 
   private def validateTopicIsDeleted(topic: String): Unit = {
@@ -185,8 +234,36 @@ class DeleteTopicsRequestTest extends BaseRequestTest {
       s"The topic $topic should not exist")
   }
 
-  private def sendDeleteTopicsRequest(request: DeleteTopicsRequest, socketServer: SocketServer = controllerSocketServer): DeleteTopicsResponse = {
+  private def sendDeleteTopicsRequest(
+                                       request: DeleteTopicsRequest,
+                                       socketServer: SocketServer = adminSocketServer
+                                     ): DeleteTopicsResponse = {
     connectAndReceive[DeleteTopicsResponse](request, destination = socketServer)
   }
 
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
+  @ValueSource(strings = Array("zk"))
+  def testDeleteTopicsVersions(quorum: String): Unit = {
+    // This test assumes that the current valid versions are 0-6 please adjust the test if there are changes.
+    assertEquals(0, DeleteTopicsRequestData.LOWEST_SUPPORTED_VERSION)
+    assertEquals(6, DeleteTopicsRequestData.HIGHEST_SUPPORTED_VERSION)
+
+    val timeout = 10000
+    (0 until DeleteTopicsRequestData.SCHEMAS.size).foreach { version =>
+      info(s"Creating and deleting tests for version $version")
+
+      val topicName = s"topic-$version"
+
+      createTopic(topicName, 1, 1)
+      val data = new DeleteTopicsRequestData().setTimeoutMs(timeout)
+
+      if (version < 6) {
+        data.setTopicNames(Arrays.asList(topicName))
+      } else {
+        data.setTopics(Arrays.asList(new DeleteTopicState().setName(topicName)))
+      }
+
+      validateValidDeleteTopicRequests(new DeleteTopicsRequest.Builder(data).build(version.toShort))
+    }
+  }
 }

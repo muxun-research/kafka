@@ -21,9 +21,7 @@ import org.junit.Test;
 import java.time.Duration;
 import java.time.Instant;
 
-import static org.apache.kafka.streams.internals.ApiUtils.prepareMillisCheckFailMsgPrefix;
-import static org.apache.kafka.streams.internals.ApiUtils.validateMillisecondDuration;
-import static org.apache.kafka.streams.internals.ApiUtils.validateMillisecondInstant;
+import static org.apache.kafka.streams.internals.ApiUtils.*;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertEquals;
@@ -31,7 +29,6 @@ import static org.junit.Assert.fail;
 
 
 public class ApiUtilsTest {
-
     // This is the maximum limit that Duration accepts but fails when it converts to milliseconds.
     private static final long MAX_ACCEPTABLE_DAYS_FOR_DURATION = 106751991167300L;
     // This is the maximum limit that Duration accepts and converts to milliseconds with out fail.

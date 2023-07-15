@@ -19,62 +19,76 @@ package org.apache.kafka.streams.processor.internals;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.streams.processor.TaskId;
 
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 public class MockChangelogReader implements ChangelogReader {
-	private final Set<TopicPartition> restoringPartitions = new HashSet<>();
-	private Map<TopicPartition, Long> restoredOffsets = Collections.emptyMap();
+    private final Set<TopicPartition> restoringPartitions = new HashSet<>();
+    private Map<TopicPartition, Long> restoredOffsets = Collections.emptyMap();
 
-	public boolean isPartitionRegistered(final TopicPartition partition) {
-		return restoringPartitions.contains(partition);
-	}
+    public boolean isPartitionRegistered(final TopicPartition partition) {
+        return restoringPartitions.contains(partition);
+    }
 
-	@Override
-	public void register(final TopicPartition partition, final ProcessorStateManager stateManager) {
-		restoringPartitions.add(partition);
-	}
+    @Override
+    public void register(final TopicPartition partition, final ProcessorStateManager stateManager) {
+        restoringPartitions.add(partition);
+    }
 
-	@Override
-	public void restore(final Map<TaskId, Task> tasks) {
-		// do nothing
-	}
+    @Override
+    public void register(final Set<TopicPartition> changelogPartitions, final ProcessorStateManager stateManager) {
+        for (final TopicPartition changelogPartition : changelogPartitions) {
+            register(changelogPartition, stateManager);
+        }
+    }
 
-	@Override
-	public void enforceRestoreActive() {
-		// do nothing
-	}
+    @Override
+    public long restore(final Map<TaskId, Task> tasks) {
+        // do nothing
+        return 0L;
+    }
 
-	@Override
-	public void transitToUpdateStandby() {
-		// do nothing
-	}
+    @Override
+    public void enforceRestoreActive() {
+        // do nothing
+    }
 
-	@Override
-	public Set<TopicPartition> completedChangelogs() {
-		// assuming all restoring partitions are completed
-		return restoringPartitions;
-	}
+    @Override
+    public void transitToUpdateStandby() {
+        // do nothing
+    }
 
-	@Override
-	public void clear() {
-		restoringPartitions.clear();
-	}
+    @Override
+    public boolean isRestoringActive() {
+        return true;
+    }
 
-	@Override
-	public void unregister(final Collection<TopicPartition> partitions) {
-		restoringPartitions.removeAll(partitions);
+    @Override
+    public Set<TopicPartition> completedChangelogs() {
+        // assuming all restoring partitions are completed
+        return restoringPartitions;
+    }
 
-		for (final TopicPartition partition : partitions) {
-			restoredOffsets.remove(partition);
-		}
-	}
+    @Override
+    public boolean allChangelogsCompleted() {
+        return false;
+    }
 
-	@Override
-	public boolean isEmpty() {
-		return restoredOffsets.isEmpty() && restoringPartitions.isEmpty();
-	}
+    @Override
+    public void clear() {
+        restoringPartitions.clear();
+    }
+
+    @Override
+    public void unregister(final Collection<TopicPartition> partitions) {
+        restoringPartitions.removeAll(partitions);
+
+        for (final TopicPartition partition : partitions) {
+            restoredOffsets.remove(partition);
+        }
+    }
+
+    @Override
+    public boolean isEmpty() {
+        return restoredOffsets.isEmpty() && restoringPartitions.isEmpty();
+    }
 }

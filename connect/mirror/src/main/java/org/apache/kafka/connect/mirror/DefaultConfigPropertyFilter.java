@@ -30,59 +30,53 @@ import java.util.regex.Pattern;
  */
 public class DefaultConfigPropertyFilter implements ConfigPropertyFilter {
 
-	public static final String CONFIG_PROPERTIES_EXCLUDE_CONFIG = "config.properties.exclude";
-	public static final String CONFIG_PROPERTIES_EXCLUDE_ALIAS_CONFIG = "config.properties.blacklist";
+    public static final String CONFIG_PROPERTIES_EXCLUDE_CONFIG = "config.properties.exclude";
+    public static final String CONFIG_PROPERTIES_EXCLUDE_ALIAS_CONFIG = "config.properties.blacklist";
+    public static final String USE_DEFAULTS_FROM = "use.defaults.from";
+    private static final String USE_DEFAULTS_FROM_DOC = "Which cluster's defaults (source or target) to use " + "when syncing topic configurations that have default values.";
+    private static final String USE_DEFAULTS_FROM_DEFAULT = "target";
 
-	private static final String CONFIG_PROPERTIES_EXCLUDE_DOC = "List of topic configuration properties and/or regexes "
-			+ "that should not be replicated.";
-	public static final String CONFIG_PROPERTIES_EXCLUDE_DEFAULT = "follower\\.replication\\.throttled\\.replicas, "
-			+ "leader\\.replication\\.throttled\\.replicas, "
-			+ "message\\.timestamp\\.difference\\.max\\.ms, "
-			+ "message\\.timestamp\\.type, "
-			+ "unclean\\.leader\\.election\\.enable, "
-			+ "min\\.insync\\.replicas";
-	private Pattern excludePattern = MirrorUtils.compilePatternList(CONFIG_PROPERTIES_EXCLUDE_DEFAULT);
+    private static final String CONFIG_PROPERTIES_EXCLUDE_DOC = "List of topic configuration properties and/or regexes " + "that should not be replicated.";
+    public static final String CONFIG_PROPERTIES_EXCLUDE_DEFAULT = "follower\\.replication\\.throttled\\.replicas, " + "leader\\.replication\\.throttled\\.replicas, " + "message\\.timestamp\\.difference\\.max\\.ms, " + "message\\.timestamp\\.type, " + "unclean\\.leader\\.election\\.enable, " + "min\\.insync\\.replicas";
+    private Pattern excludePattern = MirrorUtils.compilePatternList(CONFIG_PROPERTIES_EXCLUDE_DEFAULT);
+    private String useDefaultsFrom = USE_DEFAULTS_FROM_DEFAULT;
 
-	@Override
-	public void configure(Map<String, ?> props) {
-		ConfigPropertyFilterConfig config = new ConfigPropertyFilterConfig(props);
-		excludePattern = config.excludePattern();
-	}
+    @Override
+    public void configure(Map<String, ?> props) {
+        ConfigPropertyFilterConfig config = new ConfigPropertyFilterConfig(props);
+        excludePattern = config.excludePattern();
+        useDefaultsFrom = config.useDefaultsFrom();
+    }
 
-	@Override
-	public void close() {
-	}
+    private boolean excluded(String prop) {
+        return excludePattern != null && excludePattern.matcher(prop).matches();
+    }
 
-	private boolean excluded(String prop) {
-		return excludePattern != null && excludePattern.matcher(prop).matches();
-	}
+    @Override
+    public boolean shouldReplicateConfigProperty(String prop) {
+        return !excluded(prop);
+    }
 
-	@Override
-	public boolean shouldReplicateConfigProperty(String prop) {
-		return !excluded(prop);
-	}
+    @Override
+    public boolean shouldReplicateSourceDefault(String prop) {
+        return useDefaultsFrom.equals("source");
+    }
 
-	static class ConfigPropertyFilterConfig extends AbstractConfig {
+    static class ConfigPropertyFilterConfig extends AbstractConfig {
 
-		static final ConfigDef DEF = new ConfigDef()
-				.define(CONFIG_PROPERTIES_EXCLUDE_CONFIG,
-						Type.LIST,
-						CONFIG_PROPERTIES_EXCLUDE_DEFAULT,
-						Importance.HIGH,
-						CONFIG_PROPERTIES_EXCLUDE_DOC)
-				.define(CONFIG_PROPERTIES_EXCLUDE_ALIAS_CONFIG,
-						Type.LIST,
-						null,
-						Importance.HIGH,
-						"Deprecated. Use " + CONFIG_PROPERTIES_EXCLUDE_CONFIG + " instead.");
+        static final ConfigDef DEF = new ConfigDef().define(CONFIG_PROPERTIES_EXCLUDE_CONFIG, Type.LIST, CONFIG_PROPERTIES_EXCLUDE_DEFAULT, Importance.HIGH, CONFIG_PROPERTIES_EXCLUDE_DOC).define(CONFIG_PROPERTIES_EXCLUDE_ALIAS_CONFIG, Type.LIST, null, Importance.HIGH, "Deprecated. Use " + CONFIG_PROPERTIES_EXCLUDE_CONFIG + " instead.").define(USE_DEFAULTS_FROM, Type.STRING, USE_DEFAULTS_FROM_DEFAULT, Importance.MEDIUM, USE_DEFAULTS_FROM_DOC);
 
-		ConfigPropertyFilterConfig(Map<String, ?> props) {
-			super(DEF, ConfigUtils.translateDeprecatedConfigs(props, new String[][]{
-					{CONFIG_PROPERTIES_EXCLUDE_CONFIG, CONFIG_PROPERTIES_EXCLUDE_ALIAS_CONFIG}}), false);
-		}
 
-		Pattern excludePattern() {
-			return MirrorUtils.compilePatternList(getList(CONFIG_PROPERTIES_EXCLUDE_CONFIG));
-		}
-	}
+        ConfigPropertyFilterConfig(Map<String, ?> props) {
+            super(DEF, ConfigUtils.translateDeprecatedConfigs(props, new String[][]{{CONFIG_PROPERTIES_EXCLUDE_CONFIG, CONFIG_PROPERTIES_EXCLUDE_ALIAS_CONFIG}}), false);
+        }
+
+        Pattern excludePattern() {
+            return MirrorUtils.compilePatternList(getList(CONFIG_PROPERTIES_EXCLUDE_CONFIG));
+        }
+
+        String useDefaultsFrom() {
+            return getString(USE_DEFAULTS_FROM);
+        }
+    }
 }

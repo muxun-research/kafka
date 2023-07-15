@@ -63,17 +63,15 @@ public abstract class SetSchemaMetadata<R extends ConnectRecord<R>> implements T
 
     @Override
     public R apply(R record) {
+        final Object value = operatingValue(record);
         final Schema schema = operatingSchema(record);
+        if (value == null && schema == null) {
+            return record;
+        }
         requireSchema(schema, "updating schema metadata");
         final boolean isArray = schema.type() == Schema.Type.ARRAY;
         final boolean isMap = schema.type() == Schema.Type.MAP;
-        final Schema updatedSchema = new ConnectSchema(
-                schema.type(),
-                schema.isOptional(),
-                schema.defaultValue(),
-                schemaName != null ? schemaName : schema.name(),
-                schemaVersion != null ? schemaVersion : schema.version(),
-                schema.doc(),
+        final Schema updatedSchema = new ConnectSchema(schema.type(), schema.isOptional(), schema.defaultValue(), schemaName != null ? schemaName : schema.name(), schemaVersion != null ? schemaVersion : schema.version(), schema.doc(),
                 schema.parameters(),
                 schema.fields(),
                 isMap ? schema.keySchema() : null,
@@ -95,6 +93,8 @@ public abstract class SetSchemaMetadata<R extends ConnectRecord<R>> implements T
 
     protected abstract Schema operatingSchema(R record);
 
+    protected abstract Object operatingValue(R record);
+
     protected abstract R newRecord(R record, Schema updatedSchema);
 
     /**
@@ -104,6 +104,11 @@ public abstract class SetSchemaMetadata<R extends ConnectRecord<R>> implements T
         @Override
         protected Schema operatingSchema(R record) {
             return record.keySchema();
+        }
+
+        @Override
+        protected Object operatingValue(R record) {
+            return record.key();
         }
 
         @Override
@@ -120,6 +125,11 @@ public abstract class SetSchemaMetadata<R extends ConnectRecord<R>> implements T
         @Override
         protected Schema operatingSchema(R record) {
             return record.valueSchema();
+        }
+
+        @Override
+        protected Object operatingValue(R record) {
+            return record.value();
         }
 
         @Override

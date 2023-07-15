@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static java.util.Collections.emptyMap;
 
@@ -41,68 +42,64 @@ import static java.util.Collections.emptyMap;
  */
 public class DirectoryConfigProvider implements ConfigProvider {
 
-	private static final Logger log = LoggerFactory.getLogger(DirectoryConfigProvider.class);
+    private static final Logger log = LoggerFactory.getLogger(DirectoryConfigProvider.class);
 
-	@Override
-	public void configure(Map<String, ?> configs) {
-	}
+    @Override
+    public void configure(Map<String, ?> configs) {
+    }
 
-	@Override
-	public void close() throws IOException {
-	}
+    @Override
+    public void close() throws IOException {
+    }
 
-	/**
-	 * Retrieves the data contained in regular files in the directory given by {@code path}.
-	 * Non-regular files (such as directories) in the given directory are silently ignored.
-	 * @param path the directory where data files reside.
-	 * @return the configuration data.
-	 */
-	@Override
-	public ConfigData get(String path) {
-		return get(path, Files::isRegularFile);
-	}
+    /**
+     * Retrieves the data contained in regular files in the directory given by {@code path}.
+     * Non-regular files (such as directories) in the given directory are silently ignored.
+     * @param path the directory where data files reside.
+     * @return the configuration data.
+     */
+    @Override
+    public ConfigData get(String path) {
+        return get(path, Files::isRegularFile);
+    }
 
-	/**
-	 * Retrieves the data contained in the regular files named by {@code keys} in the directory given by {@code path}.
-	 * Non-regular files (such as directories) in the given directory are silently ignored.
-	 * @param path the directory where data files reside.
-	 * @param keys the keys whose values will be retrieved.
-	 * @return the configuration data.
-	 */
-	@Override
-	public ConfigData get(String path, Set<String> keys) {
-		return get(path, pathname ->
-				Files.isRegularFile(pathname)
-						&& keys.contains(pathname.getFileName().toString()));
-	}
+    /**
+     * Retrieves the data contained in the regular files named by {@code keys} in the directory given by {@code path}.
+     * Non-regular files (such as directories) in the given directory are silently ignored.
+     * @param path the directory where data files reside.
+     * @param keys the keys whose values will be retrieved.
+     * @return the configuration data.
+     */
+    @Override
+    public ConfigData get(String path, Set<String> keys) {
+        return get(path, pathname -> Files.isRegularFile(pathname) && keys.contains(pathname.getFileName().toString()));
+    }
 
-	private static ConfigData get(String path, Predicate<Path> fileFilter) {
-		Map<String, String> map = emptyMap();
-		if (path != null && !path.isEmpty()) {
-			Path dir = new File(path).toPath();
-			if (!Files.isDirectory(dir)) {
-				log.warn("The path {} is not a directory", path);
-			} else {
-				try {
-					map = Files.list(dir)
-							.filter(fileFilter)
-							.collect(Collectors.toMap(
-									p -> p.getFileName().toString(),
-									p -> read(p)));
-				} catch (IOException e) {
-					throw new ConfigException("Could not list directory " + dir, e);
-				}
-			}
-		}
-		return new ConfigData(map);
-	}
+    private static ConfigData get(String path, Predicate<Path> fileFilter) {
+        Map<String, String> map = emptyMap();
+        if (path != null && !path.isEmpty()) {
+            Path dir = new File(path).toPath();
+            if (!Files.isDirectory(dir)) {
+                log.warn("The path {} is not a directory", path);
+            } else {
+                try (Stream<Path> stream = Files.list(dir)) {
+                    map = stream.filter(fileFilter).collect(Collectors.toMap(p -> p.getFileName().toString(), p -> read(p)));
+                } catch (IOException e) {
+                    log.error("Could not list directory {}", dir, e);
+                    throw new ConfigException("Could not list directory " + dir);
+                }
+            }
+        }
+        return new ConfigData(map);
+    }
 
-	private static String read(Path path) {
-		try {
-			return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
-		} catch (IOException e) {
-			throw new ConfigException("Could not read file " + path + " for property " + path.getFileName(), e);
-		}
-	}
+    private static String read(Path path) {
+        try {
+            return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            log.error("Could not read file {} for property {}", path, path.getFileName(), e);
+            throw new ConfigException("Could not read file " + path + " for property " + path.getFileName());
+        }
+    }
 
 }

@@ -17,64 +17,70 @@
 package org.apache.kafka.snapshot;
 
 import org.apache.kafka.common.record.FileRecords;
-import org.apache.kafka.common.record.RecordBatch;
+import org.apache.kafka.common.record.Records;
 import org.apache.kafka.common.record.UnalignedRecords;
-import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.raft.OffsetAndEpoch;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
-import java.util.Iterator;
 
-public final class FileRawSnapshotReader implements RawSnapshotReader {
-	private final FileRecords fileRecords;
-	private final OffsetAndEpoch snapshotId;
+public final class FileRawSnapshotReader implements RawSnapshotReader, AutoCloseable {
+    private final FileRecords fileRecords;
+    private final OffsetAndEpoch snapshotId;
 
-	private FileRawSnapshotReader(FileRecords fileRecords, OffsetAndEpoch snapshotId) {
-		this.fileRecords = fileRecords;
-		this.snapshotId = snapshotId;
-	}
+    private FileRawSnapshotReader(FileRecords fileRecords, OffsetAndEpoch snapshotId) {
+        this.fileRecords = fileRecords;
+        this.snapshotId = snapshotId;
+    }
 
-	@Override
-	public OffsetAndEpoch snapshotId() {
-		return snapshotId;
-	}
+    @Override
+    public OffsetAndEpoch snapshotId() {
+        return snapshotId;
+    }
 
-	@Override
-	public long sizeInBytes() {
-		return fileRecords.sizeInBytes();
-	}
+    @Override
+    public long sizeInBytes() {
+        return fileRecords.sizeInBytes();
+    }
 
-	@Override
-	public Iterator<RecordBatch> iterator() {
-		return Utils.covariantCast(fileRecords.batchIterator());
-	}
+    @Override
+    public UnalignedRecords slice(long position, int size) {
+        return fileRecords.sliceUnaligned(Math.toIntExact(position), size);
+    }
 
-	public UnalignedRecords read(long position, int size) {
-		return fileRecords.sliceUnaligned(Math.toIntExact(position), size);
-	}
+    @Override
+    public Records records() {
+        return fileRecords;
+    }
 
-	@Override
-	public void close() throws IOException {
-		fileRecords.close();
-	}
+    @Override
+    public void close() {
+        try {
+            fileRecords.close();
+        } catch (IOException e) {
+            throw new UncheckedIOException(String.format("Unable to close snapshot reader %s at %s", snapshotId, fileRecords), e);
+        }
+    }
 
-	/**
-	 * Opens a snapshot for reading.
-	 * @param logDir     the directory for the topic partition
-	 * @param snapshotId the end offset and epoch for the snapshotId
-	 * @throws java.nio.file.NoSuchFileException if the snapshot doesn't exist
-	 * @throws IOException                       for any IO error while opening the snapshot
-	 */
-	public static FileRawSnapshotReader open(Path logDir, OffsetAndEpoch snapshotId) throws IOException {
-		FileRecords fileRecords = FileRecords.open(
-				Snapshots.snapshotPath(logDir, snapshotId).toFile(),
-				false, // mutable
-				true, // fileAlreadyExists
-				0, // initFileSize
-				false // preallocate
-		);
+    /**
+     * Opens a snapshot for reading.
+     * @param logDir     the directory for the topic partition
+     * @param snapshotId the end offset and epoch for the snapshotId
+     */
+    public static FileRawSnapshotReader open(Path logDir, OffsetAndEpoch snapshotId) {
+        FileRecords fileRecords;
+        Path filePath = Snapshots.snapshotPath(logDir, snapshotId);
+        try {
+            fileRecords = FileRecords.open(filePath.toFile(), false, // mutable
+                    true, // fileAlreadyExists
+                    0, // initFileSize
+                    false // preallocate
+            );
+        } catch (IOException e) {
+            throw new UncheckedIOException(String.format("Unable to Opens a snapshot file %s", filePath.toAbsolutePath()), e);
+        }
 
-		return new FileRawSnapshotReader(fileRecords, snapshotId);
-	}
+        return new FileRawSnapshotReader(fileRecords, snapshotId);
+    }
 }

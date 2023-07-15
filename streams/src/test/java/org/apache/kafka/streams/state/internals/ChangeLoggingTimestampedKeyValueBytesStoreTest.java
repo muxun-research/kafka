@@ -30,111 +30,101 @@ import org.apache.kafka.streams.state.ValueAndTimestamp;
 import org.apache.kafka.test.InternalMockProcessorContext;
 import org.apache.kafka.test.MockRecordCollector;
 import org.apache.kafka.test.TestUtils;
-import org.easymock.EasyMock;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.junit.MockitoJUnitRunner;
 
 import java.util.Arrays;
 
-import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.CoreMatchers.nullValue;
+import static org.hamcrest.CoreMatchers.*;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
+@SuppressWarnings("rawtypes")
+@RunWith(MockitoJUnitRunner.StrictStubs.class)
 public class ChangeLoggingTimestampedKeyValueBytesStoreTest {
 
-	private final MockRecordCollector collector = new MockRecordCollector();
-	private final InMemoryKeyValueStore root = new InMemoryKeyValueStore("kv");
+    private final MockRecordCollector collector = new MockRecordCollector();
+    private final InMemoryKeyValueStore root = new InMemoryKeyValueStore("kv");
     private final ChangeLoggingTimestampedKeyValueBytesStore store = new ChangeLoggingTimestampedKeyValueBytesStore(root);
     private final Bytes hi = Bytes.wrap("hi".getBytes());
-	private final Bytes hello = Bytes.wrap("hello".getBytes());
-	private final ValueAndTimestamp<byte[]> there = ValueAndTimestamp.make("there".getBytes(), 97L);
-	// timestamp is 97 what is ASCII of 'a'
-	private final byte[] rawThere = "\0\0\0\0\0\0\0athere".getBytes();
-	private final ValueAndTimestamp<byte[]> world = ValueAndTimestamp.make("world".getBytes(), 98L);
-	// timestamp is 98 what is ASCII of 'b'
-	private final byte[] rawWorld = "\0\0\0\0\0\0\0bworld".getBytes();
+    private final Bytes hello = Bytes.wrap("hello".getBytes());
+    private final ValueAndTimestamp<byte[]> there = ValueAndTimestamp.make("there".getBytes(), 97L);
+    // timestamp is 97 what is ASCII of 'a'
+    private final byte[] rawThere = "\0\0\0\0\0\0\0athere".getBytes();
+    private final ValueAndTimestamp<byte[]> world = ValueAndTimestamp.make("world".getBytes(), 98L);
+    // timestamp is 98 what is ASCII of 'b'
+    private final byte[] rawWorld = "\0\0\0\0\0\0\0bworld".getBytes();
 
-	@Before
-	public void before() {
-		final InternalMockProcessorContext context = mockContext();
-		context.setTime(0);
-		store.init((StateStoreContext) context, store);
-	}
+    @Before
+    public void before() {
+        final InternalMockProcessorContext context = mockContext();
+        context.setTime(0);
+        store.init((StateStoreContext) context, store);
+    }
 
-	private InternalMockProcessorContext mockContext() {
-		return new InternalMockProcessorContext(
-				TestUtils.tempDirectory(),
-				Serdes.String(),
-				Serdes.Long(),
-				collector,
-				new ThreadCache(new LogContext("testCache "), 0, new MockStreamsMetrics(new Metrics()))
-		);
-	}
+    private InternalMockProcessorContext mockContext() {
+        return new InternalMockProcessorContext<>(TestUtils.tempDirectory(), Serdes.String(), Serdes.Long(), collector, new ThreadCache(new LogContext("testCache "), 0, new MockStreamsMetrics(new Metrics())));
+    }
 
-	@After
-	public void after() {
-		store.close();
-	}
+    @After
+    public void after() {
+        store.close();
+    }
 
-	@SuppressWarnings("deprecation")
-	@Test
-	public void shouldDelegateDeprecatedInit() {
-		final InternalMockProcessorContext context = mockContext();
-		final KeyValueStore<Bytes, byte[]> inner = EasyMock.mock(InMemoryKeyValueStore.class);
-		final StateStore outer = new ChangeLoggingTimestampedKeyValueBytesStore(inner);
-		inner.init((ProcessorContext) context, outer);
-		EasyMock.expectLastCall();
-		EasyMock.replay(inner);
-		outer.init((ProcessorContext) context, outer);
-		EasyMock.verify(inner);
-	}
+    @SuppressWarnings("deprecation")
+    @Test
+    public void shouldDelegateDeprecatedInit() {
+        final InternalMockProcessorContext context = mockContext();
+        final KeyValueStore<Bytes, byte[]> inner = mock(InMemoryKeyValueStore.class);
+        final StateStore outer = new ChangeLoggingTimestampedKeyValueBytesStore(inner);
+        outer.init((ProcessorContext) context, outer);
+        verify(inner).init((ProcessorContext) context, outer);
+    }
 
-	@Test
-	public void shouldDelegateInit() {
-		final InternalMockProcessorContext context = mockContext();
-		final KeyValueStore<Bytes, byte[]> inner = EasyMock.mock(InMemoryKeyValueStore.class);
-		final StateStore outer = new ChangeLoggingTimestampedKeyValueBytesStore(inner);
-		inner.init((StateStoreContext) context, outer);
-		EasyMock.expectLastCall();
-		EasyMock.replay(inner);
-		outer.init((StateStoreContext) context, outer);
-		EasyMock.verify(inner);
-	}
+    @Test
+    public void shouldDelegateInit() {
+        final InternalMockProcessorContext context = mockContext();
+        final KeyValueStore<Bytes, byte[]> inner = mock(InMemoryKeyValueStore.class);
+        final StateStore outer = new ChangeLoggingTimestampedKeyValueBytesStore(inner);
 
-	@Test
-	public void shouldWriteKeyValueBytesToInnerStoreOnPut() {
-		store.put(hi, rawThere);
+        outer.init((StateStoreContext) context, outer);
+        verify(inner).init((StateStoreContext) context, outer);
+    }
 
-		assertThat(root.get(hi), equalTo(rawThere));
-		assertThat(collector.collected().size(), equalTo(1));
-		assertThat(collector.collected().get(0).key(), equalTo(hi));
-		assertThat(collector.collected().get(0).value(), equalTo(there.value()));
-		assertThat(collector.collected().get(0).timestamp(), equalTo(there.timestamp()));
-	}
+    @Test
+    public void shouldWriteKeyValueBytesToInnerStoreOnPut() {
+        store.put(hi, rawThere);
+
+        assertThat(root.get(hi), equalTo(rawThere));
+        assertThat(collector.collected().size(), equalTo(1));
+        assertThat(collector.collected().get(0).key(), equalTo(hi));
+        assertThat(collector.collected().get(0).value(), equalTo(there.value()));
+        assertThat(collector.collected().get(0).timestamp(), equalTo(there.timestamp()));
+    }
 
     @Test
     public void shouldWriteAllKeyValueToInnerStoreOnPutAll() {
-        store.putAll(Arrays.asList(KeyValue.pair(hi, rawThere),
-                                   KeyValue.pair(hello, rawWorld)));
+        store.putAll(Arrays.asList(KeyValue.pair(hi, rawThere), KeyValue.pair(hello, rawWorld)));
         assertThat(root.get(hi), equalTo(rawThere));
         assertThat(root.get(hello), equalTo(rawWorld));
     }
 
     @Test
     public void shouldLogChangesOnPutAll() {
-		store.putAll(Arrays.asList(KeyValue.pair(hi, rawThere),
-				KeyValue.pair(hello, rawWorld)));
+        store.putAll(Arrays.asList(KeyValue.pair(hi, rawThere), KeyValue.pair(hello, rawWorld)));
 
-		assertThat(collector.collected().size(), equalTo(2));
-		assertThat(collector.collected().get(0).key(), equalTo(hi));
-		assertThat(collector.collected().get(0).value(), equalTo(there.value()));
-		assertThat(collector.collected().get(0).timestamp(), equalTo(there.timestamp()));
-		assertThat(collector.collected().get(1).key(), equalTo(hello));
-		assertThat(collector.collected().get(1).value(), equalTo(world.value()));
-		assertThat(collector.collected().get(1).timestamp(), equalTo(world.timestamp()));
-	}
+        assertThat(collector.collected().size(), equalTo(2));
+        assertThat(collector.collected().get(0).key(), equalTo(hi));
+        assertThat(collector.collected().get(0).value(), equalTo(there.value()));
+        assertThat(collector.collected().get(0).timestamp(), equalTo(there.timestamp()));
+        assertThat(collector.collected().get(1).key(), equalTo(hello));
+        assertThat(collector.collected().get(1).value(), equalTo(world.value()));
+        assertThat(collector.collected().get(1).timestamp(), equalTo(world.timestamp()));
+    }
 
     @Test
     public void shouldPropagateDelete() {
@@ -152,18 +142,18 @@ public class ChangeLoggingTimestampedKeyValueBytesStoreTest {
 
     @Test
     public void shouldLogKeyNullOnDelete() {
-		store.put(hi, rawThere);
-		store.delete(hi);
+        store.put(hi, rawThere);
+        store.delete(hi);
 
-		assertThat(collector.collected().size(), equalTo(2));
-		assertThat(collector.collected().get(0).key(), equalTo(hi));
-		assertThat(collector.collected().get(0).value(), equalTo(there.value()));
-		assertThat(collector.collected().get(0).timestamp(), equalTo(there.timestamp()));
-		assertThat(collector.collected().get(1).key(), equalTo(hi));
-		assertThat(collector.collected().get(1).value(), nullValue());
-		assertThat(collector.collected().get(1).timestamp(), equalTo(0L));
+        assertThat(collector.collected().size(), equalTo(2));
+        assertThat(collector.collected().get(0).key(), equalTo(hi));
+        assertThat(collector.collected().get(0).value(), equalTo(there.value()));
+        assertThat(collector.collected().get(0).timestamp(), equalTo(there.timestamp()));
+        assertThat(collector.collected().get(1).key(), equalTo(hi));
+        assertThat(collector.collected().get(1).value(), nullValue());
+        assertThat(collector.collected().get(1).timestamp(), equalTo(0L));
 
-	}
+    }
 
     @Test
     public void shouldWriteToInnerOnPutIfAbsentNoPreviousValue() {
@@ -180,24 +170,24 @@ public class ChangeLoggingTimestampedKeyValueBytesStoreTest {
 
     @Test
     public void shouldWriteToChangelogOnPutIfAbsentWhenNoPreviousValue() {
-		store.putIfAbsent(hi, rawThere);
+        store.putIfAbsent(hi, rawThere);
 
-		assertThat(collector.collected().size(), equalTo(1));
-		assertThat(collector.collected().get(0).key(), equalTo(hi));
-		assertThat(collector.collected().get(0).value(), equalTo(there.value()));
-		assertThat(collector.collected().get(0).timestamp(), equalTo(there.timestamp()));
-	}
+        assertThat(collector.collected().size(), equalTo(1));
+        assertThat(collector.collected().get(0).key(), equalTo(hi));
+        assertThat(collector.collected().get(0).value(), equalTo(there.value()));
+        assertThat(collector.collected().get(0).timestamp(), equalTo(there.timestamp()));
+    }
 
     @Test
     public void shouldNotWriteToChangeLogOnPutIfAbsentWhenValueForKeyExists() {
-		store.put(hi, rawThere);
-		store.putIfAbsent(hi, rawWorld);
+        store.put(hi, rawThere);
+        store.putIfAbsent(hi, rawWorld);
 
-		assertThat(collector.collected().size(), equalTo(1));
-		assertThat(collector.collected().get(0).key(), equalTo(hi));
-		assertThat(collector.collected().get(0).value(), equalTo(there.value()));
-		assertThat(collector.collected().get(0).timestamp(), equalTo(there.timestamp()));
-	}
+        assertThat(collector.collected().size(), equalTo(1));
+        assertThat(collector.collected().get(0).key(), equalTo(hi));
+        assertThat(collector.collected().get(0).value(), equalTo(there.value()));
+        assertThat(collector.collected().get(0).timestamp(), equalTo(there.timestamp()));
+    }
 
     @Test
     public void shouldReturnCurrentValueOnPutIfAbsent() {

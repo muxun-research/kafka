@@ -16,12 +16,24 @@
  */
 package org.apache.kafka.common.serialization;
 
-public class VoidDeserializer implements Deserializer<Void> {
-	@Override
-	public Void deserialize(String topic, byte[] data) {
-		if (data != null)
-			throw new IllegalArgumentException("Data should be null for a VoidDeserializer.");
+import org.apache.kafka.common.header.Headers;
 
-		return null;
-	}
+import java.nio.ByteBuffer;
+
+public class VoidDeserializer implements Deserializer<Void> {
+    @Override
+    public Void deserialize(String topic, byte[] data) {
+        if (data != null)
+            throw new IllegalArgumentException("Data should be null for a VoidDeserializer.");
+
+        return null;
+    }
+
+    @Override
+    public Void deserialize(String topic, Headers headers, ByteBuffer data) {
+        if (data != null) {
+            throw new IllegalArgumentException("Data should be null for a VoidDeserializer.");
+        }
+        return null;
+    }
 }

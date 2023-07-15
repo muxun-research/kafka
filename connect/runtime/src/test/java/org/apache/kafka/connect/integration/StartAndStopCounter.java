@@ -17,11 +17,11 @@
 
 package org.apache.kafka.connect.integration;
 
+import org.apache.kafka.common.utils.Time;
+
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import org.apache.kafka.common.utils.Time;
 
 public class StartAndStopCounter {
 
@@ -65,19 +65,21 @@ public class StartAndStopCounter {
 
     /**
      * Get the number of stops.
-     *
      * @return the number of stops
      */
     public int stops() {
         return stopCounter.get();
     }
 
+    public StartsAndStops countsSnapshot() {
+        return new StartsAndStops(starts(), stops());
+    }
+
     /**
      * Obtain a {@link StartAndStopLatch} that can be used to wait until the expected number of restarts
      * has been completed.
-     *
-     * @param expectedStarts   the expected number of starts; may be 0
-     * @param expectedStops    the expected number of stops; may be 0
+     * @param expectedStarts the expected number of starts; may be 0
+     * @param expectedStops  the expected number of stops; may be 0
      * @return the latch; never null
      */
     public StartAndStopLatch expectedRestarts(int expectedStarts, int expectedStops) {

@@ -18,6 +18,7 @@
   "type": "metadata",
   "name": "PartitionRecord",
   "validVersions": "0",
+  "flexibleVersions": "0+",
   "fields": [
     {
       "name": "PartitionId",
@@ -49,7 +50,6 @@
       "name": "RemovingReplicas",
       "type": "[]int32",
       "versions": "0+",
-      "nullableVersions": "0+",
       "entityType": "brokerId",
       "about": "The replicas that we are in the process of removing."
     },
@@ -57,7 +57,6 @@
       "name": "AddingReplicas",
       "type": "[]int32",
       "versions": "0+",
-      "nullableVersions": "0+",
       "entityType": "brokerId",
       "about": "The replicas that we are in the process of adding."
     },
@@ -68,6 +67,15 @@
       "default": "-1",
       "entityType": "brokerId",
       "about": "The lead replica, or -1 if there is no leader."
+    },
+    {
+      "name": "LeaderRecoveryState",
+      "type": "int8",
+      "default": "0",
+      "versions": "0+",
+      "taggedVersions": "0+",
+      "tag": 0,
+      "about": "1 if the partition is recovering from an unclean leader election; 0 otherwise."
     },
     {
       "name": "LeaderEpoch",

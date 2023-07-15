@@ -24,61 +24,68 @@ import java.util.Objects;
 
 
 public class ResultOrError<T> {
-	private final ApiError error;
-	private final T result;
+    private final ApiError error;
+    private final T result;
 
-	public ResultOrError(Errors error, String message) {
-		this(new ApiError(error, message));
-	}
+    public ResultOrError(Errors error, String message) {
+        this(new ApiError(error, message));
+    }
 
-	public ResultOrError(ApiError error) {
-		Objects.requireNonNull(error);
-		this.error = error;
-		this.result = null;
-	}
+    public ResultOrError(ApiError error) {
+        Objects.requireNonNull(error);
+        this.error = error;
+        this.result = null;
+    }
 
-	public ResultOrError(T result) {
-		this.error = null;
-		this.result = result;
-	}
+    public ResultOrError(T result) {
+        this.error = null;
+        this.result = result;
+    }
 
-	public boolean isError() {
-		return error != null;
-	}
+    public static <T> ResultOrError<T> of(T result) {
+        return new ResultOrError<>(result);
+    }
 
-	public boolean isResult() {
-		return error == null;
-	}
+    public static <T> ResultOrError<T> of(ApiError error) {
+        return new ResultOrError<>(error);
+    }
 
-	public ApiError error() {
-		return error;
-	}
+    public boolean isError() {
+        return error != null;
+    }
 
-	public T result() {
-		return result;
-	}
+    public boolean isResult() {
+        return error == null;
+    }
 
-	@Override
-	public boolean equals(Object o) {
-		if (o == null || (!o.getClass().equals(getClass()))) {
-			return false;
-		}
-		ResultOrError other = (ResultOrError) o;
-		return Objects.equals(error, other.error) &&
-				Objects.equals(result, other.result);
-	}
+    public ApiError error() {
+        return error;
+    }
 
-	@Override
-	public int hashCode() {
-		return Objects.hash(error, result);
-	}
+    public T result() {
+        return result;
+    }
 
-	@Override
-	public String toString() {
-		if (error == null) {
-			return "ResultOrError(" + result + ")";
-		} else {
-			return "ResultOrError(" + error + ")";
-		}
-	}
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || (!o.getClass().equals(getClass()))) {
+            return false;
+        }
+        ResultOrError other = (ResultOrError) o;
+        return Objects.equals(error, other.error) && Objects.equals(result, other.result);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(error, result);
+    }
+
+    @Override
+    public String toString() {
+        if (error == null) {
+            return "ResultOrError(" + result + ")";
+        } else {
+            return "ResultOrError(" + error + ")";
+        }
+    }
 }

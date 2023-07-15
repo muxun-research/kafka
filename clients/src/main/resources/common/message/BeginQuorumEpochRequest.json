@@ -21,6 +21,7 @@
   ],
   "name": "BeginQuorumEpochRequest",
   "validVersions": "0",
+  "flexibleVersions": "none",
   "fields": [
     {
       "name": "ClusterId",

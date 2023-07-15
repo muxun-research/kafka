@@ -17,22 +17,20 @@
 
 package kafka.controller
 
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.atomic.AtomicInteger
-
 import com.yammer.metrics.core.{Histogram, MetricName, Timer}
 import kafka.controller
-import kafka.metrics.KafkaYammerMetrics
 import kafka.utils.TestUtils
-import org.apache.kafka.common.message.UpdateMetadataResponseData
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.requests.UpdateMetadataResponse
 import org.apache.kafka.common.utils.MockTime
+import org.apache.kafka.server.metrics.KafkaYammerMetrics
 import org.junit.jupiter.api.Assertions.{assertEquals, assertTrue, fail}
 import org.junit.jupiter.api.{AfterEach, Test}
 
-import scala.jdk.CollectionConverters._
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable
+import scala.jdk.CollectionConverters._
 
 class ControllerEventManagerTest {
 

@@ -32,59 +32,56 @@ import static org.apache.kafka.streams.tests.SmokeTestDriver.generatePerpetually
 
 public class StreamsSmokeTest {
 
-	/**
-	 * args ::= kafka propFileName command disableAutoTerminate
-	 * command := "run" | "process"
-	 * @param args
-	 */
-	public static void main(final String[] args) throws IOException {
-		if (args.length < 2) {
-			System.err.println("StreamsSmokeTest are expecting two parameters: propFile, command; but only see " + args.length + " parameter");
-			Exit.exit(1);
-		}
+    /**
+     * args ::= kafka propFileName command disableAutoTerminate
+     * command := "run" | "process"
+     * @param args
+     */
+    @SuppressWarnings("deprecation")
+    public static void main(final String[] args) throws IOException {
+        if (args.length < 2) {
+            System.err.println("StreamsSmokeTest are expecting two parameters: propFile, command; but only see " + args.length + " parameter");
+            Exit.exit(1);
+        }
 
-		final String propFileName = args[0];
-		final String command = args[1];
-		final boolean disableAutoTerminate = args.length > 2;
+        final String propFileName = args[0];
+        final String command = args[1];
+        final boolean disableAutoTerminate = args.length > 2;
 
-		final Properties streamsProperties = Utils.loadProps(propFileName);
-		final String kafka = streamsProperties.getProperty(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG);
-		final String processingGuarantee = streamsProperties.getProperty(StreamsConfig.PROCESSING_GUARANTEE_CONFIG);
+        final Properties streamsProperties = Utils.loadProps(propFileName);
+        final String kafka = streamsProperties.getProperty(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG);
+        final String processingGuarantee = streamsProperties.getProperty(StreamsConfig.PROCESSING_GUARANTEE_CONFIG);
 
-		if (kafka == null) {
-			System.err.println("No bootstrap kafka servers specified in " + StreamsConfig.BOOTSTRAP_SERVERS_CONFIG);
-			Exit.exit(1);
-		}
+        if (kafka == null) {
+            System.err.println("No bootstrap kafka servers specified in " + StreamsConfig.BOOTSTRAP_SERVERS_CONFIG);
+            Exit.exit(1);
+        }
 
-		if ("process".equals(command)) {
-			if (!StreamsConfig.AT_LEAST_ONCE.equals(processingGuarantee) &&
-					!StreamsConfig.EXACTLY_ONCE.equals(processingGuarantee) &&
-					!StreamsConfig.EXACTLY_ONCE_BETA.equals(processingGuarantee)) {
+        if ("process".equals(command)) {
+            if (!StreamsConfig.AT_LEAST_ONCE.equals(processingGuarantee) && !StreamsConfig.EXACTLY_ONCE.equals(processingGuarantee) && !StreamsConfig.EXACTLY_ONCE_BETA.equals(processingGuarantee) && !StreamsConfig.EXACTLY_ONCE_V2.equals(processingGuarantee)) {
 
-				System.err.println("processingGuarantee must be either " + StreamsConfig.AT_LEAST_ONCE + ", " +
-						StreamsConfig.EXACTLY_ONCE + ", or " + StreamsConfig.EXACTLY_ONCE_BETA);
+                System.err.println("processingGuarantee must be either " + StreamsConfig.AT_LEAST_ONCE + ", " + StreamsConfig.EXACTLY_ONCE + ", or " + StreamsConfig.EXACTLY_ONCE_BETA + ", or " + StreamsConfig.EXACTLY_ONCE_V2);
 
-				Exit.exit(1);
-			}
-		}
+                Exit.exit(1);
+            }
+        }
 
-		System.out.println("StreamsTest instance started (StreamsSmokeTest)");
-		System.out.println("command=" + command);
-		System.out.println("props=" + streamsProperties);
-		System.out.println("disableAutoTerminate=" + disableAutoTerminate);
+        System.out.println("StreamsTest instance started (StreamsSmokeTest)");
+        System.out.println("command=" + command);
+        System.out.println("props=" + streamsProperties);
+        System.out.println("disableAutoTerminate=" + disableAutoTerminate);
 
-		switch (command) {
-			case "run":
-				// this starts the driver (data generation and result verification)
-                final int numKeys = 10;
-                final int maxRecordsPerKey = 500;
+        switch (command) {
+            case "run":
+                // this starts the driver (data generation and result verification)
+                final int numKeys = 20;
+                final int maxRecordsPerKey = 1000;
                 if (disableAutoTerminate) {
                     generatePerpetually(kafka, numKeys, maxRecordsPerKey);
                 } else {
-                    // slow down data production to span 30 seconds so that system tests have time to
+                    // slow down data production so that system tests have time to
                     // do their bounces, etc.
-                    final Map<String, Set<Integer>> allData =
-                        generate(kafka, numKeys, maxRecordsPerKey, Duration.ofSeconds(30));
+                    final Map<String, Set<Integer>> allData = generate(kafka, numKeys, maxRecordsPerKey, Duration.ofSeconds(90));
                     SmokeTestDriver.verify(kafka, allData, maxRecordsPerKey);
                 }
                 break;

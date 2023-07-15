@@ -18,46 +18,46 @@
 package kafka.testkit;
 
 public class ControllerNode implements TestKitNode {
-	public static class Builder {
-		private int id = -1;
-		private String metadataDirectory = null;
+    public static class Builder {
+        private int id = -1;
+        private String metadataDirectory = null;
 
-		public Builder setId(int id) {
-			this.id = id;
-			return this;
-		}
+        public Builder setId(int id) {
+            this.id = id;
+            return this;
+        }
 
-		public Builder setMetadataDirectory() {
-			this.metadataDirectory = metadataDirectory;
-			return this;
-		}
+        public Builder setMetadataDirectory(String metadataDirectory) {
+            this.metadataDirectory = metadataDirectory;
+            return this;
+        }
 
-		public ControllerNode build() {
-			if (id == -1) {
-				throw new RuntimeException("You must set the node id");
-			}
-			if (metadataDirectory == null) {
-				metadataDirectory = String.format("controller_%d", id);
-			}
-			return new ControllerNode(id, metadataDirectory);
-		}
-	}
+        public ControllerNode build() {
+            if (id == -1) {
+                throw new RuntimeException("You must set the node id");
+            }
+            if (metadataDirectory == null) {
+                metadataDirectory = String.format("controller_%d", id);
+            }
+            return new ControllerNode(id, metadataDirectory);
+        }
+    }
 
-	private final int id;
-	private final String metadataDirectory;
+    private final int id;
+    private final String metadataDirectory;
 
-	ControllerNode(int id, String metadataDirectory) {
-		this.id = id;
-		this.metadataDirectory = metadataDirectory;
-	}
+    ControllerNode(int id, String metadataDirectory) {
+        this.id = id;
+        this.metadataDirectory = metadataDirectory;
+    }
 
-	@Override
-	public int id() {
-		return id;
-	}
+    @Override
+    public int id() {
+        return id;
+    }
 
-	@Override
-	public String metadataDirectory() {
-		return metadataDirectory;
-	}
+    @Override
+    public String metadataDirectory() {
+        return metadataDirectory;
+    }
 }

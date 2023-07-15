@@ -31,21 +31,20 @@ import java.util.Set;
  * A detailed description of a single topic in the cluster.
  */
 public class TopicDescription {
-	private final String name;
-	private final boolean internal;
-	private final List<TopicPartitionInfo> partitions;
-	private final Set<AclOperation> authorizedOperations;
-	private final Uuid topicId;
+    private final String name;
+    private final boolean internal;
+    private final List<TopicPartitionInfo> partitions;
+    private final Set<AclOperation> authorizedOperations;
+    private final Uuid topicId;
 
-	@Override
-	public boolean equals(final Object o) {
-		if (this == o) return true;
-		if (o == null || getClass() != o.getClass()) return false;
-		final TopicDescription that = (TopicDescription) o;
-		return internal == that.internal &&
-				Objects.equals(name, that.name) &&
-				Objects.equals(partitions, that.partitions) &&
-				Objects.equals(authorizedOperations, that.authorizedOperations);
+    @Override
+    public boolean equals(final Object o) {
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
+        final TopicDescription that = (TopicDescription) o;
+        return internal == that.internal && Objects.equals(name, that.name) && Objects.equals(partitions, that.partitions) && Objects.equals(authorizedOperations, that.authorizedOperations);
     }
 
     @Override
@@ -55,9 +54,8 @@ public class TopicDescription {
 
     /**
      * Create an instance with the specified parameters.
-     *
-     * @param name The topic name
-     * @param internal Whether the topic is internal to Kafka
+     * @param name       The topic name
+     * @param internal   Whether the topic is internal to Kafka
      * @param partitions A list of partitions where the index represents the partition id and the element contains
      *                   leadership and replica information for that partition.
      */
@@ -65,59 +63,66 @@ public class TopicDescription {
         this(name, internal, partitions, Collections.emptySet());
     }
 
-	/**
-	 * Create an instance with the specified parameters.
-	 * @param name                 The topic name
-	 * @param internal             Whether the topic is internal to Kafka
-	 * @param partitions           A list of partitions where the index represents the partition id and the element contains
-	 *                             leadership and replica information for that partition.
-	 * @param authorizedOperations authorized operations for this topic, or null if this is not known.
-	 */
-	public TopicDescription(String name, boolean internal, List<TopicPartitionInfo> partitions,
-							Set<AclOperation> authorizedOperations) {
-		this(name, internal, partitions, authorizedOperations, Uuid.ZERO_UUID);
-	}
+    /**
+     * Create an instance with the specified parameters.
+     * @param name                 The topic name
+     * @param internal             Whether the topic is internal to Kafka
+     * @param partitions           A list of partitions where the index represents the partition id and the element contains
+     *                             leadership and replica information for that partition.
+     * @param authorizedOperations authorized operations for this topic, or empty set if this is not known.
+     */
+    public TopicDescription(String name, boolean internal, List<TopicPartitionInfo> partitions, Set<AclOperation> authorizedOperations) {
+        this(name, internal, partitions, authorizedOperations, Uuid.ZERO_UUID);
+    }
 
-	public TopicDescription(String name, boolean internal, List<TopicPartitionInfo> partitions,
-							Set<AclOperation> authorizedOperations, Uuid topicId) {
-		this.name = name;
-		this.internal = internal;
-		this.partitions = partitions;
-		this.authorizedOperations = authorizedOperations;
-		this.topicId = topicId;
-	}
+    /**
+     * Create an instance with the specified parameters.
+     * @param name                 The topic name
+     * @param internal             Whether the topic is internal to Kafka
+     * @param partitions           A list of partitions where the index represents the partition id and the element contains
+     *                             leadership and replica information for that partition.
+     * @param authorizedOperations authorized operations for this topic, or empty set if this is not known.
+     * @param topicId              the topic id
+     */
+    public TopicDescription(String name, boolean internal, List<TopicPartitionInfo> partitions, Set<AclOperation> authorizedOperations, Uuid topicId) {
+        this.name = name;
+        this.internal = internal;
+        this.partitions = partitions;
+        this.authorizedOperations = authorizedOperations;
+        this.topicId = topicId;
+    }
 
-	/**
-	 * The name of the topic.
-	 */
+    /**
+     * The name of the topic.
+     */
     public String name() {
-		return name;
-	}
+        return name;
+    }
 
-	/**
-	 * Whether the topic is internal to Kafka. An example of an internal topic is the offsets and group management topic:
-	 * __consumer_offsets.
-	 */
-	public boolean isInternal() {
-		return internal;
-	}
+    /**
+     * Whether the topic is internal to Kafka. An example of an internal topic is the offsets and group management topic:
+     * __consumer_offsets.
+     */
+    public boolean isInternal() {
+        return internal;
+    }
 
-	public Uuid topicId() {
-		return topicId;
-	}
+    public Uuid topicId() {
+        return topicId;
+    }
 
-	/**
-	 * A list of partitions where the index represents the partition id and the element contains leadership and replica
-	 * information for that partition.
-	 */
-	public List<TopicPartitionInfo> partitions() {
-		return partitions;
+    /**
+     * A list of partitions where the index represents the partition id and the element contains leadership and replica
+     * information for that partition.
+     */
+    public List<TopicPartitionInfo> partitions() {
+        return partitions;
     }
 
     /**
      * authorized operations for this topic, or null if this is not known.
      */
-    public Set<AclOperation>  authorizedOperations() {
+    public Set<AclOperation> authorizedOperations() {
         return authorizedOperations;
     }
 

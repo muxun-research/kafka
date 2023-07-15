@@ -52,10 +52,10 @@ public class ElectLeadersResponse extends AbstractResponse {
         data.setReplicaElectionResults(electionResults);
     }
 
-	@Override
-	public ElectLeadersResponseData data() {
-		return data;
-	}
+    @Override
+    public ElectLeadersResponseData data() {
+        return data;
+    }
 
     @Override
     public int throttleTimeMs() {
@@ -63,14 +63,15 @@ public class ElectLeadersResponse extends AbstractResponse {
     }
 
     @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
+
+    @Override
     public Map<Errors, Integer> errorCounts() {
-		HashMap<Errors, Integer> counts = new HashMap<>();
-		updateErrorCounts(counts, Errors.forCode(data.errorCode()));
-		data.replicaElectionResults().forEach(result ->
-				result.partitionResult().forEach(partitionResult ->
-						updateErrorCounts(counts, Errors.forCode(partitionResult.errorCode()))
-				)
-		);
+        HashMap<Errors, Integer> counts = new HashMap<>();
+        updateErrorCounts(counts, Errors.forCode(data.errorCode()));
+        data.replicaElectionResults().forEach(result -> result.partitionResult().forEach(partitionResult -> updateErrorCounts(counts, Errors.forCode(partitionResult.errorCode()))));
 		return counts;
 	}
 

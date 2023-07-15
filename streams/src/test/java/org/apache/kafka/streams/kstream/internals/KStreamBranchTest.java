@@ -19,12 +19,12 @@ package org.apache.kafka.streams.kstream.internals;
 import org.apache.kafka.common.serialization.IntegerSerializer;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.StreamsBuilder;
+import org.apache.kafka.streams.TestInputTopic;
 import org.apache.kafka.streams.TopologyTestDriver;
+import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Predicate;
-import org.apache.kafka.streams.TestInputTopic;
 import org.apache.kafka.test.MockProcessor;
 import org.apache.kafka.test.MockProcessorSupplier;
 import org.apache.kafka.test.StreamsTestUtils;
@@ -40,8 +40,8 @@ public class KStreamBranchTest {
     private final String topicName = "topic";
     private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.String(), Serdes.String());
 
-	@SuppressWarnings({"unchecked", "deprecation"})
-	@Test
+    @SuppressWarnings({"unchecked", "deprecation"}) // Old PAPI. Needs to be migrated.
+    @Test
     public void testKStreamBranch() {
         final StreamsBuilder builder = new StreamsBuilder();
 
@@ -51,41 +51,39 @@ public class KStreamBranchTest {
 
         final int[] expectedKeys = new int[]{1, 2, 3, 4, 5, 6};
 
-		final KStream<Integer, String> stream;
-		final KStream<Integer, String>[] branches;
+        final KStream<Integer, String> stream;
+        final KStream<Integer, String>[] branches;
 
-		stream = builder.stream(topicName, Consumed.with(Serdes.Integer(), Serdes.String()));
-		branches = stream.branch(isEven, isMultipleOfThree, isOdd);
+        stream = builder.stream(topicName, Consumed.with(Serdes.Integer(), Serdes.String()));
+        branches = stream.branch(isEven, isMultipleOfThree, isOdd);
 
-		assertEquals(3, branches.length);
+        assertEquals(3, branches.length);
 
-		final MockProcessorSupplier<Integer, String> supplier = new MockProcessorSupplier<>();
-		for (final KStream<Integer, String> branch : branches) {
-			branch.process(supplier);
-		}
+        final MockProcessorSupplier<Integer, String> supplier = new MockProcessorSupplier<>();
+        for (final KStream<Integer, String> branch : branches) {
+            branch.process(supplier);
+        }
 
-		try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-			final TestInputTopic<Integer, String> inputTopic = driver.createInputTopic(topicName, new IntegerSerializer(), new StringSerializer());
-			for (final int expectedKey : expectedKeys) {
-				inputTopic.pipeInput(expectedKey, "V" + expectedKey);
-			}
-		}
+        try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
+            final TestInputTopic<Integer, String> inputTopic = driver.createInputTopic(topicName, new IntegerSerializer(), new StringSerializer());
+            for (final int expectedKey : expectedKeys) {
+                inputTopic.pipeInput(expectedKey, "V" + expectedKey);
+            }
+        }
 
-		final List<MockProcessor<Integer, String>> processors = supplier.capturedProcessors(3);
-		assertEquals(3, processors.get(0).processed().size());
-		assertEquals(1, processors.get(1).processed().size());
-		assertEquals(2, processors.get(2).processed().size());
-	}
+        final List<MockProcessor<Integer, String>> processors = supplier.capturedProcessors(3);
+        assertEquals(3, processors.get(0).processed().size());
+        assertEquals(1, processors.get(1).processed().size());
+        assertEquals(2, processors.get(2).processed().size());
+    }
 
-	@SuppressWarnings({"unchecked", "deprecation"})
-	@Test
+    @SuppressWarnings({"unchecked", "deprecation"})
+    @Test
     public void testTypeVariance() {
         final Predicate<Number, Object> positive = (key, value) -> key.doubleValue() > 0;
 
         final Predicate<Number, Object> negative = (key, value) -> key.doubleValue() < 0;
 
-        new StreamsBuilder()
-            .<Integer, String>stream("empty")
-            .branch(positive, negative);
+        new StreamsBuilder().<Integer, String>stream("empty").branch(positive, negative);
     }
 }

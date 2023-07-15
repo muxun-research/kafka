@@ -32,9 +32,7 @@ import static java.util.Arrays.asList;
 import static org.apache.kafka.test.StreamsTestUtils.toList;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThrows;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 public class FilteredCacheIteratorTest {
 
@@ -50,7 +48,6 @@ public class FilteredCacheIteratorTest {
         }
     };
 
-    @SuppressWarnings("unchecked")
     private final KeyValueStore<Bytes, LRUCacheEntry> store = new GenericInMemoryKeyValueStore<>("my-store");
     private final KeyValue<Bytes, LRUCacheEntry> firstEntry = KeyValue.pair(Bytes.wrap("a".getBytes()),
                                                                             new LRUCacheEntry("1".getBytes()));
@@ -123,12 +120,12 @@ public class FilteredCacheIteratorTest {
     @Test
     public void shouldFilterEntriesNotMatchingHasNextCondition() {
         final List<KeyValue<Bytes, LRUCacheEntry>> keyValues = toList(firstEntryIterator);
-		assertThat(keyValues, equalTo(Collections.singletonList(firstEntry)));
+        assertThat(keyValues, equalTo(Collections.singletonList(firstEntry)));
     }
 
-	@Test
-    public void shouldThrowUnsupportedOperationExeceptionOnRemove() {
-		assertThrows(UnsupportedOperationException.class, () -> allIterator.remove());
+    @Test
+    public void shouldThrowUnsupportedOperationExceptionOnRemove() {
+        assertThrows(UnsupportedOperationException.class, () -> allIterator.remove());
     }
 
 }

@@ -22,150 +22,143 @@ import org.apache.kafka.common.utils.Timer;
 import org.apache.kafka.snapshot.RawSnapshotWriter;
 import org.slf4j.Logger;
 
-import java.io.IOException;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
 
 public class FollowerState implements EpochState {
-	private final int fetchTimeoutMs;
-	private final int epoch;
-	private final int leaderId;
-	private final Set<Integer> voters;
-	// Used for tracking the expiration of both the Fetch and FetchSnapshot requests
-	private final Timer fetchTimer;
-	private Optional<LogOffsetMetadata> highWatermark;
-	/* Used to track the currently fetching snapshot. When fetching snapshot regular
-	 * Fetch request are paused
-	 */
-	private Optional<RawSnapshotWriter> fetchingSnapshot;
+    private final int fetchTimeoutMs;
+    private final int epoch;
+    private final int leaderId;
+    private final Set<Integer> voters;
+    // Used for tracking the expiration of both the Fetch and FetchSnapshot requests
+    private final Timer fetchTimer;
+    private Optional<LogOffsetMetadata> highWatermark;
+    /* Used to track the currently fetching snapshot. When fetching snapshot regular
+     * Fetch request are paused
+     */
+    private Optional<RawSnapshotWriter> fetchingSnapshot;
 
-	private final Logger log;
+    private final Logger log;
 
-	public FollowerState(
-			Time time,
-			int epoch,
-			int leaderId,
-			Set<Integer> voters,
-			Optional<LogOffsetMetadata> highWatermark,
-			int fetchTimeoutMs,
-			LogContext logContext
-	) {
-		this.fetchTimeoutMs = fetchTimeoutMs;
-		this.epoch = epoch;
-		this.leaderId = leaderId;
-		this.voters = voters;
-		this.fetchTimer = time.timer(fetchTimeoutMs);
-		this.highWatermark = highWatermark;
-		this.fetchingSnapshot = Optional.empty();
-		this.log = logContext.logger(FollowerState.class);
-	}
+    public FollowerState(Time time, int epoch, int leaderId, Set<Integer> voters, Optional<LogOffsetMetadata> highWatermark, int fetchTimeoutMs, LogContext logContext) {
+        this.fetchTimeoutMs = fetchTimeoutMs;
+        this.epoch = epoch;
+        this.leaderId = leaderId;
+        this.voters = voters;
+        this.fetchTimer = time.timer(fetchTimeoutMs);
+        this.highWatermark = highWatermark;
+        this.fetchingSnapshot = Optional.empty();
+        this.log = logContext.logger(FollowerState.class);
+    }
 
-	@Override
-	public ElectionState election() {
-		return new ElectionState(
-				epoch,
-				OptionalInt.of(leaderId),
-				OptionalInt.empty(),
-				voters
-		);
-	}
+    @Override
+    public ElectionState election() {
+        return new ElectionState(epoch, OptionalInt.of(leaderId), OptionalInt.empty(), voters);
+    }
 
-	@Override
-	public int epoch() {
-		return epoch;
-	}
+    @Override
+    public int epoch() {
+        return epoch;
+    }
 
-	@Override
-	public String name() {
-		return "Follower";
-	}
+    @Override
+    public String name() {
+        return "Follower";
+    }
 
-	public long remainingFetchTimeMs(long currentTimeMs) {
-		fetchTimer.update(currentTimeMs);
-		return fetchTimer.remainingMs();
-	}
+    public long remainingFetchTimeMs(long currentTimeMs) {
+        fetchTimer.update(currentTimeMs);
+        return fetchTimer.remainingMs();
+    }
 
-	public int leaderId() {
-		return leaderId;
-	}
+    public int leaderId() {
+        return leaderId;
+    }
 
-	public boolean hasFetchTimeoutExpired(long currentTimeMs) {
-		fetchTimer.update(currentTimeMs);
-		return fetchTimer.isExpired();
-	}
+    public boolean hasFetchTimeoutExpired(long currentTimeMs) {
+        fetchTimer.update(currentTimeMs);
+        return fetchTimer.isExpired();
+    }
 
-	public void resetFetchTimeout(long currentTimeMs) {
-		fetchTimer.update(currentTimeMs);
-		fetchTimer.reset(fetchTimeoutMs);
-	}
+    public void resetFetchTimeout(long currentTimeMs) {
+        fetchTimer.update(currentTimeMs);
+        fetchTimer.reset(fetchTimeoutMs);
+    }
 
-	public void overrideFetchTimeout(long currentTimeMs, long timeoutMs) {
-		fetchTimer.update(currentTimeMs);
-		fetchTimer.reset(timeoutMs);
-	}
+    public void overrideFetchTimeout(long currentTimeMs, long timeoutMs) {
+        fetchTimer.update(currentTimeMs);
+        fetchTimer.reset(timeoutMs);
+    }
 
-	public boolean updateHighWatermark(OptionalLong highWatermark) {
-		if (!highWatermark.isPresent() && this.highWatermark.isPresent())
-			throw new IllegalArgumentException("Attempt to overwrite current high watermark " + this.highWatermark +
-					" with unknown value");
+    public boolean updateHighWatermark(OptionalLong newHighWatermark) {
+        if (!newHighWatermark.isPresent() && highWatermark.isPresent()) {
+            throw new IllegalArgumentException(String.format("Attempt to overwrite current high watermark %s with unknown value", highWatermark));
+        }
 
-		if (this.highWatermark.isPresent()) {
-			long previousHighWatermark = this.highWatermark.get().offset;
-			long updatedHighWatermark = highWatermark.getAsLong();
+        if (highWatermark.isPresent()) {
+            long previousHighWatermark = highWatermark.get().offset;
+            long updatedHighWatermark = newHighWatermark.getAsLong();
 
-			if (updatedHighWatermark < 0)
-				throw new IllegalArgumentException("Illegal negative high watermark update");
-			if (previousHighWatermark > updatedHighWatermark)
-				throw new IllegalArgumentException("Non-monotonic update of high watermark attempted");
-			if (previousHighWatermark == updatedHighWatermark)
-				return false;
-		}
+            if (updatedHighWatermark < 0) {
+                throw new IllegalArgumentException(String.format("Illegal negative (%s) high watermark update", updatedHighWatermark));
+            } else if (previousHighWatermark > updatedHighWatermark) {
+                throw new IllegalArgumentException(String.format("Non-monotonic update of high watermark from %s to %s", previousHighWatermark, updatedHighWatermark));
+            } else if (previousHighWatermark == updatedHighWatermark) {
+                return false;
+            }
+        }
 
-		this.highWatermark = highWatermark.isPresent() ?
-				Optional.of(new LogOffsetMetadata(highWatermark.getAsLong())) :
-				Optional.empty();
-		return true;
-	}
+        Optional<LogOffsetMetadata> oldHighWatermark = highWatermark;
+        highWatermark = newHighWatermark.isPresent() ? Optional.of(new LogOffsetMetadata(newHighWatermark.getAsLong())) : Optional.empty();
 
-	@Override
-	public Optional<LogOffsetMetadata> highWatermark() {
-		return highWatermark;
-	}
+        logHighWatermarkUpdate(oldHighWatermark, highWatermark);
 
-	public Optional<RawSnapshotWriter> fetchingSnapshot() {
-		return fetchingSnapshot;
-	}
+        return true;
+    }
 
-	public void setFetchingSnapshot(Optional<RawSnapshotWriter> fetchingSnapshot) throws IOException {
-		if (fetchingSnapshot.isPresent()) {
-			fetchingSnapshot.get().close();
-		}
-		this.fetchingSnapshot = fetchingSnapshot;
-	}
+    @Override
+    public Optional<LogOffsetMetadata> highWatermark() {
+        return highWatermark;
+    }
 
-	@Override
-	public boolean canGrantVote(int candidateId, boolean isLogUpToDate) {
-		log.debug("Rejecting vote request from candidate {} since we already have a leader {} in epoch {}",
-				candidateId, leaderId(), epoch);
-		return false;
-	}
+    public Optional<RawSnapshotWriter> fetchingSnapshot() {
+        return fetchingSnapshot;
+    }
 
-	@Override
-	public String toString() {
-		return "FollowerState(" +
-				"fetchTimeoutMs=" + fetchTimeoutMs +
-				", epoch=" + epoch +
-				", leaderId=" + leaderId +
-				", voters=" + voters +
-				')';
-	}
+    public void setFetchingSnapshot(Optional<RawSnapshotWriter> newSnapshot) {
+        if (fetchingSnapshot.isPresent()) {
+            fetchingSnapshot.get().close();
+        }
+        fetchingSnapshot = newSnapshot;
+    }
 
-	@Override
-	public void close() throws IOException {
-		if (fetchingSnapshot.isPresent()) {
-			fetchingSnapshot.get().close();
-		}
-	}
+    @Override
+    public boolean canGrantVote(int candidateId, boolean isLogUpToDate) {
+        log.debug("Rejecting vote request from candidate {} since we already have a leader {} in epoch {}", candidateId, leaderId(), epoch);
+        return false;
+    }
+
+    @Override
+    public String toString() {
+        return "FollowerState(" + "fetchTimeoutMs=" + fetchTimeoutMs + ", epoch=" + epoch + ", leaderId=" + leaderId + ", voters=" + voters + ", highWatermark=" + highWatermark + ", fetchingSnapshot=" + fetchingSnapshot + ')';
+    }
+
+    @Override
+    public void close() {
+        if (fetchingSnapshot.isPresent()) {
+            fetchingSnapshot.get().close();
+        }
+    }
+
+    private void logHighWatermarkUpdate(Optional<LogOffsetMetadata> oldHighWatermark, Optional<LogOffsetMetadata> newHighWatermark) {
+        if (!oldHighWatermark.equals(newHighWatermark)) {
+            if (oldHighWatermark.isPresent()) {
+                log.trace("High watermark set to {} from {} for epoch {}", newHighWatermark, oldHighWatermark.get(), epoch);
+            } else {
+                log.info("High watermark set to {} for the first time for epoch {}", newHighWatermark, epoch);
+            }
+        }
+    }
 }

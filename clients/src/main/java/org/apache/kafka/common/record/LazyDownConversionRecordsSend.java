@@ -31,31 +31,30 @@ import java.util.Iterator;
  * on-demand when {@link #writeTo} method is called.
  */
 public final class LazyDownConversionRecordsSend extends RecordsSend<LazyDownConversionRecords> {
-	private static final Logger log = LoggerFactory.getLogger(LazyDownConversionRecordsSend.class);
-	private static final int MAX_READ_SIZE = 128 * 1024;
-	static final int MIN_OVERFLOW_MESSAGE_LENGTH = Records.LOG_OVERHEAD;
+    private static final Logger log = LoggerFactory.getLogger(LazyDownConversionRecordsSend.class);
+    private static final int MAX_READ_SIZE = 128 * 1024;
+    static final int MIN_OVERFLOW_MESSAGE_LENGTH = Records.LOG_OVERHEAD;
 
-	private RecordConversionStats recordConversionStats;
-	private RecordsSend convertedRecordsWriter;
-	private Iterator<ConvertedRecords<?>> convertedRecordsIterator;
+    private RecordConversionStats recordConversionStats;
+    private RecordsSend convertedRecordsWriter;
+    private Iterator<ConvertedRecords<?>> convertedRecordsIterator;
 
-	public LazyDownConversionRecordsSend(LazyDownConversionRecords records) {
-		super(records, records.sizeInBytes());
-		convertedRecordsWriter = null;
-		recordConversionStats = new RecordConversionStats();
-		convertedRecordsIterator = records().iterator(MAX_READ_SIZE);
-	}
+    public LazyDownConversionRecordsSend(LazyDownConversionRecords records) {
+        super(records, records.sizeInBytes());
+        convertedRecordsWriter = null;
+        recordConversionStats = new RecordConversionStats();
+        convertedRecordsIterator = records().iterator(MAX_READ_SIZE);
+    }
 
-	private MemoryRecords buildOverflowBatch(int remaining) {
-		// We do not have any records left to down-convert. Construct an overflow message for the length remaining.
-		// This message will be ignored by the consumer because its length will be past the length of maximum
-		// possible response size.
-		// DefaultRecordBatch =>
+    private MemoryRecords buildOverflowBatch(int remaining) {
+        // We do not have any records left to down-convert. Construct an overflow message for the length remaining.
+        // This message will be ignored by the consumer because its length will be past the length of maximum
+        // possible response size.
+        // DefaultRecordBatch =>
         //      BaseOffset => Int64
         //      Length => Int32
         //      ...
-        ByteBuffer overflowMessageBatch = ByteBuffer.allocate(
-                Math.max(MIN_OVERFLOW_MESSAGE_LENGTH, Math.min(remaining + 1, MAX_READ_SIZE)));
+        ByteBuffer overflowMessageBatch = ByteBuffer.allocate(Math.max(MIN_OVERFLOW_MESSAGE_LENGTH, Math.min(remaining + 1, MAX_READ_SIZE)));
         overflowMessageBatch.putLong(-1L);
 
         // Fill in the length of the overflow batch. A valid batch must be at least as long as the minimum batch
@@ -65,18 +64,18 @@ public final class LazyDownConversionRecordsSend extends RecordsSend<LazyDownCon
         return MemoryRecords.readableRecords(overflowMessageBatch);
     }
 
-	@Override
-	public long writeTo(TransferableChannel channel, long previouslyWritten, int remaining) throws IOException {
-		if (convertedRecordsWriter == null || convertedRecordsWriter.completed()) {
-			MemoryRecords convertedRecords;
+    @Override
+    public int writeTo(TransferableChannel channel, int previouslyWritten, int remaining) throws IOException {
+        if (convertedRecordsWriter == null || convertedRecordsWriter.completed()) {
+            MemoryRecords convertedRecords;
 
-			try {
-				// Check if we have more chunks left to down-convert
-				if (convertedRecordsIterator.hasNext()) {
-					// Get next chunk of down-converted messages
-					ConvertedRecords<?> recordsAndStats = convertedRecordsIterator.next();
-					convertedRecords = (MemoryRecords) recordsAndStats.records();
-					recordConversionStats.add(recordsAndStats.recordConversionStats());
+            try {
+                // Check if we have more chunks left to down-convert
+                if (convertedRecordsIterator.hasNext()) {
+                    // Get next chunk of down-converted messages
+                    ConvertedRecords<?> recordsAndStats = convertedRecordsIterator.next();
+                    convertedRecords = (MemoryRecords) recordsAndStats.records();
+                    recordConversionStats.add(recordsAndStats.recordConversionStats());
                     log.debug("Down-converted records for partition {} with length={}", topicPartition(), convertedRecords.sizeInBytes());
                 } else {
                     convertedRecords = buildOverflowBatch(remaining);
@@ -86,13 +85,14 @@ public final class LazyDownConversionRecordsSend extends RecordsSend<LazyDownCon
                 // Since we have already sent at least one batch and we have committed to the fetch size, we
                 // send an overflow batch. The consumer will read the first few records and then fetch from the
                 // offset of the batch which has the unsupported compression type. At that time, we will
-                // send back the UNSUPPORTED_COMPRESSION_TYPE erro which will allow the consumer to fail gracefully.
+                // send back the UNSUPPORTED_COMPRESSION_TYPE error which will allow the consumer to fail gracefully.
                 convertedRecords = buildOverflowBatch(remaining);
             }
 
-			convertedRecordsWriter = new DefaultRecordsSend<>(convertedRecords, Math.min(convertedRecords.sizeInBytes(), remaining));
+            convertedRecordsWriter = new DefaultRecordsSend<>(convertedRecords, Math.min(convertedRecords.sizeInBytes(), remaining));
         }
-        return convertedRecordsWriter.writeTo(channel);
+        // safe to cast to int since `remaining` is an int
+        return (int) convertedRecordsWriter.writeTo(channel);
     }
 
     public RecordConversionStats recordConversionStats() {

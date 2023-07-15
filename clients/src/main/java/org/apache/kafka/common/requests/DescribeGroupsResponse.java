@@ -25,34 +25,29 @@ import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.utils.Utils;
 
 import java.nio.ByteBuffer;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 public class DescribeGroupsResponse extends AbstractResponse {
 
-	public static final int AUTHORIZED_OPERATIONS_OMITTED = Integer.MIN_VALUE;
+    public static final int AUTHORIZED_OPERATIONS_OMITTED = Integer.MIN_VALUE;
 
-	/**
-	 * Possible per-group error codes:
-	 * <p>
-	 * COORDINATOR_LOAD_IN_PROGRESS (14)
-	 * COORDINATOR_NOT_AVAILABLE (15)
-	 * NOT_COORDINATOR (16)
-	 * AUTHORIZATION_FAILED (29)
-	 */
+    /**
+     * Possible per-group error codes:
+     * <p>
+     * COORDINATOR_LOAD_IN_PROGRESS (14)
+     * COORDINATOR_NOT_AVAILABLE (15)
+     * NOT_COORDINATOR (16)
+     * AUTHORIZATION_FAILED (29)
+     */
 
-	private final DescribeGroupsResponseData data;
+    private final DescribeGroupsResponseData data;
 
     public DescribeGroupsResponse(DescribeGroupsResponseData data) {
-		super(ApiKeys.DESCRIBE_GROUPS);
-		this.data = data;
+        super(ApiKeys.DESCRIBE_GROUPS);
+        this.data = data;
     }
 
-    public static DescribedGroupMember groupMember(
-        final String memberId,
+    public static DescribedGroupMember groupMember(final String memberId,
         final String groupInstanceId,
         final String clientId,
         final String clientHost,
@@ -75,37 +70,20 @@ public class DescribeGroupsResponse extends AbstractResponse {
         final String protocol,
         final List<DescribedGroupMember> members,
         final Set<Byte> authorizedOperations) {
-		DescribedGroup groupMetadata = new DescribedGroup();
-		groupMetadata.setGroupId(groupId)
-				.setErrorCode(error.code())
-				.setGroupState(state)
-				.setProtocolType(protocolType)
-				.setProtocolData(protocol)
-				.setMembers(members)
-				.setAuthorizedOperations(Utils.to32BitField(authorizedOperations));
-		return groupMetadata;
-	}
+        DescribedGroup groupMetadata = new DescribedGroup();
+        groupMetadata.setGroupId(groupId).setErrorCode(error.code()).setGroupState(state).setProtocolType(protocolType).setProtocolData(protocol).setMembers(members).setAuthorizedOperations(Utils.to32BitField(authorizedOperations));
+        return groupMetadata;
+    }
 
-    public static DescribedGroup groupMetadata(
-        final String groupId,
-        final Errors error,
-        final String state,
-        final String protocolType,
-        final String protocol,
-        final List<DescribedGroupMember> members,
-        final int authorizedOperations) {
-		DescribedGroup groupMetadata = new DescribedGroup();
-		groupMetadata.setGroupId(groupId)
-				.setErrorCode(error.code())
-				.setGroupState(state)
-				.setProtocolType(protocolType)
-				.setProtocolData(protocol)
-				.setMembers(members)
-				.setAuthorizedOperations(authorizedOperations);
-		return groupMetadata;
-	}
+    public static DescribedGroup groupMetadata(final String groupId, final Errors error, final String state, final String protocolType, final String protocol, final List<DescribedGroupMember> members, final int authorizedOperations) {
+        return new DescribedGroup().setGroupId(groupId).setErrorCode(error.code()).setGroupState(state).setProtocolType(protocolType).setProtocolData(protocol).setMembers(members).setAuthorizedOperations(authorizedOperations);
+    }
 
-	@Override
+    public static DescribedGroup groupError(String groupId, Errors error) {
+        return groupMetadata(groupId, error, DescribeGroupsResponse.UNKNOWN_STATE, DescribeGroupsResponse.UNKNOWN_PROTOCOL_TYPE, DescribeGroupsResponse.UNKNOWN_PROTOCOL, Collections.emptyList(), AUTHORIZED_OPERATIONS_OMITTED);
+    }
+
+    @Override
     public DescribeGroupsResponseData data() {
         return data;
     }
@@ -115,33 +93,24 @@ public class DescribeGroupsResponse extends AbstractResponse {
         return data.throttleTimeMs();
     }
 
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
+
     public static final String UNKNOWN_STATE = "";
     public static final String UNKNOWN_PROTOCOL_TYPE = "";
     public static final String UNKNOWN_PROTOCOL = "";
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> errorCounts = new HashMap<>();
-		data.groups().forEach(describedGroup ->
-				updateErrorCounts(errorCounts, Errors.forCode(describedGroup.errorCode())));
-		return errorCounts;
-	}
-
-    public static DescribedGroup forError(String groupId, Errors error) {
-		return groupMetadata(groupId, error, DescribeGroupsResponse.UNKNOWN_STATE, DescribeGroupsResponse.UNKNOWN_PROTOCOL_TYPE,
-				DescribeGroupsResponse.UNKNOWN_PROTOCOL, Collections.emptyList(), AUTHORIZED_OPERATIONS_OMITTED);
-    }
-
-    public static DescribeGroupsResponse fromError(int throttleTimeMs, Errors error, List<String> groupIds) {
-        DescribeGroupsResponseData describeGroupsResponseData = new DescribeGroupsResponseData();
-        describeGroupsResponseData.setThrottleTimeMs(throttleTimeMs);
-        for (String groupId : groupIds)
-            describeGroupsResponseData.groups().add(DescribeGroupsResponse.forError(groupId, error));
-        return new DescribeGroupsResponse(describeGroupsResponseData);
+        Map<Errors, Integer> errorCounts = new HashMap<>();
+        data.groups().forEach(describedGroup -> updateErrorCounts(errorCounts, Errors.forCode(describedGroup.errorCode())));
+        return errorCounts;
     }
 
     public static DescribeGroupsResponse parse(ByteBuffer buffer, short version) {
-		return new DescribeGroupsResponse(new DescribeGroupsResponseData(new ByteBufferAccessor(buffer), version));
+        return new DescribeGroupsResponse(new DescribeGroupsResponseData(new ByteBufferAccessor(buffer), version));
     }
 
     @Override

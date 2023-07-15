@@ -34,12 +34,7 @@ import javax.security.auth.login.AppConfigurationEntry;
 import javax.security.auth.login.Configuration;
 import javax.security.auth.login.LoginContext;
 import javax.security.auth.login.LoginException;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
-import java.util.Set;
+import java.util.*;
 
 /**
  * This class is responsible for refreshing Kerberos credentials for
@@ -163,18 +158,16 @@ public class KerberosLogin extends AbstractLogin {
                     // We should not allow the ticket to expire, but we should take into consideration
                     // minTimeBeforeRelogin. Will not sleep less than minTimeBeforeRelogin, unless doing so
                     // would cause ticket expiration.
-                    if ((nextRefresh > expiry) || (now + minTimeBeforeRelogin > expiry)) {
+                    if ((nextRefresh > expiry) || (minTimeBeforeRelogin > expiry - now)) {
                         // expiry is before next scheduled refresh).
                         log.info("[Principal={}]: Refreshing now because expiry is before next scheduled refresh time.", principal);
                         nextRefresh = now;
                     } else {
-                        if (nextRefresh < (now + minTimeBeforeRelogin)) {
+                        if (nextRefresh - now < minTimeBeforeRelogin) {
                             // next scheduled refresh is sooner than (now + MIN_TIME_BEFORE_LOGIN).
                             Date until = new Date(nextRefresh);
                             Date newUntil = new Date(now + minTimeBeforeRelogin);
-                            log.warn("[Principal={}]: TGT refresh thread time adjusted from {} to {} since the former is sooner " +
-                                "than the minimum refresh interval ({} seconds) from now.",
-                                principal, until, newUntil, minTimeBeforeRelogin / 1000);
+                            log.warn("[Principal={}]: TGT refresh thread time adjusted from {} to {} since the former is sooner " + "than the minimum refresh interval ({} seconds) from now.", principal, until, newUntil, minTimeBeforeRelogin / 1000);
                         }
                         nextRefresh = Math.max(nextRefresh, now + minTimeBeforeRelogin);
                     }
@@ -212,8 +205,8 @@ public class KerberosLogin extends AbstractLogin {
                             break;
                         } catch (Exception e) {
                             if (retry > 0) {
-								log.warn("[Principal={}]: Error when trying to renew with TicketCache, but will retry ", principal, e);
-								--retry;
+                                log.warn("[Principal={}]: Error when trying to renew with TicketCache, but will retry ", principal, e);
+                                --retry;
                                 // sleep for 10 seconds
                                 try {
                                     Thread.sleep(10 * 1000);
@@ -237,8 +230,8 @@ public class KerberosLogin extends AbstractLogin {
                             break;
                         } catch (LoginException le) {
                             if (retry > 0) {
-								log.warn("[Principal={}]: Error when trying to re-Login, but will retry ", principal, le);
-								--retry;
+                                log.warn("[Principal={}]: Error when trying to re-Login, but will retry ", principal, le);
+                                --retry;
                                 // sleep for 10 seconds.
                                 try {
                                     Thread.sleep(10 * 1000);
@@ -334,54 +327,61 @@ public class KerberosLogin extends AbstractLogin {
     private boolean hasSufficientTimeElapsed() {
         long now = currentElapsedTime();
         if (now - lastLogin < minTimeBeforeRelogin) {
-            log.warn("[Principal={}]: Not attempting to re-login since the last re-login was attempted less than {} seconds before.",
-                    principal, minTimeBeforeRelogin / 1000);
+            log.warn("[Principal={}]: Not attempting to re-login since the last re-login was attempted less than {} seconds before.", principal, minTimeBeforeRelogin / 1000);
             return false;
         }
         return true;
     }
 
-	/**
-	 * Re-login a principal. This method assumes that {@link #login()} has happened already.
-	 * @throws javax.security.auth.login.LoginException on a failure
-	 */
-	protected void reLogin() throws LoginException {
-		if (!isKrbTicket) {
-			return;
-		}
-		if (loginContext == null) {
-			throw new LoginException("Login must be done first");
-		}
-		if (!hasSufficientTimeElapsed()) {
-			return;
-		}
-		synchronized (KerberosLogin.class) {
+    /**
+     * Re-login a principal. This method assumes that {@link #login()} has happened already.
+     * @throws javax.security.auth.login.LoginException on a failure
+     */
+    protected void reLogin() throws LoginException {
+        if (!isKrbTicket) {
+            return;
+        }
+        if (loginContext == null) {
+            throw new LoginException("Login must be done first");
+        }
+        if (!hasSufficientTimeElapsed()) {
+            return;
+        }
+        synchronized (KerberosLogin.class) {
             log.info("Initiating logout for {}", principal);
             // register most recent relogin attempt
             lastLogin = currentElapsedTime();
             //clear up the kerberos state. But the tokens are not cleared! As per
             //the Java kerberos login module code, only the kerberos credentials
-			//are cleared
-			logout();
-			//login and also update the subject field of this instance to
-			//have the new credentials (pass it to the LoginContext constructor)
-			loginContext = new LoginContext(contextName(), subject, null, configuration());
-			log.info("Initiating re-login for {}", principal);
-			loginContext.login();
-		}
-	}
+            //are cleared. If previous logout succeeded but login failed, we shouldn't
+            //logout again since duplicate logout causes NPE from Java 9 onwards.
+            if (subject != null && !subject.getPrincipals().isEmpty()) {
+                logout();
+            }
+            //login and also update the subject field of this instance to
+            //have the new credentials (pass it to the LoginContext constructor)
+            loginContext = new LoginContext(contextName(), subject, null, configuration());
+            log.info("Initiating re-login for {}", principal);
+            login(loginContext);
+        }
+    }
 
-	// Visibility to override for testing
-	protected void logout() throws LoginException {
-		loginContext.logout();
-	}
+    // Visibility to override for testing
+    protected void login(LoginContext loginContext) throws LoginException {
+        loginContext.login();
+    }
 
-	private long currentElapsedTime() {
-		return time.hiResClockMs();
-	}
+    // Visibility to override for testing
+    protected void logout() throws LoginException {
+        loginContext.logout();
+    }
 
-	private long currentWallTime() {
-		return time.milliseconds();
-	}
+    private long currentElapsedTime() {
+        return time.hiResClockMs();
+    }
+
+    private long currentWallTime() {
+        return time.milliseconds();
+    }
 
 }

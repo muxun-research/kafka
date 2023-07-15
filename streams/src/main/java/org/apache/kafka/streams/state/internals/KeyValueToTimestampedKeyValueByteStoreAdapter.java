@@ -16,11 +16,13 @@
  */
 package org.apache.kafka.streams.state.internals;
 
+import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.StateStoreContext;
+import org.apache.kafka.streams.query.*;
 import org.apache.kafka.streams.state.KeyValueBytesStoreSupplier;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.KeyValueStore;
@@ -53,22 +55,20 @@ public class KeyValueToTimestampedKeyValueByteStoreAdapter implements KeyValueSt
     @Override
     public void put(final Bytes key,
                     final byte[] valueWithTimestamp) {
-        store.put(key, valueWithTimestamp == null ? null : rawValue(valueWithTimestamp));
+        store.put(key, rawValue(valueWithTimestamp));
     }
 
     @Override
     public byte[] putIfAbsent(final Bytes key,
                               final byte[] valueWithTimestamp) {
-        return convertToTimestampedFormat(store.putIfAbsent(
-            key,
-            valueWithTimestamp == null ? null : rawValue(valueWithTimestamp)));
+        return convertToTimestampedFormat(store.putIfAbsent(key, rawValue(valueWithTimestamp)));
     }
 
     @Override
     public void putAll(final List<KeyValue<Bytes, byte[]>> entries) {
         for (final KeyValue<Bytes, byte[]> entry : entries) {
             final byte[] valueWithTimestamp = entry.value;
-            store.put(entry.key, valueWithTimestamp == null ? null : rawValue(valueWithTimestamp));
+            store.put(entry.key, rawValue(valueWithTimestamp));
         }
     }
 
@@ -78,31 +78,30 @@ public class KeyValueToTimestampedKeyValueByteStoreAdapter implements KeyValueSt
     }
 
     @Override
-	public String name() {
-		return store.name();
-	}
+    public String name() {
+        return store.name();
+    }
 
-	@Deprecated
-	@Override
-	public void init(final ProcessorContext context,
-					 final StateStore root) {
-		store.init(context, root);
-	}
+    @Deprecated
+    @Override
+    public void init(final ProcessorContext context, final StateStore root) {
+        store.init(context, root);
+    }
 
-	@Override
-	public void init(final StateStoreContext context, final StateStore root) {
-		store.init(context, root);
-	}
+    @Override
+    public void init(final StateStoreContext context, final StateStore root) {
+        store.init(context, root);
+    }
 
-	@Override
-	public void flush() {
-		store.flush();
-	}
+    @Override
+    public void flush() {
+        store.flush();
+    }
 
-	@Override
-	public void close() {
-		store.close();
-	}
+    @Override
+    public void close() {
+        store.close();
+    }
 
     @Override
     public boolean persistent() {
@@ -115,35 +114,56 @@ public class KeyValueToTimestampedKeyValueByteStoreAdapter implements KeyValueSt
     }
 
     @Override
-	public byte[] get(final Bytes key) {
-		return convertToTimestampedFormat(store.get(key));
-	}
+    public <R> QueryResult<R> query(final Query<R> query, final PositionBound positionBound, final QueryConfig config) {
 
-	@Override
-	public KeyValueIterator<Bytes, byte[]> range(final Bytes from,
-												 final Bytes to) {
-		return new KeyValueToTimestampedKeyValueIteratorAdapter<>(store.range(from, to));
-	}
 
-	@Override
-	public KeyValueIterator<Bytes, byte[]> reverseRange(final Bytes from,
-														final Bytes to) {
-		return new KeyValueToTimestampedKeyValueIteratorAdapter<>(store.reverseRange(from, to));
-	}
+        final long start = config.isCollectExecutionInfo() ? System.nanoTime() : -1L;
+        final QueryResult<R> result = store.query(query, positionBound, config);
+        if (config.isCollectExecutionInfo()) {
+            final long end = System.nanoTime();
+            result.addExecutionInfo("Handled in " + getClass() + " in " + (end - start) + "ns");
+        }
+        return result;
+    }
 
-	@Override
-	public KeyValueIterator<Bytes, byte[]> all() {
-		return new KeyValueToTimestampedKeyValueIteratorAdapter<>(store.all());
-	}
+    @Override
+    public Position getPosition() {
+        return store.getPosition();
+    }
 
-	@Override
-	public KeyValueIterator<Bytes, byte[]> reverseAll() {
-		return new KeyValueToTimestampedKeyValueIteratorAdapter<>(store.reverseAll());
-	}
+    @Override
+    public byte[] get(final Bytes key) {
+        return convertToTimestampedFormat(store.get(key));
+    }
 
-	@Override
-	public long approximateNumEntries() {
-		return store.approximateNumEntries();
-	}
+    @Override
+    public KeyValueIterator<Bytes, byte[]> range(final Bytes from, final Bytes to) {
+        return new KeyValueToTimestampedKeyValueIteratorAdapter<>(store.range(from, to));
+    }
+
+    @Override
+    public KeyValueIterator<Bytes, byte[]> reverseRange(final Bytes from, final Bytes to) {
+        return new KeyValueToTimestampedKeyValueIteratorAdapter<>(store.reverseRange(from, to));
+    }
+
+    @Override
+    public KeyValueIterator<Bytes, byte[]> all() {
+        return new KeyValueToTimestampedKeyValueIteratorAdapter<>(store.all());
+    }
+
+    @Override
+    public KeyValueIterator<Bytes, byte[]> reverseAll() {
+        return new KeyValueToTimestampedKeyValueIteratorAdapter<>(store.reverseAll());
+    }
+
+    @Override
+    public <PS extends Serializer<P>, P> KeyValueIterator<Bytes, byte[]> prefixScan(final P prefix, final PS prefixKeySerializer) {
+        return new KeyValueToTimestampedKeyValueIteratorAdapter<>(store.prefixScan(prefix, prefixKeySerializer));
+    }
+
+    @Override
+    public long approximateNumEntries() {
+        return store.approximateNumEntries();
+    }
 
 }

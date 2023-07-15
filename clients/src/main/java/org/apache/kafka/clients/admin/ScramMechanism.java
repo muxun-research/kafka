@@ -21,62 +21,63 @@ import java.util.Arrays;
 
 /**
  * Representation of a SASL/SCRAM Mechanism.
+ *
  * @see <a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-554%3A+Add+Broker-side+SCRAM+Config+API">KIP-554: Add Broker-side SCRAM Config API</a>
+ *
+ * This code is duplicated in org.apache.kafka.common.security.scram.internals.ScramMechanism.
+ * The type field in both files must match and must not change. The type field
+ * is used both for passing ScramCredentialUpsertion and for the internal
+ * UserScramCredentialRecord. Do not change the type field.
  */
 public enum ScramMechanism {
-	UNKNOWN((byte) 0),
-	SCRAM_SHA_256((byte) 1),
-	SCRAM_SHA_512((byte) 2);
+    UNKNOWN((byte) 0), SCRAM_SHA_256((byte) 1), SCRAM_SHA_512((byte) 2);
 
-	private static final ScramMechanism[] VALUES = values();
+    private static final ScramMechanism[] VALUES = values();
 
-	/**
-	 * @param type the type indicator
-	 * @return the instance corresponding to the given type indicator, otherwise {@link #UNKNOWN}
-	 */
-	public static ScramMechanism fromType(byte type) {
-		for (ScramMechanism scramMechanism : VALUES) {
-			if (scramMechanism.type == type) {
-				return scramMechanism;
-			}
-		}
-		return UNKNOWN;
-	}
+    /**
+     * @param type the type indicator
+     * @return the instance corresponding to the given type indicator, otherwise {@link #UNKNOWN}
+     */
+    public static ScramMechanism fromType(byte type) {
+        for (ScramMechanism scramMechanism : VALUES) {
+            if (scramMechanism.type == type) {
+                return scramMechanism;
+            }
+        }
+        return UNKNOWN;
+    }
 
-	/**
-	 * @param mechanismName the SASL SCRAM mechanism name
-	 * @return the corresponding SASL SCRAM mechanism enum, otherwise {@link #UNKNOWN}
-	 * @see <a href="https://tools.ietf.org/html/rfc5802#section-4>
-	 * Salted Challenge Response Authentication Mechanism (SCRAM) SASL and GSS-API Mechanisms, Section 4</a>
-	 */
-	public static ScramMechanism fromMechanismName(String mechanismName) {
-		return Arrays.stream(VALUES)
-				.filter(mechanism -> mechanism.mechanismName.equals(mechanismName))
-				.findFirst()
-				.orElse(UNKNOWN);
-	}
+    /**
+     * @param mechanismName the SASL SCRAM mechanism name
+     * @return the corresponding SASL SCRAM mechanism enum, otherwise {@link #UNKNOWN}
+     * @see <a href="https://tools.ietf.org/html/rfc5802#section-4">
+     * Salted Challenge Response Authentication Mechanism (SCRAM) SASL and GSS-API Mechanisms, Section 4</a>
+     */
+    public static ScramMechanism fromMechanismName(String mechanismName) {
+        return Arrays.stream(VALUES).filter(mechanism -> mechanism.mechanismName.equals(mechanismName)).findFirst().orElse(UNKNOWN);
+    }
 
-	/**
-	 * @return the corresponding SASL SCRAM mechanism name
-	 * @see <a href="https://tools.ietf.org/html/rfc5802#section-4>
-	 * Salted Challenge Response Authentication Mechanism (SCRAM) SASL and GSS-API Mechanisms, Section 4</a>
-	 */
-	public String mechanismName() {
-		return this.mechanismName;
-	}
+    /**
+     * @return the corresponding SASL SCRAM mechanism name
+     * @see <a href="https://tools.ietf.org/html/rfc5802#section-4">
+     * Salted Challenge Response Authentication Mechanism (SCRAM) SASL and GSS-API Mechanisms, Section 4</a>
+     */
+    public String mechanismName() {
+        return this.mechanismName;
+    }
 
-	/**
-	 * @return the type indicator for this SASL SCRAM mechanism
-	 */
-	public byte type() {
-		return this.type;
-	}
+    /**
+     * @return the type indicator for this SASL SCRAM mechanism
+     */
+    public byte type() {
+        return this.type;
+    }
 
-	private final byte type;
-	private final String mechanismName;
+    private final byte type;
+    private final String mechanismName;
 
-	private ScramMechanism(byte type) {
-		this.type = type;
-		this.mechanismName = toString().replace('_', '-');
-	}
+    private ScramMechanism(byte type) {
+        this.type = type;
+        this.mechanismName = toString().replace('_', '-');
+    }
 }

@@ -17,7 +17,6 @@
 package org.apache.kafka.streams.integration;
 
 
-import kafka.utils.MockTime;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
@@ -26,11 +25,8 @@ import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.apache.kafka.streams.KafkaStreams;
-import org.apache.kafka.streams.KeyValue;
-import org.apache.kafka.streams.StreamsBuilder;
-import org.apache.kafka.streams.StreamsConfig;
-import org.apache.kafka.streams.Topology;
+import org.apache.kafka.server.util.MockTime;
+import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.errors.StreamsUncaughtExceptionHandler;
 import org.apache.kafka.streams.errors.TopologyException;
 import org.apache.kafka.streams.integration.utils.EmbeddedKafkaCluster;
@@ -38,84 +34,50 @@ import org.apache.kafka.streams.integration.utils.IntegrationTestUtils;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Produced;
-import org.apache.kafka.test.IntegrationTest;
 import org.apache.kafka.test.StreamsTestUtils;
 import org.apache.kafka.test.TestUtils;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import org.junit.experimental.categories.Category;
+import org.junit.jupiter.api.*;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
+import java.util.*;
 import java.util.regex.Pattern;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.fail;
 
-@Category({IntegrationTest.class})
+@Timeout(600)
+@Tag("integration")
 public class FineGrainedAutoResetIntegrationTest {
+    private static final int NUM_BROKERS = 1;
+    private static final String DEFAULT_OUTPUT_TOPIC = "outputTopic";
+    private static final String OUTPUT_TOPIC_0 = "outputTopic_0";
+    private static final String OUTPUT_TOPIC_1 = "outputTopic_1";
+    private static final String OUTPUT_TOPIC_2 = "outputTopic_2";
 
-	private static final int NUM_BROKERS = 1;
-	private static final String DEFAULT_OUTPUT_TOPIC = "outputTopic";
-	private static final String OUTPUT_TOPIC_0 = "outputTopic_0";
-	private static final String OUTPUT_TOPIC_1 = "outputTopic_1";
-	private static final String OUTPUT_TOPIC_2 = "outputTopic_2";
+    public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(NUM_BROKERS);
 
-	public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(NUM_BROKERS);
+    @BeforeAll
+    public static void startCluster() throws IOException, InterruptedException {
+        CLUSTER.start();
+        CLUSTER.createTopics(TOPIC_1_0, TOPIC_2_0, TOPIC_A_0, TOPIC_C_0, TOPIC_Y_0, TOPIC_Z_0, TOPIC_1_1, TOPIC_2_1, TOPIC_A_1, TOPIC_C_1, TOPIC_Y_1, TOPIC_Z_1, TOPIC_1_2, TOPIC_2_2, TOPIC_A_2, TOPIC_C_2, TOPIC_Y_2, TOPIC_Z_2, NOOP, DEFAULT_OUTPUT_TOPIC, OUTPUT_TOPIC_0, OUTPUT_TOPIC_1, OUTPUT_TOPIC_2);
+    }
 
-	@BeforeClass
-	public static void startCluster() throws IOException, InterruptedException {
-		CLUSTER.start();
-		CLUSTER.createTopics(
-				TOPIC_1_0,
-				TOPIC_2_0,
-				TOPIC_A_0,
-				TOPIC_C_0,
-				TOPIC_Y_0,
-				TOPIC_Z_0,
-				TOPIC_1_1,
-				TOPIC_2_1,
-				TOPIC_A_1,
-				TOPIC_C_1,
-				TOPIC_Y_1,
-				TOPIC_Z_1,
-				TOPIC_1_2,
-				TOPIC_2_2,
-				TOPIC_A_2,
-				TOPIC_C_2,
-				TOPIC_Y_2,
-				TOPIC_Z_2,
-				NOOP,
-				DEFAULT_OUTPUT_TOPIC,
-				OUTPUT_TOPIC_0,
-				OUTPUT_TOPIC_1,
-				OUTPUT_TOPIC_2);
-	}
+    @AfterAll
+    public static void closeCluster() {
+        CLUSTER.stop();
+    }
 
-	@AfterClass
-	public static void closeCluster() {
-		CLUSTER.stop();
-	}
+    private final MockTime mockTime = CLUSTER.time;
 
-	private final MockTime mockTime = CLUSTER.time;
-
-	private static final String TOPIC_1_0 = "topic-1_0";
-	private static final String TOPIC_2_0 = "topic-2_0";
-	private static final String TOPIC_A_0 = "topic-A_0";
-	private static final String TOPIC_C_0 = "topic-C_0";
-	private static final String TOPIC_Y_0 = "topic-Y_0";
-	private static final String TOPIC_Z_0 = "topic-Z_0";
-	private static final String TOPIC_1_1 = "topic-1_1";
+    private static final String TOPIC_1_0 = "topic-1_0";
+    private static final String TOPIC_2_0 = "topic-2_0";
+    private static final String TOPIC_A_0 = "topic-A_0";
+    private static final String TOPIC_C_0 = "topic-C_0";
+    private static final String TOPIC_Y_0 = "topic-Y_0";
+    private static final String TOPIC_Z_0 = "topic-Z_0";
+    private static final String TOPIC_1_1 = "topic-1_1";
     private static final String TOPIC_2_1 = "topic-2_1";
     private static final String TOPIC_A_1 = "topic-A_1";
     private static final String TOPIC_C_1 = "topic-C_1";
@@ -140,21 +102,16 @@ public class FineGrainedAutoResetIntegrationTest {
     private final String topicYTestMessage = "topic-Y test";
     private final String topicZTestMessage = "topic-Z test";
 
-    @Before
+    @BeforeEach
     public void setUp() throws IOException {
 
         final Properties props = new Properties();
-        props.put(StreamsConfig.CACHE_MAX_BYTES_BUFFERING_CONFIG, 0);
-        props.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 100);
+        props.put(StreamsConfig.STATESTORE_CACHE_MAX_BYTES_CONFIG, 0);
+        props.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 100L);
         props.put(ConsumerConfig.METADATA_MAX_AGE_CONFIG, "1000");
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
 
-        streamsConfiguration = StreamsTestUtils.getStreamsConfig(
-                "testAutoOffsetId",
-                CLUSTER.bootstrapServers(),
-                STRING_SERDE_CLASSNAME,
-                STRING_SERDE_CLASSNAME,
-                props);
+        streamsConfiguration = StreamsTestUtils.getStreamsConfig("testAutoOffsetId", CLUSTER.bootstrapServers(), STRING_SERDE_CLASSNAME, STRING_SERDE_CLASSNAME, props);
 
         // Remove any state from previous test runs
         IntegrationTestUtils.purgeLocalStreamsState(streamsConfiguration);
@@ -283,17 +240,12 @@ public class FineGrainedAutoResetIntegrationTest {
     @Test
     public void shouldThrowStreamsExceptionNoResetSpecified() throws InterruptedException {
         final Properties props = new Properties();
-        props.put(StreamsConfig.CACHE_MAX_BYTES_BUFFERING_CONFIG, 0);
-        props.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 100);
+        props.put(StreamsConfig.STATESTORE_CACHE_MAX_BYTES_CONFIG, 0);
+        props.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 100L);
         props.put(ConsumerConfig.METADATA_MAX_AGE_CONFIG, "1000");
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "none");
 
-        final Properties localConfig = StreamsTestUtils.getStreamsConfig(
-                "testAutoOffsetWithNone",
-                CLUSTER.bootstrapServers(),
-                STRING_SERDE_CLASSNAME,
-                STRING_SERDE_CLASSNAME,
-                props);
+        final Properties localConfig = StreamsTestUtils.getStreamsConfig("testAutoOffsetWithNone", CLUSTER.bootstrapServers(), STRING_SERDE_CLASSNAME, STRING_SERDE_CLASSNAME, props);
 
         final StreamsBuilder builder = new StreamsBuilder();
         final KStream<String, String> exceptionStream = builder.stream(NOOP);
@@ -306,22 +258,21 @@ public class FineGrainedAutoResetIntegrationTest {
 
         streams.setUncaughtExceptionHandler(uncaughtExceptionHandler);
         streams.start();
-        TestUtils.waitForCondition(() -> uncaughtExceptionHandler.correctExceptionThrown,
-                "The expected NoOffsetForPartitionException was never thrown");
+        TestUtils.waitForCondition(() -> uncaughtExceptionHandler.correctExceptionThrown, "The expected NoOffsetForPartitionException was never thrown");
         streams.close();
     }
 
 
-	private static final class TestingUncaughtExceptionHandler implements StreamsUncaughtExceptionHandler {
-		boolean correctExceptionThrown = false;
+    private static final class TestingUncaughtExceptionHandler implements StreamsUncaughtExceptionHandler {
+        boolean correctExceptionThrown = false;
 
-		@Override
-		public StreamThreadExceptionResponse handle(final Throwable throwable) {
-			assertThat(throwable.getClass().getSimpleName(), is("StreamsException"));
-			assertThat(throwable.getCause().getClass().getSimpleName(), is("NoOffsetForPartitionException"));
-			correctExceptionThrown = true;
-			return StreamThreadExceptionResponse.SHUTDOWN_CLIENT;
-		}
-	}
+        @Override
+        public StreamThreadExceptionResponse handle(final Throwable throwable) {
+            assertThat(throwable.getClass().getSimpleName(), is("StreamsException"));
+            assertThat(throwable.getCause().getClass().getSimpleName(), is("NoOffsetForPartitionException"));
+            correctExceptionThrown = true;
+            return StreamThreadExceptionResponse.SHUTDOWN_CLIENT;
+        }
+    }
 
 }

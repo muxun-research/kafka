@@ -30,51 +30,57 @@ import java.util.Objects;
 @InterfaceStability.Evolving
 public class RemoteLogSegmentId {
 
-	private final TopicIdPartition topicIdPartition;
-	private final Uuid id;
+    private final TopicIdPartition topicIdPartition;
+    private final Uuid id;
 
-	public RemoteLogSegmentId(TopicIdPartition topicIdPartition, Uuid id) {
-		this.topicIdPartition = Objects.requireNonNull(topicIdPartition, "topicIdPartition can not be null");
-		this.id = Objects.requireNonNull(id, "id can not be null");
-	}
+    /**
+     * Creates a new {@link RemoteLogSegmentId} for the provided {@link TopicIdPartition} with a random Uuid.
+     * @param topicIdPartition TopicIdPartition of this remote log segment.
+     * @return generated RemoteLogSegmentId.
+     */
+    public static RemoteLogSegmentId generateNew(TopicIdPartition topicIdPartition) {
+        return new RemoteLogSegmentId(topicIdPartition, Uuid.randomUuid());
+    }
 
-	/**
-	 * @return TopicIdPartition of this remote log segment.
-	 */
-	public TopicIdPartition topicIdPartition() {
-		return topicIdPartition;
-	}
+    public RemoteLogSegmentId(TopicIdPartition topicIdPartition, Uuid id) {
+        this.topicIdPartition = Objects.requireNonNull(topicIdPartition, "topicIdPartition can not be null");
+        this.id = Objects.requireNonNull(id, "id can not be null");
+    }
 
-	/**
-	 * @return Universally Unique Id of this remote log segment.
-	 */
-	public Uuid id() {
-		return id;
-	}
+    /**
+     * @return TopicIdPartition of this remote log segment.
+     */
+    public TopicIdPartition topicIdPartition() {
+        return topicIdPartition;
+    }
 
-	@Override
-	public String toString() {
-		return "RemoteLogSegmentId{" +
-				"topicIdPartition=" + topicIdPartition +
-				", id=" + id +
-				'}';
-	}
+    /**
+     * @return Universally Unique Id of this remote log segment.
+     */
+    public Uuid id() {
+        return id;
+    }
 
-	@Override
-	public boolean equals(Object o) {
-		if (this == o) {
-			return true;
-		}
-		if (o == null || getClass() != o.getClass()) {
-			return false;
-		}
-		RemoteLogSegmentId that = (RemoteLogSegmentId) o;
-		return Objects.equals(topicIdPartition, that.topicIdPartition) && Objects.equals(id, that.id);
-	}
+    @Override
+    public String toString() {
+        return "RemoteLogSegmentId{" + "topicIdPartition=" + topicIdPartition + ", id=" + id + '}';
+    }
 
-	@Override
-	public int hashCode() {
-		return Objects.hash(topicIdPartition, id);
-	}
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        RemoteLogSegmentId that = (RemoteLogSegmentId) o;
+        return Objects.equals(topicIdPartition, that.topicIdPartition) && Objects.equals(id, that.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(topicIdPartition, id);
+    }
 
 }

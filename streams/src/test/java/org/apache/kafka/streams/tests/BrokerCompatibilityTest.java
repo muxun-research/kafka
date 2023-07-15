@@ -50,30 +50,30 @@ public class BrokerCompatibilityTest {
 
     public static void main(final String[] args) throws IOException {
         if (args.length < 2) {
-			System.err.println("BrokerCompatibilityTest are expecting two parameters: propFile, processingMode; but only see " + args.length + " parameter");
-			Exit.exit(1);
-		}
+            System.err.println("BrokerCompatibilityTest are expecting two parameters: propFile, processingMode; but only see " + args.length + " parameter");
+            Exit.exit(1);
+        }
 
         System.out.println("StreamsTest instance started");
 
-		final String propFileName = args[0];
-		final String processingMode = args[1];
+        final String propFileName = args[0];
+        final String processingMode = args[1];
 
         final Properties streamsProperties = Utils.loadProps(propFileName);
         final String kafka = streamsProperties.getProperty(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG);
 
         if (kafka == null) {
-			System.err.println("No bootstrap kafka servers specified in " + StreamsConfig.BOOTSTRAP_SERVERS_CONFIG);
-			Exit.exit(1);
+            System.err.println("No bootstrap kafka servers specified in " + StreamsConfig.BOOTSTRAP_SERVERS_CONFIG);
+            Exit.exit(1);
         }
 
         streamsProperties.put(StreamsConfig.APPLICATION_ID_CONFIG, "kafka-streams-system-test-broker-compatibility");
         streamsProperties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         streamsProperties.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
         streamsProperties.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
-        streamsProperties.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 100);
-		streamsProperties.put(StreamsConfig.CACHE_MAX_BYTES_BUFFERING_CONFIG, 0);
-		streamsProperties.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, processingMode);
+        streamsProperties.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 100L);
+        streamsProperties.put(StreamsConfig.STATESTORE_CACHE_MAX_BYTES_CONFIG, 0);
+        streamsProperties.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, processingMode);
         final int timeout = 6000;
         streamsProperties.put(StreamsConfig.consumerPrefix(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG), timeout);
         streamsProperties.put(StreamsConfig.consumerPrefix(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG), timeout);
@@ -81,56 +81,52 @@ public class BrokerCompatibilityTest {
         final Serde<String> stringSerde = Serdes.String();
 
 
-		final StreamsBuilder builder = new StreamsBuilder();
-		builder.<String, String>stream(SOURCE_TOPIC).groupByKey(Grouped.with(stringSerde, stringSerde))
-				.count()
-				.toStream()
-				.mapValues(Object::toString)
-				.to(SINK_TOPIC);
+        final StreamsBuilder builder = new StreamsBuilder();
+        builder.<String, String>stream(SOURCE_TOPIC).groupByKey(Grouped.with(stringSerde, stringSerde)).count().toStream().mapValues(Object::toString).to(SINK_TOPIC);
 
-		final KafkaStreams streams = new KafkaStreams(builder.build(), streamsProperties);
-		streams.setUncaughtExceptionHandler(e -> {
-			Throwable cause = e;
-			if (cause instanceof StreamsException) {
-				while (cause.getCause() != null) {
-					cause = cause.getCause();
-				}
-			}
-			System.err.println("FATAL: An unexpected exception " + cause);
-			e.printStackTrace(System.err);
-			System.err.flush();
-			return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_CLIENT;
-		});
-		System.out.println("start Kafka Streams");
-		streams.start();
+        final KafkaStreams streams = new KafkaStreams(builder.build(), streamsProperties);
+        streams.setUncaughtExceptionHandler(e -> {
+            Throwable cause = e;
+            if (cause instanceof StreamsException) {
+                while (cause.getCause() != null) {
+                    cause = cause.getCause();
+                }
+            }
+            System.err.println("FATAL: An unexpected exception " + cause);
+            e.printStackTrace(System.err);
+            System.err.flush();
+            return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_CLIENT;
+        });
+        System.out.println("start Kafka Streams");
+        streams.start();
 
-		final boolean eosEnabled = processingMode.startsWith(StreamsConfig.EXACTLY_ONCE);
+        final boolean eosEnabled = processingMode.startsWith("exactly_once");
 
-		System.out.println("send data");
-		final Properties producerProperties = new Properties();
-		producerProperties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka);
-		producerProperties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-		producerProperties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-		if (eosEnabled) {
-			producerProperties.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "broker-compatibility-producer-tx");
-		}
+        System.out.println("send data");
+        final Properties producerProperties = new Properties();
+        producerProperties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka);
+        producerProperties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        producerProperties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        if (eosEnabled) {
+            producerProperties.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "broker-compatibility-producer-tx");
+        }
 
-		try {
-			try (final KafkaProducer<String, String> producer = new KafkaProducer<>(producerProperties)) {
-				if (eosEnabled) {
-					producer.initTransactions();
-					producer.beginTransaction();
-				}
-				producer.send(new ProducerRecord<>(SOURCE_TOPIC, "key", "value"));
-				if (eosEnabled) {
-					producer.commitTransaction();
-				}
+        try {
+            try (final KafkaProducer<String, String> producer = new KafkaProducer<>(producerProperties)) {
+                if (eosEnabled) {
+                    producer.initTransactions();
+                    producer.beginTransaction();
+                }
+                producer.send(new ProducerRecord<>(SOURCE_TOPIC, "key", "value"));
+                if (eosEnabled) {
+                    producer.commitTransaction();
+                }
 
-				System.out.println("wait for result");
-				loopUntilRecordReceived(kafka, eosEnabled);
-				System.out.println("close Kafka Streams");
-				streams.close();
-			}
+                System.out.println("wait for result");
+                loopUntilRecordReceived(kafka, eosEnabled);
+                System.out.println("close Kafka Streams");
+                streams.close();
+            }
         } catch (final RuntimeException e) {
             System.err.println("Non-Streams exception occurred: ");
             e.printStackTrace(System.err);

@@ -18,80 +18,124 @@
 package kafka.test;
 
 import kafka.network.SocketServer;
+import kafka.server.BrokerFeatures;
 import kafka.test.annotation.ClusterTest;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.common.network.ListenerName;
 
-import java.util.Collection;
-import java.util.Properties;
+import java.util.*;
 
 public interface ClusterInstance {
 
-	enum ClusterType {
-		ZK,
-		RAFT
-	}
+    enum ClusterType {
+        ZK, RAFT
+    }
 
-	/**
-	 * Cluster type. For now, only ZK is supported.
-	 */
-	ClusterType clusterType();
+    /**
+     * Cluster type. For now, only ZK is supported.
+     */
+    ClusterType clusterType();
 
-	/**
-	 * The cluster configuration used to create this cluster. Changing data in this instance through this accessor will
-	 * have no affect on the cluster since it is already provisioned.
-	 */
-	ClusterConfig config();
+    default boolean isKRaftTest() {
+        return clusterType() == ClusterType.RAFT;
+    }
 
-	/**
-	 * The listener for this cluster as configured by {@link ClusterTest} or by {@link ClusterConfig}. If
-	 * unspecified by those sources, this will return the listener for the default security protocol PLAINTEXT
-	 */
-	ListenerName clientListener();
+    /**
+     * The cluster configuration used to create this cluster. Changing data in this instance through this accessor will
+     * have no effect on the cluster since it is already provisioned.
+     */
+    ClusterConfig config();
 
-	/**
-	 * The broker connect string which can be used by clients for bootstrapping
-	 */
-	String bootstrapServers();
+    /**
+     * Return the set of all controller IDs configured for this test. For kraft, this
+     * will return only the nodes which have the "controller" role enabled in `process.roles`.
+     * For zookeeper, this will return all broker IDs since they are all eligible controllers.
+     */
+    Set<Integer> controllerIds();
 
-	/**
-	 * A collection of all brokers in the cluster. In ZK-based clusters this will also include the broker which is
-	 * acting as the controller (since ZK controllers serve both broker and controller roles).
-	 */
-	Collection<SocketServer> brokerSocketServers();
+    /**
+     * Return the set of all broker IDs configured for this test.
+     */
+    Set<Integer> brokerIds();
 
-	/**
-	 * A collection of all controllers in the cluster. For ZK-based clusters, this will return the broker which is also
-	 * currently the active controller. For Raft-based clusters, this will return all controller servers.
-	 */
-	Collection<SocketServer> controllerSocketServers();
+    /**
+     * The listener for this cluster as configured by {@link ClusterTest} or by {@link ClusterConfig}. If
+     * unspecified by those sources, this will return the listener for the default security protocol PLAINTEXT
+     */
+    ListenerName clientListener();
 
-	/**
-	 * Return any one of the broker servers. Throw an error if none are found
-	 */
-	SocketServer anyBrokerSocketServer();
+    /**
+     * The listener for the kraft cluster controller configured by controller.listener.names. In ZK-based clusters, return Optional.empty
+     */
+    default Optional<ListenerName> controllerListenerName() {
+        return Optional.empty();
+    }
 
-	/**
-	 * Return any one of the controller servers. Throw an error if none are found
-	 */
-	SocketServer anyControllerSocketServer();
+    /**
+     * The listener for the zk controller configured by control.plane.listener.name. In Raft-based clusters, return Optional.empty
+     */
+    default Optional<ListenerName> controlPlaneListenerName() {
+        return Optional.empty();
+    }
 
-	/**
-	 * The underlying object which is responsible for setting up and tearing down the cluster.
-	 */
-	Object getUnderlying();
+    /**
+     * The broker connect string which can be used by clients for bootstrapping
+     */
+    String bootstrapServers();
 
-	default <T> T getUnderlying(Class<T> asClass) {
-		return asClass.cast(getUnderlying());
-	}
+    /**
+     * A collection of all brokers in the cluster. In ZK-based clusters this will also include the broker which is
+     * acting as the controller (since ZK controllers serve both broker and controller roles).
+     */
+    Collection<SocketServer> brokerSocketServers();
 
-	Admin createAdminClient(Properties configOverrides);
+    /**
+     * A collection of all controllers in the cluster. For ZK-based clusters, this will return the broker which is also
+     * currently the active controller. For Raft-based clusters, this will return all controller servers.
+     */
+    Collection<SocketServer> controllerSocketServers();
 
-	default Admin createAdminClient() {
-		return createAdminClient(new Properties());
-	}
+    /**
+     * Return any one of the broker servers. Throw an error if none are found
+     */
+    SocketServer anyBrokerSocketServer();
 
-	void start();
+    /**
+     * Return any one of the controller servers. Throw an error if none are found
+     */
+    SocketServer anyControllerSocketServer();
 
-	void stop();
+    /**
+     * Return a mapping of the underlying broker IDs to their supported features
+     */
+    Map<Integer, BrokerFeatures> brokerFeatures();
+
+    String clusterId();
+
+    /**
+     * The underlying object which is responsible for setting up and tearing down the cluster.
+     */
+    Object getUnderlying();
+
+    default <T> T getUnderlying(Class<T> asClass) {
+        return asClass.cast(getUnderlying());
+    }
+
+    Admin createAdminClient(Properties configOverrides);
+
+    default Admin createAdminClient() {
+        return createAdminClient(new Properties());
+    }
+
+    void start();
+
+    void stop();
+
+    void shutdownBroker(int brokerId);
+
+    void startBroker(int brokerId);
+
+    void rollingBrokerRestart();
+
+    void waitForReadyBrokers() throws InterruptedException;
 }

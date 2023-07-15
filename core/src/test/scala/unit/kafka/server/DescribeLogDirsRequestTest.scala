@@ -17,17 +17,14 @@
 
 package kafka.server
 
-import java.io.File
-
 import kafka.utils._
 import org.apache.kafka.common.TopicPartition
-import org.apache.kafka.common.message.DescribeLogDirsRequestData
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.requests._
 import org.junit.jupiter.api.Assertions._
 import org.junit.jupiter.api.Test
 
-import scala.jdk.CollectionConverters._
+import java.io.File
 
 class DescribeLogDirsRequestTest extends BaseRequestTest {
   override val logDirCount = 2
@@ -53,9 +50,13 @@ class DescribeLogDirsRequestTest extends BaseRequestTest {
     val offlineResult = response.data.results.asScala.find(logDirResult => logDirResult.logDir == offlineDir).get
     assertEquals(Errors.KAFKA_STORAGE_ERROR.code, offlineResult.errorCode)
     assertEquals(0, offlineResult.topics.asScala.map(t => t.partitions().size()).sum)
+    assertEquals(DescribeLogDirsResponse.UNKNOWN_VOLUME_BYTES, offlineResult.totalBytes)
+    assertEquals(DescribeLogDirsResponse.UNKNOWN_VOLUME_BYTES, offlineResult.usableBytes)
 
     val onlineResult = response.data.results.asScala.find(logDirResult => logDirResult.logDir == onlineDir).get
     assertEquals(Errors.NONE.code, onlineResult.errorCode)
+    assertTrue(onlineResult.totalBytes > 0)
+    assertTrue(onlineResult.usableBytes > 0)
     val onlinePartitionsMap = onlineResult.topics.asScala.flatMap { topic =>
       topic.partitions().asScala.map { partitionResult =>
         new TopicPartition(topic.name, partitionResult.partitionIndex) -> partitionResult

@@ -17,18 +17,16 @@
 
 package kafka
 
-import java.lang.management.ManagementFactory
-import java.lang.management.OperatingSystemMXBean
-import java.util.Random
-import java.util.concurrent._
-
 import joptsimple._
 import kafka.server.{DelayedOperation, DelayedOperationPurgatory}
-import kafka.utils._
 import org.apache.kafka.common.utils.Time
+import org.apache.kafka.server.util.{CommandLineUtils, ShutdownableThread}
 
-import scala.math._
+import java.lang.management.{ManagementFactory, OperatingSystemMXBean}
+import java.util.Random
+import java.util.concurrent._
 import scala.jdk.CollectionConverters._
+import scala.math._
 
 /**
  * This is a benchmark test of the purgatory.
@@ -256,7 +254,7 @@ object TestPurgatoryPerformance {
 
   private class CompletionQueue {
     private[this] val delayQueue = new DelayQueue[Scheduled]()
-    private[this] val thread = new ShutdownableThread(name = "completion thread", isInterruptible = false) {
+    private[this] val thread = new ShutdownableThread("completion thread", false) {
       override def doWork(): Unit = {
         val scheduled = delayQueue.poll(100, TimeUnit.MILLISECONDS)
         if (scheduled != null) {

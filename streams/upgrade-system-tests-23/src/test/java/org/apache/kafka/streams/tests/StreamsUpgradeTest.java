@@ -29,59 +29,59 @@ import java.util.Properties;
 
 public class StreamsUpgradeTest {
 
-	@SuppressWarnings("unchecked")
-	public static void main(final String[] args) throws Exception {
-		if (args.length < 1) {
-			System.err.println("StreamsUpgradeTest requires one argument (properties-file) but provided none");
-		}
-		final String propFileName = args[0];
+    @SuppressWarnings("unchecked")
+    public static void main(final String[] args) throws Exception {
+        if (args.length < 1) {
+            System.err.println("StreamsUpgradeTest requires one argument (properties-file) but provided none");
+        }
+        final String propFileName = args[0];
 
-		final Properties streamsProperties = Utils.loadProps(propFileName);
+        final Properties streamsProperties = Utils.loadProps(propFileName);
 
-		System.out.println("StreamsTest instance started (StreamsUpgradeTest v2.3)");
-		System.out.println("props=" + streamsProperties);
+        System.out.println("StreamsTest instance started (StreamsUpgradeTest v2.3)");
+        System.out.println("props=" + streamsProperties);
 
-		final StreamsBuilder builder = new StreamsBuilder();
-		final KStream dataStream = builder.stream("data");
-		dataStream.process(printProcessorSupplier());
-		dataStream.to("echo");
+        final StreamsBuilder builder = new StreamsBuilder();
+        final KStream dataStream = builder.stream("data");
+        dataStream.process(printProcessorSupplier());
+        dataStream.to("echo");
 
-		final Properties config = new Properties();
-		config.setProperty(StreamsConfig.APPLICATION_ID_CONFIG, "StreamsUpgradeTest");
-		config.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 1000);
-		config.putAll(streamsProperties);
+        final Properties config = new Properties();
+        config.setProperty(StreamsConfig.APPLICATION_ID_CONFIG, "StreamsUpgradeTest");
+        config.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 1000L);
+        config.putAll(streamsProperties);
 
-		final KafkaStreams streams = new KafkaStreams(builder.build(), config);
-		streams.start();
+        final KafkaStreams streams = new KafkaStreams(builder.build(), config);
+        streams.start();
 
-		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-			streams.close();
-			System.out.println("UPGRADE-TEST-CLIENT-CLOSED");
-			System.out.flush();
-		}));
-	}
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            streams.close();
+            System.out.println("UPGRADE-TEST-CLIENT-CLOSED");
+            System.out.flush();
+        }));
+    }
 
-	private static <K, V> ProcessorSupplier<K, V> printProcessorSupplier() {
-		return () -> new AbstractProcessor<K, V>() {
-			private int numRecordsProcessed = 0;
+    private static <K, V> ProcessorSupplier<K, V> printProcessorSupplier() {
+        return () -> new AbstractProcessor<K, V>() {
+            private int numRecordsProcessed = 0;
 
-			@Override
-			public void init(final ProcessorContext context) {
-				System.out.println("[2.3] initializing processor: topic=data taskId=" + context.taskId());
-				numRecordsProcessed = 0;
-			}
+            @Override
+            public void init(final ProcessorContext context) {
+                System.out.println("[2.3] initializing processor: topic=data taskId=" + context.taskId());
+                numRecordsProcessed = 0;
+            }
 
-			@Override
-			public void process(final K key, final V value) {
-				numRecordsProcessed++;
-				if (numRecordsProcessed % 100 == 0) {
-					System.out.println("processed " + numRecordsProcessed + " records from topic=data");
-				}
-			}
+            @Override
+            public void process(final K key, final V value) {
+                numRecordsProcessed++;
+                if (numRecordsProcessed % 100 == 0) {
+                    System.out.println("processed " + numRecordsProcessed + " records from topic=data");
+                }
+            }
 
-			@Override
-			public void close() {
-			}
-		};
-	}
+            @Override
+            public void close() {
+            }
+        };
+    }
 }

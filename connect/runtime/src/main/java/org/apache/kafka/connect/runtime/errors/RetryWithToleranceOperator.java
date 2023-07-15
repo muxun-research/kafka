@@ -29,8 +29,10 @@ import org.slf4j.LoggerFactory;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Attempt to recover a failed operation with retries and tolerance limits.
@@ -57,257 +59,281 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public class RetryWithToleranceOperator implements AutoCloseable {
 
-	private static final Logger log = LoggerFactory.getLogger(RetryWithToleranceOperator.class);
+    private static final Logger log = LoggerFactory.getLogger(RetryWithToleranceOperator.class);
 
-	public static final long RETRIES_DELAY_MIN_MS = 300;
+    public static final long RETRIES_DELAY_MIN_MS = 300;
 
-	private static final Map<Stage, Class<? extends Exception>> TOLERABLE_EXCEPTIONS = new HashMap<>();
+    private static final Map<Stage, Class<? extends Exception>> TOLERABLE_EXCEPTIONS = new HashMap<>();
 
-	static {
-		TOLERABLE_EXCEPTIONS.put(Stage.TRANSFORMATION, Exception.class);
-		TOLERABLE_EXCEPTIONS.put(Stage.HEADER_CONVERTER, Exception.class);
-		TOLERABLE_EXCEPTIONS.put(Stage.KEY_CONVERTER, Exception.class);
-		TOLERABLE_EXCEPTIONS.put(Stage.VALUE_CONVERTER, Exception.class);
-	}
+    static {
+        TOLERABLE_EXCEPTIONS.put(Stage.TRANSFORMATION, Exception.class);
+        TOLERABLE_EXCEPTIONS.put(Stage.HEADER_CONVERTER, Exception.class);
+        TOLERABLE_EXCEPTIONS.put(Stage.KEY_CONVERTER, Exception.class);
+        TOLERABLE_EXCEPTIONS.put(Stage.VALUE_CONVERTER, Exception.class);
+    }
 
-	private final long errorRetryTimeout;
-	private final long errorMaxDelayInMillis;
-	private final ToleranceType errorToleranceType;
+    private final long errorRetryTimeout;
+    private final long errorMaxDelayInMillis;
+    private final ToleranceType errorToleranceType;
 
-	private long totalFailures = 0;
-	private final Time time;
-	private ErrorHandlingMetrics errorHandlingMetrics;
+    private long totalFailures = 0;
+    private final Time time;
+    private final ErrorHandlingMetrics errorHandlingMetrics;
+    private final CountDownLatch stopRequestedLatch;
+    private volatile boolean stopping;   // indicates whether the operator has been asked to stop retrying
 
-	protected final ProcessingContext context;
+    protected final ProcessingContext context;
 
-	public RetryWithToleranceOperator(long errorRetryTimeout, long errorMaxDelayInMillis,
-									  ToleranceType toleranceType, Time time) {
-		this(errorRetryTimeout, errorMaxDelayInMillis, toleranceType, time, new ProcessingContext());
-	}
+    public RetryWithToleranceOperator(long errorRetryTimeout, long errorMaxDelayInMillis, ToleranceType toleranceType, Time time, ErrorHandlingMetrics errorHandlingMetrics) {
+        this(errorRetryTimeout, errorMaxDelayInMillis, toleranceType, time, errorHandlingMetrics, new ProcessingContext(), new CountDownLatch(1));
+    }
 
-	RetryWithToleranceOperator(long errorRetryTimeout, long errorMaxDelayInMillis,
-							   ToleranceType toleranceType, Time time,
-							   ProcessingContext context) {
-		this.errorRetryTimeout = errorRetryTimeout;
-		this.errorMaxDelayInMillis = errorMaxDelayInMillis;
-		this.errorToleranceType = toleranceType;
-		this.time = time;
-		this.context = context;
-	}
+    RetryWithToleranceOperator(long errorRetryTimeout, long errorMaxDelayInMillis, ToleranceType toleranceType, Time time, ErrorHandlingMetrics errorHandlingMetrics, ProcessingContext context, CountDownLatch stopRequestedLatch) {
+        this.errorRetryTimeout = errorRetryTimeout;
+        this.errorMaxDelayInMillis = errorMaxDelayInMillis;
+        this.errorToleranceType = toleranceType;
+        this.time = time;
+        this.errorHandlingMetrics = errorHandlingMetrics;
+        this.context = context;
+        this.stopRequestedLatch = stopRequestedLatch;
+        this.stopping = false;
+    }
 
-	public synchronized Future<Void> executeFailed(Stage stage, Class<?> executingClass,
-												   ConsumerRecord<byte[], byte[]> consumerRecord,
-												   Throwable error) {
+    public synchronized Future<Void> executeFailed(Stage stage, Class<?> executingClass, ConsumerRecord<byte[], byte[]> consumerRecord, Throwable error) {
 
-		markAsFailed();
-		context.consumerRecord(consumerRecord);
-		context.currentContext(stage, executingClass);
-		context.error(error);
-		errorHandlingMetrics.recordFailure();
-		Future<Void> errantRecordFuture = context.report();
-		if (!withinToleranceLimits()) {
-			errorHandlingMetrics.recordError();
-			throw new ConnectException("Tolerance exceeded in error handler", error);
-		}
-		return errantRecordFuture;
-	}
+        markAsFailed();
+        context.consumerRecord(consumerRecord);
+        context.currentContext(stage, executingClass);
+        context.error(error);
+        errorHandlingMetrics.recordFailure();
+        Future<Void> errantRecordFuture = context.report();
+        if (!withinToleranceLimits()) {
+            errorHandlingMetrics.recordError();
+            throw new ConnectException("Tolerance exceeded in error handler", error);
+        }
+        return errantRecordFuture;
+    }
 
-	/**
-	 * Execute the recoverable operation. If the operation is already in a failed state, then simply return
-	 * with the existing failure.
-	 * @param operation the recoverable operation
-	 * @param <V>       return type of the result of the operation.
-	 * @return result of the operation
-	 */
-	public synchronized <V> V execute(Operation<V> operation, Stage stage, Class<?> executingClass) {
-		context.currentContext(stage, executingClass);
+    public synchronized Future<Void> executeFailed(Stage stage, Class<?> executingClass, SourceRecord sourceRecord, Throwable error) {
 
-		if (context.failed()) {
-			log.debug("ProcessingContext is already in failed state. Ignoring requested operation.");
-			return null;
-		}
+        markAsFailed();
+        context.sourceRecord(sourceRecord);
+        context.currentContext(stage, executingClass);
+        context.error(error);
+        errorHandlingMetrics.recordFailure();
+        Future<Void> errantRecordFuture = context.report();
+        if (!withinToleranceLimits()) {
+            errorHandlingMetrics.recordError();
+            throw new ConnectException("Tolerance exceeded in Source Worker error handler", error);
+        }
+        return errantRecordFuture;
+    }
 
-		try {
-			Class<? extends Exception> ex = TOLERABLE_EXCEPTIONS.getOrDefault(context.stage(), RetriableException.class);
-			return execAndHandleError(operation, ex);
-		} finally {
-			if (context.failed()) {
-				errorHandlingMetrics.recordError();
-				context.report();
-			}
-		}
-	}
+    /**
+     * Execute the recoverable operation. If the operation is already in a failed state, then simply return
+     * with the existing failure.
+     * @param operation the recoverable operation
+     * @param <V>       return type of the result of the operation.
+     * @return result of the operation
+     */
+    public synchronized <V> V execute(Operation<V> operation, Stage stage, Class<?> executingClass) {
+        context.currentContext(stage, executingClass);
 
-	/**
-	 * Attempt to execute an operation. Retry if a {@link RetriableException} is raised. Re-throw everything else.
-	 *
-	 * @param operation the operation to be executed.
-	 * @param <V> the return type of the result of the operation.
-	 * @return the result of the operation.
-	 * @throws Exception rethrow if a non-retriable Exception is thrown by the operation
-	 */
-	protected <V> V execAndRetry(Operation<V> operation) throws Exception {
-		int attempt = 0;
-		long startTime = time.milliseconds();
-		long deadline = startTime + errorRetryTimeout;
-		do {
-			try {
-				attempt++;
-				return operation.call();
-			} catch (RetriableException e) {
-				log.trace("Caught a retriable exception while executing {} operation with {}", context.stage(), context.executingClass());
-				errorHandlingMetrics.recordFailure();
-				if (checkRetry(startTime)) {
-					backoff(attempt, deadline);
-					if (Thread.currentThread().isInterrupted()) {
-						log.trace("Thread was interrupted. Marking operation as failed.");
-						context.error(e);
-						return null;
-					}
-					errorHandlingMetrics.recordRetry();
-				} else {
-					log.trace("Can't retry. start={}, attempt={}, deadline={}", startTime, attempt, deadline);
-					context.error(e);
-					return null;
-				}
-			} finally {
-				context.attempt(attempt);
-			}
-		} while (true);
-	}
+        if (context.failed()) {
+            log.debug("ProcessingContext is already in failed state. Ignoring requested operation.");
+            return null;
+        }
 
-	/**
-	 * Execute a given operation multiple times (if needed), and tolerate certain exceptions.
-	 *
-	 * @param operation the operation to be executed.
-	 * @param tolerated the class of exceptions which can be tolerated.
-	 * @param <V> The return type of the result of the operation.
-	 * @return the result of the operation
-	 */
-	// Visible for testing
-	protected <V> V execAndHandleError(Operation<V> operation, Class<? extends Exception> tolerated) {
-		try {
-			V result = execAndRetry(operation);
-			if (context.failed()) {
-				markAsFailed();
-				errorHandlingMetrics.recordSkipped();
-			}
-			return result;
-		} catch (Exception e) {
-			errorHandlingMetrics.recordFailure();
-			markAsFailed();
-			context.error(e);
+        try {
+            Class<? extends Exception> ex = TOLERABLE_EXCEPTIONS.getOrDefault(context.stage(), RetriableException.class);
+            return execAndHandleError(operation, ex);
+        } finally {
+            if (context.failed()) {
+                errorHandlingMetrics.recordError();
+                context.report();
+            }
+        }
+    }
 
-			if (!tolerated.isAssignableFrom(e.getClass())) {
-				throw new ConnectException("Unhandled exception in error handler", e);
-			}
+    /**
+     * Attempt to execute an operation. Retry if a {@link RetriableException} is raised. Re-throw everything else.
+     * @param operation the operation to be executed.
+     * @param <V>       the return type of the result of the operation.
+     * @return the result of the operation.
+     * @throws Exception rethrow if a non-retriable Exception is thrown by the operation
+     */
+    protected <V> V execAndRetry(Operation<V> operation) throws Exception {
+        int attempt = 0;
+        long startTime = time.milliseconds();
+        long deadline = (errorRetryTimeout >= 0) ? startTime + errorRetryTimeout : Long.MAX_VALUE;
+        do {
+            try {
+                attempt++;
+                return operation.call();
+            } catch (RetriableException e) {
+                log.trace("Caught a retriable exception while executing {} operation with {}", context.stage(), context.executingClass());
+                errorHandlingMetrics.recordFailure();
+                if (time.milliseconds() < deadline) {
+                    backoff(attempt, deadline);
+                    errorHandlingMetrics.recordRetry();
+                } else {
+                    log.trace("Can't retry. start={}, attempt={}, deadline={}", startTime, attempt, deadline);
+                    context.error(e);
+                    return null;
+                }
+                if (stopping) {
+                    log.trace("Shutdown has been scheduled. Marking operation as failed.");
+                    context.error(e);
+                    return null;
+                }
+            } finally {
+                context.attempt(attempt);
+            }
+        } while (true);
+    }
 
-			if (!withinToleranceLimits()) {
-				throw new ConnectException("Tolerance exceeded in error handler", e);
-			}
+    /**
+     * Execute a given operation multiple times (if needed), and tolerate certain exceptions.
+     * Visible for testing.
+     * @param operation the operation to be executed.
+     * @param tolerated the class of exceptions which can be tolerated.
+     * @param <V>       The return type of the result of the operation.
+     * @return the result of the operation
+     */
+    protected <V> V execAndHandleError(Operation<V> operation, Class<? extends Exception> tolerated) {
+        try {
+            V result = execAndRetry(operation);
+            if (context.failed()) {
+                markAsFailed();
+                errorHandlingMetrics.recordSkipped();
+            }
+            return result;
+        } catch (Exception e) {
+            errorHandlingMetrics.recordFailure();
+            markAsFailed();
+            context.error(e);
 
-			errorHandlingMetrics.recordSkipped();
-			return null;
-		}
-	}
+            if (!tolerated.isAssignableFrom(e.getClass())) {
+                throw new ConnectException("Unhandled exception in error handler", e);
+            }
 
-	// Visible for testing
-	void markAsFailed() {
-		errorHandlingMetrics.recordErrorTimestamp();
-		totalFailures++;
-	}
+            if (!withinToleranceLimits()) {
+                throw new ConnectException("Tolerance exceeded in error handler", e);
+            }
 
-	@SuppressWarnings("fallthrough")
-	public synchronized boolean withinToleranceLimits() {
-		switch (errorToleranceType) {
-			case NONE:
-				if (totalFailures > 0) return false;
-			case ALL:
-				return true;
-			default:
-				throw new ConfigException("Unknown tolerance type: {}", errorToleranceType);
-		}
-	}
+            errorHandlingMetrics.recordSkipped();
+            return null;
+        }
+    }
 
-	// Visible for testing
-	boolean checkRetry(long startTime) {
-		return (time.milliseconds() - startTime) < errorRetryTimeout;
-	}
+    // Visible for testing
+    void markAsFailed() {
+        errorHandlingMetrics.recordErrorTimestamp();
+        totalFailures++;
+    }
 
-	// Visible for testing
-	void backoff(int attempt, long deadline) {
-		int numRetry = attempt - 1;
-		long delay = RETRIES_DELAY_MIN_MS << numRetry;
-		if (delay > errorMaxDelayInMillis) {
-			delay = ThreadLocalRandom.current().nextLong(errorMaxDelayInMillis);
-		}
-		if (delay + time.milliseconds() > deadline) {
-			delay = deadline - time.milliseconds();
-		}
-		log.debug("Sleeping for {} millis", delay);
-		time.sleep(delay);
-	}
+    @SuppressWarnings("fallthrough")
+    public synchronized boolean withinToleranceLimits() {
+        switch (errorToleranceType) {
+            case NONE:
+                if (totalFailures > 0)
+                    return false;
+            case ALL:
+                return true;
+            default:
+                throw new ConfigException("Unknown tolerance type: {}", errorToleranceType);
+        }
+    }
 
-	public synchronized void metrics(ErrorHandlingMetrics errorHandlingMetrics) {
-		this.errorHandlingMetrics = errorHandlingMetrics;
-	}
+    // For source connectors that want to skip kafka producer errors.
+    // They cannot use withinToleranceLimits() as no failure may have actually occurred prior to the producer failing
+    // to write to kafka.
+    public ToleranceType getErrorToleranceType() {
+        return errorToleranceType;
+    }
 
-	@Override
-	public String toString() {
-		return "RetryWithToleranceOperator{" +
-				"errorRetryTimeout=" + errorRetryTimeout +
-				", errorMaxDelayInMillis=" + errorMaxDelayInMillis +
-				", errorToleranceType=" + errorToleranceType +
-				", totalFailures=" + totalFailures +
-				", time=" + time +
-				", context=" + context +
-				'}';
-	}
+    /**
+     * Do an exponential backoff bounded by {@link #RETRIES_DELAY_MIN_MS} and {@link #errorMaxDelayInMillis}
+     * which can be exited prematurely if {@link #triggerStop()} is called or if the thread is interrupted.
+     * Visible for testing.
+     * @param attempt  the number indicating which backoff attempt it is (beginning with 1)
+     * @param deadline the time in milliseconds until when retries can be attempted
+     */
+    void backoff(int attempt, long deadline) {
+        int numRetry = attempt - 1;
+        long delay = RETRIES_DELAY_MIN_MS << numRetry;
+        if (delay > errorMaxDelayInMillis) {
+            delay = ThreadLocalRandom.current().nextLong(errorMaxDelayInMillis);
+        }
+        long currentTime = time.milliseconds();
+        if (delay + currentTime > deadline) {
+            delay = Math.max(0, deadline - currentTime);
+        }
+        log.debug("Sleeping for up to {} millis", delay);
+        try {
+            stopRequestedLatch.await(delay, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            return;
+        }
+    }
 
-	/**
-	 * Set the error reporters for this connector.
-	 *
-	 * @param reporters the error reporters (should not be null).
-	 */
-	public synchronized void reporters(List<ErrorReporter> reporters) {
-		this.context.reporters(reporters);
-	}
+    @Override
+    public String toString() {
+        return "RetryWithToleranceOperator{" + "errorRetryTimeout=" + errorRetryTimeout + ", errorMaxDelayInMillis=" + errorMaxDelayInMillis + ", errorToleranceType=" + errorToleranceType + ", totalFailures=" + totalFailures + ", time=" + time + ", context=" + context + '}';
+    }
 
-	/**
-	 * Set the source record being processed in the connect pipeline.
-	 *
-	 * @param preTransformRecord the source record
-	 */
-	public synchronized void sourceRecord(SourceRecord preTransformRecord) {
-		this.context.sourceRecord(preTransformRecord);
-	}
+    /**
+     * Set the error reporters for this connector.
+     * @param reporters the error reporters (should not be null).
+     */
+    public synchronized void reporters(List<ErrorReporter> reporters) {
+        this.context.reporters(reporters);
+    }
 
-	/**
-	 * Set the record consumed from Kafka in a sink connector.
-	 *
-	 * @param consumedMessage the record
-	 */
-	public synchronized void consumerRecord(ConsumerRecord<byte[], byte[]> consumedMessage) {
-		this.context.consumerRecord(consumedMessage);
-	}
+    /**
+     * Set the source record being processed in the connect pipeline.
+     * @param preTransformRecord the source record
+     */
+    public synchronized void sourceRecord(SourceRecord preTransformRecord) {
+        this.context.sourceRecord(preTransformRecord);
+    }
 
-	/**
-	 * @return true, if the last operation encountered an error; false otherwise
-	 */
-	public synchronized boolean failed() {
-		return this.context.failed();
-	}
+    /**
+     * Set the record consumed from Kafka in a sink connector.
+     * @param consumedMessage the record
+     */
+    public synchronized void consumerRecord(ConsumerRecord<byte[], byte[]> consumedMessage) {
+        this.context.consumerRecord(consumedMessage);
+    }
 
-	/**
-	 * Returns the error encountered when processing the current stage.
-	 * @return the error encountered when processing the current stage
-	 */
-	public synchronized Throwable error() {
-		return this.context.error();
-	}
+    /**
+     * @return true, if the last operation encountered an error; false otherwise
+     */
+    public synchronized boolean failed() {
+        return this.context.failed();
+    }
 
-	@Override
-	public synchronized void close() {
-		this.context.close();
-	}
+    /**
+     * Returns the error encountered when processing the current stage.
+     * @return the error encountered when processing the current stage
+     */
+    public synchronized Throwable error() {
+        return this.context.error();
+    }
+
+    /**
+     * This will stop any further retries for operations.
+     * This will also mark any ongoing operations that are currently backing off for retry as failed.
+     * This can be called from a separate thread to break out of retry/backoff loops in
+     * {@link #execAndRetry(Operation)}
+     */
+    public void triggerStop() {
+        stopping = true;
+        stopRequestedLatch.countDown();
+    }
+
+    @Override
+    public synchronized void close() {
+        this.context.close();
+    }
 }

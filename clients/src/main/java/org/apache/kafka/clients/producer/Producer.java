@@ -37,12 +37,12 @@ import java.util.concurrent.Future;
  */
 public interface Producer<K, V> extends Closeable {
 
-    /**
-     * See {@link KafkaProducer#initTransactions()}
-     */
-    void initTransactions();
+	/**
+	 * See {@link KafkaProducer#initTransactions()}
+	 */
+	void initTransactions();
 
-    /**
+	/**
 	 * See {@link KafkaProducer#beginTransaction()}
 	 */
 	void beginTransaction() throws ProducerFencedException;
@@ -50,14 +50,13 @@ public interface Producer<K, V> extends Closeable {
 	/**
 	 * See {@link KafkaProducer#sendOffsetsToTransaction(Map, String)}
 	 */
-	void sendOffsetsToTransaction(Map<TopicPartition, OffsetAndMetadata> offsets,
-								  String consumerGroupId) throws ProducerFencedException;
+	@Deprecated
+	void sendOffsetsToTransaction(Map<TopicPartition, OffsetAndMetadata> offsets, String consumerGroupId) throws ProducerFencedException;
 
 	/**
 	 * See {@link KafkaProducer#sendOffsetsToTransaction(Map, ConsumerGroupMetadata)}
 	 */
-	void sendOffsetsToTransaction(Map<TopicPartition, OffsetAndMetadata> offsets,
-								  ConsumerGroupMetadata groupMetadata) throws ProducerFencedException;
+	void sendOffsetsToTransaction(Map<TopicPartition, OffsetAndMetadata> offsets, ConsumerGroupMetadata groupMetadata) throws ProducerFencedException;
 
 	/**
 	 * See {@link KafkaProducer#commitTransaction()}
@@ -69,15 +68,15 @@ public interface Producer<K, V> extends Closeable {
 	 */
 	void abortTransaction() throws ProducerFencedException;
 
-    /**
-     * See {@link KafkaProducer#send(ProducerRecord)}
-     */
-    Future<RecordMetadata> send(ProducerRecord<K, V> record);
+	/**
+	 * See {@link KafkaProducer#send(ProducerRecord)}
+	 */
+	Future<RecordMetadata> send(ProducerRecord<K, V> record);
 
-    /**
-     * See {@link KafkaProducer#send(ProducerRecord, Callback)}
-     */
-    Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback);
+	/**
+	 * See {@link KafkaProducer#send(ProducerRecord, Callback)}
+	 */
+	Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback);
 
     /**
      * See {@link KafkaProducer#flush()}

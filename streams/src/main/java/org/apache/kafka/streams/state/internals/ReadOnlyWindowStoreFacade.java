@@ -18,11 +18,7 @@ package org.apache.kafka.streams.state.internals;
 
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.kstream.Windowed;
-import org.apache.kafka.streams.state.KeyValueIterator;
-import org.apache.kafka.streams.state.ReadOnlyWindowStore;
-import org.apache.kafka.streams.state.TimestampedWindowStore;
-import org.apache.kafka.streams.state.ValueAndTimestamp;
-import org.apache.kafka.streams.state.WindowStoreIterator;
+import org.apache.kafka.streams.state.*;
 
 import java.time.Instant;
 
@@ -36,95 +32,58 @@ public class ReadOnlyWindowStoreFacade<K, V> implements ReadOnlyWindowStore<K, V
     }
 
     @Override
-    public V fetch(final K key,
-                   final long time) {
+    public V fetch(final K key, final long time) {
         return getValueOrNull(inner.fetch(key, time));
     }
 
-	@Override
-	@SuppressWarnings("deprecation")
-	public WindowStoreIterator<V> fetch(final K key,
-										final long timeFrom,
-										final long timeTo) {
-		return new WindowStoreIteratorFacade<>(inner.fetch(key, timeFrom, timeTo));
-	}
+    @Override
+    public WindowStoreIterator<V> fetch(final K key, final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
+        return new WindowStoreIteratorFacade<>(inner.fetch(key, timeFrom, timeTo));
+    }
 
-	@Override
-	public WindowStoreIterator<V> fetch(final K key,
-										final Instant timeFrom,
-										final Instant timeTo) throws IllegalArgumentException {
-		return new WindowStoreIteratorFacade<>(inner.fetch(key, timeFrom, timeTo));
-	}
+    @Override
+    public WindowStoreIterator<V> backwardFetch(final K key, final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
+        return new WindowStoreIteratorFacade<>(inner.backwardFetch(key, timeFrom, timeTo));
+    }
 
-	@Override
-	public WindowStoreIterator<V> backwardFetch(final K key,
-												final Instant timeFrom,
-												final Instant timeTo) throws IllegalArgumentException {
-		return new WindowStoreIteratorFacade<>(inner.backwardFetch(key, timeFrom, timeTo));
-	}
+    @Override
+    public KeyValueIterator<Windowed<K>, V> fetch(final K keyFrom, final K keyTo, final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
+        return new KeyValueIteratorFacade<>(inner.fetch(keyFrom, keyTo, timeFrom, timeTo));
+    }
 
-	@Override
-	@SuppressWarnings("deprecation")
-	public KeyValueIterator<Windowed<K>, V> fetch(final K keyFrom,
-												  final K keyTo,
-												  final long timeFrom,
-												  final long timeTo) {
-		return new KeyValueIteratorFacade<>(inner.fetch(keyFrom, keyTo, timeFrom, timeTo));
-	}
+    @Override
+    public KeyValueIterator<Windowed<K>, V> backwardFetch(final K keyFrom, final K keyTo, final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
+        return new KeyValueIteratorFacade<>(inner.backwardFetch(keyFrom, keyTo, timeFrom, timeTo));
+    }
 
-	@Override
-	public KeyValueIterator<Windowed<K>, V> fetch(final K keyFrom,
-												  final K keyTo,
-												  final Instant timeFrom,
-												  final Instant timeTo) throws IllegalArgumentException {
-		return new KeyValueIteratorFacade<>(inner.fetch(keyFrom, keyTo, timeFrom, timeTo));
-	}
+    @Override
+    public KeyValueIterator<Windowed<K>, V> fetchAll(final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
+        return new KeyValueIteratorFacade<>(inner.fetchAll(timeFrom, timeTo));
+    }
 
-	@Override
-	public KeyValueIterator<Windowed<K>, V> backwardFetch(final K keyFrom,
-														  final K keyTo,
-														  final Instant timeFrom,
-														  final Instant timeTo) throws IllegalArgumentException {
-		return new KeyValueIteratorFacade<>(inner.backwardFetch(keyFrom, keyTo, timeFrom, timeTo));
-	}
+    @Override
+    public KeyValueIterator<Windowed<K>, V> backwardFetchAll(final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
+        return new KeyValueIteratorFacade<>(inner.backwardFetchAll(timeFrom, timeTo));
+    }
 
-	@Override
-	@SuppressWarnings("deprecation")
-	public KeyValueIterator<Windowed<K>, V> fetchAll(final long timeFrom,
-													 final long timeTo) {
-		return new KeyValueIteratorFacade<>(inner.fetchAll(timeFrom, timeTo));
-	}
+    @Override
+    public KeyValueIterator<Windowed<K>, V> all() {
+        return new KeyValueIteratorFacade<>(inner.all());
+    }
 
-	@Override
-	public KeyValueIterator<Windowed<K>, V> fetchAll(final Instant timeFrom,
-													 final Instant timeTo) throws IllegalArgumentException {
-		return new KeyValueIteratorFacade<>(inner.fetchAll(timeFrom, timeTo));
-	}
+    @Override
+    public KeyValueIterator<Windowed<K>, V> backwardAll() {
+        return new KeyValueIteratorFacade<>(inner.backwardAll());
+    }
 
-	@Override
-	public KeyValueIterator<Windowed<K>, V> backwardFetchAll(final Instant timeFrom,
-															 final Instant timeTo) throws IllegalArgumentException {
-		return new KeyValueIteratorFacade<>(inner.backwardFetchAll(timeFrom, timeTo));
-	}
+    private static class WindowStoreIteratorFacade<V> implements WindowStoreIterator<V> {
+        final KeyValueIterator<Long, ValueAndTimestamp<V>> innerIterator;
 
-	@Override
-	public KeyValueIterator<Windowed<K>, V> all() {
-		return new KeyValueIteratorFacade<>(inner.all());
-	}
+        WindowStoreIteratorFacade(final KeyValueIterator<Long, ValueAndTimestamp<V>> iterator) {
+            innerIterator = iterator;
+        }
 
-	@Override
-	public KeyValueIterator<Windowed<K>, V> backwardAll() {
-		return new KeyValueIteratorFacade<>(inner.backwardAll());
-	}
-
-	private static class WindowStoreIteratorFacade<V> implements WindowStoreIterator<V> {
-		final KeyValueIterator<Long, ValueAndTimestamp<V>> innerIterator;
-
-		WindowStoreIteratorFacade(final KeyValueIterator<Long, ValueAndTimestamp<V>> iterator) {
-			innerIterator = iterator;
-		}
-
-		@Override
+        @Override
         public void close() {
             innerIterator.close();
         }

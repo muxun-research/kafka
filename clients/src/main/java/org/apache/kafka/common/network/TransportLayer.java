@@ -34,60 +34,60 @@ import java.security.Principal;
 
 public interface TransportLayer extends ScatteringByteChannel, TransferableChannel {
 
-	/**
-	 * Returns true if the channel has handshake and authentication done.
-	 */
-	boolean ready();
+    /**
+     * Returns true if the channel has handshake and authentication done.
+     */
+    boolean ready();
 
-	/**
-	 * Finishes the process of connecting a socket channel.
-	 */
-	boolean finishConnect() throws IOException;
+    /**
+     * Finishes the process of connecting a socket channel.
+     */
+    boolean finishConnect() throws IOException;
 
-	/**
-	 * disconnect socketChannel
-	 */
-	void disconnect();
+    /**
+     * disconnect socketChannel
+     */
+    void disconnect();
 
-	/**
-	 * Tells whether or not this channel's network socket is connected.
-	 */
-	boolean isConnected();
+    /**
+     * Tells whether or not this channel's network socket is connected.
+     */
+    boolean isConnected();
 
-	/**
-	 * returns underlying socketChannel
-	 */
-	SocketChannel socketChannel();
+    /**
+     * returns underlying socketChannel
+     */
+    SocketChannel socketChannel();
 
-	/**
-	 * Get the underlying selection key
-	 */
-	SelectionKey selectionKey();
+    /**
+     * Get the underlying selection key
+     */
+    SelectionKey selectionKey();
 
-	/**
-	 * This a no-op for the non-secure PLAINTEXT implementation. For SSL, this performs
-	 * SSL handshake. The SSL handshake includes client authentication if configured using
-	 * {@link org.apache.kafka.common.config.SslConfigs#SSL_CLIENT_AUTH_CONFIG}.
-	 * @throws AuthenticationException if handshake fails due to an {@link javax.net.ssl.SSLException}.
-	 * @throws IOException             if read or write fails with an I/O error.
-	 */
-	void handshake() throws AuthenticationException, IOException;
+    /**
+     * This a no-op for the non-secure PLAINTEXT implementation. For SSL, this performs
+     * SSL handshake. The SSL handshake includes client authentication if configured using
+     * {@link org.apache.kafka.common.config.internals.BrokerSecurityConfigs#SSL_CLIENT_AUTH_CONFIG}.
+     * @throws AuthenticationException if handshake fails due to an {@link javax.net.ssl.SSLException}.
+     * @throws IOException             if read or write fails with an I/O error.
+     */
+    void handshake() throws AuthenticationException, IOException;
 
-	/**
-	 * Returns `SSLSession.getPeerPrincipal()` if this is an SslTransportLayer and there is an authenticated peer,
-	 * `KafkaPrincipal.ANONYMOUS` is returned otherwise.
-	 */
-	Principal peerPrincipal() throws IOException;
+    /**
+     * Returns `SSLSession.getPeerPrincipal()` if this is an SslTransportLayer and there is an authenticated peer,
+     * `KafkaPrincipal.ANONYMOUS` is returned otherwise.
+     */
+    Principal peerPrincipal() throws IOException;
 
-	void addInterestOps(int ops);
+    void addInterestOps(int ops);
 
-	void removeInterestOps(int ops);
+    void removeInterestOps(int ops);
 
-	boolean isMute();
+    boolean isMute();
 
-	/**
-	 * @return true if channel has bytes to be read in any intermediate buffers
-	 * which may be processed without reading additional data from the network.
-	 */
-	boolean hasBytesBuffered();
+    /**
+     * @return true if channel has bytes to be read in any intermediate buffers
+     * which may be processed without reading additional data from the network.
+     */
+    boolean hasBytesBuffered();
 }

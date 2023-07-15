@@ -22,61 +22,53 @@ import java.util.Objects;
  * Represents a range of version levels supported by every broker in a cluster for some feature.
  */
 public class FinalizedVersionRange {
-	private final short minVersionLevel;
+    private final short minVersionLevel;
 
-	private final short maxVersionLevel;
+    private final short maxVersionLevel;
 
-	/**
-	 * Raises an exception unless the following condition is met:
-	 * minVersionLevel >= 1 and maxVersionLevel >= 1 and maxVersionLevel >= minVersionLevel.
-	 * @param minVersionLevel The minimum version level value.
-	 * @param maxVersionLevel The maximum version level value.
-	 * @throws IllegalArgumentException Raised when the condition described above is not met.
-	 */
-	FinalizedVersionRange(final short minVersionLevel, final short maxVersionLevel) {
-		if (minVersionLevel < 1 || maxVersionLevel < 1 || maxVersionLevel < minVersionLevel) {
-			throw new IllegalArgumentException(
-					String.format(
-							"Expected minVersionLevel >= 1, maxVersionLevel >= 1 and" +
-									" maxVersionLevel >= minVersionLevel, but received" +
-									" minVersionLevel: %d, maxVersionLevel: %d", minVersionLevel, maxVersionLevel));
-		}
-		this.minVersionLevel = minVersionLevel;
-		this.maxVersionLevel = maxVersionLevel;
-	}
+    /**
+     * Raises an exception unless the following condition is met:
+     * minVersionLevel >= 1 and maxVersionLevel >= 1 and maxVersionLevel >= minVersionLevel.
+     * @param minVersionLevel The minimum version level value.
+     * @param maxVersionLevel The maximum version level value.
+     * @throws IllegalArgumentException Raised when the condition described above is not met.
+     */
+    FinalizedVersionRange(final short minVersionLevel, final short maxVersionLevel) {
+        if (minVersionLevel < 0 || maxVersionLevel < 0 || maxVersionLevel < minVersionLevel) {
+            throw new IllegalArgumentException(String.format("Expected minVersionLevel >= 0, maxVersionLevel >= 0 and" + " maxVersionLevel >= minVersionLevel, but received" + " minVersionLevel: %d, maxVersionLevel: %d", minVersionLevel, maxVersionLevel));
+        }
+        this.minVersionLevel = minVersionLevel;
+        this.maxVersionLevel = maxVersionLevel;
+    }
 
-	public short minVersionLevel() {
-		return minVersionLevel;
-	}
+    public short minVersionLevel() {
+        return minVersionLevel;
+    }
 
-	public short maxVersionLevel() {
-		return maxVersionLevel;
-	}
+    public short maxVersionLevel() {
+        return maxVersionLevel;
+    }
 
-	@Override
-	public boolean equals(Object other) {
-		if (this == other) {
-			return true;
-		}
-		if (!(other instanceof FinalizedVersionRange)) {
-			return false;
-		}
+    @Override
+    public boolean equals(Object other) {
+        if (this == other) {
+            return true;
+        }
+        if (!(other instanceof FinalizedVersionRange)) {
+            return false;
+        }
 
-		final FinalizedVersionRange that = (FinalizedVersionRange) other;
-		return this.minVersionLevel == that.minVersionLevel &&
-				this.maxVersionLevel == that.maxVersionLevel;
-	}
+        final FinalizedVersionRange that = (FinalizedVersionRange) other;
+        return this.minVersionLevel == that.minVersionLevel && this.maxVersionLevel == that.maxVersionLevel;
+    }
 
-	@Override
-	public int hashCode() {
-		return Objects.hash(minVersionLevel, maxVersionLevel);
-	}
+    @Override
+    public int hashCode() {
+        return Objects.hash(minVersionLevel, maxVersionLevel);
+    }
 
-	@Override
-	public String toString() {
-		return String.format(
-				"FinalizedVersionRange[min_version_level:%d, max_version_level:%d]",
-				minVersionLevel,
-				maxVersionLevel);
-	}
+    @Override
+    public String toString() {
+        return String.format("FinalizedVersionRange[min_version_level:%d, max_version_level:%d]", minVersionLevel, maxVersionLevel);
+    }
 }

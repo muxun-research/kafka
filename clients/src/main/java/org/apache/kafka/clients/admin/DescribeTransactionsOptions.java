@@ -28,4 +28,9 @@ import java.util.Collection;
 @InterfaceStability.Evolving
 public class DescribeTransactionsOptions extends AbstractOptions<DescribeTransactionsOptions> {
 
+    @Override
+    public String toString() {
+        return "DescribeTransactionsOptions(" + "timeoutMs=" + timeoutMs + ')';
+    }
+
 }

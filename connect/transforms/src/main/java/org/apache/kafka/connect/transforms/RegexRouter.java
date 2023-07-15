@@ -20,6 +20,8 @@ import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.connector.ConnectRecord;
 import org.apache.kafka.connect.transforms.util.RegexValidator;
 import org.apache.kafka.connect.transforms.util.SimpleConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -27,15 +29,11 @@ import java.util.regex.Pattern;
 
 public class RegexRouter<R extends ConnectRecord<R>> implements Transformation<R> {
 
-    public static final String OVERVIEW_DOC = "Update the record topic using the configured regular expression and replacement string."
-            + "<p/>Under the hood, the regex is compiled to a <code>java.util.regex.Pattern</code>. "
-            + "If the pattern matches the input topic, <code>java.util.regex.Matcher#replaceFirst()</code> is used with the replacement string to obtain the new topic.";
+    private static final Logger log = LoggerFactory.getLogger(RegexRouter.class);
 
-    public static final ConfigDef CONFIG_DEF = new ConfigDef()
-            .define(ConfigName.REGEX, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE, new RegexValidator(), ConfigDef.Importance.HIGH,
-                    "Regular expression to use for matching.")
-            .define(ConfigName.REPLACEMENT, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE, ConfigDef.Importance.HIGH,
-                    "Replacement string.");
+    public static final String OVERVIEW_DOC = "Update the record topic using the configured regular expression and replacement string." + "<p/>Under the hood, the regex is compiled to a <code>java.util.regex.Pattern</code>. " + "If the pattern matches the input topic, <code>java.util.regex.Matcher#replaceFirst()</code> is used with the replacement string to obtain the new topic.";
+
+    public static final ConfigDef CONFIG_DEF = new ConfigDef().define(ConfigName.REGEX, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE, new RegexValidator(), ConfigDef.Importance.HIGH, "Regular expression to use for matching.").define(ConfigName.REPLACEMENT, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE, ConfigDef.Importance.HIGH, "Replacement string.");
 
     private interface ConfigName {
         String REGEX = "regex";
@@ -57,7 +55,10 @@ public class RegexRouter<R extends ConnectRecord<R>> implements Transformation<R
         final Matcher matcher = regex.matcher(record.topic());
         if (matcher.matches()) {
             final String topic = matcher.replaceFirst(replacement);
+            log.trace("Rerouting from topic '{}' to new topic '{}'", record.topic(), topic);
             return record.newRecord(topic, record.kafkaPartition(), record.keySchema(), record.key(), record.valueSchema(), record.value(), record.timestamp());
+        } else {
+            log.trace("Not rerouting topic '{}' as it does not match the configured regex", record.topic());
         }
         return record;
     }

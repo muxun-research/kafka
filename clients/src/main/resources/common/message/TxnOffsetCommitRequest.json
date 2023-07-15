@@ -17,7 +17,8 @@
   "apiKey": 28,
   "type": "request",
   "listeners": [
-    "zkBroker"
+    "zkBroker",
+    "broker"
   ],
   "name": "TxnOffsetCommitRequest",
   // Version 1 is the same as version 0.
@@ -94,7 +95,7 @@
           "name": "Partitions",
           "type": "[]TxnOffsetCommitRequestPartition",
           "versions": "0+",
-          "about": "The partitions inside the topic that we want to committ offsets for.",
+          "about": "The partitions inside the topic that we want to commit offsets for.",
           "fields": [
             {
               "name": "PartitionIndex",
@@ -116,9 +117,16 @@
               "ignorable": true,
               "about": "The leader epoch of the last consumed record."
             },
-        { "name": "CommittedMetadata", "type": "string", "versions": "0+", "nullableVersions": "0+",
-          "about": "Any associated metadata the client wants to keep." }
-      ]}
-    ]}
+            {
+              "name": "CommittedMetadata",
+              "type": "string",
+              "versions": "0+",
+              "nullableVersions": "0+",
+              "about": "Any associated metadata the client wants to keep."
+            }
+          ]
+        }
+      ]
+    }
   ]
 }

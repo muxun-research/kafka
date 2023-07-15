@@ -32,56 +32,51 @@ import java.util.concurrent.TimeUnit;
  * Emits heartbeats.
  */
 public class MirrorHeartbeatTask extends SourceTask {
-	private String sourceClusterAlias;
-	private String targetClusterAlias;
-	private String heartbeatsTopic;
-	private Duration interval;
-	private CountDownLatch stopped;
+    private String sourceClusterAlias;
+    private String targetClusterAlias;
+    private String heartbeatsTopic;
+    private Duration interval;
+    private CountDownLatch stopped;
 
-	@Override
-	public void start(Map<String, String> props) {
-		stopped = new CountDownLatch(1);
-		MirrorTaskConfig config = new MirrorTaskConfig(props);
-		sourceClusterAlias = config.sourceClusterAlias();
-		targetClusterAlias = config.targetClusterAlias();
-		heartbeatsTopic = config.heartbeatsTopic();
-		interval = config.emitHeartbeatsInterval();
-	}
+    @Override
+    public void start(Map<String, String> props) {
+        stopped = new CountDownLatch(1);
+        MirrorHeartbeatConfig config = new MirrorHeartbeatConfig(props);
+        sourceClusterAlias = config.sourceClusterAlias();
+        targetClusterAlias = config.targetClusterAlias();
+        heartbeatsTopic = config.heartbeatsTopic();
+        interval = config.emitHeartbeatsInterval();
+    }
 
-	@Override
-	public void commit() {
-		// nop
-	}
+    @Override
+    public void commit() {
+        // nop
+    }
 
-	@Override
-	public void stop() {
-		stopped.countDown();
-	}
+    @Override
+    public void stop() {
+        stopped.countDown();
+    }
 
-	@Override
-	public String version() {
-		return "1";
-	}
+    @Override
+    public String version() {
+        return new MirrorHeartbeatConnector().version();
+    }
 
-	@Override
-	public List<SourceRecord> poll() throws InterruptedException {
-		// pause to throttle, unless we've stopped
-		if (stopped.await(interval.toMillis(), TimeUnit.MILLISECONDS)) {
-			// SourceWorkerTask expects non-zero batches or null
-			return null;
-		}
-		long timestamp = System.currentTimeMillis();
-		Heartbeat heartbeat = new Heartbeat(sourceClusterAlias, targetClusterAlias, timestamp);
-		SourceRecord record = new SourceRecord(
-				heartbeat.connectPartition(), MirrorUtils.wrapOffset(0),
-				heartbeatsTopic, 0,
-				Schema.BYTES_SCHEMA, heartbeat.recordKey(),
-				Schema.BYTES_SCHEMA, heartbeat.recordValue(),
-				timestamp);
-		return Collections.singletonList(record);
-	}
+    @Override
+    public List<SourceRecord> poll() throws InterruptedException {
+        // pause to throttle, unless we've stopped
+        if (stopped.await(interval.toMillis(), TimeUnit.MILLISECONDS)) {
+            // SourceWorkerTask expects non-zero batches or null
+            return null;
+        }
+        long timestamp = System.currentTimeMillis();
+        Heartbeat heartbeat = new Heartbeat(sourceClusterAlias, targetClusterAlias, timestamp);
+        SourceRecord record = new SourceRecord(heartbeat.connectPartition(), MirrorUtils.wrapOffset(0), heartbeatsTopic, 0, Schema.BYTES_SCHEMA, heartbeat.recordKey(), Schema.BYTES_SCHEMA, heartbeat.recordValue(), timestamp);
+        return Collections.singletonList(record);
+    }
 
-	@Override
-	public void commitRecord(SourceRecord record, RecordMetadata metadata) {
-	}
+    @Override
+    public void commitRecord(SourceRecord record, RecordMetadata metadata) {
+    }
 }

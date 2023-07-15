@@ -23,15 +23,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class HeartbeatTest {
 
-	@Test
-	public void testSerde() {
-		Heartbeat heartbeat = new Heartbeat("source-1", "target-2", 1234567890L);
-		byte[] key = heartbeat.recordKey();
-		byte[] value = heartbeat.recordValue();
-		ConsumerRecord<byte[], byte[]> record = new ConsumerRecord<>("any-topic", 6, 7, key, value);
-		Heartbeat deserialized = Heartbeat.deserializeRecord(record);
-		assertEquals(heartbeat.sourceClusterAlias(), deserialized.sourceClusterAlias());
-		assertEquals(heartbeat.targetClusterAlias(), deserialized.targetClusterAlias());
-		assertEquals(heartbeat.timestamp(), deserialized.timestamp());
-	}
+    @Test
+    public void testSerde() {
+        Heartbeat heartbeat = new Heartbeat("source-1", "target-2", 1234567890L);
+        byte[] key = heartbeat.recordKey();
+        byte[] value = heartbeat.recordValue();
+        ConsumerRecord<byte[], byte[]> record = new ConsumerRecord<>("any-topic", 6, 7, key, value);
+        Heartbeat deserialized = Heartbeat.deserializeRecord(record);
+        assertEquals(heartbeat.sourceClusterAlias(), deserialized.sourceClusterAlias(), "Failure on heartbeat sourceClusterAlias serde");
+        assertEquals(heartbeat.targetClusterAlias(), deserialized.targetClusterAlias(), "Failure on heartbeat targetClusterAlias serde");
+        assertEquals(heartbeat.timestamp(), deserialized.timestamp(), "Failure on heartbeat timestamp serde");
+    }
 }

@@ -255,7 +255,7 @@ public class ConsumerRecord<K, V> {
     }
 
     /**
-     * The timestamp of this record
+     * The timestamp of this record, in milliseconds elapsed since unix epoch.
      */
     public long timestamp() {
         return timestamp;

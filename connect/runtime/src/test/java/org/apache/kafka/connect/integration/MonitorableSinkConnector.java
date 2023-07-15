@@ -20,19 +20,13 @@ import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.connector.Task;
-import org.apache.kafka.connect.runtime.TestSinkConnector;
+import org.apache.kafka.connect.runtime.SampleSinkConnector;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.apache.kafka.connect.sink.SinkTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
  * A sink connector that is used in Apache Kafka integration tests to verify the behavior of the
@@ -41,9 +35,12 @@ import java.util.Set;
  * which are initiated by the embedded connector, and wait for them to consume a desired number of
  * messages.
  */
-public class MonitorableSinkConnector extends TestSinkConnector {
+public class MonitorableSinkConnector extends SampleSinkConnector {
 
     private static final Logger log = LoggerFactory.getLogger(MonitorableSinkConnector.class);
+
+    // Boolean valued configuration that determines whether MonitorableSinkConnector::alterOffsets should return true or false
+    public static final String ALTER_OFFSETS_RESULT = "alter.offsets.result";
 
     private String connectorName;
     private Map<String, String> commonConfigs;
@@ -78,7 +75,7 @@ public class MonitorableSinkConnector extends TestSinkConnector {
     @Override
     public void stop() {
         log.info("Stopped {} connector {}", this.getClass().getSimpleName(), connectorName);
-		connectorHandle.recordConnectorStop();
+        connectorHandle.recordConnectorStop();
     }
 
     @Override
@@ -86,24 +83,27 @@ public class MonitorableSinkConnector extends TestSinkConnector {
         return new ConfigDef();
     }
 
-	public static class MonitorableSinkTask extends SinkTask {
+    @Override
+    public boolean alterOffsets(Map<String, String> connectorConfig, Map<TopicPartition, Long> offsets) {
+        return Boolean.parseBoolean(connectorConfig.get(ALTER_OFFSETS_RESULT));
+    }
 
-		private String connectorName;
-		private String taskId;
-		TaskHandle taskHandle;
-		Set<TopicPartition> assignments;
-		Map<TopicPartition, Long> committedOffsets;
-		Map<String, Map<Integer, TopicPartition>> cachedTopicPartitions;
+    public static class MonitorableSinkTask extends SinkTask {
 
-		public MonitorableSinkTask() {
-			this.assignments = new HashSet<>();
-			this.committedOffsets = new HashMap<>();
-			this.cachedTopicPartitions = new HashMap<>();
-		}
+        private String connectorName;
+        private String taskId;
+        TaskHandle taskHandle;
+        Map<TopicPartition, Integer> committedOffsets;
+        Map<String, Map<Integer, TopicPartition>> cachedTopicPartitions;
 
-		@Override
-		public String version() {
-			return "unknown";
+        public MonitorableSinkTask() {
+            this.committedOffsets = new HashMap<>();
+            this.cachedTopicPartitions = new HashMap<>();
+        }
+
+        @Override
+        public String version() {
+            return "unknown";
         }
 
         @Override
@@ -117,45 +117,45 @@ public class MonitorableSinkConnector extends TestSinkConnector {
 
         @Override
         public void open(Collection<TopicPartition> partitions) {
-            log.debug("Opening {} partitions", partitions.size());
-            assignments.addAll(partitions);
-            taskHandle.partitionsAssigned(partitions.size());
+            log.debug("Opening partitions {}", partitions);
+            taskHandle.partitionsAssigned(partitions);
+        }
+
+        @Override
+        public void close(Collection<TopicPartition> partitions) {
+            log.debug("Closing partitions {}", partitions);
+            taskHandle.partitionsRevoked(partitions);
+            partitions.forEach(committedOffsets::remove);
         }
 
         @Override
         public void put(Collection<SinkRecord> records) {
             for (SinkRecord rec : records) {
-				taskHandle.record(rec);
-                TopicPartition tp = cachedTopicPartitions
-                        .computeIfAbsent(rec.topic(), v -> new HashMap<>())
-                        .computeIfAbsent(rec.kafkaPartition(), v -> new TopicPartition(rec.topic(), rec.kafkaPartition()));
-                committedOffsets.put(tp, committedOffsets.getOrDefault(tp, 0L) + 1);
+                taskHandle.record(rec);
+                TopicPartition tp = cachedTopicPartitions.computeIfAbsent(rec.topic(), v -> new HashMap<>()).computeIfAbsent(rec.kafkaPartition(), v -> new TopicPartition(rec.topic(), rec.kafkaPartition()));
+                committedOffsets.put(tp, committedOffsets.getOrDefault(tp, 0) + 1);
                 log.trace("Task {} obtained record (key='{}' value='{}')", taskId, rec.key(), rec.value());
             }
         }
 
         @Override
         public Map<TopicPartition, OffsetAndMetadata> preCommit(Map<TopicPartition, OffsetAndMetadata> offsets) {
-            for (TopicPartition tp : assignments) {
-                Long recordsSinceLastCommit = committedOffsets.get(tp);
-                if (recordsSinceLastCommit == null) {
-                    log.warn("preCommit was called with topic-partition {} that is not included "
-                            + "in the assignments of this task {}", tp, assignments);
-                } else {
-                    taskHandle.commit(recordsSinceLastCommit.intValue());
-                    log.error("Forwarding to framework request to commit additional {} for {}",
-                            recordsSinceLastCommit, tp);
-                    taskHandle.commit((int) (long) recordsSinceLastCommit);
-                    committedOffsets.put(tp, 0L);
+            taskHandle.partitionsCommitted(offsets.keySet());
+            offsets.forEach((tp, offset) -> {
+                int recordsSinceLastCommit = committedOffsets.getOrDefault(tp, 0);
+                if (recordsSinceLastCommit != 0) {
+                    taskHandle.commit(recordsSinceLastCommit);
+                    log.debug("Forwarding to framework request to commit {} records for {}", recordsSinceLastCommit, tp);
+                    committedOffsets.put(tp, 0);
                 }
-            }
+            });
             return offsets;
         }
 
         @Override
         public void stop() {
-			log.info("Stopped {} task {}", this.getClass().getSimpleName(), taskId);
-			taskHandle.recordTaskStop();
+            log.info("Stopped {} task {}", this.getClass().getSimpleName(), taskId);
+            taskHandle.recordTaskStop();
         }
     }
 }

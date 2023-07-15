@@ -32,85 +32,84 @@ import java.util.Map;
 
 public class LeaderAndIsrResponse extends AbstractResponse {
 
-	/**
-	 * Possible error code:
-	 * <p>
-	 * STALE_CONTROLLER_EPOCH (11)
-	 * STALE_BROKER_EPOCH (77)
-	 */
-	private final LeaderAndIsrResponseData data;
-	private final short version;
+    /**
+     * Possible error code:
+     * <p>
+     * STALE_CONTROLLER_EPOCH (11)
+     * STALE_BROKER_EPOCH (77)
+     */
+    private final LeaderAndIsrResponseData data;
+    private final short version;
 
-	public LeaderAndIsrResponse(LeaderAndIsrResponseData data, short version) {
-		super(ApiKeys.LEADER_AND_ISR);
-		this.data = data;
-		this.version = version;
-	}
+    public LeaderAndIsrResponse(LeaderAndIsrResponseData data, short version) {
+        super(ApiKeys.LEADER_AND_ISR);
+        this.data = data;
+        this.version = version;
+    }
 
-	public LeaderAndIsrTopicErrorCollection topics() {
-		return this.data.topics();
-	}
+    public LeaderAndIsrTopicErrorCollection topics() {
+        return this.data.topics();
+    }
 
-	public Errors error() {
-		return Errors.forCode(data.errorCode());
-	}
+    public Errors error() {
+        return Errors.forCode(data.errorCode());
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		Errors error = error();
-		if (error != Errors.NONE) {
-			// Minor optimization since the top-level error applies to all partitions
-			if (version < 5)
-				return Collections.singletonMap(error, data.partitionErrors().size() + 1);
-			return Collections.singletonMap(error,
-					data.topics().stream().mapToInt(t -> t.partitionErrors().size()).sum() + 1);
-		}
-		Map<Errors, Integer> errors;
-		if (version < 5)
-			errors = errorCounts(data.partitionErrors().stream().map(l -> Errors.forCode(l.errorCode())));
-		else
-			errors = errorCounts(data.topics().stream().flatMap(t -> t.partitionErrors().stream()).map(l ->
-					Errors.forCode(l.errorCode())));
-		updateErrorCounts(errors, Errors.NONE);
-		return errors;
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        Errors error = error();
+        if (error != Errors.NONE) {
+            // Minor optimization since the top-level error applies to all partitions
+            if (version < 5)
+                return Collections.singletonMap(error, data.partitionErrors().size() + 1);
+            return Collections.singletonMap(error, data.topics().stream().mapToInt(t -> t.partitionErrors().size()).sum() + 1);
+        }
+        Map<Errors, Integer> errors;
+        if (version < 5)
+            errors = errorCounts(data.partitionErrors().stream().map(l -> Errors.forCode(l.errorCode())));
+        else
+            errors = errorCounts(data.topics().stream().flatMap(t -> t.partitionErrors().stream()).map(l -> Errors.forCode(l.errorCode())));
+        updateErrorCounts(errors, Errors.NONE);
+        return errors;
+    }
 
-	public Map<TopicPartition, Errors> partitionErrors(Map<Uuid, String> topicNames) {
-		Map<TopicPartition, Errors> errors = new HashMap<>();
-		if (version < 5) {
-			data.partitionErrors().forEach(partition ->
-					errors.put(new TopicPartition(partition.topicName(), partition.partitionIndex()),
-							Errors.forCode(partition.errorCode())));
-		} else {
-			for (LeaderAndIsrTopicError topic : data.topics()) {
-				String topicName = topicNames.get(topic.topicId());
-				if (topicName != null) {
-					topic.partitionErrors().forEach(partition ->
-							errors.put(new TopicPartition(topicName, partition.partitionIndex()),
-									Errors.forCode(partition.errorCode())));
-				}
-			}
-		}
-		return errors;
-	}
+    public Map<TopicPartition, Errors> partitionErrors(Map<Uuid, String> topicNames) {
+        Map<TopicPartition, Errors> errors = new HashMap<>();
+        if (version < 5) {
+            data.partitionErrors().forEach(partition -> errors.put(new TopicPartition(partition.topicName(), partition.partitionIndex()), Errors.forCode(partition.errorCode())));
+        } else {
+            for (LeaderAndIsrTopicError topic : data.topics()) {
+                String topicName = topicNames.get(topic.topicId());
+                if (topicName != null) {
+                    topic.partitionErrors().forEach(partition -> errors.put(new TopicPartition(topicName, partition.partitionIndex()), Errors.forCode(partition.errorCode())));
+                }
+            }
+        }
+        return errors;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return DEFAULT_THROTTLE_TIME;
-	}
+    @Override
+    public int throttleTimeMs() {
+        return DEFAULT_THROTTLE_TIME;
+    }
 
-	public static LeaderAndIsrResponse parse(ByteBuffer buffer, short version) {
-		return new LeaderAndIsrResponse(new LeaderAndIsrResponseData(new ByteBufferAccessor(buffer), version), version);
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        // Not supported by the response schema
+    }
 
-	@Override
-	public LeaderAndIsrResponseData data() {
-		return data;
-	}
+    public static LeaderAndIsrResponse parse(ByteBuffer buffer, short version) {
+        return new LeaderAndIsrResponse(new LeaderAndIsrResponseData(new ByteBufferAccessor(buffer), version), version);
+    }
+
+    @Override
+    public LeaderAndIsrResponseData data() {
+        return data;
+    }
 
     @Override
     public String toString() {
-		return data.toString();
+        return data.toString();
     }
 
 }

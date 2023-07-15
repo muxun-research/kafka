@@ -22,28 +22,18 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
 /**
  * Generates byte arrays based on a position argument.
- * <p>
+ *
  * The array generated at a given position should be the same no matter how many
  * times generate() is invoked.  PayloadGenerator instances should be immutable
  * and thread-safe.
  */
-@JsonTypeInfo(use = JsonTypeInfo.Id.NAME,
-		include = JsonTypeInfo.As.PROPERTY,
-		property = "type")
-@JsonSubTypes(value = {
-		@JsonSubTypes.Type(value = ConstantPayloadGenerator.class, name = "constant"),
-		@JsonSubTypes.Type(value = SequentialPayloadGenerator.class, name = "sequential"),
-		@JsonSubTypes.Type(value = UniformRandomPayloadGenerator.class, name = "uniformRandom"),
-		@JsonSubTypes.Type(value = NullPayloadGenerator.class, name = "null"),
-		@JsonSubTypes.Type(value = RandomComponentPayloadGenerator.class, name = "randomComponent"),
-		@JsonSubTypes.Type(value = TimestampRandomPayloadGenerator.class, name = "timestampRandom"),
-		@JsonSubTypes.Type(value = GaussianTimestampRandomPayloadGenerator.class, name = "gaussianTimestampRandom")
-})
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
+@JsonSubTypes(value = {@JsonSubTypes.Type(value = ConstantPayloadGenerator.class, name = "constant"), @JsonSubTypes.Type(value = SequentialPayloadGenerator.class, name = "sequential"), @JsonSubTypes.Type(value = UniformRandomPayloadGenerator.class, name = "uniformRandom"), @JsonSubTypes.Type(value = NullPayloadGenerator.class, name = "null"), @JsonSubTypes.Type(value = RandomComponentPayloadGenerator.class, name = "randomComponent"), @JsonSubTypes.Type(value = TimestampRandomPayloadGenerator.class, name = "timestampRandom"), @JsonSubTypes.Type(value = TimestampConstantPayloadGenerator.class, name = "timestampConstant"), @JsonSubTypes.Type(value = GaussianTimestampRandomPayloadGenerator.class, name = "gaussianTimestampRandom"), @JsonSubTypes.Type(value = GaussianTimestampConstantPayloadGenerator.class, name = "gaussianTimestampConstant")})
 public interface PayloadGenerator {
-	/**
-	 * Generate a payload.
-	 * @param position The position to use to generate the payload
-	 * @return A new array object containing the payload.
-	 */
-	byte[] generate(long position);
+    /**
+     * Generate a payload.
+     * @param position The position to use to generate the payload
+     * @return A new array object containing the payload.
+     */
+    byte[] generate(long position);
 }

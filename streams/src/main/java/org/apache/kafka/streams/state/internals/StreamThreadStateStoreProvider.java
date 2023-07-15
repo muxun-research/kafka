@@ -22,6 +22,7 @@ import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.TaskId;
 import org.apache.kafka.streams.processor.internals.StreamThread;
 import org.apache.kafka.streams.processor.internals.Task;
+import org.apache.kafka.streams.processor.internals.namedtopology.NamedTopologyStoreQueryParameters;
 import org.apache.kafka.streams.state.QueryableStoreType;
 import org.apache.kafka.streams.state.QueryableStoreTypes;
 import org.apache.kafka.streams.state.TimestampedKeyValueStore;
@@ -34,81 +35,69 @@ import java.util.List;
 
 public class StreamThreadStateStoreProvider {
 
-	private final StreamThread streamThread;
+    private final StreamThread streamThread;
 
-	public StreamThreadStateStoreProvider(final StreamThread streamThread) {
-		this.streamThread = streamThread;
-	}
+    public StreamThreadStateStoreProvider(final StreamThread streamThread) {
+        this.streamThread = streamThread;
+    }
 
-	@SuppressWarnings("unchecked")
-	public <T> List<T> stores(final StoreQueryParameters storeQueryParams) {
-		final String storeName = storeQueryParams.storeName();
-		final QueryableStoreType<T> queryableStoreType = storeQueryParams.queryableStoreType();
-		if (streamThread.state() == StreamThread.State.DEAD) {
-			return Collections.emptyList();
-		}
-		final StreamThread.State state = streamThread.state();
-		if (storeQueryParams.staleStoresEnabled() ? state.isAlive() : state == StreamThread.State.RUNNING) {
-			final Collection<Task> tasks = storeQueryParams.staleStoresEnabled() ?
-					streamThread.allTasks().values() : streamThread.activeTasks();
+    @SuppressWarnings("unchecked")
+    public <T> List<T> stores(final StoreQueryParameters storeQueryParams) {
+        final StreamThread.State state = streamThread.state();
+        if (state == StreamThread.State.DEAD) {
+            return Collections.emptyList();
+        }
 
-			if (storeQueryParams.partition() != null) {
-				for (final Task task : tasks) {
-					if (task.id().partition == storeQueryParams.partition() &&
-							task.getStore(storeName) != null &&
-							storeName.equals(task.getStore(storeName).name())) {
-						final T typedStore = validateAndCastStores(task.getStore(storeName), queryableStoreType, storeName, task.id());
-						return Collections.singletonList(typedStore);
-					}
-				}
-				return Collections.emptyList();
-			} else {
-				final List<T> list = new ArrayList<>();
-				for (final Task task : tasks) {
-					final StateStore store = task.getStore(storeName);
-					if (store == null) {
-						// then this task doesn't have that store
-					} else {
-						final T typedStore = validateAndCastStores(store, queryableStoreType, storeName, task.id());
-						list.add(typedStore);
-					}
-				}
-				return list;
-			}
-		} else {
-			throw new InvalidStateStoreException("Cannot get state store " + storeName + " because the stream thread is " +
-					state + ", not RUNNING" +
-					(storeQueryParams.staleStoresEnabled() ? " or REBALANCING" : ""));
-		}
-	}
+        final String storeName = storeQueryParams.storeName();
+        final QueryableStoreType<T> queryableStoreType = storeQueryParams.queryableStoreType();
+        final String topologyName = storeQueryParams instanceof NamedTopologyStoreQueryParameters ? ((NamedTopologyStoreQueryParameters) storeQueryParams).topologyName() : null;
 
-	@SuppressWarnings("unchecked")
-	private static <T> T validateAndCastStores(final StateStore store,
-											   final QueryableStoreType<T> queryableStoreType,
-											   final String storeName,
-											   final TaskId taskId) {
-		if (store == null) {
-			throw new NullPointerException("Expected store not to be null at this point.");
-		} else if (queryableStoreType.accepts(store)) {
-			if (!store.isOpen()) {
-				throw new InvalidStateStoreException(
-						"Cannot get state store " + storeName + " for task " + taskId +
-								" because the store is not open. " +
-								"The state store may have migrated to another instance.");
-			}
-			if (store instanceof TimestampedKeyValueStore && queryableStoreType instanceof QueryableStoreTypes.KeyValueStoreType) {
-				return (T) new ReadOnlyKeyValueStoreFacade<>((TimestampedKeyValueStore<Object, Object>) store);
-			} else if (store instanceof TimestampedWindowStore && queryableStoreType instanceof QueryableStoreTypes.WindowStoreType) {
-				return (T) new ReadOnlyWindowStoreFacade<>((TimestampedWindowStore<Object, Object>) store);
-			} else {
-				return (T) store;
-			}
-		} else {
-			throw new InvalidStateStoreException(
-					"Cannot get state store " + storeName +
-							" because the queryable store type [" + queryableStoreType.getClass() +
-							"] does not accept the actual store type [" + store.getClass() + "]."
-			);
-		}
-	}
+        if (storeQueryParams.staleStoresEnabled() ? state.isAlive() : state == StreamThread.State.RUNNING) {
+            final Collection<Task> tasks = storeQueryParams.staleStoresEnabled() ? streamThread.readyOnlyAllTasks() : streamThread.readOnlyActiveTasks();
+
+            if (storeQueryParams.partition() != null) {
+                for (final Task task : tasks) {
+                    if (task.id().partition() == storeQueryParams.partition() && (topologyName == null || topologyName.equals(task.id().topologyName())) && task.getStore(storeName) != null && storeName.equals(task.getStore(storeName).name())) {
+                        final T typedStore = validateAndCastStores(task.getStore(storeName), queryableStoreType, storeName, task.id());
+                        return Collections.singletonList(typedStore);
+                    }
+                }
+                return Collections.emptyList();
+            } else {
+                final List<T> list = new ArrayList<>();
+                for (final Task task : tasks) {
+                    final StateStore store = task.getStore(storeName);
+                    if (store == null) {
+                        // then this task doesn't have that store
+                    } else {
+                        final T typedStore = validateAndCastStores(store, queryableStoreType, storeName, task.id());
+                        list.add(typedStore);
+                    }
+                }
+                return list;
+            }
+        } else {
+            throw new InvalidStateStoreException("Cannot get state store " + storeName + " because the stream thread is " + state + ", not RUNNING" + (storeQueryParams.staleStoresEnabled() ? " or REBALANCING" : ""));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T validateAndCastStores(final StateStore store, final QueryableStoreType<T> queryableStoreType, final String storeName, final TaskId taskId) {
+        if (store == null) {
+            throw new NullPointerException("Expected store not to be null at this point.");
+        } else if (queryableStoreType.accepts(store)) {
+            if (!store.isOpen()) {
+                throw new InvalidStateStoreException("Cannot get state store " + storeName + " for task " + taskId + " because the store is not open. " + "The state store may have migrated to another instance.");
+            }
+            if (store instanceof TimestampedKeyValueStore && queryableStoreType instanceof QueryableStoreTypes.KeyValueStoreType) {
+                return (T) new ReadOnlyKeyValueStoreFacade<>((TimestampedKeyValueStore<Object, Object>) store);
+            } else if (store instanceof TimestampedWindowStore && queryableStoreType instanceof QueryableStoreTypes.WindowStoreType) {
+                return (T) new ReadOnlyWindowStoreFacade<>((TimestampedWindowStore<Object, Object>) store);
+            } else {
+                return (T) store;
+            }
+        } else {
+            throw new InvalidStateStoreException("Cannot get state store " + storeName + " because the queryable store type [" + queryableStoreType.getClass() + "] does not accept the actual store type [" + store.getClass() + "].");
+        }
+    }
 }

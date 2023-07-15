@@ -20,6 +20,7 @@ import org.apache.kafka.common.compress.KafkaLZ4BlockInputStream;
 import org.apache.kafka.common.compress.KafkaLZ4BlockOutputStream;
 import org.apache.kafka.common.utils.BufferSupplier;
 import org.apache.kafka.common.utils.ByteBufferOutputStream;
+import org.apache.kafka.common.utils.ChunkedBytesStream;
 import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
@@ -32,28 +33,24 @@ public class CompressionTypeTest {
     @Test
     public void testLZ4FramingMagicV0() {
         ByteBuffer buffer = ByteBuffer.allocate(256);
-        KafkaLZ4BlockOutputStream out = (KafkaLZ4BlockOutputStream) CompressionType.LZ4.wrapForOutput(
-                new ByteBufferOutputStream(buffer), RecordBatch.MAGIC_VALUE_V0);
+        KafkaLZ4BlockOutputStream out = (KafkaLZ4BlockOutputStream) CompressionType.LZ4.wrapForOutput(new ByteBufferOutputStream(buffer), RecordBatch.MAGIC_VALUE_V0);
         assertTrue(out.useBrokenFlagDescriptorChecksum());
 
         buffer.rewind();
 
-        KafkaLZ4BlockInputStream in = (KafkaLZ4BlockInputStream) CompressionType.LZ4.wrapForInput(
-                buffer, RecordBatch.MAGIC_VALUE_V0, BufferSupplier.NO_CACHING);
-        assertTrue(in.ignoreFlagDescriptorChecksum());
+        ChunkedBytesStream in = (ChunkedBytesStream) CompressionType.LZ4.wrapForInput(buffer, RecordBatch.MAGIC_VALUE_V0, BufferSupplier.NO_CACHING);
+        assertTrue(((KafkaLZ4BlockInputStream) in.sourceStream()).ignoreFlagDescriptorChecksum());
     }
 
     @Test
     public void testLZ4FramingMagicV1() {
         ByteBuffer buffer = ByteBuffer.allocate(256);
-        KafkaLZ4BlockOutputStream out = (KafkaLZ4BlockOutputStream) CompressionType.LZ4.wrapForOutput(
-                new ByteBufferOutputStream(buffer), RecordBatch.MAGIC_VALUE_V1);
+        KafkaLZ4BlockOutputStream out = (KafkaLZ4BlockOutputStream) CompressionType.LZ4.wrapForOutput(new ByteBufferOutputStream(buffer), RecordBatch.MAGIC_VALUE_V1);
         assertFalse(out.useBrokenFlagDescriptorChecksum());
 
         buffer.rewind();
 
-        KafkaLZ4BlockInputStream in = (KafkaLZ4BlockInputStream) CompressionType.LZ4.wrapForInput(
-                buffer, RecordBatch.MAGIC_VALUE_V1, BufferSupplier.create());
-        assertFalse(in.ignoreFlagDescriptorChecksum());
+        ChunkedBytesStream in = (ChunkedBytesStream) CompressionType.LZ4.wrapForInput(buffer, RecordBatch.MAGIC_VALUE_V1, BufferSupplier.create());
+        assertFalse(((KafkaLZ4BlockInputStream) in.sourceStream()).ignoreFlagDescriptorChecksum());
     }
 }

@@ -41,44 +41,44 @@ import java.util.concurrent.CompletableFuture;
  */
 public interface FuturePurgatory<T extends Comparable<T>> {
 
-	/**
-	 * Create a new future which is tracked by the purgatory.
-	 * @param threshold     the minimum value that must be reached for the future
-	 *                      to be successfully completed by {@link #maybeComplete(Comparable, long)}
-	 * @param maxWaitTimeMs the maximum time to wait for completion. If this
-	 *                      timeout is reached, then the future will be completed exceptionally
-	 *                      with a {@link org.apache.kafka.common.errors.TimeoutException}
-	 * @return the future tracking the expected completion
-	 */
-	CompletableFuture<Long> await(T threshold, long maxWaitTimeMs);
+    /**
+     * Create a new future which is tracked by the purgatory.
+     * @param threshold     the minimum value that must be reached for the future
+     *                      to be successfully completed by {@link #maybeComplete(Comparable, long)}
+     * @param maxWaitTimeMs the maximum time to wait for completion. If this
+     *                      timeout is reached, then the future will be completed exceptionally
+     *                      with a {@link org.apache.kafka.common.errors.TimeoutException}
+     * @return the future tracking the expected completion
+     */
+    CompletableFuture<Long> await(T threshold, long maxWaitTimeMs);
 
-	/**
-	 * Complete awaiting futures whose associated values are larger than the given threshold value.
-	 * The completion callbacks will be triggered from the calling thread.
-	 * @param value         the threshold value used to determine which futures can be completed
-	 * @param currentTimeMs the current time in milliseconds that will be passed to
-	 *                      {@link CompletableFuture#complete(Object)} when the futures are completed
-	 */
-	void maybeComplete(T value, long currentTimeMs);
+    /**
+     * Complete awaiting futures whose threshold value from {@link FuturePurgatory#await} are smaller
+     * than the given threshold value. The completion callbacks will be triggered from the calling thread.
+     * @param value         the threshold value used to determine which futures can be completed
+     * @param currentTimeMs the current time in milliseconds that will be passed to
+     *                      {@link CompletableFuture#complete(Object)} when the futures are completed
+     */
+    void maybeComplete(T value, long currentTimeMs);
 
-	/**
-	 * Complete all awaiting futures successfully.
-	 * @param currentTimeMs the current time in milliseconds that will be passed to
-	 *                      {@link CompletableFuture#complete(Object)} when the futures are completed
-	 */
-	void completeAll(long currentTimeMs);
+    /**
+     * Complete all awaiting futures successfully.
+     * @param currentTimeMs the current time in milliseconds that will be passed to
+     *                      {@link CompletableFuture#complete(Object)} when the futures are completed
+     */
+    void completeAll(long currentTimeMs);
 
-	/**
-	 * Complete all awaiting futures exceptionally. The completion callbacks will be
-	 * triggered with the passed in exception.
-	 * @param exception the current time in milliseconds that will be passed to
-	 *                  {@link CompletableFuture#completeExceptionally(Throwable)}
-	 */
-	void completeAllExceptionally(Throwable exception);
+    /**
+     * Complete all awaiting futures exceptionally. The completion callbacks will be
+     * triggered with the passed in exception.
+     * @param exception the current time in milliseconds that will be passed to
+     *                  {@link CompletableFuture#completeExceptionally(Throwable)}
+     */
+    void completeAllExceptionally(Throwable exception);
 
-	/**
-	 * The number of currently waiting futures.
-	 * @return the number of waiting futures
-	 */
-	int numWaiting();
+    /**
+     * The number of currently waiting futures.
+     * @return the number of waiting futures
+     */
+    int numWaiting();
 }

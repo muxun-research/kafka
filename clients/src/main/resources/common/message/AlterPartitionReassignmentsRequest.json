@@ -17,6 +17,8 @@
   "apiKey": 45,
   "type": "request",
   "listeners": [
+    "broker",
+    "controller",
     "zkBroker"
   ],
   "name": "AlterPartitionReassignmentsRequest",
@@ -53,7 +55,8 @@
               "name": "PartitionIndex",
               "type": "int32",
               "versions": "0+",
-          "about": "The partition index." },
+              "about": "The partition index."
+            },
             {
               "name": "Replicas",
               "type": "[]int32",
@@ -63,7 +66,9 @@
               "entityType": "brokerId",
               "about": "The replicas to place the partitions on, or null to cancel a pending reassignment for this partition."
             }
-      ]}
-    ]}
+          ]
+        }
+      ]
+    }
   ]
 }

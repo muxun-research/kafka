@@ -44,20 +44,19 @@ public class AclPermissionTypeTest {
     };
 
     @Test
-    public void testIsUnknown() throws Exception {
+    public void testIsUnknown() {
         for (AclPermissionTypeTestInfo info : INFOS) {
-			assertEquals(info.unknown, info.ty.isUnknown(), info.ty + " was supposed to have unknown == " + info.unknown);
+            assertEquals(info.unknown, info.ty.isUnknown(), info.ty + " was supposed to have unknown == " + info.unknown);
         }
     }
 
     @Test
-    public void testCode() throws Exception {
+    public void testCode() {
         assertEquals(AclPermissionType.values().length, INFOS.length);
         for (AclPermissionTypeTestInfo info : INFOS) {
-			assertEquals(info.code, info.ty.code(), info.ty + " was supposed to have code == " + info.code);
-			assertEquals(info.ty, AclPermissionType.fromCode((byte) info.code),
-					"AclPermissionType.fromCode(" + info.code + ") was supposed to be " + info.ty);
-		}
+            assertEquals(info.code, info.ty.code(), info.ty + " was supposed to have code == " + info.code);
+            assertEquals(info.ty, AclPermissionType.fromCode((byte) info.code), "AclPermissionType.fromCode(" + info.code + ") was supposed to be " + info.ty);
+        }
         assertEquals(AclPermissionType.UNKNOWN, AclPermissionType.fromCode((byte) 120));
     }
 
@@ -71,7 +70,7 @@ public class AclPermissionTypeTest {
     }
 
     @Test
-    public void testExhaustive() throws Exception {
+    public void testExhaustive() {
         assertEquals(INFOS.length, AclPermissionType.values().length);
         for (int i = 0; i < INFOS.length; i++) {
             assertEquals(INFOS[i].ty, AclPermissionType.values()[i]);

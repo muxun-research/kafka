@@ -17,7 +17,7 @@
 package org.apache.kafka.streams.scala
 package kstream
 
-import org.apache.kafka.streams.kstream.{SessionWindowedCogroupedKStream => SessionWindowedCogroupedKStreamJ, Windowed}
+import org.apache.kafka.streams.kstream.{Windowed, SessionWindowedCogroupedKStream => SessionWindowedCogroupedKStreamJ}
 import org.apache.kafka.streams.scala.FunctionsCompatConversions.{InitializerFromFunction, MergerFromFunction}
 
 /**
@@ -31,6 +31,7 @@ class SessionWindowedCogroupedKStream[K, V](val inner: SessionWindowedCogroupedK
 
   /**
    * Aggregate the values of records in this stream by the grouped key and defined `SessionWindows`.
+   *
    * @param initializer  the initializer function
    * @param merger       a function that combines two aggregation results.
    * @param materialized an instance of `Materialized` used to materialize a state store.
@@ -38,13 +39,14 @@ class SessionWindowedCogroupedKStream[K, V](val inner: SessionWindowedCogroupedK
    *         the latest (rolling) aggregate for each key within a window
    * @see `org.apache.kafka.streams.kstream.SessionWindowedCogroupedKStream#aggregate`
    */
-  def aggregate(initializer: => V, merger: (K, V, V) => V)(
-    implicit materialized: Materialized[K, V, ByteArraySessionStore]
+  def aggregate(initializer: => V, merger: (K, V, V) => V)(implicit
+                                                           materialized: Materialized[K, V, ByteArraySessionStore]
   ): KTable[Windowed[K], V] =
     new KTable(inner.aggregate((() => initializer).asInitializer, merger.asMerger, materialized))
 
   /**
    * Aggregate the values of records in this stream by the grouped key and defined `SessionWindows`.
+   *
    * @param initializer  the initializer function
    * @param merger       a function that combines two aggregation results.
    * @param named        a [[Named]] config used to name the processor in the topology
@@ -53,8 +55,8 @@ class SessionWindowedCogroupedKStream[K, V](val inner: SessionWindowedCogroupedK
    *         the latest (rolling) aggregate for each key within a window
    * @see `org.apache.kafka.streams.kstream.SessionWindowedCogroupedKStream#aggregate`
    */
-  def aggregate(initializer: => V, merger: (K, V, V) => V, named: Named)(
-    implicit materialized: Materialized[K, V, ByteArraySessionStore]
+  def aggregate(initializer: => V, merger: (K, V, V) => V, named: Named)(implicit
+                                                                         materialized: Materialized[K, V, ByteArraySessionStore]
   ): KTable[Windowed[K], V] =
     new KTable(inner.aggregate((() => initializer).asInitializer, merger.asMerger, named, materialized))
 

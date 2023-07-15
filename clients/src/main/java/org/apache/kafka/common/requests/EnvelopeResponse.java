@@ -26,49 +26,52 @@ import java.util.Map;
 
 public class EnvelopeResponse extends AbstractResponse {
 
-	private final EnvelopeResponseData data;
+    private final EnvelopeResponseData data;
 
-	public EnvelopeResponse(ByteBuffer responseData, Errors error) {
-		super(ApiKeys.ENVELOPE);
-		this.data = new EnvelopeResponseData()
-				.setResponseData(responseData)
-				.setErrorCode(error.code());
-	}
+    public EnvelopeResponse(ByteBuffer responseData, Errors error) {
+        super(ApiKeys.ENVELOPE);
+        this.data = new EnvelopeResponseData().setResponseData(responseData).setErrorCode(error.code());
+    }
 
-	public EnvelopeResponse(Errors error) {
-		this(null, error);
-	}
+    public EnvelopeResponse(Errors error) {
+        this(null, error);
+    }
 
-	public EnvelopeResponse(EnvelopeResponseData data) {
-		super(ApiKeys.ENVELOPE);
-		this.data = data;
-	}
+    public EnvelopeResponse(EnvelopeResponseData data) {
+        super(ApiKeys.ENVELOPE);
+        this.data = data;
+    }
 
-	public ByteBuffer responseData() {
-		return data.responseData();
-	}
+    public ByteBuffer responseData() {
+        return data.responseData();
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		return errorCounts(error());
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        return errorCounts(error());
+    }
 
-	public Errors error() {
-		return Errors.forCode(data.errorCode());
-	}
+    public Errors error() {
+        return Errors.forCode(data.errorCode());
+    }
 
-	@Override
-	public EnvelopeResponseData data() {
-		return data;
-	}
+    @Override
+    public EnvelopeResponseData data() {
+        return data;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return DEFAULT_THROTTLE_TIME;
-	}
+    @Override
+    public int throttleTimeMs() {
+        return DEFAULT_THROTTLE_TIME;
+    }
 
-	public static EnvelopeResponse parse(ByteBuffer buffer, short version) {
-		return new EnvelopeResponse(new EnvelopeResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        // Not supported by the response schema
+    }
+
+    public static EnvelopeResponse parse(ByteBuffer buffer, short version) {
+        return new EnvelopeResponse(new EnvelopeResponseData(new ByteBufferAccessor(buffer), version));
+    }
 
 }

@@ -33,8 +33,8 @@ public class SaslAuthenticateResponse extends AbstractResponse {
     private final SaslAuthenticateResponseData data;
 
     public SaslAuthenticateResponse(SaslAuthenticateResponseData data) {
-		super(ApiKeys.SASL_AUTHENTICATE);
-		this.data = data;
+        super(ApiKeys.SASL_AUTHENTICATE);
+        this.data = data;
     }
 
     /**
@@ -47,32 +47,37 @@ public class SaslAuthenticateResponse extends AbstractResponse {
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-		return errorCounts(Errors.forCode(data.errorCode()));
+        return errorCounts(Errors.forCode(data.errorCode()));
     }
 
     public String errorMessage() {
         return data.errorMessage();
     }
 
-	public long sessionLifetimeMs() {
-		return data.sessionLifetimeMs();
-	}
+    public long sessionLifetimeMs() {
+        return data.sessionLifetimeMs();
+    }
 
-	public byte[] saslAuthBytes() {
-		return data.authBytes();
-	}
+    public byte[] saslAuthBytes() {
+        return data.authBytes();
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return DEFAULT_THROTTLE_TIME;
-	}
+    @Override
+    public int throttleTimeMs() {
+        return DEFAULT_THROTTLE_TIME;
+    }
 
-	@Override
-	public SaslAuthenticateResponseData data() {
-		return data;
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        // Not supported by the response schema
+    }
 
-	public static SaslAuthenticateResponse parse(ByteBuffer buffer, short version) {
-		return new SaslAuthenticateResponse(new SaslAuthenticateResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public SaslAuthenticateResponseData data() {
+        return data;
+    }
+
+    public static SaslAuthenticateResponse parse(ByteBuffer buffer, short version) {
+        return new SaslAuthenticateResponse(new SaslAuthenticateResponseData(new ByteBufferAccessor(buffer), version));
+    }
 }

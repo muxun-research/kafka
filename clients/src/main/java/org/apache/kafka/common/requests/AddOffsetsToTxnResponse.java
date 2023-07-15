@@ -39,38 +39,43 @@ import java.util.Map;
  */
 public class AddOffsetsToTxnResponse extends AbstractResponse {
 
-	private final AddOffsetsToTxnResponseData data;
+    private final AddOffsetsToTxnResponseData data;
 
-	public AddOffsetsToTxnResponse(AddOffsetsToTxnResponseData data) {
-		super(ApiKeys.ADD_OFFSETS_TO_TXN);
-		this.data = data;
-	}
+    public AddOffsetsToTxnResponse(AddOffsetsToTxnResponseData data) {
+        super(ApiKeys.ADD_OFFSETS_TO_TXN);
+        this.data = data;
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		return errorCounts(Errors.forCode(data.errorCode()));
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        return errorCounts(Errors.forCode(data.errorCode()));
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
 
-	@Override
-	public AddOffsetsToTxnResponseData data() {
-		return data;
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	public static AddOffsetsToTxnResponse parse(ByteBuffer buffer, short version) {
-		return new AddOffsetsToTxnResponse(new AddOffsetsToTxnResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public AddOffsetsToTxnResponseData data() {
+        return data;
+    }
+
+    public static AddOffsetsToTxnResponse parse(ByteBuffer buffer, short version) {
+        return new AddOffsetsToTxnResponse(new AddOffsetsToTxnResponseData(new ByteBufferAccessor(buffer), version));
+    }
 
     @Override
     public String toString() {
         return data.toString();
-	}
+    }
 
-	@Override
+    @Override
     public boolean shouldClientThrottle(short version) {
         return version >= 1;
     }

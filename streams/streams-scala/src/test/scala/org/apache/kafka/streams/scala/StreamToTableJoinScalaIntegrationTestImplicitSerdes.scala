@@ -16,15 +16,15 @@
  */
 package org.apache.kafka.streams.scala
 
-import java.util.Properties
-
-import org.apache.kafka.streams.{KafkaStreams, KeyValue, StreamsConfig}
-import org.apache.kafka.streams.scala.serialization.{Serdes => NewSerdes}
 import org.apache.kafka.streams.scala.ImplicitConversions._
 import org.apache.kafka.streams.scala.kstream._
+import org.apache.kafka.streams.scala.serialization.{Serdes => NewSerdes}
 import org.apache.kafka.streams.scala.utils.StreamToTableJoinScalaIntegrationTestBase
-import org.junit.jupiter.api._
+import org.apache.kafka.streams.{KafkaStreams, KeyValue, StreamsConfig}
 import org.junit.jupiter.api.Assertions._
+import org.junit.jupiter.api._
+
+import java.util.Properties
 
 /**
  * Test suite that does an example to demonstrate stream-table joins in Kafka Streams
@@ -54,7 +54,7 @@ class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJ
     val clicksPerRegion: KTable[String, Long] =
       userClicksStream
 
-      // Join the stream against the table.
+        // Join the stream against the table.
         .leftJoin(userRegionsTable)((clicks, region) => (if (region == null) "UNKNOWN" else region, clicks))
 
         // Change the stream from <user> -> <region, clicks> to <region> -> <clicks>
@@ -98,7 +98,7 @@ class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJ
     val clicksPerRegion: KTable[String, Long] =
       userClicksStream
 
-      // Join the stream against the table.
+        // Join the stream against the table.
         .leftJoin(userRegionsTable)((clicks, region) => (if (region == null) "UNKNOWN" else region, clicks))
 
         // Change the stream from <user> -> <region, clicks> to <region> -> <clicks>
@@ -125,10 +125,10 @@ class StreamToTableJoinScalaIntegrationTestImplicitSerdes extends StreamToTableJ
   @Test
   def testShouldCountClicksPerRegionJava(): Unit = {
 
-    import java.lang.{Long => JLong}
-
     import org.apache.kafka.streams.kstream.{KStream => KStreamJ, KTable => KTableJ, _}
     import org.apache.kafka.streams.{KafkaStreams => KafkaStreamsJ, StreamsBuilder => StreamsBuilderJ}
+
+    import java.lang.{Long => JLong}
 
     val streamsConfiguration: Properties = getStreamsConfiguration()
 

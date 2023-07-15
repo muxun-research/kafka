@@ -23,6 +23,7 @@ import org.apache.kafka.raft.OffsetAndEpoch;
 import org.apache.kafka.raft.ReplicatedLog;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,109 +31,113 @@ import java.nio.file.StandardOpenOption;
 import java.util.Optional;
 
 public final class FileRawSnapshotWriter implements RawSnapshotWriter {
-	private final Path tempSnapshotPath;
-	private final FileChannel channel;
-	private final OffsetAndEpoch snapshotId;
-	private final Optional<ReplicatedLog> replicatedLog;
-	private boolean frozen = false;
+    private final Path tempSnapshotPath;
+    private final FileChannel channel;
+    private final OffsetAndEpoch snapshotId;
+    private final Optional<ReplicatedLog> replicatedLog;
+    private boolean frozen = false;
 
-	private FileRawSnapshotWriter(
-			Path tempSnapshotPath,
-			FileChannel channel,
-			OffsetAndEpoch snapshotId,
-			Optional<ReplicatedLog> replicatedLog
-	) {
-		this.tempSnapshotPath = tempSnapshotPath;
-		this.channel = channel;
-		this.snapshotId = snapshotId;
-		this.replicatedLog = replicatedLog;
-	}
+    private FileRawSnapshotWriter(Path tempSnapshotPath, FileChannel channel, OffsetAndEpoch snapshotId, Optional<ReplicatedLog> replicatedLog) {
+        this.tempSnapshotPath = tempSnapshotPath;
+        this.channel = channel;
+        this.snapshotId = snapshotId;
+        this.replicatedLog = replicatedLog;
+    }
 
-	@Override
-	public OffsetAndEpoch snapshotId() {
-		return snapshotId;
-	}
+    @Override
+    public OffsetAndEpoch snapshotId() {
+        return snapshotId;
+    }
 
-	@Override
-	public long sizeInBytes() throws IOException {
-		return channel.size();
-	}
+    @Override
+    public long sizeInBytes() {
+        try {
+            return channel.size();
+        } catch (IOException e) {
+            throw new UncheckedIOException(String.format("Error calculating snapshot size. temp path = %s, snapshotId = %s.", tempSnapshotPath, snapshotId), e);
+        }
+    }
 
-	@Override
-	public void append(UnalignedMemoryRecords records) throws IOException {
-		if (frozen) {
-			throw new IllegalStateException(
-					String.format("Append is not supported. Snapshot is already frozen: id = %s; temp path = %s", snapshotId, tempSnapshotPath)
-			);
-		}
-		Utils.writeFully(channel, records.buffer());
-	}
+    @Override
+    public void append(UnalignedMemoryRecords records) {
+        try {
+            checkIfFrozen("Append");
+            Utils.writeFully(channel, records.buffer());
+        } catch (IOException e) {
+            throw new UncheckedIOException(String.format("Error writing file snapshot, " + "temp path = %s, snapshotId = %s.", this.tempSnapshotPath, this.snapshotId), e);
+        }
+    }
 
-	@Override
-	public void append(MemoryRecords records) throws IOException {
-		if (frozen) {
-			throw new IllegalStateException(
-					String.format("Append is not supported. Snapshot is already frozen: id = %s; temp path = %s", snapshotId, tempSnapshotPath)
-			);
-		}
-		Utils.writeFully(channel, records.buffer());
-	}
+    @Override
+    public void append(MemoryRecords records) {
+        try {
+            checkIfFrozen("Append");
+            Utils.writeFully(channel, records.buffer());
+        } catch (IOException e) {
+            throw new UncheckedIOException(String.format("Error writing file snapshot, " + "temp path = %s, snapshotId = %s.", this.tempSnapshotPath, this.snapshotId), e);
+        }
+    }
 
-	@Override
-	public boolean isFrozen() {
-		return frozen;
-	}
+    @Override
+    public boolean isFrozen() {
+        return frozen;
+    }
 
-	@Override
-	public void freeze() throws IOException {
-		if (frozen) {
-			throw new IllegalStateException(
-					String.format("Freeze is not supported. Snapshot is already frozen: id = %s; temp path = %s", snapshotId, tempSnapshotPath)
-			);
-		}
+    @Override
+    public void freeze() {
+        try {
+            checkIfFrozen("Freeze");
 
-		channel.close();
-		frozen = true;
+            channel.close();
+            frozen = true;
 
-		// Set readonly and ignore the result
-		if (!tempSnapshotPath.toFile().setReadOnly()) {
-			throw new IOException(String.format("Unable to set file (%s) as read-only", tempSnapshotPath));
-		}
+            if (!tempSnapshotPath.toFile().setReadOnly()) {
+                throw new IllegalStateException(String.format("Unable to set file (%s) as read-only", tempSnapshotPath));
+            }
 
-		Path destination = Snapshots.moveRename(tempSnapshotPath, snapshotId);
-		Utils.atomicMoveWithFallback(tempSnapshotPath, destination);
+            Path destination = Snapshots.moveRename(tempSnapshotPath, snapshotId);
+            Utils.atomicMoveWithFallback(tempSnapshotPath, destination);
 
-		replicatedLog.ifPresent(log -> log.onSnapshotFrozen(snapshotId));
-	}
+            replicatedLog.ifPresent(log -> log.onSnapshotFrozen(snapshotId));
+        } catch (IOException e) {
+            throw new UncheckedIOException(String.format("Error freezing file snapshot, " + "temp path = %s, snapshotId = %s.", this.tempSnapshotPath, this.snapshotId), e);
+        }
+    }
 
-	@Override
-	public void close() throws IOException {
-		try {
-			channel.close();
-		} finally {
-			// This is a noop if freeze was called before calling close
-			Files.deleteIfExists(tempSnapshotPath);
-		}
-	}
+    @Override
+    public void close() {
+        try {
+            channel.close();
+            // This is a noop if freeze was called before calling close
+            Files.deleteIfExists(tempSnapshotPath);
+        } catch (IOException e) {
+            throw new UncheckedIOException(String.format("Error closing snapshot writer, " + "temp path = %s, snapshotId %s.", this.tempSnapshotPath, this.snapshotId), e);
+        }
+    }
 
-	/**
-	 * Create a snapshot writer for topic partition log dir and snapshot id.
-	 * @param logDir     the directory for the topic partition
-	 * @param snapshotId the end offset and epoch for the snapshotId
-	 * @throws IOException for any IO error while creating the snapshot
-	 */
-	public static FileRawSnapshotWriter create(
-			Path logDir,
-			OffsetAndEpoch snapshotId,
-			Optional<ReplicatedLog> replicatedLog
-	) throws IOException {
-		Path path = Snapshots.createTempFile(logDir, snapshotId);
+    @Override
+    public String toString() {
+        return String.format("FileRawSnapshotWriter(path=%s, snapshotId=%s, frozen=%s)", tempSnapshotPath, snapshotId, frozen);
+    }
 
-		return new FileRawSnapshotWriter(
-				path,
-				FileChannel.open(path, Utils.mkSet(StandardOpenOption.WRITE, StandardOpenOption.APPEND)),
-				snapshotId,
-				replicatedLog
-		);
-	}
+    void checkIfFrozen(String operation) {
+        if (frozen) {
+            throw new IllegalStateException(String.format("%s is not supported. Snapshot is already frozen: id = %s; temp path = %s", operation, snapshotId, tempSnapshotPath));
+        }
+    }
+
+    /**
+     * Create a snapshot writer for topic partition log dir and snapshot id.
+     * @param logDir     the directory for the topic partition
+     * @param snapshotId the end offset and epoch for the snapshotId
+     */
+    public static FileRawSnapshotWriter create(Path logDir, OffsetAndEpoch snapshotId, Optional<ReplicatedLog> replicatedLog) {
+        Path path = Snapshots.createTempFile(logDir, snapshotId);
+
+        try {
+            return new FileRawSnapshotWriter(path, FileChannel.open(path, StandardOpenOption.WRITE, StandardOpenOption.APPEND), snapshotId, replicatedLog);
+        } catch (IOException e) {
+            throw new UncheckedIOException(String.format("Error creating snapshot writer. path = %s, snapshotId %s.", path, snapshotId), e);
+        }
+    }
 }

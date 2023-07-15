@@ -37,36 +37,12 @@ public class InMemorySessionStoreTest extends AbstractSessionBytesStoreTest {
 	private static final String STORE_NAME = "in-memory session store";
 
 	@Override
-	<K, V> SessionStore<K, V> buildSessionStore(final long retentionPeriod,
-												final Serde<K> keySerde,
-												final Serde<V> valueSerde) {
-		return Stores.sessionStoreBuilder(
-				Stores.inMemorySessionStore(
-						STORE_NAME,
-                ofMillis(retentionPeriod)),
-            keySerde,
-            valueSerde).build();
+	<K, V> SessionStore<K, V> buildSessionStore(final long retentionPeriod, final Serde<K> keySerde, final Serde<V> valueSerde) {
+        return Stores.sessionStoreBuilder(Stores.inMemorySessionStore(STORE_NAME, ofMillis(retentionPeriod)), keySerde, valueSerde).build();
     }
 
-    @Override
-    String getMetricsScope() {
-        return new InMemorySessionBytesStoreSupplier(null, 0).metricsScope();
-    }
-
-    @Test
-    public void shouldRemoveExpired() {
-        sessionStore.put(new Windowed<>("a", new SessionWindow(0, 0)), 1L);
-        sessionStore.put(new Windowed<>("aa", new SessionWindow(0, 10)), 2L);
-        sessionStore.put(new Windowed<>("a", new SessionWindow(10, 20)), 3L);
-
-        // Advance stream time to expire the first record
-        sessionStore.put(new Windowed<>("aa", new SessionWindow(10, RETENTION_PERIOD)), 4L);
-
-        try (final KeyValueIterator<Windowed<String>, Long> iterator =
-            sessionStore.findSessions("a", "b", 0L, Long.MAX_VALUE)
-        ) {
-            assertEquals(valuesToSet(iterator), new HashSet<>(Arrays.asList(2L, 3L, 4L)));
-        }
+    StoreType getStoreType() {
+        return StoreType.InMemoryStore;
     }
 
     @Test

@@ -22,23 +22,13 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsBuilder;
+import org.apache.kafka.streams.TestInputTopic;
 import org.apache.kafka.streams.TopologyTestDriver;
 import org.apache.kafka.streams.errors.TopologyException;
-import org.apache.kafka.streams.kstream.Consumed;
-import org.apache.kafka.streams.kstream.Grouped;
-import org.apache.kafka.streams.kstream.KGroupedTable;
-import org.apache.kafka.streams.kstream.KTable;
-import org.apache.kafka.streams.kstream.KeyValueMapper;
-import org.apache.kafka.streams.kstream.Materialized;
+import org.apache.kafka.streams.kstream.*;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
-import org.apache.kafka.streams.TestInputTopic;
-import org.apache.kafka.test.MockAggregator;
-import org.apache.kafka.test.MockInitializer;
-import org.apache.kafka.test.MockMapper;
-import org.apache.kafka.test.MockProcessorSupplier;
-import org.apache.kafka.test.MockReducer;
-import org.apache.kafka.test.StreamsTestUtils;
+import org.apache.kafka.test.*;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -47,9 +37,7 @@ import java.util.Properties;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.*;
 
 public class KGroupedTableImplTest {
 
@@ -118,26 +106,19 @@ public class KGroupedTableImplTest {
 				Materialized.as("store")));
     }
 
-	@Test
+    @Test
     public void shouldNotAllowInvalidStoreNameOnReduce() {
-		assertThrows(TopologyException.class, () -> groupedTable.reduce(
-				MockReducer.STRING_ADDER,
-				MockReducer.STRING_REMOVER,
-				Materialized.as(INVALID_STORE_NAME)));
+        assertThrows(TopologyException.class, () -> groupedTable.reduce(MockReducer.STRING_ADDER, MockReducer.STRING_REMOVER, Materialized.as(INVALID_STORE_NAME)));
     }
 
-    private MockProcessorSupplier<String, Integer> getReducedResults(final KTable<String, Integer> inputKTable) {
-        final MockProcessorSupplier<String, Integer> supplier = new MockProcessorSupplier<>();
-        inputKTable
-            .toStream()
-            .process(supplier);
+    private MockApiProcessorSupplier<String, Integer, Void, Void> getReducedResults(final KTable<String, Integer> inputKTable) {
+        final MockApiProcessorSupplier<String, Integer, Void, Void> supplier = new MockApiProcessorSupplier<>();
+        inputKTable.toStream().process(supplier);
         return supplier;
     }
 
-    private void assertReduced(final Map<String, ValueAndTimestamp<Integer>> reducedResults,
-                               final String topic,
-                               final TopologyTestDriver driver) {
-		final TestInputTopic<String, Double> inputTopic =
+    private void assertReduced(final Map<String, ValueAndTimestamp<Integer>> reducedResults, final String topic, final TopologyTestDriver driver) {
+        final TestInputTopic<String, Double> inputTopic =
 				driver.createInputTopic(topic, new StringSerializer(), new DoubleSerializer());
 		inputTopic.pipeInput("A", 1.1, 10);
 		inputTopic.pipeInput("B", 2.2, 11);
@@ -172,7 +153,7 @@ public class KGroupedTableImplTest {
                 MockReducer.INTEGER_SUBTRACTOR,
                 Materialized.as("reduced"));
 
-        final MockProcessorSupplier<String, Integer> supplier = getReducedResults(reduced);
+        final MockApiProcessorSupplier<String, Integer, Void, Void> supplier = getReducedResults(reduced);
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
 			assertReduced(supplier.theCapturedProcessor().lastValueAndTimestampPerKey(), topic, driver);
 			assertEquals(reduced.queryableStoreName(), "reduced");
@@ -194,14 +175,13 @@ public class KGroupedTableImplTest {
             .groupBy(intProjection)
             .reduce(MockReducer.INTEGER_ADDER, MockReducer.INTEGER_SUBTRACTOR);
 
-        final MockProcessorSupplier<String, Integer> supplier = getReducedResults(reduced);
+        final MockApiProcessorSupplier<String, Integer, Void, Void> supplier = getReducedResults(reduced);
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
 			assertReduced(supplier.theCapturedProcessor().lastValueAndTimestampPerKey(), topic, driver);
 			assertNull(reduced.queryableStoreName());
         }
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     public void shouldReduceAndMaterializeResults() {
         final KeyValueMapper<String, Number, KeyValue<String, Integer>> intProjection =
@@ -219,7 +199,7 @@ public class KGroupedTableImplTest {
                     .withKeySerde(Serdes.String())
                     .withValueSerde(Serdes.Integer()));
 
-        final MockProcessorSupplier<String, Integer> supplier = getReducedResults(reduced);
+        final MockApiProcessorSupplier<String, Integer, Void, Void> supplier = getReducedResults(reduced);
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
 			assertReduced(supplier.theCapturedProcessor().lastValueAndTimestampPerKey(), topic, driver);
             {
@@ -235,7 +215,6 @@ public class KGroupedTableImplTest {
         }
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     public void shouldCountAndMaterializeResults() {
         builder
@@ -265,7 +244,6 @@ public class KGroupedTableImplTest {
         }
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     public void shouldAggregateAndMaterializeResults() {
         builder

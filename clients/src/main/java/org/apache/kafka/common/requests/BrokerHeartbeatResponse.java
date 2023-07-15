@@ -27,36 +27,41 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class BrokerHeartbeatResponse extends AbstractResponse {
-	private final BrokerHeartbeatResponseData data;
+    private final BrokerHeartbeatResponseData data;
 
-	public BrokerHeartbeatResponse(BrokerHeartbeatResponseData data) {
-		super(ApiKeys.BROKER_HEARTBEAT);
-		this.data = data;
-	}
+    public BrokerHeartbeatResponse(BrokerHeartbeatResponseData data) {
+        super(ApiKeys.BROKER_HEARTBEAT);
+        this.data = data;
+    }
 
-	@Override
-	public BrokerHeartbeatResponseData data() {
-		return data;
-	}
+    @Override
+    public BrokerHeartbeatResponseData data() {
+        return data;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> errorCounts = new HashMap<>();
-		errorCounts.put(Errors.forCode(data.errorCode()), 1);
-		return errorCounts;
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	public static BrokerHeartbeatResponse parse(ByteBuffer buffer, short version) {
-		return new BrokerHeartbeatResponse(new BrokerHeartbeatResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        Map<Errors, Integer> errorCounts = new HashMap<>();
+        errorCounts.put(Errors.forCode(data.errorCode()), 1);
+        return errorCounts;
+    }
 
-	@Override
-	public boolean shouldClientThrottle(short version) {
-		return true;
-	}
+    public static BrokerHeartbeatResponse parse(ByteBuffer buffer, short version) {
+        return new BrokerHeartbeatResponse(new BrokerHeartbeatResponseData(new ByteBufferAccessor(buffer), version));
+    }
+
+    @Override
+    public boolean shouldClientThrottle(short version) {
+        return true;
+    }
 }

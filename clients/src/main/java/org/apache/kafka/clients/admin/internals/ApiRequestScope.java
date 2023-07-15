@@ -29,13 +29,17 @@ import java.util.OptionalInt;
  */
 public interface ApiRequestScope {
 
-	/**
-	 * Get the target broker ID that a request is intended for or
-	 * empty if the request can be sent to any broker.
-	 * @return optional broker id
-	 */
-	default OptionalInt destinationBrokerId() {
-		return OptionalInt.empty();
-	}
+    /**
+     * Get the target broker ID that a request is intended for or
+     * empty if the request can be sent to any broker.
+     * <p>
+     * Note that if the destination broker ID is present in the
+     * {@link ApiRequestScope} returned by {@link AdminApiLookupStrategy#lookupScope(Object)},
+     * then no lookup will be attempted.
+     * @return optional broker ID
+     */
+    default OptionalInt destinationBrokerId() {
+        return OptionalInt.empty();
+    }
 
 }

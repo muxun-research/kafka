@@ -124,93 +124,84 @@ public class FileRecords extends AbstractRecords implements Closeable {
     /**
      * Return a slice of records from this instance, which is a view into this set starting from the given position
      * and with the given size limit.
-	 *
-	 * If the size is beyond the end of the file, the end will be based on the size of the file at the time of the read.
-	 *
-	 * If this message set is already sliced, the position will be taken relative to that slicing.
-	 *
-	 * @param position The start position to begin the read from
-	 * @param size The number of bytes after the start position to include
-	 * @return A sliced wrapper on this message set limited based on the given position and size
-	 */
-	public FileRecords slice(int position, int size) throws IOException {
-		int availableBytes = availableBytes(position, size);
-		int startPosition = this.start + position;
-		return new FileRecords(file, channel, startPosition, startPosition + availableBytes, true);
-	}
-
-	/**
-	 * Return a slice of records from this instance, the difference with {@link FileRecords#slice(int, int)} is
-	 * that the position is not necessarily on an offset boundary.
-	 * <p>
-	 * This method is reserved for cases where offset alignment is not necessary, such as in the replication of raft
-	 * snapshots.
-	 * @param position The start position to begin the read from
-	 * @param size     The number of bytes after the start position to include
-	 * @return A unaligned slice of records on this message set limited based on the given position and size
-	 */
-	public UnalignedFileRecords sliceUnaligned(int position, int size) {
-		int availableBytes = availableBytes(position, size);
-		return new UnalignedFileRecords(channel, this.start + position, availableBytes);
-	}
-
-	private int availableBytes(int position, int size) {
-		// Cache current size in case concurrent write changes it
-		int currentSizeInBytes = sizeInBytes();
-
-		if (position < 0)
-			throw new IllegalArgumentException("Invalid position: " + position + " in read from " + this);
-		if (position > currentSizeInBytes - start)
-			throw new IllegalArgumentException("Slice from position " + position + " exceeds end position of " + this);
-		if (size < 0)
-			throw new IllegalArgumentException("Invalid size: " + size + " in read from " + this);
-
-		int end = this.start + position + size;
-		// Handle integer overflow or if end is beyond the end of the file
-		if (end < 0 || end > start + currentSizeInBytes)
-			end = this.start + currentSizeInBytes;
-		return end - (this.start + position);
-	}
+     * <p>
+     * If the size is beyond the end of the file, the end will be based on the size of the file at the time of the read.
+     * <p>
+     * If this message set is already sliced, the position will be taken relative to that slicing.
+     * @param position The start position to begin the read from
+     * @param size     The number of bytes after the start position to include
+     * @return A sliced wrapper on this message set limited based on the given position and size
+     */
+    public FileRecords slice(int position, int size) throws IOException {
+        int availableBytes = availableBytes(position, size);
+        int startPosition = this.start + position;
+        return new FileRecords(file, channel, startPosition, startPosition + availableBytes, true);
+    }
 
     /**
-	 * 追加消息集到文件中
-	 * 此方法并非线程安全，所以需要在锁的保护下执行
-	 * @param records 追加的消息集
-	 * @return 持久化到文件的字节数
+     * Return a slice of records from this instance, the difference with {@link FileRecords#slice(int, int)} is
+     * that the position is not necessarily on an offset boundary.
+     * <p>
+     * This method is reserved for cases where offset alignment is not necessary, such as in the replication of raft
+     * snapshots.
+     * @param position The start position to begin the read from
+     * @param size     The number of bytes after the start position to include
+     * @return A unaligned slice of records on this message set limited based on the given position and size
+     */
+    public UnalignedFileRecords sliceUnaligned(int position, int size) {
+        int availableBytes = availableBytes(position, size);
+        return new UnalignedFileRecords(channel, this.start + position, availableBytes);
+    }
+
+    private int availableBytes(int position, int size) {
+        // Cache current size in case concurrent write changes it
+        int currentSizeInBytes = sizeInBytes();
+
+        if (position < 0)
+            throw new IllegalArgumentException("Invalid position: " + position + " in read from " + this);
+        if (position > currentSizeInBytes - start)
+            throw new IllegalArgumentException("Slice from position " + position + " exceeds end position of " + this);
+        if (size < 0)
+            throw new IllegalArgumentException("Invalid size: " + size + " in read from " + this);
+
+        int end = this.start + position + size;
+        // Handle integer overflow or if end is beyond the end of the file
+        if (end < 0 || end > start + currentSizeInBytes)
+            end = this.start + currentSizeInBytes;
+        return end - (this.start + position);
+    }
+
+    /**
+     * Append a set of records to the file. This method is not thread-safe and must be
+     * protected with a lock.
+     *
+     * @param records The records to append
+     * @return the number of bytes written to the underlying file
      */
     public int append(MemoryRecords records) throws IOException {
         if (records.sizeInBytes() > Integer.MAX_VALUE - size.get())
-            throw new IllegalArgumentException("Append of size " + records.sizeInBytes() +
-                    " bytes is too large for segment with current file position at " + size.get());
+            throw new IllegalArgumentException("Append of size " + records.sizeInBytes() + " bytes is too large for segment with current file position at " + size.get());
 
         int written = records.writeFullyTo(channel);
-		// 累加写入的字节数
         size.getAndAdd(written);
-		return written;
-	}
+        return written;
+    }
 
-	/**
-	 * 提交所有写入数据到磁盘上
-	 */
-	public void flush() throws IOException {
-		channel.force(true);
-	}
+    /**
+     * Commit all written data to the physical disk
+     */
+    public void flush() throws IOException {
+        channel.force(true);
+    }
 
-	/**
-	 * Flush the parent directory of a file to the physical disk, which makes sure the file is accessible after crashing.
-	 */
-	public void flushParentDir() throws IOException {
-		Utils.flushParentDir(file.toPath());
-	}
-
-	/**
-	 * Close this record set
-	 */
-	public void close() throws IOException {
-		flush();
-		trim();
-		channel.close();
-	}
+    /**
+     * Close this record set
+     */
+    public void close() throws IOException {
+        flush();
+        trim();
+        channel.close();
+    }
 
     /**
      * Close file handlers used by the FileChannel but don't write to disk. This is used when the disk may have failed
@@ -220,13 +211,13 @@ public class FileRecords extends AbstractRecords implements Closeable {
     }
 
     /**
-	 * 直接从文件系统中删除这个消息集
-	 * @throws IOException 出现IO异常问题，抛出IOException
-	 * @return 通过此方法删除的文件，返回true，如果因为文件不存在导致的删除失败，返回false
+     * Delete this message set from the filesystem
+     * @throws IOException if deletion fails due to an I/O error
+     * @return  {@code true} if the file was deleted by this method; {@code false} if the file could not be deleted
+     *          because it did not exist
      */
     public boolean deleteIfExists() throws IOException {
         Utils.closeQuietly(channel, "FileChannel");
-		// 直接根据文件路径删除文件
         return Files.deleteIfExists(file.toPath());
     }
 
@@ -237,13 +228,13 @@ public class FileRecords extends AbstractRecords implements Closeable {
         truncateTo(sizeInBytes());
     }
 
-	/**
-	 * Update the parent directory (to be used with caution since this does not reopen the file channel)
-	 * @param parentDir The new parent directory
-	 */
-	public void updateParentDir(File parentDir) {
-		this.file = new File(parentDir, file.getName());
-	}
+    /**
+     * Update the parent directory (to be used with caution since this does not reopen the file channel)
+     * @param parentDir The new parent directory
+     */
+    public void updateParentDir(File parentDir) {
+        this.file = new File(parentDir, file.getName());
+    }
 
     /**
      * Rename the file that backs this message set
@@ -251,7 +242,7 @@ public class FileRecords extends AbstractRecords implements Closeable {
      */
     public void renameTo(File f) throws IOException {
         try {
-			Utils.atomicMoveWithFallback(file.toPath(), f.toPath(), false);
+            Utils.atomicMoveWithFallback(file.toPath(), f.toPath(), false);
         } finally {
             this.file = f;
         }
@@ -296,34 +287,29 @@ public class FileRecords extends AbstractRecords implements Closeable {
         }
     }
 
-	@Override
-	public long writeTo(TransferableChannel destChannel, long offset, int length) throws IOException {
-		long newSize = Math.min(channel.size(), end) - start;
-		int oldSize = sizeInBytes();
-		if (newSize < oldSize)
-			throw new KafkaException(String.format(
-					"Size of FileRecords %s has been truncated during write: old size %d, new size %d",
-					file.getAbsolutePath(), oldSize, newSize));
+    @Override
+    public int writeTo(TransferableChannel destChannel, int offset, int length) throws IOException {
+        long newSize = Math.min(channel.size(), end) - start;
+        int oldSize = sizeInBytes();
+        if (newSize < oldSize)
+            throw new KafkaException(String.format("Size of FileRecords %s has been truncated during write: old size %d, new size %d", file.getAbsolutePath(), oldSize, newSize));
 
-		long position = start + offset;
-		long count = Math.min(length, oldSize - offset);
-		return destChannel.transferFrom(channel, position, count);
-	}
+        long position = start + offset;
+        int count = Math.min(length, oldSize - offset);
+        // safe to cast to int since `count` is an int
+        return (int) destChannel.transferFrom(channel, position, count);
+    }
 
-	/**
-	 * 直接查询最后一个offset的文件位置，如果这个offset≥给定的offset
-	 * 并返回它的物理位置以及消息的大小
-	 * 如果没有找到，直接返回null
-	 * @param targetOffset     需要进行查找的offset
-	 * @param startingPosition 进行查找的起始位置
-	 */
+    /**
+     * Search forward for the file position of the last offset that is greater than or equal to the target offset
+     * and return its physical position and the size of the message (including log overhead) at the returned offset. If
+     * no such offsets are found, return null.
+     * @param targetOffset     The offset to search for.
+     * @param startingPosition The starting position in the file to begin searching from.
+     */
     public LogOffsetPosition searchForOffsetWithSize(long targetOffset, int startingPosition) {
-
         for (FileChannelRecordBatch batch : batchesFrom(startingPosition)) {
-			// 获取当前batch的最大offset
             long offset = batch.lastOffset();
-			// 如果最大的offset≥的给定的offset，那么就是此batch，返回当前batch的物理文件地址以及batch大小
-			// 相当于结束位置
             if (offset >= targetOffset)
                 return new LogOffsetPosition(offset, batch.position(), batch.sizeInBytes());
         }
@@ -396,18 +382,15 @@ public class FileRecords extends AbstractRecords implements Closeable {
 
     @Override
     public String toString() {
-		return "FileRecords(size=" + sizeInBytes() +
-				", file=" + file +
-				", start=" + start +
-				", end=" + end +
-				")";
-	}
+        return "FileRecords(size=" + sizeInBytes() + ", file=" + file + ", start=" + start + ", end=" + end + ")";
+    }
 
-	/**
-	 * 提供一个文件中存储的record batch的迭代器，于一个指定的位置开始，和{@link #batches()}方法很类似，但是此方法指定了一个起始位置
-	 * 这个方法必须使用小心：传入的起始位置必须是一个已知的batch的起始位置
-	 * @param start record开始迭代的位置，必须是一个已知的batch的起始位置
-	 * @return 以{@code start}起始的batch迭代器
+    /**
+     * Get an iterator over the record batches in the file, starting at a specific position. This is similar to
+     * {@link #batches()} except that callers specify a particular position to start reading the batches from. This
+     * method must be used with caution: the start position passed in must be a known start of a batch.
+     * @param start The position to start record iteration from; must be a known position for start of a batch
+     * @return An iterator over batches starting from {@code start}
      */
     public Iterable<FileChannelRecordBatch> batchesFrom(final int start) {
         return () -> batchIterator(start);

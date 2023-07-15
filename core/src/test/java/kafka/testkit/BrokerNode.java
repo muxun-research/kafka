@@ -19,81 +19,86 @@ package kafka.testkit;
 
 import org.apache.kafka.common.Uuid;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
+
+import static java.util.Collections.emptyMap;
 
 public class BrokerNode implements TestKitNode {
-	public static class Builder {
-		private int id = -1;
-		private Uuid incarnationId = null;
-		private String metadataDirectory = null;
-		private List<String> logDataDirectories = null;
+    public static class Builder {
+        private int id = -1;
+        private Uuid incarnationId = null;
+        private String metadataDirectory = null;
+        private List<String> logDataDirectories = null;
 
-		public Builder setId(int id) {
-			this.id = id;
-			return this;
-		}
+        public Builder setId(int id) {
+            this.id = id;
+            return this;
+        }
 
-		public Builder setLogDirectories(List<String> logDataDirectories) {
-			this.logDataDirectories = logDataDirectories;
-			return this;
-		}
+        public Builder setLogDirectories(List<String> logDataDirectories) {
+            this.logDataDirectories = logDataDirectories;
+            return this;
+        }
 
-		public Builder setMetadataDirectory(String metadataDirectory) {
-			this.metadataDirectory = metadataDirectory;
-			return this;
-		}
+        public Builder setMetadataDirectory(String metadataDirectory) {
+            this.metadataDirectory = metadataDirectory;
+            return this;
+        }
 
-		public BrokerNode build() {
-			if (id == -1) {
-				throw new RuntimeException("You must set the node id");
-			}
-			if (incarnationId == null) {
-				incarnationId = Uuid.randomUuid();
-			}
-			if (logDataDirectories == null) {
-				logDataDirectories = Collections.
-						singletonList(String.format("broker_%d_data0", id));
-			}
-			if (metadataDirectory == null) {
-				metadataDirectory = logDataDirectories.get(0);
-			}
-			return new BrokerNode(id, incarnationId, metadataDirectory,
-					logDataDirectories);
-		}
-	}
+        public BrokerNode build() {
+            if (id == -1) {
+                throw new RuntimeException("You must set the node id");
+            }
+            if (incarnationId == null) {
+                incarnationId = Uuid.randomUuid();
+            }
+            if (logDataDirectories == null) {
+                logDataDirectories = Collections.singletonList(String.format("broker_%d_data0", id));
+            }
+            if (metadataDirectory == null) {
+                metadataDirectory = logDataDirectories.get(0);
+            }
+            return new BrokerNode(id, incarnationId, metadataDirectory, logDataDirectories);
+        }
+    }
 
-	private final int id;
-	private final Uuid incarnationId;
-	private final String metadataDirectory;
-	private final List<String> logDataDirectories;
+    private final int id;
+    private final Uuid incarnationId;
+    private final String metadataDirectory;
+    private final List<String> logDataDirectories;
+    private final Map<String, String> propertyOverrides;
 
-	BrokerNode(int id,
-			   Uuid incarnationId,
-			   String metadataDirectory,
-			   List<String> logDataDirectories) {
-		this.id = id;
-		this.incarnationId = incarnationId;
-		this.metadataDirectory = metadataDirectory;
-		this.logDataDirectories = new ArrayList<>(logDataDirectories);
-	}
+    BrokerNode(int id, Uuid incarnationId, String metadataDirectory, List<String> logDataDirectories) {
+        this(id, incarnationId, metadataDirectory, logDataDirectories, emptyMap());
+    }
 
-	@Override
-	public int id() {
-		return id;
-	}
+    BrokerNode(int id, Uuid incarnationId, String metadataDirectory, List<String> logDataDirectories, Map<String, String> propertyOverrides) {
+        this.id = id;
+        this.incarnationId = incarnationId;
+        this.metadataDirectory = metadataDirectory;
+        this.logDataDirectories = new ArrayList<>(logDataDirectories);
+        this.propertyOverrides = new HashMap<>(propertyOverrides);
+    }
 
-	public Uuid incarnationId() {
-		return incarnationId;
-	}
+    @Override
+    public int id() {
+        return id;
+    }
 
-	@Override
-	public String metadataDirectory() {
-		return metadataDirectory;
-	}
+    public Uuid incarnationId() {
+        return incarnationId;
+    }
 
-	public List<String> logDataDirectories() {
-		return logDataDirectories;
-	}
+    @Override
+    public String metadataDirectory() {
+        return metadataDirectory;
+    }
+
+    public List<String> logDataDirectories() {
+        return logDataDirectories;
+    }
+
+    public Map<String, String> propertyOverrides() {
+        return propertyOverrides;
+    }
 }

@@ -27,17 +27,24 @@ public interface ProductionExceptionHandler extends Configurable {
     /**
      * Inspect a record that we attempted to produce, and the exception that resulted
      * from attempting to produce it and determine whether or not to continue processing.
-     *
-     * @param record The record that failed to produce
+     * @param record    The record that failed to produce
      * @param exception The exception that occurred during production
      */
-    ProductionExceptionHandlerResponse handle(final ProducerRecord<byte[], byte[]> record,
-                                              final Exception exception);
+    ProductionExceptionHandlerResponse handle(final ProducerRecord<byte[], byte[]> record, final Exception exception);
+
+    /**
+     * Handles serialization exception and determine if the process should continue. The default implementation is to
+     * fail the process.
+     * @param record    the record that failed to serialize
+     * @param exception the exception that occurred during serialization
+     */
+    default ProductionExceptionHandlerResponse handleSerializationException(final ProducerRecord record, final Exception exception) {
+        return ProductionExceptionHandlerResponse.FAIL;
+    }
 
     enum ProductionExceptionHandlerResponse {
         /* continue processing */
-        CONTINUE(0, "CONTINUE"),
-        /* fail processing */
+        CONTINUE(0, "CONTINUE"), /* fail processing */
         FAIL(1, "FAIL");
 
         /**
@@ -50,8 +57,7 @@ public interface ProductionExceptionHandler extends Configurable {
          */
         public final int id;
 
-        ProductionExceptionHandlerResponse(final int id,
-                                           final String name) {
+        ProductionExceptionHandlerResponse(final int id, final String name) {
             this.id = id;
             this.name = name;
         }

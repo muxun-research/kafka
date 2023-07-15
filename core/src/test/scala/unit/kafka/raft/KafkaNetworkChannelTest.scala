@@ -16,21 +16,22 @@
  */
 package kafka.raft
 
-import java.net.InetSocketAddress
-import java.util
-import java.util.Collections
 import org.apache.kafka.clients.MockClient.MockMetadataUpdater
 import org.apache.kafka.clients.{MockClient, NodeApiVersions}
-import org.apache.kafka.common.message.{BeginQuorumEpochResponseData, EndQuorumEpochResponseData, FetchResponseData, VoteResponseData}
 import org.apache.kafka.common.protocol.{ApiKeys, ApiMessage, Errors}
-import org.apache.kafka.common.requests.{AbstractResponse, ApiVersionsResponse, BeginQuorumEpochRequest, BeginQuorumEpochResponse, EndQuorumEpochRequest, EndQuorumEpochResponse, FetchResponse, VoteRequest, VoteResponse}
+import org.apache.kafka.common.requests._
+import org.apache.kafka.common.utils.annotation.ApiKeyVersionsSource
 import org.apache.kafka.common.utils.{MockTime, Time}
-import org.apache.kafka.common.{Node, TopicPartition}
+import org.apache.kafka.common.{Node, TopicPartition, Uuid}
 import org.apache.kafka.raft.RaftConfig.InetAddressSpec
 import org.apache.kafka.raft.{RaftRequest, RaftUtil}
 import org.junit.jupiter.api.Assertions._
 import org.junit.jupiter.api.{BeforeEach, Test}
+import org.junit.jupiter.params.ParameterizedTest
 
+import java.net.InetSocketAddress
+import java.util
+import java.util.Collections
 import scala.jdk.CollectionConverters._
 
 class KafkaNetworkChannelTest {
@@ -42,6 +43,7 @@ class KafkaNetworkChannelTest {
   private val time = new MockTime()
   private val client = new MockClient(time, new StubMetadataUpdater)
   private val topicPartition = new TopicPartition("topic", 0)
+  private val topicId = Uuid.randomUuid()
   private val channel = new KafkaNetworkChannel(time, client, requestTimeoutMs, threadNamePrefix = "test-raft")
 
   @BeforeEach
@@ -159,6 +161,28 @@ class KafkaNetworkChannelTest {
     }
   }
 
+  @ParameterizedTest
+  @ApiKeyVersionsSource(apiKey = ApiKeys.FETCH)
+  def testFetchRequestDowngrade(version: Short): Unit = {
+    val destinationId = 2
+    val destinationNode = new Node(destinationId, "127.0.0.1", 9092)
+    channel.updateEndpoint(destinationId, new InetAddressSpec(
+      new InetSocketAddress(destinationNode.host, destinationNode.port)))
+    sendTestRequest(ApiKeys.FETCH, destinationId)
+    channel.pollOnce()
+
+    assertEquals(1, client.requests.size)
+    val request = client.requests.peek.requestBuilder.build(version)
+
+    if (version < 15) {
+      assertTrue(request.asInstanceOf[FetchRequest].data.replicaId == 1)
+      assertTrue(request.asInstanceOf[FetchRequest].data.replicaState.replicaId == -1)
+    } else {
+      assertTrue(request.asInstanceOf[FetchRequest].data.replicaId == -1)
+      assertTrue(request.asInstanceOf[FetchRequest].data.replicaState.replicaId == 1)
+    }
+  }
+
   private def sendTestRequest(
                                apiKey: ApiKeys,
                                destinationId: Int,
@@ -210,13 +234,13 @@ class KafkaNetworkChannelTest {
         VoteRequest.singletonRequest(topicPartition, clusterId, leaderEpoch, leaderId, lastEpoch, 329)
 
       case ApiKeys.FETCH =>
-        val request = RaftUtil.singletonFetchRequest(topicPartition, fetchPartition => {
+        val request = RaftUtil.singletonFetchRequest(topicPartition, topicId, fetchPartition => {
           fetchPartition
             .setCurrentLeaderEpoch(5)
             .setFetchOffset(333)
             .setLastFetchedEpoch(5)
         })
-        request.setReplicaId(1)
+        request.setReplicaState(new ReplicaState().setReplicaId(1))
 
       case _ =>
         throw new AssertionError(s"Unexpected api $key")

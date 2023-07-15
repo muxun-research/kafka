@@ -22,11 +22,7 @@ import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.utils.Time;
-import org.apache.kafka.streams.KeyValue;
-import org.apache.kafka.streams.StreamsConfig;
-import org.apache.kafka.streams.StreamsMetrics;
-import org.apache.kafka.streams.Topology;
-import org.apache.kafka.streams.TopologyTestDriver;
+import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.internals.ApiUtils;
 import org.apache.kafka.streams.kstream.Transformer;
 import org.apache.kafka.streams.kstream.ValueTransformer;
@@ -38,11 +34,7 @@ import org.apache.kafka.streams.state.internals.InMemoryKeyValueStore;
 
 import java.io.File;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
+import java.util.*;
 
 /**
  * {@link MockProcessorContext} is a mock of {@link ProcessorContext} for users to test their {@link Processor},
@@ -56,31 +48,32 @@ import java.util.Properties;
  * If you require more automated tests, we recommend wrapping your {@link Processor} in a minimal source-processor-sink
  * {@link Topology} and using the {@link TopologyTestDriver}.
  */
+@SuppressWarnings("deprecation") // not deprecating old PAPI Context, since it is still in use by Transformers.
 public class MockProcessorContext implements ProcessorContext, RecordCollector.Supplier {
     // Immutable fields ================================================
-	private final StreamsMetricsImpl metrics;
-	private final TaskId taskId;
-	private final StreamsConfig config;
-	private final File stateDir;
+    private final StreamsMetricsImpl metrics;
+    private final TaskId taskId;
+    private final StreamsConfig config;
+    private final File stateDir;
 
-	// settable record metadata ================================================
-	private String topic;
-	private Integer partition;
-	private Long offset;
-	private Headers headers;
-	private Long recordTimestamp;
-	private Long currentSystemTimeMs;
-	private Long currentStreamTimeMs;
+    // settable record metadata ================================================
+    private String topic;
+    private Integer partition;
+    private Long offset;
+    private Headers headers;
+    private Long recordTimestamp;
+    private Long currentSystemTimeMs;
+    private Long currentStreamTimeMs;
 
-	// mocks ================================================
-	private final Map<String, StateStore> stateStores = new HashMap<>();
-	private final List<CapturedPunctuator> punctuators = new LinkedList<>();
-	private final List<CapturedForward> capturedForwards = new LinkedList<>();
-	private boolean committed = false;
+    // mocks ================================================
+    private final Map<String, StateStore> stateStores = new HashMap<>();
+    private final List<CapturedPunctuator> punctuators = new LinkedList<>();
+    private final List<CapturedForward> capturedForwards = new LinkedList<>();
+    private boolean committed = false;
 
 
-	/**
-	 * {@link CapturedPunctuator} holds captured punctuators, along with their scheduling information.
+    /**
+     * {@link CapturedPunctuator} holds captured punctuators, along with their scheduling information.
      */
     public static class CapturedPunctuator {
         private final long intervalMs;
@@ -121,59 +114,59 @@ public class MockProcessorContext implements ProcessorContext, RecordCollector.S
     }
 
 
-	public static class CapturedForward {
-		private final String childName;
-		private final long timestamp;
-		private final KeyValue keyValue;
+    public static class CapturedForward {
+        private final String childName;
+        private final long timestamp;
+        private final Headers headers;
+        private final KeyValue keyValue;
 
-		private CapturedForward(final To to, final KeyValue keyValue) {
-			if (keyValue == null) {
-				throw new IllegalArgumentException();
-			}
+        private CapturedForward(final KeyValue keyValue, final To to, final Headers headers) {
+            if (keyValue == null) {
+                throw new IllegalArgumentException();
+            }
 
-			this.childName = to.childName;
-			this.timestamp = to.timestamp;
-			this.keyValue = keyValue;
-		}
+            this.childName = to.childName;
+            this.timestamp = to.timestamp;
+            this.keyValue = keyValue;
+            this.headers = headers;
+        }
 
-		/**
-		 * The child this data was forwarded to.
-		 *
-		 * @return The child name, or {@code null} if it was broadcast.
-		 */
-		@SuppressWarnings({"WeakerAccess", "unused"})
-		public String childName() {
-			return childName;
-		}
+        /**
+         * The child this data was forwarded to.
+         * @return The child name, or {@code null} if it was broadcast.
+         */
+        @SuppressWarnings({"WeakerAccess", "unused"})
+        public String childName() {
+            return childName;
+        }
 
-		/**
-		 * The timestamp attached to the forwarded record.
-		 *
-		 * @return A timestamp, or {@code -1} if none was forwarded.
-		 */
-		@SuppressWarnings({"WeakerAccess", "unused"})
-		public long timestamp() {
-			return timestamp;
-		}
+        /**
+         * The timestamp attached to the forwarded record.
+         * @return A timestamp, or {@code -1} if none was forwarded.
+         */
+        @SuppressWarnings({"WeakerAccess", "unused"})
+        public long timestamp() {
+            return timestamp;
+        }
 
-		/**
-		 * The data forwarded.
-		 * @return A key/value pair. Not null.
-		 */
-		@SuppressWarnings({"WeakerAccess", "unused"})
-		public KeyValue keyValue() {
-			return keyValue;
-		}
+        /**
+         * The data forwarded.
+         * @return A key/value pair. Not null.
+         */
+        @SuppressWarnings({"WeakerAccess", "unused"})
+        public KeyValue keyValue() {
+            return keyValue;
+        }
 
-		@Override
-		public String toString() {
-			return "CapturedForward{" +
-					"childName='" + childName + '\'' +
-					", timestamp=" + timestamp +
-					", keyValue=" + keyValue +
-					'}';
-		}
-	}
+        @Override
+        public String toString() {
+            return "CapturedForward{" + "childName='" + childName + '\'' + ", timestamp=" + timestamp + ", keyValue=" + keyValue + '}';
+        }
+
+        public Headers headers() {
+            return this.headers;
+        }
+    }
 
     // constructors ================================================
 
@@ -220,26 +213,21 @@ public class MockProcessorContext implements ProcessorContext, RecordCollector.S
     @SuppressWarnings({"WeakerAccess", "unused"})
     public MockProcessorContext(final Properties config, final TaskId taskId, final File stateDir) {
         final Properties configCopy = new Properties();
-		configCopy.putAll(config);
-		configCopy.putIfAbsent(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "dummy-bootstrap-host:0");
-		configCopy.putIfAbsent(StreamsConfig.APPLICATION_ID_CONFIG, "dummy-mock-app-id");
-		final StreamsConfig streamsConfig = new ClientUtils.QuietStreamsConfig(configCopy);
-		this.taskId = taskId;
-		this.config = streamsConfig;
-		this.stateDir = stateDir;
-		final MetricConfig metricConfig = new MetricConfig();
-		metricConfig.recordLevel(Sensor.RecordingLevel.DEBUG);
-		final String threadId = Thread.currentThread().getName();
-		this.metrics = new StreamsMetricsImpl(
-				new Metrics(metricConfig),
-				threadId,
-				streamsConfig.getString(StreamsConfig.BUILT_IN_METRICS_VERSION_CONFIG),
-				Time.SYSTEM
-		);
-		TaskMetrics.droppedRecordsSensorOrSkippedRecordsSensor(threadId, taskId.toString(), metrics);
-	}
+        configCopy.putAll(config);
+        configCopy.putIfAbsent(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "dummy-bootstrap-host:0");
+        configCopy.putIfAbsent(StreamsConfig.APPLICATION_ID_CONFIG, "dummy-mock-app-id");
+        final StreamsConfig streamsConfig = new ClientUtils.QuietStreamsConfig(configCopy);
+        this.taskId = taskId;
+        this.config = streamsConfig;
+        this.stateDir = stateDir;
+        final MetricConfig metricConfig = new MetricConfig();
+        metricConfig.recordLevel(Sensor.RecordingLevel.DEBUG);
+        final String threadId = Thread.currentThread().getName();
+        this.metrics = new StreamsMetricsImpl(new Metrics(metricConfig), threadId, streamsConfig.getString(StreamsConfig.BUILT_IN_METRICS_VERSION_CONFIG), Time.SYSTEM);
+        TaskMetrics.droppedRecordsSensor(threadId, taskId.toString(), metrics);
+    }
 
-	@Override
+    @Override
     public String applicationId() {
         return config.getString(StreamsConfig.APPLICATION_ID_CONFIG);
     }
@@ -253,42 +241,42 @@ public class MockProcessorContext implements ProcessorContext, RecordCollector.S
     public Map<String, Object> appConfigs() {
         final Map<String, Object> combined = new HashMap<>();
         combined.putAll(config.originals());
-		combined.putAll(config.values());
-		return combined;
-	}
+        combined.putAll(config.values());
+        return combined;
+    }
 
-	@Override
-	public Map<String, Object> appConfigsWithPrefix(final String prefix) {
-		return config.originalsWithPrefix(prefix);
-	}
+    @Override
+    public Map<String, Object> appConfigsWithPrefix(final String prefix) {
+        return config.originalsWithPrefix(prefix);
+    }
 
-	@Override
-	public long currentSystemTimeMs() {
-		if (currentSystemTimeMs == null) {
-			throw new IllegalStateException("System time must be set before use via setCurrentSystemTimeMs().");
-		}
-		return currentSystemTimeMs;
-	}
+    @Override
+    public long currentSystemTimeMs() {
+        if (currentSystemTimeMs == null) {
+            throw new IllegalStateException("System time must be set before use via setCurrentSystemTimeMs().");
+        }
+        return currentSystemTimeMs;
+    }
 
-	@Override
-	public long currentStreamTimeMs() {
-		if (currentStreamTimeMs == null) {
-			throw new IllegalStateException("Stream time must be set before use via setCurrentStreamTimeMs().");
-		}
-		return currentStreamTimeMs;
-	}
+    @Override
+    public long currentStreamTimeMs() {
+        if (currentStreamTimeMs == null) {
+            throw new IllegalStateException("Stream time must be set before use via setCurrentStreamTimeMs().");
+        }
+        return currentStreamTimeMs;
+    }
 
-	@Override
-	public Serde<?> keySerde() {
-		return config.defaultKeySerde();
-	}
+    @Override
+    public Serde<?> keySerde() {
+        return config.defaultKeySerde();
+    }
 
-	@Override
-	public Serde<?> valueSerde() {
-		return config.defaultValueSerde();
-	}
+    @Override
+    public Serde<?> valueSerde() {
+        return config.defaultValueSerde();
+    }
 
-	@Override
+    @Override
     public File stateDir() {
         return stateDir;
     }
@@ -319,10 +307,10 @@ public class MockProcessorContext implements ProcessorContext, RecordCollector.S
         this.partition = partition;
         this.offset = offset;
         this.headers = headers;
-		this.recordTimestamp = timestamp;
-	}
+        this.recordTimestamp = timestamp;
+    }
 
-	/**
+    /**
      * The context exposes this metadata for use in the processor. Normally, they are set by the Kafka Streams framework,
      * but for the purpose of driving unit tests, you can set it directly. Setting this attribute doesn't affect the others.
      *
@@ -367,45 +355,45 @@ public class MockProcessorContext implements ProcessorContext, RecordCollector.S
     }
 
     /**
-	 * The context exposes this metadata for use in the processor. Normally, they are set by the Kafka Streams framework,
-	 * but for the purpose of driving unit tests, you can set it directly. Setting this attribute doesn't affect the others.
-	 *
-	 * @param timestamp A record timestamp
-	 * @deprecated Since 3.0.0; use {@link MockProcessorContext#setRecordTimestamp(long)} instead.
-	 */
-	@Deprecated
-	@SuppressWarnings({"WeakerAccess", "unused"})
-	public void setTimestamp(final long timestamp) {
-		this.recordTimestamp = timestamp;
-	}
+     * The context exposes this metadata for use in the processor. Normally, they are set by the Kafka Streams framework,
+     * but for the purpose of driving unit tests, you can set it directly. Setting this attribute doesn't affect the others.
+     *
+     * @param timestamp A record timestamp
+     * @deprecated Since 3.0.0; use {@link MockProcessorContext#setRecordTimestamp(long)} instead.
+     */
+    @Deprecated
+    @SuppressWarnings({"WeakerAccess", "unused"})
+    public void setTimestamp(final long timestamp) {
+        this.recordTimestamp = timestamp;
+    }
 
-	/**
-	 * The context exposes this metadata for use in the processor. Normally, they are set by the Kafka Streams framework,
-	 * but for the purpose of driving unit tests, you can set it directly. Setting this attribute doesn't affect the others.
-	 * @param recordTimestamp A record timestamp
-	 */
-	@SuppressWarnings({"WeakerAccess"})
-	public void setRecordTimestamp(final long recordTimestamp) {
-		this.recordTimestamp = recordTimestamp;
-	}
+    /**
+     * The context exposes this metadata for use in the processor. Normally, they are set by the Kafka Streams framework,
+     * but for the purpose of driving unit tests, you can set it directly. Setting this attribute doesn't affect the others.
+     * @param recordTimestamp A record timestamp
+     */
+    @SuppressWarnings({"WeakerAccess"})
+    public void setRecordTimestamp(final long recordTimestamp) {
+        this.recordTimestamp = recordTimestamp;
+    }
 
-	public void setCurrentSystemTimeMs(final long currentSystemTimeMs) {
-		this.currentSystemTimeMs = currentSystemTimeMs;
-	}
+    public void setCurrentSystemTimeMs(final long currentSystemTimeMs) {
+        this.currentSystemTimeMs = currentSystemTimeMs;
+    }
 
-	public void setCurrentStreamTimeMs(final long currentStreamTimeMs) {
-		this.currentStreamTimeMs = currentStreamTimeMs;
-	}
+    public void setCurrentStreamTimeMs(final long currentStreamTimeMs) {
+        this.currentStreamTimeMs = currentStreamTimeMs;
+    }
 
-	@Override
-	public String topic() {
-		if (topic == null) {
-			throw new IllegalStateException("Topic must be set before use via setRecordMetadata() or setTopic().");
-		}
-		return topic;
-	}
+    @Override
+    public String topic() {
+        if (topic == null) {
+            throw new IllegalStateException("Topic must be set before use via setRecordMetadata() or setTopic().");
+        }
+        return topic;
+    }
 
-	@Override
+    @Override
     public int partition() {
         if (partition == null) {
             throw new IllegalStateException("Partition must be set before use via setRecordMetadata() or setPartition().");
@@ -421,6 +409,17 @@ public class MockProcessorContext implements ProcessorContext, RecordCollector.S
         return offset;
     }
 
+    /**
+     * Returns the headers of the current input record; could be {@code null} if it is not
+     * available.
+     *
+     * <p> Note, that headers should never be {@code null} in the actual Kafka Streams runtime,
+     * even if they could be empty. However, this mock does not guarantee non-{@code null} headers.
+     * Thus, you either need to add a {@code null} check to your production code to use this mock
+     * for testing or you always need to set headers manually via {@link #setHeaders(Headers)} to
+     * avoid a {@link NullPointerException} from your {@link Processor} implementation.
+     * @return the headers
+     */
     @Override
     public Headers headers() {
         return headers;
@@ -429,12 +428,12 @@ public class MockProcessorContext implements ProcessorContext, RecordCollector.S
     @Override
     public long timestamp() {
         if (recordTimestamp == null) {
-			throw new IllegalStateException("Timestamp must be set before use via setRecordMetadata() or setTimestamp().");
-		}
-		return recordTimestamp;
-	}
+            throw new IllegalStateException("Timestamp must be set before use via setRecordMetadata() or setTimestamp().");
+        }
+        return recordTimestamp;
+    }
 
-	// mocks ================================================
+    // mocks ================================================
 
     @Override
     public void register(final StateStore store,
@@ -443,29 +442,23 @@ public class MockProcessorContext implements ProcessorContext, RecordCollector.S
     }
 
     @SuppressWarnings("unchecked")
-	@Override
-	public <S extends StateStore> S getStateStore(final String name) {
-		return (S) stateStores.get(name);
-	}
+    @Override
+    public <S extends StateStore> S getStateStore(final String name) {
+        return (S) stateStores.get(name);
+    }
 
-	@Override
-	@Deprecated
-    public Cancellable schedule(final long intervalMs,
-                                final PunctuationType type,
-                                final Punctuator callback) {
+    @SuppressWarnings("deprecation") // removing #schedule(final long intervalMs,...) will fix this
+    @Override
+    public Cancellable schedule(final Duration interval, final PunctuationType type, final Punctuator callback) throws IllegalArgumentException {
+        final long intervalMs = ApiUtils.validateMillisecondDuration(interval, "interval");
+        if (intervalMs < 1) {
+            throw new IllegalArgumentException("The minimum supported scheduling interval is 1 millisecond.");
+        }
         final CapturedPunctuator capturedPunctuator = new CapturedPunctuator(intervalMs, type, callback);
 
         punctuators.add(capturedPunctuator);
 
         return capturedPunctuator::cancel;
-    }
-
-    @SuppressWarnings("deprecation") // removing #schedule(final long intervalMs,...) will fix this
-    @Override
-    public Cancellable schedule(final Duration interval,
-                                final PunctuationType type,
-                                final Punctuator callback) throws IllegalArgumentException {
-        return schedule(ApiUtils.validateMillisecondDuration(interval, "interval"), type, callback);
     }
 
     /**
@@ -486,14 +479,10 @@ public class MockProcessorContext implements ProcessorContext, RecordCollector.S
     @Override
     public <K, V> void forward(final K key, final V value, final To to) {
         capturedForwards.add(
-            new CapturedForward(
-					to.timestamp == -1 ? to.withTimestamp(recordTimestamp == null ? -1 : recordTimestamp) : to,
-					new KeyValue<>(key, value)
-			)
-		);
-	}
+            new CapturedForward(new KeyValue<>(key, value), to.timestamp == -1 ? to.withTimestamp(recordTimestamp == null ? -1 : recordTimestamp) : to, headers));
+    }
 
-	/**
+    /**
      * Get all the forwarded data this context has observed. The returned list will not be
      * affected by subsequent interactions with the context. The data in the list is in the same order as the calls to
      * {@code forward(...)}.

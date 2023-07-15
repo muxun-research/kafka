@@ -28,29 +28,26 @@ import java.util.Objects;
  */
 public class UnalignedMemoryRecords implements UnalignedRecords {
 
-	private final ByteBuffer buffer;
+    private final ByteBuffer buffer;
 
-	public UnalignedMemoryRecords(ByteBuffer buffer) {
-		this.buffer = Objects.requireNonNull(buffer);
-	}
+    public UnalignedMemoryRecords(ByteBuffer buffer) {
+        this.buffer = Objects.requireNonNull(buffer);
+    }
 
-	public ByteBuffer buffer() {
-		return buffer.duplicate();
-	}
+    public ByteBuffer buffer() {
+        return buffer.duplicate();
+    }
 
-	@Override
-	public int sizeInBytes() {
-		return buffer.remaining();
-	}
+    @Override
+    public int sizeInBytes() {
+        return buffer.remaining();
+    }
 
-	@Override
-	public long writeTo(TransferableChannel channel, long position, int length) throws IOException {
-		if (position > Integer.MAX_VALUE)
-			throw new IllegalArgumentException("position should not be greater than Integer.MAX_VALUE: " + position);
-		if (position + length > buffer.limit())
-			throw new IllegalArgumentException("position+length should not be greater than buffer.limit(), position: "
-					+ position + ", length: " + length + ", buffer.limit(): " + buffer.limit());
-		return Utils.tryWriteTo(channel, (int) position, length, buffer);
-	}
+    @Override
+    public int writeTo(TransferableChannel channel, int position, int length) throws IOException {
+        if (((long) position) + length > buffer.limit())
+            throw new IllegalArgumentException("position+length should not be greater than buffer.limit(), position: " + position + ", length: " + length + ", buffer.limit(): " + buffer.limit());
+        return Utils.tryWriteTo(channel, position, length, buffer);
+    }
 
 }

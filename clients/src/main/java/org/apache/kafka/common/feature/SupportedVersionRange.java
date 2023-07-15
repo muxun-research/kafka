@@ -22,23 +22,31 @@ import java.util.Map;
  * An extended {@link BaseVersionRange} representing the min/max versions for a supported feature.
  */
 public class SupportedVersionRange extends BaseVersionRange {
-	// Label for the min version key, that's used only to convert to/from a map.
-	private static final String MIN_VERSION_KEY_LABEL = "min_version";
+    // Label for the min version key, that's used only to convert to/from a map.
+    private static final String MIN_VERSION_KEY_LABEL = "min_version";
 
-	// Label for the max version key, that's used only to convert to/from a map.
-	private static final String MAX_VERSION_KEY_LABEL = "max_version";
+    // Label for the max version key, that's used only to convert to/from a map.
+    private static final String MAX_VERSION_KEY_LABEL = "max_version";
 
-	public SupportedVersionRange(short minVersion, short maxVersion) {
-		super(MIN_VERSION_KEY_LABEL, minVersion, MAX_VERSION_KEY_LABEL, maxVersion);
-	}
+    public SupportedVersionRange(short minVersion, short maxVersion) {
+        super(MIN_VERSION_KEY_LABEL, minVersion, MAX_VERSION_KEY_LABEL, maxVersion);
+    }
 
-	public SupportedVersionRange(short maxVersion) {
-		this((short) 1, maxVersion);
-	}
+    public SupportedVersionRange(short maxVersion) {
+        this((short) 1, maxVersion);
+    }
 
-	public static SupportedVersionRange fromMap(Map<String, Short> versionRangeMap) {
-		return new SupportedVersionRange(
-				BaseVersionRange.valueOrThrow(MIN_VERSION_KEY_LABEL, versionRangeMap),
-				BaseVersionRange.valueOrThrow(MAX_VERSION_KEY_LABEL, versionRangeMap));
-	}
+    public static SupportedVersionRange fromMap(Map<String, Short> versionRangeMap) {
+        return new SupportedVersionRange(BaseVersionRange.valueOrThrow(MIN_VERSION_KEY_LABEL, versionRangeMap), BaseVersionRange.valueOrThrow(MAX_VERSION_KEY_LABEL, versionRangeMap));
+    }
+
+    /**
+     * Checks if the version level does *NOT* fall within the [min, max] range of this SupportedVersionRange.
+     * @param version the version to be checked
+     * @return - true, if the version levels are incompatible
+     * - false otherwise
+     */
+    public boolean isIncompatibleWith(short version) {
+        return min() > version || max() < version;
+    }
 }

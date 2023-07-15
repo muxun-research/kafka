@@ -18,32 +18,23 @@ package org.apache.kafka.streams.state.internals;
 
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.streams.kstream.internals.Change;
+import org.apache.kafka.streams.processor.api.Record;
 
 import java.util.HashMap;
 import java.util.Map;
 
 public class CacheFlushListenerStub<K, V> implements CacheFlushListener<byte[], byte[]> {
-	private final Deserializer<K> keyDeserializer;
-	private final Deserializer<V> valueDeserializer;
-	final Map<K, Change<V>> forwarded = new HashMap<>();
+    private final Deserializer<K> keyDeserializer;
+    private final Deserializer<V> valueDeserializer;
+    final Map<K, Change<V>> forwarded = new HashMap<>();
 
-	CacheFlushListenerStub(final Deserializer<K> keyDeserializer,
-						   final Deserializer<V> valueDeserializer) {
-		this.keyDeserializer = keyDeserializer;
-		this.valueDeserializer = valueDeserializer;
-	}
+    CacheFlushListenerStub(final Deserializer<K> keyDeserializer, final Deserializer<V> valueDeserializer) {
+        this.keyDeserializer = keyDeserializer;
+        this.valueDeserializer = valueDeserializer;
+    }
 
-	@Override
-	public void apply(final byte[] key,
-					  final byte[] newValue,
-					  final byte[] oldValue,
-					  final long timestamp) {
-		forwarded.put(
-				keyDeserializer.deserialize(null, key),
-				new Change<>(
-						valueDeserializer.deserialize(null, newValue),
-						valueDeserializer.deserialize(null, oldValue)
-				)
-		);
-	}
+    @Override
+    public void apply(final Record<byte[], Change<byte[]>> record) {
+        forwarded.put(keyDeserializer.deserialize(null, record.key()), new Change<>(valueDeserializer.deserialize(null, record.value().newValue), valueDeserializer.deserialize(null, record.value().oldValue), record.value().isLatest));
+    }
 }

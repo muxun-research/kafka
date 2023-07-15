@@ -16,10 +16,7 @@
  */
 package org.apache.kafka.clients;
 
-import org.apache.kafka.common.Cluster;
-import org.apache.kafka.common.KafkaException;
-import org.apache.kafka.common.Node;
-import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.*;
 import org.apache.kafka.common.errors.InvalidMetadataException;
 import org.apache.kafka.common.errors.InvalidTopicException;
 import org.apache.kafka.common.errors.TopicAuthorizationException;
@@ -32,15 +29,7 @@ import org.slf4j.Logger;
 
 import java.io.Closeable;
 import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Supplier;
 
 import static org.apache.kafka.common.record.RecordBatch.NO_PARTITION_LEADER_EPOCH;
@@ -59,50 +48,46 @@ import static org.apache.kafka.common.record.RecordBatch.NO_PARTITION_LEADER_EPO
  */
 public class Metadata implements Closeable {
     private final Logger log;
-	private final long refreshBackoffMs;
-	private final long metadataExpireMs;
-	private int updateVersion;  // bumped on every metadata response
-	private int requestVersion; // bumped on every new topic addition
-	private long lastRefreshMs;
-	private long lastSuccessfulRefreshMs;
-	private KafkaException fatalException;
-	private Set<String> invalidTopics;
-	private Set<String> unauthorizedTopics;
-	private MetadataCache cache = MetadataCache.empty();
-	private boolean needFullUpdate;
-	private boolean needPartialUpdate;
-	private final ClusterResourceListeners clusterResourceListeners;
-	private boolean isClosed;
-	private final Map<TopicPartition, Integer> lastSeenLeaderEpochs;
+    private final long refreshBackoffMs;
+    private final long metadataExpireMs;
+    private int updateVersion;  // bumped on every metadata response
+    private int requestVersion; // bumped on every new topic addition
+    private long lastRefreshMs;
+    private long lastSuccessfulRefreshMs;
+    private KafkaException fatalException;
+    private Set<String> invalidTopics;
+    private Set<String> unauthorizedTopics;
+    private MetadataCache cache = MetadataCache.empty();
+    private boolean needFullUpdate;
+    private boolean needPartialUpdate;
+    private final ClusterResourceListeners clusterResourceListeners;
+    private boolean isClosed;
+    private final Map<TopicPartition, Integer> lastSeenLeaderEpochs;
 
-	/**
-	 * Create a new Metadata instance
-	 *
-	 * @param refreshBackoffMs         The minimum amount of time that must expire between metadata refreshes to avoid busy
-	 *                                 polling
-	 * @param metadataExpireMs         The maximum amount of time that metadata can be retained without refresh
+    /**
+     * Create a new Metadata instance
+     * @param refreshBackoffMs         The minimum amount of time that must expire between metadata refreshes to avoid busy
+     *                                 polling
+     * @param metadataExpireMs         The maximum amount of time that metadata can be retained without refresh
      * @param logContext               Log context corresponding to the containing client
      * @param clusterResourceListeners List of ClusterResourceListeners which will receive metadata updates.
      */
-    public Metadata(long refreshBackoffMs,
-                    long metadataExpireMs,
-                    LogContext logContext,
-                    ClusterResourceListeners clusterResourceListeners) {
-		this.log = logContext.logger(Metadata.class);
-		this.refreshBackoffMs = refreshBackoffMs;
-		this.metadataExpireMs = metadataExpireMs;
-		this.lastRefreshMs = 0L;
-		this.lastSuccessfulRefreshMs = 0L;
-		this.requestVersion = 0;
-		this.updateVersion = 0;
-		this.needFullUpdate = false;
-		this.needPartialUpdate = false;
-		this.clusterResourceListeners = clusterResourceListeners;
-		this.isClosed = false;
-		this.lastSeenLeaderEpochs = new HashMap<>();
-		this.invalidTopics = Collections.emptySet();
-		this.unauthorizedTopics = Collections.emptySet();
-	}
+    public Metadata(long refreshBackoffMs, long metadataExpireMs, LogContext logContext, ClusterResourceListeners clusterResourceListeners) {
+        this.log = logContext.logger(Metadata.class);
+        this.refreshBackoffMs = refreshBackoffMs;
+        this.metadataExpireMs = metadataExpireMs;
+        this.lastRefreshMs = 0L;
+        this.lastSuccessfulRefreshMs = 0L;
+        this.requestVersion = 0;
+        this.updateVersion = 0;
+        this.needFullUpdate = false;
+        this.needPartialUpdate = false;
+        this.clusterResourceListeners = clusterResourceListeners;
+        this.isClosed = false;
+        this.lastSeenLeaderEpochs = new HashMap<>();
+        this.invalidTopics = Collections.emptySet();
+        this.unauthorizedTopics = Collections.emptySet();
+    }
 
     /**
      * Get the current cluster info without blocking
@@ -130,155 +115,160 @@ public class Metadata implements Closeable {
      * @return remaining time in ms till updating the cluster info
      */
     public synchronized long timeToNextUpdate(long nowMs) {
-		long timeToExpire = updateRequested() ? 0 : Math.max(this.lastSuccessfulRefreshMs + this.metadataExpireMs - nowMs, 0);
+        long timeToExpire = updateRequested() ? 0 : Math.max(this.lastSuccessfulRefreshMs + this.metadataExpireMs - nowMs, 0);
         return Math.max(timeToExpire, timeToAllowUpdate(nowMs));
-	}
+    }
 
-	public long metadataExpireMs() {
-		return this.metadataExpireMs;
-	}
+    public long metadataExpireMs() {
+        return this.metadataExpireMs;
+    }
 
-	/**
-	 * Request an update of the current cluster metadata info, return the current updateVersion before the update
-	 */
-	public synchronized int requestUpdate() {
-		this.needFullUpdate = true;
-		return this.updateVersion;
-	}
+    /**
+     * Request an update of the current cluster metadata info, return the current updateVersion before the update
+     */
+    public synchronized int requestUpdate() {
+        this.needFullUpdate = true;
+        return this.updateVersion;
+    }
 
-	public synchronized int requestUpdateForNewTopics() {
-		// Override the timestamp of last refresh to let immediate update.
-		this.lastRefreshMs = 0;
-		this.needPartialUpdate = true;
-		this.requestVersion++;
-		return this.updateVersion;
-	}
+    public synchronized int requestUpdateForNewTopics() {
+        // Override the timestamp of last refresh to let immediate update.
+        this.lastRefreshMs = 0;
+        this.needPartialUpdate = true;
+        this.requestVersion++;
+        return this.updateVersion;
+    }
 
-	/**
-	 * Request an update for the partition metadata iff we have seen a newer leader epoch. This is called by the client
-	 * any time it handles a response from the broker that includes leader epoch, except for UpdateMetadata which
-	 * follows a different code path ({@link #update}).
-	 * @param topicPartition
-	 * @param leaderEpoch
-	 * @return true if we updated the last seen epoch, false otherwise
-	 */
-	public synchronized boolean updateLastSeenEpochIfNewer(TopicPartition topicPartition, int leaderEpoch) {
-		Objects.requireNonNull(topicPartition, "TopicPartition cannot be null");
-		if (leaderEpoch < 0)
-			throw new IllegalArgumentException("Invalid leader epoch " + leaderEpoch + " (must be non-negative)");
+    /**
+     * Request an update for the partition metadata iff we have seen a newer leader epoch. This is called by the client
+     * any time it handles a response from the broker that includes leader epoch, except for UpdateMetadata which
+     * follows a different code path ({@link #update}).
+     * @param topicPartition
+     * @param leaderEpoch
+     * @return true if we updated the last seen epoch, false otherwise
+     */
+    public synchronized boolean updateLastSeenEpochIfNewer(TopicPartition topicPartition, int leaderEpoch) {
+        Objects.requireNonNull(topicPartition, "TopicPartition cannot be null");
+        if (leaderEpoch < 0)
+            throw new IllegalArgumentException("Invalid leader epoch " + leaderEpoch + " (must be non-negative)");
 
-		Integer oldEpoch = lastSeenLeaderEpochs.get(topicPartition);
-		log.trace("Determining if we should replace existing epoch {} with new epoch {} for partition {}", oldEpoch, leaderEpoch, topicPartition);
+        Integer oldEpoch = lastSeenLeaderEpochs.get(topicPartition);
+        log.trace("Determining if we should replace existing epoch {} with new epoch {} for partition {}", oldEpoch, leaderEpoch, topicPartition);
 
-		final boolean updated;
-		if (oldEpoch == null) {
-			log.debug("Not replacing null epoch with new epoch {} for partition {}", leaderEpoch, topicPartition);
-			updated = false;
-		} else if (leaderEpoch > oldEpoch) {
-			log.debug("Updating last seen epoch from {} to {} for partition {}", oldEpoch, leaderEpoch, topicPartition);
-			lastSeenLeaderEpochs.put(topicPartition, leaderEpoch);
-			updated = true;
-		} else {
-			log.debug("Not replacing existing epoch {} with new epoch {} for partition {}", oldEpoch, leaderEpoch, topicPartition);
-			updated = false;
-		}
+        final boolean updated;
+        if (oldEpoch == null) {
+            log.debug("Not replacing null epoch with new epoch {} for partition {}", leaderEpoch, topicPartition);
+            updated = false;
+        } else if (leaderEpoch > oldEpoch) {
+            log.debug("Updating last seen epoch from {} to {} for partition {}", oldEpoch, leaderEpoch, topicPartition);
+            lastSeenLeaderEpochs.put(topicPartition, leaderEpoch);
+            updated = true;
+        } else {
+            log.debug("Not replacing existing epoch {} with new epoch {} for partition {}", oldEpoch, leaderEpoch, topicPartition);
+            updated = false;
+        }
 
-		this.needFullUpdate = this.needFullUpdate || updated;
-		return updated;
-	}
+        this.needFullUpdate = this.needFullUpdate || updated;
+        return updated;
+    }
 
-	public Optional<Integer> lastSeenLeaderEpoch(TopicPartition topicPartition) {
-		return Optional.ofNullable(lastSeenLeaderEpochs.get(topicPartition));
-	}
+    public Optional<Integer> lastSeenLeaderEpoch(TopicPartition topicPartition) {
+        return Optional.ofNullable(lastSeenLeaderEpochs.get(topicPartition));
+    }
 
-	/**
-	 * Check whether an update has been explicitly requested.
-	 * @return true if an update was requested, false otherwise
-	 */
-	public synchronized boolean updateRequested() {
-		return this.needFullUpdate || this.needPartialUpdate;
-	}
+    /**
+     * Check whether an update has been explicitly requested.
+     * @return true if an update was requested, false otherwise
+     */
+    public synchronized boolean updateRequested() {
+        return this.needFullUpdate || this.needPartialUpdate;
+    }
 
-	/**
+    /**
      * Return the cached partition info if it exists and a newer leader epoch isn't known about.
-	 */
-	synchronized Optional<MetadataResponse.PartitionMetadata> partitionMetadataIfCurrent(TopicPartition topicPartition) {
-		Integer epoch = lastSeenLeaderEpochs.get(topicPartition);
-		Optional<MetadataResponse.PartitionMetadata> partitionMetadata = cache.partitionMetadata(topicPartition);
-		if (epoch == null) {
-			// old cluster format (no epochs)
-			return partitionMetadata;
-		} else {
-			return partitionMetadata.filter(metadata ->
-					metadata.leaderEpoch.orElse(NO_PARTITION_LEADER_EPOCH).equals(epoch));
-		}
-	}
+     */
+    synchronized Optional<MetadataResponse.PartitionMetadata> partitionMetadataIfCurrent(TopicPartition topicPartition) {
+        Integer epoch = lastSeenLeaderEpochs.get(topicPartition);
+        Optional<MetadataResponse.PartitionMetadata> partitionMetadata = cache.partitionMetadata(topicPartition);
+        if (epoch == null) {
+            // old cluster format (no epochs)
+            return partitionMetadata;
+        } else {
+            return partitionMetadata.filter(metadata -> metadata.leaderEpoch.orElse(NO_PARTITION_LEADER_EPOCH).equals(epoch));
+        }
+    }
 
-	public synchronized LeaderAndEpoch currentLeader(TopicPartition topicPartition) {
-		Optional<MetadataResponse.PartitionMetadata> maybeMetadata = partitionMetadataIfCurrent(topicPartition);
-		if (!maybeMetadata.isPresent())
-			return new LeaderAndEpoch(Optional.empty(), Optional.ofNullable(lastSeenLeaderEpochs.get(topicPartition)));
+    /**
+     * @return a mapping from topic names to topic IDs for all topics with valid IDs in the cache
+     */
+    public synchronized Map<String, Uuid> topicIds() {
+        return cache.topicIds();
+    }
 
-		MetadataResponse.PartitionMetadata partitionMetadata = maybeMetadata.get();
-		Optional<Integer> leaderEpochOpt = partitionMetadata.leaderEpoch;
-		Optional<Node> leaderNodeOpt = partitionMetadata.leaderId.flatMap(cache::nodeById);
-		return new LeaderAndEpoch(leaderNodeOpt, leaderEpochOpt);
-	}
+    public synchronized LeaderAndEpoch currentLeader(TopicPartition topicPartition) {
+        Optional<MetadataResponse.PartitionMetadata> maybeMetadata = partitionMetadataIfCurrent(topicPartition);
+        if (!maybeMetadata.isPresent())
+            return new LeaderAndEpoch(Optional.empty(), Optional.ofNullable(lastSeenLeaderEpochs.get(topicPartition)));
 
-	public synchronized void bootstrap(List<InetSocketAddress> addresses) {
-		this.needFullUpdate = true;
-		this.updateVersion += 1;
-		this.cache = MetadataCache.bootstrap(addresses);
-	}
+        MetadataResponse.PartitionMetadata partitionMetadata = maybeMetadata.get();
+        Optional<Integer> leaderEpochOpt = partitionMetadata.leaderEpoch;
+        Optional<Node> leaderNodeOpt = partitionMetadata.leaderId.flatMap(cache::nodeById);
+        return new LeaderAndEpoch(leaderNodeOpt, leaderEpochOpt);
+    }
 
-	/**
-	 * Update metadata assuming the current request version.
-	 * <p>
-	 * For testing only.
-	 */
-	public synchronized void updateWithCurrentRequestVersion(MetadataResponse response, boolean isPartialUpdate, long nowMs) {
-		this.update(this.requestVersion, response, isPartialUpdate, nowMs);
-	}
+    public synchronized void bootstrap(List<InetSocketAddress> addresses) {
+        this.needFullUpdate = true;
+        this.updateVersion += 1;
+        this.cache = MetadataCache.bootstrap(addresses);
+    }
 
-	/**
-	 * Updates the cluster metadata. If topic expiry is enabled, expiry time
-	 * is set for topics if required and expired topics are removed from the metadata.
-	 *
-	 * @param requestVersion The request version corresponding to the update response, as provided by
-	 *     {@link #newMetadataRequestAndVersion(long)}.
-	 * @param response metadata response received from the broker
-	 * @param isPartialUpdate whether the metadata request was for a subset of the active topics
-	 * @param nowMs current time in milliseconds
-	 */
-	public synchronized void update(int requestVersion, MetadataResponse response, boolean isPartialUpdate, long nowMs) {
-		Objects.requireNonNull(response, "Metadata response cannot be null");
-		if (isClosed())
-			throw new IllegalStateException("Update requested after metadata close");
+    /**
+     * Update metadata assuming the current request version.
+     * <p>
+     * For testing only.
+     */
+    public synchronized void updateWithCurrentRequestVersion(MetadataResponse response, boolean isPartialUpdate, long nowMs) {
+        this.update(this.requestVersion, response, isPartialUpdate, nowMs);
+    }
 
-		this.needPartialUpdate = requestVersion < this.requestVersion;
-		this.lastRefreshMs = nowMs;
-		this.updateVersion += 1;
-		if (!isPartialUpdate) {
-			this.needFullUpdate = false;
-			this.lastSuccessfulRefreshMs = nowMs;
-		}
+    /**
+     * Updates the cluster metadata. If topic expiry is enabled, expiry time
+     * is set for topics if required and expired topics are removed from the metadata.
+     * @param requestVersion  The request version corresponding to the update response, as provided by
+     *                        {@link #newMetadataRequestAndVersion(long)}.
+     * @param response        metadata response received from the broker
+     * @param isPartialUpdate whether the metadata request was for a subset of the active topics
+     * @param nowMs           current time in milliseconds
+     */
+    public synchronized void update(int requestVersion, MetadataResponse response, boolean isPartialUpdate, long nowMs) {
+        Objects.requireNonNull(response, "Metadata response cannot be null");
+        if (isClosed())
+            throw new IllegalStateException("Update requested after metadata close");
 
-		String previousClusterId = cache.clusterResource().clusterId();
+        this.needPartialUpdate = requestVersion < this.requestVersion;
+        this.lastRefreshMs = nowMs;
+        this.updateVersion += 1;
+        if (!isPartialUpdate) {
+            this.needFullUpdate = false;
+            this.lastSuccessfulRefreshMs = nowMs;
+        }
 
-		this.cache = handleMetadataResponse(response, isPartialUpdate, nowMs);
+        String previousClusterId = cache.clusterResource().clusterId();
 
-		Cluster cluster = cache.cluster();
-		maybeSetMetadataError(cluster);
+        this.cache = handleMetadataResponse(response, isPartialUpdate, nowMs);
 
-		this.lastSeenLeaderEpochs.keySet().removeIf(tp -> !retainTopic(tp.topic(), false, nowMs));
+        Cluster cluster = cache.cluster();
+        maybeSetMetadataError(cluster);
 
-		String newClusterId = cache.clusterResource().clusterId();
-		if (!Objects.equals(previousClusterId, newClusterId)) {
+        this.lastSeenLeaderEpochs.keySet().removeIf(tp -> !retainTopic(tp.topic(), false, nowMs));
+
+        String newClusterId = cache.clusterResource().clusterId();
+        if (!Objects.equals(previousClusterId, newClusterId)) {
             log.info("Cluster ID: {}", newClusterId);
         }
         clusterResourceListeners.onUpdate(cache.clusterResource());
 
-		log.debug("Updated cluster metadata updateVersion {} to {}", this.updateVersion, this.cache);
+        log.debug("Updated cluster metadata updateVersion {} to {}", this.updateVersion, this.cache);
     }
 
     private void maybeSetMetadataError(Cluster cluster) {
@@ -303,88 +293,106 @@ public class Metadata implements Closeable {
 
     /**
      * Transform a MetadataResponse into a new MetadataCache instance.
-	 */
-	private MetadataCache handleMetadataResponse(MetadataResponse metadataResponse, boolean isPartialUpdate, long nowMs) {
-		// All encountered topics.
-		Set<String> topics = new HashSet<>();
+     */
+    private MetadataCache handleMetadataResponse(MetadataResponse metadataResponse, boolean isPartialUpdate, long nowMs) {
+        // All encountered topics.
+        Set<String> topics = new HashSet<>();
 
-		// Retained topics to be passed to the metadata cache.
-		Set<String> internalTopics = new HashSet<>();
-		Set<String> unauthorizedTopics = new HashSet<>();
-		Set<String> invalidTopics = new HashSet<>();
+        // Retained topics to be passed to the metadata cache.
+        Set<String> internalTopics = new HashSet<>();
+        Set<String> unauthorizedTopics = new HashSet<>();
+        Set<String> invalidTopics = new HashSet<>();
 
-		List<MetadataResponse.PartitionMetadata> partitions = new ArrayList<>();
-		for (MetadataResponse.TopicMetadata metadata : metadataResponse.topicMetadata()) {
-			topics.add(metadata.topic());
+        List<MetadataResponse.PartitionMetadata> partitions = new ArrayList<>();
+        Map<String, Uuid> topicIds = new HashMap<>();
+        Map<String, Uuid> oldTopicIds = cache.topicIds();
+        for (MetadataResponse.TopicMetadata metadata : metadataResponse.topicMetadata()) {
+            String topicName = metadata.topic();
+            Uuid topicId = metadata.topicId();
+            topics.add(topicName);
+            // We can only reason about topic ID changes when both IDs are valid, so keep oldId null unless the new metadata contains a topic ID
+            Uuid oldTopicId = null;
+            if (!Uuid.ZERO_UUID.equals(topicId)) {
+                topicIds.put(topicName, topicId);
+                oldTopicId = oldTopicIds.get(topicName);
+            } else {
+                topicId = null;
+            }
 
-			if (!retainTopic(metadata.topic(), metadata.isInternal(), nowMs))
-				continue;
+            if (!retainTopic(topicName, metadata.isInternal(), nowMs))
+                continue;
 
-			if (metadata.isInternal())
-				internalTopics.add(metadata.topic());
+            if (metadata.isInternal())
+                internalTopics.add(topicName);
 
-			if (metadata.error() == Errors.NONE) {
-				for (MetadataResponse.PartitionMetadata partitionMetadata : metadata.partitionMetadata()) {
-					// Even if the partition's metadata includes an error, we need to handle
-					// the update to catch new epochs
-					updateLatestMetadata(partitionMetadata, metadataResponse.hasReliableLeaderEpochs())
-							.ifPresent(partitions::add);
+            if (metadata.error() == Errors.NONE) {
+                for (MetadataResponse.PartitionMetadata partitionMetadata : metadata.partitionMetadata()) {
+                    // Even if the partition's metadata includes an error, we need to handle
+                    // the update to catch new epochs
+                    updateLatestMetadata(partitionMetadata, metadataResponse.hasReliableLeaderEpochs(), topicId, oldTopicId).ifPresent(partitions::add);
 
-					if (partitionMetadata.error.exception() instanceof InvalidMetadataException) {
-						log.debug("Requesting metadata update for partition {} due to error {}",
-								partitionMetadata.topicPartition, partitionMetadata.error);
-						requestUpdate();
-					}
-				}
-			} else {
-				if (metadata.error().exception() instanceof InvalidMetadataException) {
-					log.debug("Requesting metadata update for topic {} due to error {}", metadata.topic(), metadata.error());
-					requestUpdate();
-				}
+                    if (partitionMetadata.error.exception() instanceof InvalidMetadataException) {
+                        log.debug("Requesting metadata update for partition {} due to error {}", partitionMetadata.topicPartition, partitionMetadata.error);
+                        requestUpdate();
+                    }
+                }
+            } else {
+                if (metadata.error().exception() instanceof InvalidMetadataException) {
+                    log.debug("Requesting metadata update for topic {} due to error {}", topicName, metadata.error());
+                    requestUpdate();
+                }
 
-				if (metadata.error() == Errors.INVALID_TOPIC_EXCEPTION)
-					invalidTopics.add(metadata.topic());
-				else if (metadata.error() == Errors.TOPIC_AUTHORIZATION_FAILED)
-					unauthorizedTopics.add(metadata.topic());
-			}
-		}
+                if (metadata.error() == Errors.INVALID_TOPIC_EXCEPTION)
+                    invalidTopics.add(topicName);
+                else if (metadata.error() == Errors.TOPIC_AUTHORIZATION_FAILED)
+                    unauthorizedTopics.add(topicName);
+            }
+        }
 
-		Map<Integer, Node> nodes = metadataResponse.brokersById();
-		if (isPartialUpdate)
-			return this.cache.mergeWith(metadataResponse.clusterId(), nodes, partitions,
-					unauthorizedTopics, invalidTopics, internalTopics, metadataResponse.controller(),
-					(topic, isInternal) -> !topics.contains(topic) && retainTopic(topic, isInternal, nowMs));
-		else
-			return new MetadataCache(metadataResponse.clusterId(), nodes, partitions,
-					unauthorizedTopics, invalidTopics, internalTopics, metadataResponse.controller());
-	}
+        Map<Integer, Node> nodes = metadataResponse.brokersById();
+        if (isPartialUpdate)
+            return this.cache.mergeWith(metadataResponse.clusterId(), nodes, partitions, unauthorizedTopics, invalidTopics, internalTopics, metadataResponse.controller(), topicIds, (topic, isInternal) -> !topics.contains(topic) && retainTopic(topic, isInternal, nowMs));
+        else
+            return new MetadataCache(metadataResponse.clusterId(), nodes, partitions, unauthorizedTopics, invalidTopics, internalTopics, metadataResponse.controller(), topicIds);
+    }
 
-	/**
-	 * Compute the latest partition metadata to cache given ordering by leader epochs (if both
-	 * available and reliable).
-	 */
-	private Optional<MetadataResponse.PartitionMetadata> updateLatestMetadata(
-			MetadataResponse.PartitionMetadata partitionMetadata,
-			boolean hasReliableLeaderEpoch) {
-		TopicPartition tp = partitionMetadata.topicPartition;
-		if (hasReliableLeaderEpoch && partitionMetadata.leaderEpoch.isPresent()) {
-			int newEpoch = partitionMetadata.leaderEpoch.get();
-			// If the received leader epoch is at least the same as the previous one, update the metadata
-			Integer currentEpoch = lastSeenLeaderEpochs.get(tp);
-			if (currentEpoch == null || newEpoch >= currentEpoch) {
-				log.debug("Updating last seen epoch for partition {} from {} to epoch {} from new metadata", tp, currentEpoch, newEpoch);
-				lastSeenLeaderEpochs.put(tp, newEpoch);
-				return Optional.of(partitionMetadata);
-			} else {
-				// Otherwise ignore the new metadata and use the previously cached info
-				log.debug("Got metadata for an older epoch {} (current is {}) for partition {}, not updating", newEpoch, currentEpoch, tp);
-				return cache.partitionMetadata(tp);
-			}
-		} else {
-			// Handle old cluster formats as well as error responses where leader and epoch are missing
+    /**
+     * Compute the latest partition metadata to cache given ordering by leader epochs (if both
+     * available and reliable) and whether the topic ID changed.
+     */
+    private Optional<MetadataResponse.PartitionMetadata> updateLatestMetadata(MetadataResponse.PartitionMetadata partitionMetadata, boolean hasReliableLeaderEpoch, Uuid topicId, Uuid oldTopicId) {
+        TopicPartition tp = partitionMetadata.topicPartition;
+        if (hasReliableLeaderEpoch && partitionMetadata.leaderEpoch.isPresent()) {
+            int newEpoch = partitionMetadata.leaderEpoch.get();
+            Integer currentEpoch = lastSeenLeaderEpochs.get(tp);
+            if (currentEpoch == null) {
+                // We have no previous info, so we can just insert the new epoch info
+                log.debug("Setting the last seen epoch of partition {} to {} since the last known epoch was undefined.", tp, newEpoch);
+                lastSeenLeaderEpochs.put(tp, newEpoch);
+                return Optional.of(partitionMetadata);
+            } else if (topicId != null && !topicId.equals(oldTopicId)) {
+                // If the new topic ID is valid and different from the last seen topic ID, update the metadata.
+                // Between the time that a topic is deleted and re-created, the client may lose track of the
+                // corresponding topicId (i.e. `oldTopicId` will be null). In this case, when we discover the new
+                // topicId, we allow the corresponding leader epoch to override the last seen value.
+                log.info("Resetting the last seen epoch of partition {} to {} since the associated topicId changed from {} to {}", tp, newEpoch, oldTopicId, topicId);
+                lastSeenLeaderEpochs.put(tp, newEpoch);
+                return Optional.of(partitionMetadata);
+            } else if (newEpoch >= currentEpoch) {
+                // If the received leader epoch is at least the same as the previous one, update the metadata
+                log.debug("Updating last seen epoch for partition {} from {} to epoch {} from new metadata", tp, currentEpoch, newEpoch);
+                lastSeenLeaderEpochs.put(tp, newEpoch);
+                return Optional.of(partitionMetadata);
+            } else {
+                // Otherwise ignore the new metadata and use the previously cached info
+                log.debug("Got metadata for an older epoch {} (current is {}) for partition {}, not updating", newEpoch, currentEpoch, tp);
+                return cache.partitionMetadata(tp);
+            }
+        } else {
+            // Handle old cluster formats as well as error responses where leader and epoch are missing
             lastSeenLeaderEpochs.remove(tp);
             return Optional.of(partitionMetadata.withoutLeaderEpoch());
-		}
+        }
     }
 
     /**
@@ -398,23 +406,23 @@ public class Metadata implements Closeable {
 
     /**
      * If any fatal exceptions were encountered during metadata update, throw the exception. This is used by
-	 * the producer to abort waiting for metadata if there were fatal exceptions (e.g. authentication failures)
-	 * in the last metadata update.
-	 */
-	protected synchronized void maybeThrowFatalException() {
-		KafkaException metadataException = this.fatalException;
-		if (metadataException != null) {
-			fatalException = null;
-			throw metadataException;
-		}
-	}
+     * the producer to abort waiting for metadata if there were fatal exceptions (e.g. authentication failures)
+     * in the last metadata update.
+     */
+    protected synchronized void maybeThrowFatalException() {
+        KafkaException metadataException = this.fatalException;
+        if (metadataException != null) {
+            fatalException = null;
+            throw metadataException;
+        }
+    }
 
-	/**
-	 * If any non-retriable exceptions were encountered during metadata update, throw exception if the exception
-	 * is fatal or related to the specified topic. All exceptions from the last metadata update are cleared.
-	 * This is used by the producer to propagate topic metadata errors for send requests.
-	 */
-	public synchronized void maybeThrowExceptionForTopic(String topic) {
+    /**
+     * If any non-retriable exceptions were encountered during metadata update, throw exception if the exception
+     * is fatal or related to the specified topic. All exceptions from the last metadata update are cleared.
+     * This is used by the producer to propagate topic metadata errors for send requests.
+     */
+    public synchronized void maybeThrowExceptionForTopic(String topic) {
         clearErrorsAndMaybeThrowException(() -> recoverableExceptionForTopic(topic));
     }
 
@@ -451,37 +459,37 @@ public class Metadata implements Closeable {
     }
 
     /**
-	 * Record an attempt to update the metadata that failed. We need to keep track of this
-	 * to avoid retrying immediately.
-	 */
-	public synchronized void failedUpdate(long now) {
-		this.lastRefreshMs = now;
-	}
+     * Record an attempt to update the metadata that failed. We need to keep track of this
+     * to avoid retrying immediately.
+     */
+    public synchronized void failedUpdate(long now) {
+        this.lastRefreshMs = now;
+    }
 
-	/**
-	 * Propagate a fatal error which affects the ability to fetch metadata for the cluster.
-	 * Two examples are authentication and unsupported version exceptions.
-	 * @param exception The fatal exception
-	 */
-	public synchronized void fatalError(KafkaException exception) {
-		this.fatalException = exception;
-	}
+    /**
+     * Propagate a fatal error which affects the ability to fetch metadata for the cluster.
+     * Two examples are authentication and unsupported version exceptions.
+     * @param exception The fatal exception
+     */
+    public synchronized void fatalError(KafkaException exception) {
+        this.fatalException = exception;
+    }
 
-	/**
-	 * @return The current metadata updateVersion
-	 */
-	public synchronized int updateVersion() {
-		return this.updateVersion;
-	}
+    /**
+     * @return The current metadata updateVersion
+     */
+    public synchronized int updateVersion() {
+        return this.updateVersion;
+    }
 
-	/**
-	 * The last time metadata was successfully updated.
-	 */
-	public synchronized long lastSuccessfulUpdate() {
-		return this.lastSuccessfulRefreshMs;
-	}
+    /**
+     * The last time metadata was successfully updated.
+     */
+    public synchronized long lastSuccessfulUpdate() {
+        return this.lastSuccessfulRefreshMs;
+    }
 
-	/**
+    /**
      * Close this metadata instance to indicate that metadata updates are no longer possible.
      */
     @Override
@@ -491,110 +499,107 @@ public class Metadata implements Closeable {
 
     /**
      * Check if this metadata instance has been closed. See {@link #close()} for more information.
-	 *
-	 * @return True if this instance has been closed; false otherwise
-	 */
-	public synchronized boolean isClosed() {
-		return this.isClosed;
-	}
+     * @return True if this instance has been closed; false otherwise
+     */
+    public synchronized boolean isClosed() {
+        return this.isClosed;
+    }
 
-	public synchronized MetadataRequestAndVersion newMetadataRequestAndVersion(long nowMs) {
-		MetadataRequest.Builder request = null;
-		boolean isPartialUpdate = false;
+    public synchronized MetadataRequestAndVersion newMetadataRequestAndVersion(long nowMs) {
+        MetadataRequest.Builder request = null;
+        boolean isPartialUpdate = false;
 
-		// Perform a partial update only if a full update hasn't been requested, and the last successful
-		// hasn't exceeded the metadata refresh time.
-		if (!this.needFullUpdate && this.lastSuccessfulRefreshMs + this.metadataExpireMs > nowMs) {
-			request = newMetadataRequestBuilderForNewTopics();
-			isPartialUpdate = true;
-		}
-		if (request == null) {
-			request = newMetadataRequestBuilder();
-			isPartialUpdate = false;
-		}
-		return new MetadataRequestAndVersion(request, requestVersion, isPartialUpdate);
-	}
+        // Perform a partial update only if a full update hasn't been requested, and the last successful
+        // hasn't exceeded the metadata refresh time.
+        if (!this.needFullUpdate && this.lastSuccessfulRefreshMs + this.metadataExpireMs > nowMs) {
+            request = newMetadataRequestBuilderForNewTopics();
+            isPartialUpdate = true;
+        }
+        if (request == null) {
+            request = newMetadataRequestBuilder();
+            isPartialUpdate = false;
+        }
+        return new MetadataRequestAndVersion(request, requestVersion, isPartialUpdate);
+    }
 
-	/**
-	 * Constructs and returns a metadata request builder for fetching cluster data and all active topics.
-	 * @return the constructed non-null metadata builder
-	 */
-	protected MetadataRequest.Builder newMetadataRequestBuilder() {
-		return MetadataRequest.Builder.allTopics();
-	}
+    /**
+     * Constructs and returns a metadata request builder for fetching cluster data and all active topics.
+     * @return the constructed non-null metadata builder
+     */
+    protected MetadataRequest.Builder newMetadataRequestBuilder() {
+        return MetadataRequest.Builder.allTopics();
+    }
 
-	/**
-	 * Constructs and returns a metadata request builder for fetching cluster data and any uncached topics,
-	 * otherwise null if the functionality is not supported.
-	 * @return the constructed metadata builder, or null if not supported
-	 */
-	protected MetadataRequest.Builder newMetadataRequestBuilderForNewTopics() {
-		return null;
-	}
+    /**
+     * Constructs and returns a metadata request builder for fetching cluster data and any uncached topics,
+     * otherwise null if the functionality is not supported.
+     * @return the constructed metadata builder, or null if not supported
+     */
+    protected MetadataRequest.Builder newMetadataRequestBuilderForNewTopics() {
+        return null;
+    }
 
-	protected boolean retainTopic(String topic, boolean isInternal, long nowMs) {
-		return true;
-	}
+    protected boolean retainTopic(String topic, boolean isInternal, long nowMs) {
+        return true;
+    }
 
-	public static class MetadataRequestAndVersion {
-		public final MetadataRequest.Builder requestBuilder;
-		public final int requestVersion;
-		public final boolean isPartialUpdate;
+    public static class MetadataRequestAndVersion {
+        public final MetadataRequest.Builder requestBuilder;
+        public final int requestVersion;
+        public final boolean isPartialUpdate;
 
-		private MetadataRequestAndVersion(MetadataRequest.Builder requestBuilder,
-										  int requestVersion,
-										  boolean isPartialUpdate) {
-			this.requestBuilder = requestBuilder;
-			this.requestVersion = requestVersion;
-			this.isPartialUpdate = isPartialUpdate;
-		}
-	}
+        private MetadataRequestAndVersion(MetadataRequest.Builder requestBuilder, int requestVersion, boolean isPartialUpdate) {
+            this.requestBuilder = requestBuilder;
+            this.requestVersion = requestVersion;
+            this.isPartialUpdate = isPartialUpdate;
+        }
+    }
 
-	/**
-	 * Represents current leader state known in metadata. It is possible that we know the leader, but not the
-	 * epoch if the metadata is received from a broker which does not support a sufficient Metadata API version.
-	 * It is also possible that we know of the leader epoch, but not the leader when it is derived
-	 * from an external source (e.g. a committed offset).
-	 */
-	public static class LeaderAndEpoch {
-		private static final LeaderAndEpoch NO_LEADER_OR_EPOCH = new LeaderAndEpoch(Optional.empty(), Optional.empty());
+    /**
+     * Represents current leader state known in metadata. It is possible that we know the leader, but not the
+     * epoch if the metadata is received from a broker which does not support a sufficient Metadata API version.
+     * It is also possible that we know of the leader epoch, but not the leader when it is derived
+     * from an external source (e.g. a committed offset).
+     */
+    public static class LeaderAndEpoch {
+        private static final LeaderAndEpoch NO_LEADER_OR_EPOCH = new LeaderAndEpoch(Optional.empty(), Optional.empty());
 
-		public final Optional<Node> leader;
-		public final Optional<Integer> epoch;
+        public final Optional<Node> leader;
+        public final Optional<Integer> epoch;
 
-		public LeaderAndEpoch(Optional<Node> leader, Optional<Integer> epoch) {
-			this.leader = Objects.requireNonNull(leader);
-			this.epoch = Objects.requireNonNull(epoch);
-		}
+        public LeaderAndEpoch(Optional<Node> leader, Optional<Integer> epoch) {
+            this.leader = Objects.requireNonNull(leader);
+            this.epoch = Objects.requireNonNull(epoch);
+        }
 
-		public static LeaderAndEpoch noLeaderOrEpoch() {
-			return NO_LEADER_OR_EPOCH;
-		}
+        public static LeaderAndEpoch noLeaderOrEpoch() {
+            return NO_LEADER_OR_EPOCH;
+        }
 
-		@Override
-		public boolean equals(Object o) {
-			if (this == o) return true;
-			if (o == null || getClass() != o.getClass()) return false;
+        @Override
+        public boolean equals(Object o) {
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
 
-			LeaderAndEpoch that = (LeaderAndEpoch) o;
+            LeaderAndEpoch that = (LeaderAndEpoch) o;
 
-			if (!leader.equals(that.leader)) return false;
-			return epoch.equals(that.epoch);
-		}
+            if (!leader.equals(that.leader))
+                return false;
+            return epoch.equals(that.epoch);
+        }
 
-		@Override
-		public int hashCode() {
-			int result = leader.hashCode();
-			result = 31 * result + epoch.hashCode();
-			return result;
-		}
+        @Override
+        public int hashCode() {
+            int result = leader.hashCode();
+            result = 31 * result + epoch.hashCode();
+            return result;
+        }
 
-		@Override
-		public String toString() {
-			return "LeaderAndEpoch{" +
-					"leader=" + leader +
-					", epoch=" + epoch.map(Number::toString).orElse("absent") +
-					'}';
-		}
-	}
+        @Override
+        public String toString() {
+            return "LeaderAndEpoch{" + "leader=" + leader + ", epoch=" + epoch.map(Number::toString).orElse("absent") + '}';
+        }
+    }
 }

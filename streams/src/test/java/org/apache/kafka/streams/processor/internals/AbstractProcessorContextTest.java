@@ -16,21 +16,20 @@
  */
 package org.apache.kafka.streams.processor.internals;
 
+import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.metrics.Metrics;
+import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.streams.StreamsConfig;
-import org.apache.kafka.streams.processor.Cancellable;
-import org.apache.kafka.streams.processor.PunctuationType;
-import org.apache.kafka.streams.processor.Punctuator;
-import org.apache.kafka.streams.processor.StateStore;
-import org.apache.kafka.streams.processor.TaskId;
-import org.apache.kafka.streams.processor.To;
+import org.apache.kafka.streams.processor.*;
+import org.apache.kafka.streams.processor.api.FixedKeyRecord;
 import org.apache.kafka.streams.processor.api.Record;
+import org.apache.kafka.streams.query.Position;
 import org.apache.kafka.streams.state.RocksDBConfigSetter;
 import org.apache.kafka.streams.state.internals.ThreadCache;
 import org.apache.kafka.streams.state.internals.ThreadCache.DirtyEntryFlushListener;
@@ -77,41 +76,41 @@ public class AbstractProcessorContextTest {
     @Test
     public void shouldNotThrowIllegalStateExceptionOnRegisterWhenContextIsNotInitialized() {
         context.register(stateStore, null);
-	}
-
-	@Test
-	public void shouldThrowNullPointerOnRegisterIfStateStoreIsNull() {
-		assertThrows(NullPointerException.class, () -> context.register(null, null));
-	}
-
-	@Test
-	public void shouldReturnNullTopicIfNoRecordContext() {
-		context.setRecordContext(null);
-		assertThat(context.topic(), is(nullValue()));
-	}
-
-	@Test
-	public void shouldNotThrowNullPointerExceptionOnTopicIfRecordContextTopicIsNull() {
-		context.setRecordContext(new ProcessorRecordContext(0, 0, 0, null, null));
-		assertThat(context.topic(), nullValue());
-	}
-
-	@Test
-	public void shouldReturnTopicFromRecordContext() {
-		assertThat(context.topic(), equalTo(recordContext.topic()));
-	}
-
-	@Test
-	public void shouldReturnNullIfTopicEqualsNonExistTopic() {
-		context.setRecordContext(null);
-		assertThat(context.topic(), nullValue());
     }
 
-	@Test
-	public void shouldReturnDummyPartitionIfNoRecordContext() {
-		context.setRecordContext(null);
-		assertThat(context.partition(), is(-1));
-	}
+    @Test
+    public void shouldThrowNullPointerOnRegisterIfStateStoreIsNull() {
+        assertThrows(NullPointerException.class, () -> context.register(null, null));
+    }
+
+    @Test
+    public void shouldReturnNullTopicIfNoRecordContext() {
+        context.setRecordContext(null);
+        assertThat(context.topic(), is(nullValue()));
+    }
+
+    @Test
+    public void shouldNotThrowNullPointerExceptionOnTopicIfRecordContextTopicIsNull() {
+        context.setRecordContext(new ProcessorRecordContext(0, 0, 0, null, new RecordHeaders()));
+        assertThat(context.topic(), nullValue());
+    }
+
+    @Test
+    public void shouldReturnTopicFromRecordContext() {
+        assertThat(context.topic(), equalTo(recordContext.topic()));
+    }
+
+    @Test
+    public void shouldReturnNullIfTopicEqualsNonExistTopic() {
+        context.setRecordContext(null);
+        assertThat(context.topic(), nullValue());
+    }
+
+    @Test
+    public void shouldReturnDummyPartitionIfNoRecordContext() {
+        context.setRecordContext(null);
+        assertThat(context.partition(), is(-1));
+    }
 
     @Test
     public void shouldReturnPartitionFromRecordContext() {
@@ -133,11 +132,11 @@ public class AbstractProcessorContextTest {
         assertThat(context.offset(), equalTo(recordContext.offset()));
     }
 
-	@Test
-	public void shouldReturnDummyTimestampIfNoRecordContext() {
-		context.setRecordContext(null);
-		assertThat(context.timestamp(), is(0L));
-	}
+    @Test
+    public void shouldReturnDummyTimestampIfNoRecordContext() {
+        context.setRecordContext(null);
+        assertThat(context.timestamp(), is(0L));
+    }
 
     @Test
     public void shouldReturnTimestampFromRecordContext() {
@@ -149,113 +148,121 @@ public class AbstractProcessorContextTest {
         assertThat(context.headers(), equalTo(recordContext.headers()));
     }
 
-	@Test
-	public void shouldReturnEmptyHeadersIfHeadersAreNotSet() {
-		context.setRecordContext(null);
-		assertThat(context.headers(), is(emptyIterable()));
-	}
+    @Test
+    public void shouldReturnEmptyHeadersIfHeadersAreNotSet() {
+        context.setRecordContext(null);
+        assertThat(context.headers(), is(emptyIterable()));
+    }
 
     @Test
     public void appConfigsShouldReturnParsedValues() {
-		assertThat(
-				context.appConfigs().get(StreamsConfig.ROCKSDB_CONFIG_SETTER_CLASS_CONFIG),
-				equalTo(RocksDBConfigSetter.class)
-		);
+        assertThat(context.appConfigs().get(StreamsConfig.ROCKSDB_CONFIG_SETTER_CLASS_CONFIG), equalTo(RocksDBConfigSetter.class));
     }
 
     @Test
     public void appConfigsShouldReturnUnrecognizedValues() {
-		assertThat(
-				context.appConfigs().get("user.supplied.config"),
-				equalTo("user-supplied-value")
-		);
+        assertThat(context.appConfigs().get("user.supplied.config"), equalTo("user-supplied-value"));
     }
 
-    private static class TestProcessorContext extends AbstractProcessorContext {
+    @Test
+    public void shouldThrowErrorIfSerdeDefaultNotSet() {
+        final Properties config = getStreamsConfig();
+        config.put(StreamsConfig.ROCKSDB_CONFIG_SETTER_CLASS_CONFIG, RocksDBConfigSetter.class.getName());
+        config.put("user.supplied.config", "user-supplied-value");
+        final TestProcessorContext pc = new TestProcessorContext(metrics, config);
+        assertThrows(ConfigException.class, pc::keySerde);
+        assertThrows(ConfigException.class, pc::valueSerde);
+    }
+
+    private static class TestProcessorContext extends AbstractProcessorContext<Object, Object> {
         static Properties config;
+
         static {
             config = getStreamsConfig();
-			// Value must be a string to test className -> class conversion
-			config.put(StreamsConfig.ROCKSDB_CONFIG_SETTER_CLASS_CONFIG, RocksDBConfigSetter.class.getName());
-			config.put("user.supplied.config", "user-supplied-value");
-		}
+            // Value must be a string to test className -> class conversion
+            config.put(StreamsConfig.ROCKSDB_CONFIG_SETTER_CLASS_CONFIG, RocksDBConfigSetter.class.getName());
+            config.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.ByteArraySerde.class);
+            config.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.ByteArraySerde.class);
+            config.put("user.supplied.config", "user-supplied-value");
+        }
 
-		TestProcessorContext(final MockStreamsMetrics metrics) {
-			super(new TaskId(0, 0), new StreamsConfig(config), metrics, new ThreadCache(new LogContext("name "), 0, metrics));
-		}
+        TestProcessorContext(final MockStreamsMetrics metrics) {
+            super(new TaskId(0, 0), new StreamsConfig(config), metrics, new ThreadCache(new LogContext("name "), 0, metrics));
+        }
 
-		@Override
-		protected StateManager stateManager() {
-			return new StateManagerStub();
-		}
+        TestProcessorContext(final MockStreamsMetrics metrics, final Properties config) {
+            super(new TaskId(0, 0), new StreamsConfig(config), metrics, new ThreadCache(new LogContext("name "), 0, metrics));
+        }
 
-		@Override
-		public <S extends StateStore> S getStateStore(final String name) {
-			return null;
-		}
+        @Override
+        protected StateManager stateManager() {
+            return new StateManagerStub();
+        }
 
-		@Override
-		@Deprecated
-		public Cancellable schedule(final long interval,
-									final PunctuationType type,
-									final Punctuator callback) {
-			return null;
-		}
+        @Override
+        public <S extends StateStore> S getStateStore(final String name) {
+            return null;
+        }
 
-		@Override
-		public Cancellable schedule(final Duration interval,
-									final PunctuationType type,
-									final Punctuator callback) throws IllegalArgumentException {
-			return null;
-		}
+        @Override
+        public Cancellable schedule(final Duration interval, final PunctuationType type, final Punctuator callback) throws IllegalArgumentException {
+            return null;
+        }
 
-		@Override
-		public <K, V> void forward(final Record<K, V> record) {
-		}
+        @Override
+        public <K, V> void forward(final Record<K, V> record) {
+        }
 
-		@Override
-		public <K, V> void forward(final Record<K, V> record, final String childName) {
-		}
+        @Override
+        public <K, V> void forward(final Record<K, V> record, final String childName) {
+        }
 
-		@Override
-		public <K, V> void forward(final K key, final V value) {
-		}
+        @Override
+        public <K, V> void forward(final K key, final V value) {
+        }
 
-		@Override
-		public <K, V> void forward(final K key, final V value, final To to) {
-		}
+        @Override
+        public <K, V> void forward(final K key, final V value, final To to) {
+        }
 
-		@Override
-		public void commit() {
-		}
+        @Override
+        public void commit() {
+        }
 
-		@Override
-		public long currentStreamTimeMs() {
-			throw new UnsupportedOperationException("this method is not supported in TestProcessorContext");
-		}
+        @Override
+        public long currentStreamTimeMs() {
+            throw new UnsupportedOperationException("this method is not supported in TestProcessorContext");
+        }
 
-		@Override
-		public void logChange(final String storeName,
-							  final Bytes key,
-							  final byte[] value,
-							  final long timestamp) {
-		}
+        @Override
+        public void logChange(final String storeName, final Bytes key, final byte[] value, final long timestamp, final Position position) {
+        }
 
-		@Override
-		public void transitionToActive(final StreamTask streamTask, final RecordCollector recordCollector, final ThreadCache newCache) {
-		}
+        @Override
+        public void transitionToActive(final StreamTask streamTask, final RecordCollector recordCollector, final ThreadCache newCache) {
+        }
 
-		@Override
-		public void transitionToStandby(final ThreadCache newCache) {
-		}
+        @Override
+        public void transitionToStandby(final ThreadCache newCache) {
+        }
 
-		@Override
-		public void registerCacheFlushListener(final String namespace, final DirtyEntryFlushListener listener) {
-		}
+        @Override
+        public void registerCacheFlushListener(final String namespace, final DirtyEntryFlushListener listener) {
+        }
 
-		@Override
-		public String changelogFor(final String storeName) {
-			return ProcessorStateManager.storeChangelogTopic(applicationId(), storeName);
-		}
-	}
+        @Override
+        public String changelogFor(final String storeName) {
+            return ProcessorStateManager.storeChangelogTopic(applicationId(), storeName, taskId().topologyName());
+        }
+
+        @Override
+        public <K, V> void forward(final FixedKeyRecord<K, V> record) {
+            forward(new Record<>(record.key(), record.value(), record.timestamp(), record.headers()));
+        }
+
+        @Override
+        public <K, V> void forward(final FixedKeyRecord<K, V> record, final String childName) {
+            forward(new Record<>(record.key(), record.value(), record.timestamp(), record.headers()), childName);
+        }
+    }
 }

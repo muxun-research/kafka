@@ -27,13 +27,13 @@ import java.io.IOException;
  */
 public interface TransferableRecords extends BaseRecords {
 
-	/**
-	 * Attempts to write the contents of this buffer to a channel.
-	 * @param channel  The channel to write to
-	 * @param position The position in the buffer to write from
-	 * @param length   The number of bytes to write
-	 * @return The number of bytes actually written
-	 * @throws IOException For any IO errors
-	 */
-	long writeTo(TransferableChannel channel, long position, int length) throws IOException;
+    /**
+     * Attempts to write the contents of this buffer to a channel.
+     * @param channel  The channel to write to
+     * @param position The position in the buffer to write from
+     * @param length   The number of bytes to write
+     * @return The number of bytes actually written
+     * @throws IOException For any IO errors
+     */
+    int writeTo(TransferableChannel channel, int position, int length) throws IOException;
 }

@@ -40,41 +40,44 @@ public class ControlledShutdownResponse extends AbstractResponse {
     private final ControlledShutdownResponseData data;
 
     public ControlledShutdownResponse(ControlledShutdownResponseData data) {
-		super(ApiKeys.CONTROLLED_SHUTDOWN);
-		this.data = data;
-	}
+        super(ApiKeys.CONTROLLED_SHUTDOWN);
+        this.data = data;
+    }
 
-	public Errors error() {
-		return Errors.forCode(data.errorCode());
-	}
+    public Errors error() {
+        return Errors.forCode(data.errorCode());
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		return errorCounts(error());
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        return errorCounts(error());
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return DEFAULT_THROTTLE_TIME;
-	}
+    @Override
+    public int throttleTimeMs() {
+        return DEFAULT_THROTTLE_TIME;
+    }
 
-	public static ControlledShutdownResponse parse(ByteBuffer buffer, short version) {
-		return new ControlledShutdownResponse(new ControlledShutdownResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        // Not supported by the response schema
+    }
 
-	@Override
-	public ControlledShutdownResponseData data() {
-		return data;
-	}
+    public static ControlledShutdownResponse parse(ByteBuffer buffer, short version) {
+        return new ControlledShutdownResponse(new ControlledShutdownResponseData(new ByteBufferAccessor(buffer), version));
+    }
+
+    @Override
+    public ControlledShutdownResponseData data() {
+        return data;
+    }
 
     public static ControlledShutdownResponse prepareResponse(Errors error, Set<TopicPartition> tps) {
         ControlledShutdownResponseData data = new ControlledShutdownResponseData();
         data.setErrorCode(error.code());
         ControlledShutdownResponseData.RemainingPartitionCollection pSet = new ControlledShutdownResponseData.RemainingPartitionCollection();
         tps.forEach(tp -> {
-            pSet.add(new RemainingPartition()
-                    .setTopicName(tp.topic())
-                    .setPartitionIndex(tp.partition()));
+            pSet.add(new RemainingPartition().setTopicName(tp.topic()).setPartitionIndex(tp.partition()));
         });
         data.setRemainingPartitions(pSet);
         return new ControlledShutdownResponse(data);

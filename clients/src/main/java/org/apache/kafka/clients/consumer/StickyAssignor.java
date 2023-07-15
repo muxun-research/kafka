@@ -18,20 +18,11 @@ package org.apache.kafka.clients.consumer;
 
 import org.apache.kafka.clients.consumer.internals.AbstractStickyAssignor;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.protocol.types.ArrayOf;
-import org.apache.kafka.common.protocol.types.Field;
-import org.apache.kafka.common.protocol.types.Schema;
-import org.apache.kafka.common.protocol.types.Struct;
-import org.apache.kafka.common.protocol.types.Type;
+import org.apache.kafka.common.protocol.types.*;
 import org.apache.kafka.common.utils.CollectionUtils;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 
 /**
  * <p>The sticky assignor serves two purposes. First, it guarantees an assignment that is as balanced as possible, meaning either:
@@ -175,30 +166,26 @@ import java.util.Set;
  * {@link ConsumerPartitionAssignor.RebalanceProtocol} for a detailed explanation of cooperative rebalancing.
  */
 public class StickyAssignor extends AbstractStickyAssignor {
+    public static final String STICKY_ASSIGNOR_NAME = "sticky";
 
-	// these schemas are used for preserving consumer's previously assigned partitions
-	// list and sending it as user data to the leader during a rebalance
-	static final String TOPIC_PARTITIONS_KEY_NAME = "previous_assignment";
-	static final String TOPIC_KEY_NAME = "topic";
-	static final String PARTITIONS_KEY_NAME = "partitions";
-	private static final String GENERATION_KEY_NAME = "generation";
+    // these schemas are used for preserving consumer's previously assigned partitions
+    // list and sending it as user data to the leader during a rebalance
+    static final String TOPIC_PARTITIONS_KEY_NAME = "previous_assignment";
+    static final String TOPIC_KEY_NAME = "topic";
+    static final String PARTITIONS_KEY_NAME = "partitions";
+    private static final String GENERATION_KEY_NAME = "generation";
 
-	static final Schema TOPIC_ASSIGNMENT = new Schema(
-			new Field(TOPIC_KEY_NAME, Type.STRING),
-			new Field(PARTITIONS_KEY_NAME, new ArrayOf(Type.INT32)));
-	static final Schema STICKY_ASSIGNOR_USER_DATA_V0 = new Schema(
-			new Field(TOPIC_PARTITIONS_KEY_NAME, new ArrayOf(TOPIC_ASSIGNMENT)));
-	private static final Schema STICKY_ASSIGNOR_USER_DATA_V1 = new Schema(
-			new Field(TOPIC_PARTITIONS_KEY_NAME, new ArrayOf(TOPIC_ASSIGNMENT)),
-			new Field(GENERATION_KEY_NAME, Type.INT32));
+    static final Schema TOPIC_ASSIGNMENT = new Schema(new Field(TOPIC_KEY_NAME, Type.STRING), new Field(PARTITIONS_KEY_NAME, new ArrayOf(Type.INT32)));
+    static final Schema STICKY_ASSIGNOR_USER_DATA_V0 = new Schema(new Field(TOPIC_PARTITIONS_KEY_NAME, new ArrayOf(TOPIC_ASSIGNMENT)));
+    private static final Schema STICKY_ASSIGNOR_USER_DATA_V1 = new Schema(new Field(TOPIC_PARTITIONS_KEY_NAME, new ArrayOf(TOPIC_ASSIGNMENT)), new Field(GENERATION_KEY_NAME, Type.INT32));
 
     private List<TopicPartition> memberAssignment = null;
     private int generation = DEFAULT_GENERATION; // consumer group generation
 
-	@Override
-	public String name() {
-		return "sticky";
-	}
+    @Override
+    public String name() {
+        return STICKY_ASSIGNOR_NAME;
+    }
 
     @Override
     public void onAssignment(Assignment assignment, ConsumerGroupMetadata metadata) {
@@ -211,63 +198,65 @@ public class StickyAssignor extends AbstractStickyAssignor {
         if (memberAssignment == null)
             return null;
 
-		return serializeTopicPartitionAssignment(new MemberData(memberAssignment, Optional.of(generation)));
+        return serializeTopicPartitionAssignment(new MemberData(memberAssignment, Optional.of(generation)));
     }
 
-	@Override
-	protected MemberData memberData(Subscription subscription) {
-		ByteBuffer userData = subscription.userData();
-		if (userData == null || !userData.hasRemaining()) {
-			return new MemberData(Collections.emptyList(), Optional.empty());
-		}
-		return deserializeTopicPartitionAssignment(userData);
-	}
+    @Override
+    protected MemberData memberData(Subscription subscription) {
+        // Always deserialize ownedPartitions and generation id from user data
+        // since StickyAssignor is an eager rebalance protocol that will revoke all existing partitions before joining group
+        ByteBuffer userData = subscription.userData();
+        if (userData == null || !userData.hasRemaining()) {
+            return new MemberData(Collections.emptyList(), Optional.empty(), subscription.rackId());
+        }
+        return deserializeTopicPartitionAssignment(userData);
+    }
 
-	// visible for testing
-	static ByteBuffer serializeTopicPartitionAssignment(MemberData memberData) {
-		Struct struct = new Struct(STICKY_ASSIGNOR_USER_DATA_V1);
-		List<Struct> topicAssignments = new ArrayList<>();
-		for (Map.Entry<String, List<Integer>> topicEntry : CollectionUtils.groupPartitionsByTopic(memberData.partitions).entrySet()) {
-			Struct topicAssignment = new Struct(TOPIC_ASSIGNMENT);
-			topicAssignment.set(TOPIC_KEY_NAME, topicEntry.getKey());
-			topicAssignment.set(PARTITIONS_KEY_NAME, topicEntry.getValue().toArray());
-			topicAssignments.add(topicAssignment);
-		}
-		struct.set(TOPIC_PARTITIONS_KEY_NAME, topicAssignments.toArray());
-		if (memberData.generation.isPresent())
-			struct.set(GENERATION_KEY_NAME, memberData.generation.get());
-		ByteBuffer buffer = ByteBuffer.allocate(STICKY_ASSIGNOR_USER_DATA_V1.sizeOf(struct));
-		STICKY_ASSIGNOR_USER_DATA_V1.write(buffer, struct);
-		buffer.flip();
-		return buffer;
-	}
+    // visible for testing
+    static ByteBuffer serializeTopicPartitionAssignment(MemberData memberData) {
+        Struct struct = new Struct(STICKY_ASSIGNOR_USER_DATA_V1);
+        List<Struct> topicAssignments = new ArrayList<>();
+        for (Map.Entry<String, List<Integer>> topicEntry : CollectionUtils.groupPartitionsByTopic(memberData.partitions).entrySet()) {
+            Struct topicAssignment = new Struct(TOPIC_ASSIGNMENT);
+            topicAssignment.set(TOPIC_KEY_NAME, topicEntry.getKey());
+            topicAssignment.set(PARTITIONS_KEY_NAME, topicEntry.getValue().toArray());
+            topicAssignments.add(topicAssignment);
+        }
+        struct.set(TOPIC_PARTITIONS_KEY_NAME, topicAssignments.toArray());
+        if (memberData.generation.isPresent())
+            struct.set(GENERATION_KEY_NAME, memberData.generation.get());
+        ByteBuffer buffer = ByteBuffer.allocate(STICKY_ASSIGNOR_USER_DATA_V1.sizeOf(struct));
+        STICKY_ASSIGNOR_USER_DATA_V1.write(buffer, struct);
+        buffer.flip();
+        return buffer;
+    }
 
-	private static MemberData deserializeTopicPartitionAssignment(ByteBuffer buffer) {
-		Struct struct;
-		ByteBuffer copy = buffer.duplicate();
-		try {
-			struct = STICKY_ASSIGNOR_USER_DATA_V1.read(buffer);
-		} catch (Exception e1) {
-			try {
-				// fall back to older schema
-				struct = STICKY_ASSIGNOR_USER_DATA_V0.read(copy);
-			} catch (Exception e2) {
-				// ignore the consumer's previous assignment if it cannot be parsed
-				return new MemberData(Collections.emptyList(), Optional.of(DEFAULT_GENERATION));
+    private static MemberData deserializeTopicPartitionAssignment(ByteBuffer buffer) {
+        Struct struct;
+        ByteBuffer copy = buffer.duplicate();
+        try {
+            struct = STICKY_ASSIGNOR_USER_DATA_V1.read(buffer);
+        } catch (Exception e1) {
+            try {
+                // fall back to older schema
+                struct = STICKY_ASSIGNOR_USER_DATA_V0.read(copy);
+            } catch (Exception e2) {
+                // ignore the consumer's previous assignment if it cannot be parsed
+                return new MemberData(Collections.emptyList(), Optional.of(DEFAULT_GENERATION));
             }
         }
 
         List<TopicPartition> partitions = new ArrayList<>();
-		for (Object structObj : struct.getArray(TOPIC_PARTITIONS_KEY_NAME)) {
-			Struct assignment = (Struct) structObj;
-			String topic = assignment.getString(TOPIC_KEY_NAME);
-			for (Object partitionObj : assignment.getArray(PARTITIONS_KEY_NAME)) {
-				Integer partition = (Integer) partitionObj;
-				partitions.add(new TopicPartition(topic, partition));
-			}
-		}
-		// make sure this is backward compatible
-		Optional<Integer> generation = struct.hasField(GENERATION_KEY_NAME) ? Optional.of(struct.getInt(GENERATION_KEY_NAME)) : Optional.empty();
-		return new MemberData(partitions, generation);
-	}
+        for (Object structObj : struct.getArray(TOPIC_PARTITIONS_KEY_NAME)) {
+            Struct assignment = (Struct) structObj;
+            String topic = assignment.getString(TOPIC_KEY_NAME);
+            for (Object partitionObj : assignment.getArray(PARTITIONS_KEY_NAME)) {
+                Integer partition = (Integer) partitionObj;
+                partitions.add(new TopicPartition(topic, partition));
+            }
+        }
+        // make sure this is backward compatible
+        Optional<Integer> generation = struct.hasField(GENERATION_KEY_NAME) ? Optional.of(struct.getInt(GENERATION_KEY_NAME)) : Optional.empty();
+        return new MemberData(partitions, generation);
+    }
 }

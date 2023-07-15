@@ -56,14 +56,19 @@ public class DescribeProducersResponse extends AbstractResponse {
 				new ByteBufferAccessor(buffer), version));
 	}
 
-	@Override
-	public String toString() {
-		return data.toString();
-	}
+    @Override
+    public String toString() {
+        return data.toString();
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
+
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
 }

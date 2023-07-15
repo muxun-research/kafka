@@ -17,29 +17,29 @@
 package org.apache.kafka.streams.kstream.internals;
 
 import org.apache.kafka.streams.kstream.ValueMapperWithKey;
-import org.apache.kafka.streams.processor.api.ContextualProcessor;
-import org.apache.kafka.streams.processor.api.Processor;
-import org.apache.kafka.streams.processor.api.ProcessorSupplier;
-import org.apache.kafka.streams.processor.api.Record;
+import org.apache.kafka.streams.processor.api.ContextualFixedKeyProcessor;
+import org.apache.kafka.streams.processor.api.FixedKeyProcessor;
+import org.apache.kafka.streams.processor.api.FixedKeyProcessorSupplier;
+import org.apache.kafka.streams.processor.api.FixedKeyRecord;
 
-class KStreamMapValues<KIn, VIn, VOut> implements ProcessorSupplier<KIn, VIn, KIn, VOut> {
+class KStreamMapValues<KIn, VIn, VOut> implements FixedKeyProcessorSupplier<KIn, VIn, VOut> {
 
-	private final ValueMapperWithKey<KIn, VIn, VOut> mapper;
+    private final ValueMapperWithKey<KIn, VIn, VOut> mapper;
 
-	public KStreamMapValues(final ValueMapperWithKey<KIn, VIn, VOut> mapper) {
-		this.mapper = mapper;
-	}
+    public KStreamMapValues(final ValueMapperWithKey<KIn, VIn, VOut> mapper) {
+        this.mapper = mapper;
+    }
 
-	@Override
-	public Processor<KIn, VIn, KIn, VOut> get() {
-		return new KStreamMapProcessor();
-	}
+    @Override
+    public FixedKeyProcessor<KIn, VIn, VOut> get() {
+        return new KStreamMapProcessor();
+    }
 
-	private class KStreamMapProcessor extends ContextualProcessor<KIn, VIn, KIn, VOut> {
-		@Override
-		public void process(final Record<KIn, VIn> record) {
-			final VOut newValue = mapper.apply(record.key(), record.value());
-			context().forward(record.withValue(newValue));
-		}
-	}
+    private class KStreamMapProcessor extends ContextualFixedKeyProcessor<KIn, VIn, VOut> {
+        @Override
+        public void process(final FixedKeyRecord<KIn, VIn> record) {
+            final VOut newValue = mapper.apply(record.key(), record.value());
+            context().forward(record.withValue(newValue));
+        }
+    }
 }

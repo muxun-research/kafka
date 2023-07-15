@@ -22,11 +22,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.kafka.test.TestUtils;
 import org.apache.kafka.trogdor.agent.AgentClient;
 import org.apache.kafka.trogdor.coordinator.CoordinatorClient;
-import org.apache.kafka.trogdor.rest.AgentStatusResponse;
-import org.apache.kafka.trogdor.rest.TaskState;
-import org.apache.kafka.trogdor.rest.TasksRequest;
-import org.apache.kafka.trogdor.rest.TasksResponse;
-import org.apache.kafka.trogdor.rest.WorkerState;
+import org.apache.kafka.trogdor.rest.*;
 import org.apache.kafka.trogdor.task.TaskSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -203,4 +199,4 @@ public class ExpectedTasks {
         }, "Timed out waiting for expected workers " + JsonUtil.toJsonString(expected));
         return this;
     }
-};
+}

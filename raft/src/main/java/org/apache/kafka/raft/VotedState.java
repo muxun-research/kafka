@@ -32,98 +32,74 @@ import java.util.Set;
  * then the voter will become a candidate.
  */
 public class VotedState implements EpochState {
-	private final int epoch;
-	private final int votedId;
-	private final Set<Integer> voters;
-	private final int electionTimeoutMs;
-	private final Timer electionTimer;
-	private final Optional<LogOffsetMetadata> highWatermark;
-	private final Logger log;
+    private final int epoch;
+    private final int votedId;
+    private final Set<Integer> voters;
+    private final int electionTimeoutMs;
+    private final Timer electionTimer;
+    private final Optional<LogOffsetMetadata> highWatermark;
+    private final Logger log;
 
-	public VotedState(
-			Time time,
-			int epoch,
-			int votedId,
-			Set<Integer> voters,
-			Optional<LogOffsetMetadata> highWatermark,
-			int electionTimeoutMs,
-			LogContext logContext
-	) {
-		this.epoch = epoch;
-		this.votedId = votedId;
-		this.voters = voters;
-		this.highWatermark = highWatermark;
-		this.electionTimeoutMs = electionTimeoutMs;
-		this.electionTimer = time.timer(electionTimeoutMs);
-		this.log = logContext.logger(VotedState.class);
-	}
+    public VotedState(Time time, int epoch, int votedId, Set<Integer> voters, Optional<LogOffsetMetadata> highWatermark, int electionTimeoutMs, LogContext logContext) {
+        this.epoch = epoch;
+        this.votedId = votedId;
+        this.voters = voters;
+        this.highWatermark = highWatermark;
+        this.electionTimeoutMs = electionTimeoutMs;
+        this.electionTimer = time.timer(electionTimeoutMs);
+        this.log = logContext.logger(VotedState.class);
+    }
 
-	@Override
-	public ElectionState election() {
-		return new ElectionState(
-				epoch,
-				OptionalInt.empty(),
-				OptionalInt.of(votedId),
-				voters
-		);
-	}
+    @Override
+    public ElectionState election() {
+        return new ElectionState(epoch, OptionalInt.empty(), OptionalInt.of(votedId), voters);
+    }
 
-	public int votedId() {
-		return votedId;
-	}
+    public int votedId() {
+        return votedId;
+    }
 
-	@Override
-	public int epoch() {
-		return epoch;
-	}
+    @Override
+    public int epoch() {
+        return epoch;
+    }
 
-	@Override
-	public String name() {
-		return "Voted";
-	}
+    @Override
+    public String name() {
+        return "Voted";
+    }
 
-	public long remainingElectionTimeMs(long currentTimeMs) {
-		electionTimer.update(currentTimeMs);
-		return electionTimer.remainingMs();
-	}
+    public long remainingElectionTimeMs(long currentTimeMs) {
+        electionTimer.update(currentTimeMs);
+        return electionTimer.remainingMs();
+    }
 
-	public boolean hasElectionTimeoutExpired(long currentTimeMs) {
-		electionTimer.update(currentTimeMs);
-		return electionTimer.isExpired();
-	}
+    public boolean hasElectionTimeoutExpired(long currentTimeMs) {
+        electionTimer.update(currentTimeMs);
+        return electionTimer.isExpired();
+    }
 
-	public void overrideElectionTimeout(long currentTimeMs, long timeoutMs) {
-		electionTimer.update(currentTimeMs);
-		electionTimer.reset(timeoutMs);
-	}
+    @Override
+    public boolean canGrantVote(int candidateId, boolean isLogUpToDate) {
+        if (votedId() == candidateId) {
+            return true;
+        }
 
-	@Override
-	public boolean canGrantVote(int candidateId, boolean isLogUpToDate) {
-		if (votedId() == candidateId) {
-			return true;
-		}
+        log.debug("Rejecting vote request from candidate {} since we already have voted for " + "another candidate {} in epoch {}", candidateId, votedId(), epoch);
+        return false;
+    }
 
-		log.debug("Rejecting vote request from candidate {} since we already have voted for " +
-				"another candidate {} in epoch {}", candidateId, votedId(), epoch);
-		return false;
-	}
+    @Override
+    public Optional<LogOffsetMetadata> highWatermark() {
+        return highWatermark;
+    }
 
-	@Override
-	public Optional<LogOffsetMetadata> highWatermark() {
-		return highWatermark;
-	}
+    @Override
+    public String toString() {
+        return "Voted(" + "epoch=" + epoch + ", votedId=" + votedId + ", voters=" + voters + ", electionTimeoutMs=" + electionTimeoutMs + ')';
+    }
 
-	@Override
-	public String toString() {
-		return "Voted(" +
-				"epoch=" + epoch +
-				", votedId=" + votedId +
-				", voters=" + voters +
-				", electionTimeoutMs=" + electionTimeoutMs +
-				')';
-	}
-
-	@Override
-	public void close() {
-	}
+    @Override
+    public void close() {
+    }
 }

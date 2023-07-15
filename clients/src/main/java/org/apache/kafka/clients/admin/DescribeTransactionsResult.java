@@ -19,7 +19,6 @@ package org.apache.kafka.clients.admin;
 import org.apache.kafka.clients.admin.internals.CoordinatorKey;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.annotation.InterfaceStability;
-import org.apache.kafka.common.internals.KafkaFutureImpl;
 
 import java.util.Collection;
 import java.util.HashMap;
@@ -28,53 +27,51 @@ import java.util.concurrent.ExecutionException;
 
 @InterfaceStability.Evolving
 public class DescribeTransactionsResult {
-	private final Map<CoordinatorKey, KafkaFutureImpl<TransactionDescription>> futures;
+    private final Map<CoordinatorKey, KafkaFuture<TransactionDescription>> futures;
 
-	DescribeTransactionsResult(Map<CoordinatorKey, KafkaFutureImpl<TransactionDescription>> futures) {
-		this.futures = futures;
-	}
+    DescribeTransactionsResult(Map<CoordinatorKey, KafkaFuture<TransactionDescription>> futures) {
+        this.futures = futures;
+    }
 
-	/**
-	 * Get the description of a specific transactional ID.
-	 * @param transactionalId the transactional ID to describe
-	 * @return a future which completes when the transaction description of a particular
-	 * transactional ID is available.
-	 * @throws IllegalArgumentException if the `transactionalId` was not included in the
-	 *                                  respective call to {@link Admin#describeTransactions(Collection, DescribeTransactionsOptions)}.
-	 */
-	public KafkaFuture<TransactionDescription> description(String transactionalId) {
-		CoordinatorKey key = CoordinatorKey.byTransactionalId(transactionalId);
-		KafkaFuture<TransactionDescription> future = futures.get(key);
-		if (future == null) {
-			throw new IllegalArgumentException("TransactionalId " +
-					"`" + transactionalId + "` was not included in the request");
-		}
-		return future;
-	}
+    /**
+     * Get the description of a specific transactional ID.
+     * @param transactionalId the transactional ID to describe
+     * @return a future which completes when the transaction description of a particular
+     * transactional ID is available.
+     * @throws IllegalArgumentException if the `transactionalId` was not included in the
+     *                                  respective call to {@link Admin#describeTransactions(Collection, DescribeTransactionsOptions)}.
+     */
+    public KafkaFuture<TransactionDescription> description(String transactionalId) {
+        CoordinatorKey key = CoordinatorKey.byTransactionalId(transactionalId);
+        KafkaFuture<TransactionDescription> future = futures.get(key);
+        if (future == null) {
+            throw new IllegalArgumentException("TransactionalId " + "`" + transactionalId + "` was not included in the request");
+        }
+        return future;
+    }
 
-	/**
-	 * Get a future which returns a map of the transaction descriptions requested in the respective
-	 * call to {@link Admin#describeTransactions(Collection, DescribeTransactionsOptions)}.
-	 * <p>
-	 * If the description fails on any of the transactional IDs in the request, then this future
-	 * will also fail.
-	 * @return a future which either completes when all transaction descriptions complete or fails
-	 * if any of the descriptions cannot be obtained
-	 */
-	public KafkaFuture<Map<String, TransactionDescription>> all() {
-		return KafkaFuture.allOf(futures.values().toArray(new KafkaFuture[0]))
-				.thenApply(nil -> {
-					Map<String, TransactionDescription> results = new HashMap<>(futures.size());
-					for (Map.Entry<CoordinatorKey, KafkaFutureImpl<TransactionDescription>> entry : futures.entrySet()) {
-						try {
-							results.put(entry.getKey().idValue, entry.getValue().get());
-						} catch (InterruptedException | ExecutionException e) {
-							// This should be unreachable, because allOf ensured that all the futures completed successfully.
-							throw new RuntimeException(e);
-						}
-					}
-					return results;
-				});
-	}
+    /**
+     * Get a future which returns a map of the transaction descriptions requested in the respective
+     * call to {@link Admin#describeTransactions(Collection, DescribeTransactionsOptions)}.
+     * <p>
+     * If the description fails on any of the transactional IDs in the request, then this future
+     * will also fail.
+     * @return a future which either completes when all transaction descriptions complete or fails
+     * if any of the descriptions cannot be obtained
+     */
+    public KafkaFuture<Map<String, TransactionDescription>> all() {
+        return KafkaFuture.allOf(futures.values().toArray(new KafkaFuture[0])).thenApply(nil -> {
+            Map<String, TransactionDescription> results = new HashMap<>(futures.size());
+            for (Map.Entry<CoordinatorKey, KafkaFuture<TransactionDescription>> entry : futures.entrySet()) {
+                try {
+                    results.put(entry.getKey().idValue, entry.getValue().get());
+                } catch (InterruptedException | ExecutionException e) {
+                    // This should be unreachable, because allOf ensured that all the futures completed successfully.
+                    throw new RuntimeException(e);
+                }
+            }
+            return results;
+        });
+    }
 
 }

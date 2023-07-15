@@ -18,17 +18,16 @@
 package kafka.tools
 
 import joptsimple._
+import kafka.utils.{CoreUtils, Exit, Logging}
+import org.apache.kafka.common.internals.Topic
+import org.apache.kafka.server.util.CommandLineUtils
 
-import scala.util.matching.Regex
-import collection.mutable
-import java.util.Date
-import java.text.SimpleDateFormat
-
-import kafka.utils.{CommandLineUtils, CoreUtils, Exit, Logging}
 import java.io.{BufferedOutputStream, OutputStream}
 import java.nio.charset.StandardCharsets
-
-import org.apache.kafka.common.internals.Topic
+import java.text.SimpleDateFormat
+import java.util.Date
+import scala.collection.mutable
+import scala.util.matching.Regex
 
 /**
  * A utility that merges the state change logs (possibly obtained from different brokers and over multiple days).
@@ -44,27 +43,27 @@ import org.apache.kafka.common.internals.Topic
  * 3. Start time from when the logs should be merged
  * 4. End time until when the logs should be merged
  */
-
+@deprecated(since = "3.6")
 object StateChangeLogMerger extends Logging {
-
   val dateFormatString = "yyyy-MM-dd HH:mm:ss,SSS"
   val topicPartitionRegex = new Regex("\\[(" + Topic.LEGAL_CHARS + "+),( )*([0-9]+)\\]")
   val dateRegex = new Regex("[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]{3}")
   val dateFormat = new SimpleDateFormat(dateFormatString)
   var files: List[String] = List()
-  var topic: String = null
+  var topic: String = _
   var partitions: List[Int] = List()
-  var startDate: Date = null
-  var endDate: Date = null
+  var startDate: Date = _
+  var endDate: Date = _
 
   def main(args: Array[String]): Unit = {
+    println("WARNING: This tool is deprecated and will be removed in the next major release.")
 
     // Parse input arguments.
     val parser = new OptionParser(false)
     val filesOpt = parser.accepts("logs", "Comma separated list of state change logs or a regex for the log file names")
-                              .withRequiredArg
-                              .describedAs("file1,file2,...")
-                              .ofType(classOf[String])
+      .withRequiredArg
+      .describedAs("file1,file2,...")
+      .ofType(classOf[String])
     val regexOpt = parser.accepts("logs-regex", "Regex to match the state change log files to be merged")
                               .withRequiredArg
                               .describedAs("for example: /tmp/state-change.log*")
@@ -78,21 +77,21 @@ object StateChangeLogMerger extends Logging {
                               .describedAs("0,1,2,...")
                               .ofType(classOf[String])
     val startTimeOpt = parser.accepts("start-time", "The earliest timestamp of state change log entries to be merged")
-                              .withRequiredArg
-                              .describedAs("start timestamp in the format " + dateFormat)
-                              .ofType(classOf[String])
-                              .defaultsTo("0000-00-00 00:00:00,000")
+      .withRequiredArg
+      .describedAs("start timestamp in the format " + dateFormat)
+      .ofType(classOf[String])
+      .defaultsTo("0000-00-00 00:00:00,000")
     val endTimeOpt = parser.accepts("end-time", "The latest timestamp of state change log entries to be merged")
-                              .withRequiredArg
-                              .describedAs("end timestamp in the format " + dateFormat)
-                              .ofType(classOf[String])
-                              .defaultsTo("9999-12-31 23:59:59,999")
-                              
-    if(args.length == 0)
-      CommandLineUtils.printUsageAndDie(parser, "A tool for merging the log files from several brokers to reconnstruct a unified history of what happened.")
+      .withRequiredArg
+      .describedAs("end timestamp in the format " + dateFormat)
+      .ofType(classOf[String])
+      .defaultsTo("9999-12-31 23:59:59,999")
+
+    if (args.isEmpty)
+      CommandLineUtils.printUsageAndExit(parser, "A tool for merging the log files from several brokers to reconnstruct a unified history of what happened.")
 
 
-    val options = parser.parse(args : _*)
+    val options = parser.parse(args: _*)
     if ((!options.has(filesOpt) && !options.has(regexOpt)) || (options.has(filesOpt) && options.has(regexOpt))) {
       System.err.println("Provide arguments to exactly one of the two options \"" + filesOpt + "\" or \"" + regexOpt + "\"")
       parser.printHelpOn(System.err)
@@ -192,5 +191,4 @@ object StateChangeLogMerger extends Logging {
       secondDate.compareTo(firstDate)
     }
   }
-
 }

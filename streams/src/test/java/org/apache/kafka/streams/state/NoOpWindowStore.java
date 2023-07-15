@@ -16,11 +16,12 @@
  */
 package org.apache.kafka.streams.state;
 
-import java.time.Instant;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateStore;
+import org.apache.kafka.streams.query.Position;
 
+import java.time.Instant;
 import java.util.NoSuchElementException;
 
 public class NoOpWindowStore implements ReadOnlyWindowStore, StateStore {
@@ -54,11 +55,11 @@ public class NoOpWindowStore implements ReadOnlyWindowStore, StateStore {
         return "";
     }
 
-	@Deprecated
-	@Override
-	public void init(final ProcessorContext context, final StateStore root) {
+    @Deprecated
+    @Override
+    public void init(final ProcessorContext context, final StateStore root) {
 
-	}
+    }
 
     @Override
     public void flush() {
@@ -81,77 +82,52 @@ public class NoOpWindowStore implements ReadOnlyWindowStore, StateStore {
     }
 
     @Override
+    public Position getPosition() {
+        throw new UnsupportedOperationException("Position handling not implemented");
+    }
+
+    @Override
     public Object fetch(final Object key, final long time) {
-		return null;
-	}
+        return null;
+    }
 
-	@Override
-	@SuppressWarnings("deprecation")
-	public WindowStoreIterator fetch(final Object key, final long timeFrom, final long timeTo) {
-		return EMPTY_WINDOW_STORE_ITERATOR;
-	}
+    @Override
+    public WindowStoreIterator fetch(final Object key, final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
+        return EMPTY_WINDOW_STORE_ITERATOR;
+    }
 
-	@Override
-	public WindowStoreIterator fetch(final Object key, final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
-		return EMPTY_WINDOW_STORE_ITERATOR;
-	}
+    @Override
+    public WindowStoreIterator backwardFetch(final Object key, final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
+        return EMPTY_WINDOW_STORE_ITERATOR;
+    }
 
-	@Override
-	public WindowStoreIterator backwardFetch(final Object key,
-											 final Instant timeFrom,
-											 final Instant timeTo) throws IllegalArgumentException {
-		return EMPTY_WINDOW_STORE_ITERATOR;
-	}
+    @Override
+    public KeyValueIterator fetch(final Object keyFrom, final Object keyTo, final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
+        return EMPTY_WINDOW_STORE_ITERATOR;
+    }
 
-	@Override
-	@SuppressWarnings("deprecation")
-	public WindowStoreIterator<KeyValue> fetch(final Object keyFrom,
-											   final Object keyTo,
-											   final long timeFrom,
-											   final long timeTo) {
-		return EMPTY_WINDOW_STORE_ITERATOR;
-	}
+    @Override
+    public KeyValueIterator backwardFetch(final Object from, final Object keyTo, final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
+        return EMPTY_WINDOW_STORE_ITERATOR;
+    }
 
-	@Override
-	public KeyValueIterator fetch(final Object keyFrom,
-								  final Object keyTo,
-								  final Instant timeFrom,
-								  final Instant timeTo) throws IllegalArgumentException {
-		return EMPTY_WINDOW_STORE_ITERATOR;
-	}
+    @Override
+    public WindowStoreIterator<KeyValue> all() {
+        return EMPTY_WINDOW_STORE_ITERATOR;
+    }
 
-	@Override
-	public KeyValueIterator backwardFetch(final Object from,
-										  final Object keyTo,
-										  final Instant timeFrom,
-										  final Instant timeTo) throws IllegalArgumentException {
-		return EMPTY_WINDOW_STORE_ITERATOR;
-	}
+    @Override
+    public WindowStoreIterator<KeyValue> backwardAll() {
+        return EMPTY_WINDOW_STORE_ITERATOR;
+    }
 
-	@Override
-	public WindowStoreIterator<KeyValue> all() {
-		return EMPTY_WINDOW_STORE_ITERATOR;
-	}
+    @Override
+    public KeyValueIterator fetchAll(final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
+        return EMPTY_WINDOW_STORE_ITERATOR;
+    }
 
-	@Override
-	public WindowStoreIterator<KeyValue> backwardAll() {
-		return EMPTY_WINDOW_STORE_ITERATOR;
-	}
-
-	@Override
-	@SuppressWarnings("deprecation")
-	public WindowStoreIterator<KeyValue> fetchAll(final long timeFrom, final long timeTo) {
-		return EMPTY_WINDOW_STORE_ITERATOR;
-	}
-
-	@Override
-	public KeyValueIterator fetchAll(final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
-		return EMPTY_WINDOW_STORE_ITERATOR;
-	}
-
-	@Override
-	public KeyValueIterator backwardFetchAll(final Instant timeFrom,
-											 final Instant timeTo) throws IllegalArgumentException {
-		return EMPTY_WINDOW_STORE_ITERATOR;
-	}
+    @Override
+    public KeyValueIterator backwardFetchAll(final Instant timeFrom, final Instant timeTo) throws IllegalArgumentException {
+        return EMPTY_WINDOW_STORE_ITERATOR;
+    }
 }

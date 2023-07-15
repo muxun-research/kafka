@@ -40,7 +40,12 @@
   // Version 12 adds support for flexible versions, epoch detection through the `TruncationOffset` field,
   // and leader discovery through the `CurrentLeader` field
   //
-  "validVersions": "0-12",
+  // Version 13 replaces the topic name field with topic ID (KIP-516).
+  //
+  // Version 14 is the same as version 13 but it also receives a new error called OffsetMovedToTieredStorageException (KIP-405)
+  //
+  // Version 15 is the same as version 14 (KIP-903).
+  "validVersions": "0-15",
   "flexibleVersions": "12+",
   "fields": [
     {
@@ -74,9 +79,17 @@
         {
           "name": "Topic",
           "type": "string",
-          "versions": "0+",
+          "versions": "0-12",
+          "ignorable": true,
           "entityType": "topicName",
           "about": "The topic name."
+        },
+        {
+          "name": "TopicId",
+          "type": "uuid",
+          "versions": "13+",
+          "ignorable": true,
+          "about": "The unique topic ID"
         },
         {
           "name": "Partitions",
@@ -225,7 +238,9 @@
               "nullableVersions": "0+",
               "about": "The record data."
             }
-          ]}
-    ]}
+          ]
+        }
+      ]
+    }
   ]
 }

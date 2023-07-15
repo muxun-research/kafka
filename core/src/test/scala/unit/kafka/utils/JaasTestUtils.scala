@@ -16,13 +16,12 @@
  */
 package kafka.utils
 
-import java.io.{BufferedWriter, File, FileWriter}
-import java.util.Properties
-
-import scala.collection.Seq
 import kafka.server.KafkaConfig
 import org.apache.kafka.clients.admin.ScramMechanism
 import org.apache.kafka.common.utils.Java
+
+import java.io.{BufferedWriter, File, FileWriter}
+import java.util.Properties
 
 object JaasTestUtils {
 
@@ -31,16 +30,17 @@ object JaasTestUtils {
                              keyTab: String,
                              principal: String,
                              debug: Boolean,
-                             serviceName: Option[String]) extends JaasModule {
+                             serviceName: Option[String],
+                             isIbmSecurity: Boolean) extends JaasModule {
 
     def name =
-      if (Java.isIbmJdk)
+      if (isIbmSecurity)
         "com.ibm.security.auth.module.Krb5LoginModule"
       else
         "com.sun.security.auth.module.Krb5LoginModule"
 
     def entries: Map[String, String] =
-      if (Java.isIbmJdk)
+      if (isIbmSecurity)
         Map(
           "principal" -> principal,
           "credsType" -> "both"
@@ -119,6 +119,8 @@ object JaasTestUtils {
     }
   }
 
+  private val isIbmSecurity = Java.isIbmJdk && !Java.isIbmJdkSemeru
+
   private val ZkServerContextName = "Server"
   private val ZkClientContextName = "Client"
   private val ZkUserSuperPasswd = "adminpasswd"
@@ -158,7 +160,7 @@ object JaasTestUtils {
     val result = saslProperties.getOrElse(new Properties)
     // IBM Kerberos module doesn't support the serviceName JAAS property, hence it needs to be
     // passed as a Kafka property
-    if (Java.isIbmJdk && !result.contains(KafkaConfig.SaslKerberosServiceNameProp))
+    if (isIbmSecurity && !result.contains(KafkaConfig.SaslKerberosServiceNameProp))
       result.put(KafkaConfig.SaslKerberosServiceNameProp, serviceName)
     result
   }
@@ -183,6 +185,11 @@ object JaasTestUtils {
   // Returns the dynamic configuration, using credentials for user #1
   def clientLoginModule(mechanism: String, keytabLocation: Option[File], serviceName: String = serviceName): String =
     kafkaClientModule(mechanism, keytabLocation, KafkaClientPrincipal, KafkaPlainUser, KafkaPlainPassword, KafkaScramUser, KafkaScramPassword, KafkaOAuthBearerUser, serviceName).toString
+
+  // Returns the dynamic configuration, using credentials for admin
+  def adminLoginModule(mechanism: String, keytabLocation: Option[File], serviceName: String = serviceName): String =
+    kafkaClientModule(mechanism, keytabLocation, KafkaServerPrincipal, KafkaPlainAdmin, KafkaPlainAdminPassword,
+      KafkaScramAdmin, KafkaScramAdminPassword, KafkaOAuthBearerAdmin, serviceName).toString
 
   def tokenClientLoginModule(tokenId: String, password: String): String = {
     ScramLoginModule(
@@ -210,7 +217,8 @@ object JaasTestUtils {
           keyTab = keytabLocation.getOrElse(throw new IllegalArgumentException("Keytab location not specified for GSSAPI")).getAbsolutePath,
           principal = KafkaServerPrincipal,
           debug = true,
-          serviceName = Some(serviceName))
+          serviceName = Some(serviceName),
+          isIbmSecurity)
       case "PLAIN" =>
         PlainLoginModule(
           KafkaPlainAdmin,
@@ -251,7 +259,8 @@ object JaasTestUtils {
           keyTab = keytabLocation.getOrElse(throw new IllegalArgumentException("Keytab location not specified for GSSAPI")).getAbsolutePath,
           principal = clientPrincipal,
           debug = true,
-          serviceName = Some(serviceName)
+          serviceName = Some(serviceName),
+          isIbmSecurity
         )
       case "PLAIN" =>
         PlainLoginModule(

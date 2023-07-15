@@ -23,23 +23,28 @@ import org.apache.kafka.common.header.internals.RecordHeaders;
 import java.util.Objects;
 
 /**
- * ProducerRecord是将要发送到Kafka集群的键值对，里面包含了需要发送到的topic名称，可选的partition序号，以及可选的键值对
+ * A key/value pair to be sent to Kafka. This consists of a topic name to which the record is being sent, an optional
+ * partition number, and an optional key and value.
  * <p>
- * 如果指定了合法的partition序号，record会被发送到指定的partition上
- * 如果没有指定partition，则会根据给定的key做一次hash来计算应将key发送到哪个partition
- * 如果既没有指定partition序号，也没有指定key，那么将会使用round-robin策略选取一个partition
+ * If a valid partition number is specified that partition will be used when sending the record. If no partition is
+ * specified but a key is present a partition will be chosen using a hash of the key. If neither key nor partition is
+ * present a partition will be assigned in a round-robin fashion. Note that partition numbers are 0-indexed.
  * <p>
- * record也会记录一个关联的时间戳
- * 如果开发者没有给定时间戳，那么Producer会使用当前时间作为本条record的时间戳，Kafka最后使用的时间戳取决于topic配置的时间戳类型
+ * The record also has an associated timestamp. If the user did not provide a timestamp, the producer will stamp the
+ * record with its current time. The timestamp eventually used by Kafka depends on the timestamp type configured for
+ * the topic.
  * <li>
- * 如果topic配置使用了{@link org.apache.kafka.common.record.TimestampType#CREATE_TIME CreateTime}类型的时间戳，broker将会使用ProducerRecord中存储的时间戳
+ * If the topic is configured to use {@link org.apache.kafka.common.record.TimestampType#CREATE_TIME CreateTime},
+ * the timestamp in the producer record will be used by the broker.
  * </li>
  * <li>
- * 如果topic配置使用的是{@link org.apache.kafka.common.record.TimestampType#LOG_APPEND_TIME LogAppendTime}时间戳类型
- * ProducerRecord中的时间戳会在record发送到broker时，在追加到日志文件后，使用broker的本地时间进行覆盖
+ * If the topic is configured to use {@link org.apache.kafka.common.record.TimestampType#LOG_APPEND_TIME LogAppendTime},
+ * the timestamp in the producer record will be overwritten by the broker with the broker local time when it appends the
+ * message to its log.
  * </li>
  * <p>
- * 在上面的任何一种case情况下，时间戳会通过返回给开发者的{@link RecordMetadata}中进行返回
+ * In either of the cases above, the timestamp that has actually been used will be returned to user in
+ * {@link RecordMetadata}
  */
 public class ProducerRecord<K, V> {
 

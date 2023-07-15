@@ -20,14 +20,7 @@ import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.streams.StreamsMetrics;
 import org.apache.kafka.streams.errors.StreamsException;
-import org.apache.kafka.streams.processor.Cancellable;
-import org.apache.kafka.streams.processor.ProcessorContext;
-import org.apache.kafka.streams.processor.PunctuationType;
-import org.apache.kafka.streams.processor.Punctuator;
-import org.apache.kafka.streams.processor.StateRestoreCallback;
-import org.apache.kafka.streams.processor.StateStore;
-import org.apache.kafka.streams.processor.TaskId;
-import org.apache.kafka.streams.processor.To;
+import org.apache.kafka.streams.processor.*;
 
 import java.io.File;
 import java.time.Duration;
@@ -38,21 +31,18 @@ import java.util.Objects;
  * {@code ProcessorContext} implementation that will throw on any forward call.
  */
 public final class ForwardingDisabledProcessorContext implements ProcessorContext {
-	private final ProcessorContext delegate;
+    private final ProcessorContext delegate;
 
-	private static final String EXPLANATION = "ProcessorContext#forward() is not supported from this context, "
-			+ "as the framework must ensure the key is not changed (#forward allows changing the key on "
-			+ "messages which are sent). Try another function, which doesn't allow the key to be changed "
-			+ "(for example - #tranformValues).";
+    private static final String EXPLANATION = "ProcessorContext#forward() is not supported from this context, " + "as the framework must ensure the key is not changed (#forward allows changing the key on " + "messages which are sent). Try another function, which doesn't allow the key to be changed " + "(for example - #transformValues).";
 
-	public ForwardingDisabledProcessorContext(final ProcessorContext delegate) {
-		this.delegate = Objects.requireNonNull(delegate, "delegate");
-	}
+    public ForwardingDisabledProcessorContext(final ProcessorContext delegate) {
+        this.delegate = Objects.requireNonNull(delegate, "delegate");
+    }
 
-	@Override
-	public String applicationId() {
-		return delegate.applicationId();
-	}
+    @Override
+    public String applicationId() {
+        return delegate.applicationId();
+    }
 
     @Override
     public TaskId taskId() {
@@ -80,39 +70,28 @@ public final class ForwardingDisabledProcessorContext implements ProcessorContex
     }
 
     @Override
-    public void register(final StateStore store,
-                         final StateRestoreCallback stateRestoreCallback) {
+    public void register(final StateStore store, final StateRestoreCallback stateRestoreCallback) {
         delegate.register(store, stateRestoreCallback);
     }
 
-	@Override
-	public <S extends StateStore> S getStateStore(final String name) {
-		return delegate.getStateStore(name);
-	}
-
     @Override
-    @Deprecated
-    public Cancellable schedule(final long intervalMs,
-                                final PunctuationType type,
-                                final Punctuator callback) {
-        return delegate.schedule(intervalMs, type, callback);
+    public <S extends StateStore> S getStateStore(final String name) {
+        return delegate.getStateStore(name);
     }
 
     @Override
-    public Cancellable schedule(final Duration interval,
-                                final PunctuationType type,
-                                final Punctuator callback) throws IllegalArgumentException {
+    public Cancellable schedule(final Duration interval, final PunctuationType type, final Punctuator callback) throws IllegalArgumentException {
         return delegate.schedule(interval, type, callback);
     }
 
     @Override
     public <K, V> void forward(final K key, final V value) {
-		throw new StreamsException(EXPLANATION);
+        throw new StreamsException(EXPLANATION);
     }
 
     @Override
     public <K, V> void forward(final K key, final V value, final To to) {
-		throw new StreamsException(EXPLANATION);
+        throw new StreamsException(EXPLANATION);
     }
 
     @Override
@@ -145,23 +124,23 @@ public final class ForwardingDisabledProcessorContext implements ProcessorContex
         return delegate.timestamp();
     }
 
-	@Override
-	public Map<String, Object> appConfigs() {
-		return delegate.appConfigs();
-	}
+    @Override
+    public Map<String, Object> appConfigs() {
+        return delegate.appConfigs();
+    }
 
-	@Override
-	public Map<String, Object> appConfigsWithPrefix(final String prefix) {
-		return delegate.appConfigsWithPrefix(prefix);
-	}
+    @Override
+    public Map<String, Object> appConfigsWithPrefix(final String prefix) {
+        return delegate.appConfigsWithPrefix(prefix);
+    }
 
-	@Override
-	public long currentSystemTimeMs() {
-		return delegate.currentSystemTimeMs();
-	}
+    @Override
+    public long currentSystemTimeMs() {
+        return delegate.currentSystemTimeMs();
+    }
 
-	@Override
-	public long currentStreamTimeMs() {
-		return delegate.currentStreamTimeMs();
-	}
+    @Override
+    public long currentStreamTimeMs() {
+        return delegate.currentStreamTimeMs();
+    }
 }

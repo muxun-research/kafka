@@ -34,39 +34,44 @@ public class SaslHandshakeResponse extends AbstractResponse {
     private final SaslHandshakeResponseData data;
 
     public SaslHandshakeResponse(SaslHandshakeResponseData data) {
-		super(ApiKeys.SASL_HANDSHAKE);
-		this.data = data;
+        super(ApiKeys.SASL_HANDSHAKE);
+        this.data = data;
     }
 
     /*
-    * Possible error codes:
-    *   UNSUPPORTED_SASL_MECHANISM(33): Client mechanism not enabled in server
-    *   ILLEGAL_SASL_STATE(34) : Invalid request during SASL handshake
-    */
-	public Errors error() {
-		return Errors.forCode(data.errorCode());
-	}
+     * Possible error codes:
+     *   UNSUPPORTED_SASL_MECHANISM(33): Client mechanism not enabled in server
+     *   ILLEGAL_SASL_STATE(34) : Invalid request during SASL handshake
+     */
+    public Errors error() {
+        return Errors.forCode(data.errorCode());
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		return errorCounts(Errors.forCode(data.errorCode()));
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        return errorCounts(Errors.forCode(data.errorCode()));
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return DEFAULT_THROTTLE_TIME;
-	}
+    @Override
+    public int throttleTimeMs() {
+        return DEFAULT_THROTTLE_TIME;
+    }
 
-	@Override
-	public SaslHandshakeResponseData data() {
-		return data;
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        // Not supported by the response schema
+    }
 
-	public List<String> enabledMechanisms() {
-		return data.mechanisms();
-	}
+    @Override
+    public SaslHandshakeResponseData data() {
+        return data;
+    }
 
-	public static SaslHandshakeResponse parse(ByteBuffer buffer, short version) {
-		return new SaslHandshakeResponse(new SaslHandshakeResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    public List<String> enabledMechanisms() {
+        return data.mechanisms();
+    }
+
+    public static SaslHandshakeResponse parse(ByteBuffer buffer, short version) {
+        return new SaslHandshakeResponse(new SaslHandshakeResponseData(new ByteBufferAccessor(buffer), version));
+    }
 }

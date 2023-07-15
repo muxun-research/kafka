@@ -64,7 +64,7 @@ public class Rate implements MeasurableStat {
     @Override
     public double measure(MetricConfig config, long now) {
         double value = stat.measure(config, now);
-		return value / convert(windowSize(config, now), unit);
+        return value / convert(windowSize(config, now), unit);
     }
 
     public long windowSize(MetricConfig config, long now) {
@@ -84,28 +84,21 @@ public class Rate implements MeasurableStat {
          */
         long totalElapsedTimeMs = now - stat.oldest(now).lastWindowMs;
         // Check how many full windows of data we have currently retained
-		int numFullWindows = (int) (totalElapsedTimeMs / config.timeWindowMs());
-		int minFullWindows = config.samples() - 1;
+        int numFullWindows = (int) (totalElapsedTimeMs / config.timeWindowMs());
+        int minFullWindows = config.samples() - 1;
 
-		// If the available windows are less than the minimum required, add the difference to the totalElapsedTime
-		if (numFullWindows < minFullWindows)
-			totalElapsedTimeMs += (minFullWindows - numFullWindows) * config.timeWindowMs();
+        // If the available windows are less than the minimum required, add the difference to the totalElapsedTime
+        if (numFullWindows < minFullWindows)
+            totalElapsedTimeMs += (minFullWindows - numFullWindows) * config.timeWindowMs();
 
-		return totalElapsedTimeMs;
-	}
+        // If window size is being calculated at the exact beginning of the window with no prior samples, the window size
+        // will result in a value of 0. Calculation of rate over a window is size 0 is undefined, hence, we assume the
+        // minimum window size to be at least 1ms.
+        return Math.max(totalElapsedTimeMs, 1);
+    }
 
-	@Override
-	public String toString() {
-		return "Rate(" +
-				"unit=" + unit +
-				", stat=" + stat +
-				')';
-	}
-
-	/**
-	 * @deprecated since 2.4 Use {@link WindowedSum} instead.
-	 */
-	@Deprecated
-	public static class SampledTotal extends WindowedSum {
-	}
+    @Override
+    public String toString() {
+        return "Rate(" + "unit=" + unit + ", stat=" + stat + ')';
+    }
 }

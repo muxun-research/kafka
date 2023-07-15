@@ -21,52 +21,53 @@ import org.apache.kafka.common.message.DescribeLogDirsRequestData;
 import org.apache.kafka.common.message.DescribeLogDirsResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.ByteBufferAccessor;
+import org.apache.kafka.common.protocol.Errors;
 
 import java.nio.ByteBuffer;
 
 public class DescribeLogDirsRequest extends AbstractRequest {
 
-	private final DescribeLogDirsRequestData data;
+    private final DescribeLogDirsRequestData data;
 
     public static class Builder extends AbstractRequest.Builder<DescribeLogDirsRequest> {
-		private final DescribeLogDirsRequestData data;
+        private final DescribeLogDirsRequestData data;
 
-		public Builder(DescribeLogDirsRequestData data) {
-			super(ApiKeys.DESCRIBE_LOG_DIRS);
-			this.data = data;
-		}
+        public Builder(DescribeLogDirsRequestData data) {
+            super(ApiKeys.DESCRIBE_LOG_DIRS);
+            this.data = data;
+        }
 
         @Override
         public DescribeLogDirsRequest build(short version) {
-			return new DescribeLogDirsRequest(data, version);
+            return new DescribeLogDirsRequest(data, version);
         }
 
         @Override
         public String toString() {
-			return data.toString();
+            return data.toString();
         }
     }
 
-	public DescribeLogDirsRequest(DescribeLogDirsRequestData data, short version) {
-		super(ApiKeys.DESCRIBE_LOG_DIRS, version);
-		this.data = data;
-	}
+    public DescribeLogDirsRequest(DescribeLogDirsRequestData data, short version) {
+        super(ApiKeys.DESCRIBE_LOG_DIRS, version);
+        this.data = data;
+    }
 
-	@Override
-	public DescribeLogDirsRequestData data() {
-		return data;
-	}
+    @Override
+    public DescribeLogDirsRequestData data() {
+        return data;
+    }
 
     @Override
     public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-		return new DescribeLogDirsResponse(new DescribeLogDirsResponseData().setThrottleTimeMs(throttleTimeMs));
+        return new DescribeLogDirsResponse(new DescribeLogDirsResponseData().setThrottleTimeMs(throttleTimeMs).setErrorCode(Errors.forException(e).code()));
     }
 
     public boolean isAllTopicPartitions() {
-		return data.topics() == null;
+        return data.topics() == null;
     }
 
     public static DescribeLogDirsRequest parse(ByteBuffer buffer, short version) {
-		return new DescribeLogDirsRequest(new DescribeLogDirsRequestData(new ByteBufferAccessor(buffer), version), version);
+        return new DescribeLogDirsRequest(new DescribeLogDirsRequestData(new ByteBufferAccessor(buffer), version), version);
     }
 }

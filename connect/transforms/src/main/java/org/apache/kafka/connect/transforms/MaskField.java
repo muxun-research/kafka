@@ -28,13 +28,7 @@ import org.apache.kafka.connect.transforms.util.SimpleConfig;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.Collections;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Function;
 
 import static org.apache.kafka.connect.transforms.util.Requirements.requireMap;
@@ -42,59 +36,50 @@ import static org.apache.kafka.connect.transforms.util.Requirements.requireStruc
 
 public abstract class MaskField<R extends ConnectRecord<R>> implements Transformation<R> {
 
-	public static final String OVERVIEW_DOC =
-			"Mask specified fields with a valid null value for the field type (i.e. 0, false, empty string, and so on)."
-					+ "<p/>For numeric and string fields, an optional replacement value can be specified that is converted to the correct type."
-					+ "<p/>Use the concrete transformation type designed for the record key (<code>" + Key.class.getName()
-					+ "</code>) or value (<code>" + Value.class.getName() + "</code>).";
+    public static final String OVERVIEW_DOC = "Mask specified fields with a valid null value for the field type (i.e. 0, false, empty string, and so on)." + "<p/>For numeric and string fields, an optional replacement value can be specified that is converted to the correct type." + "<p/>Use the concrete transformation type designed for the record key (<code>" + Key.class.getName() + "</code>) or value (<code>" + Value.class.getName() + "</code>).";
 
-	private static final String FIELDS_CONFIG = "fields";
-	private static final String REPLACEMENT_CONFIG = "replacement";
+    private static final String FIELDS_CONFIG = "fields";
+    private static final String REPLACEMENT_CONFIG = "replacement";
 
-	public static final ConfigDef CONFIG_DEF = new ConfigDef()
-			.define(FIELDS_CONFIG, ConfigDef.Type.LIST, ConfigDef.NO_DEFAULT_VALUE, new NonEmptyListValidator(),
-					ConfigDef.Importance.HIGH, "Names of fields to mask.")
-			.define(REPLACEMENT_CONFIG, ConfigDef.Type.STRING, null, new ConfigDef.NonEmptyString(),
-					ConfigDef.Importance.LOW, "Custom value replacement, that will be applied to all"
-							+ " 'fields' values (numeric or non-empty string values only).");
+    public static final ConfigDef CONFIG_DEF = new ConfigDef().define(FIELDS_CONFIG, ConfigDef.Type.LIST, ConfigDef.NO_DEFAULT_VALUE, new NonEmptyListValidator(), ConfigDef.Importance.HIGH, "Names of fields to mask.").define(REPLACEMENT_CONFIG, ConfigDef.Type.STRING, null, new ConfigDef.NonEmptyString(), ConfigDef.Importance.LOW, "Custom value replacement, that will be applied to all" + " 'fields' values (numeric or non-empty string values only).");
 
     private static final String PURPOSE = "mask fields";
 
-	private static final Map<Class<?>, Function<String, ?>> REPLACEMENT_MAPPING_FUNC = new HashMap<>();
-	private static final Map<Class<?>, Object> PRIMITIVE_VALUE_MAPPING = new HashMap<>();
+    private static final Map<Class<?>, Function<String, ?>> REPLACEMENT_MAPPING_FUNC = new HashMap<>();
+    private static final Map<Class<?>, Object> PRIMITIVE_VALUE_MAPPING = new HashMap<>();
 
     static {
         PRIMITIVE_VALUE_MAPPING.put(Boolean.class, Boolean.FALSE);
-		PRIMITIVE_VALUE_MAPPING.put(Byte.class, (byte) 0);
-		PRIMITIVE_VALUE_MAPPING.put(Short.class, (short) 0);
-		PRIMITIVE_VALUE_MAPPING.put(Integer.class, 0);
-		PRIMITIVE_VALUE_MAPPING.put(Long.class, 0L);
-		PRIMITIVE_VALUE_MAPPING.put(Float.class, 0f);
-		PRIMITIVE_VALUE_MAPPING.put(Double.class, 0d);
-		PRIMITIVE_VALUE_MAPPING.put(BigInteger.class, BigInteger.ZERO);
-		PRIMITIVE_VALUE_MAPPING.put(BigDecimal.class, BigDecimal.ZERO);
-		PRIMITIVE_VALUE_MAPPING.put(Date.class, new Date(0));
-		PRIMITIVE_VALUE_MAPPING.put(String.class, "");
+        PRIMITIVE_VALUE_MAPPING.put(Byte.class, (byte) 0);
+        PRIMITIVE_VALUE_MAPPING.put(Short.class, (short) 0);
+        PRIMITIVE_VALUE_MAPPING.put(Integer.class, 0);
+        PRIMITIVE_VALUE_MAPPING.put(Long.class, 0L);
+        PRIMITIVE_VALUE_MAPPING.put(Float.class, 0f);
+        PRIMITIVE_VALUE_MAPPING.put(Double.class, 0d);
+        PRIMITIVE_VALUE_MAPPING.put(BigInteger.class, BigInteger.ZERO);
+        PRIMITIVE_VALUE_MAPPING.put(BigDecimal.class, BigDecimal.ZERO);
+        PRIMITIVE_VALUE_MAPPING.put(Date.class, new Date(0));
+        PRIMITIVE_VALUE_MAPPING.put(String.class, "");
 
-		REPLACEMENT_MAPPING_FUNC.put(Byte.class, v -> Values.convertToByte(null, v));
-		REPLACEMENT_MAPPING_FUNC.put(Short.class, v -> Values.convertToShort(null, v));
-		REPLACEMENT_MAPPING_FUNC.put(Integer.class, v -> Values.convertToInteger(null, v));
-		REPLACEMENT_MAPPING_FUNC.put(Long.class, v -> Values.convertToLong(null, v));
-		REPLACEMENT_MAPPING_FUNC.put(Float.class, v -> Values.convertToFloat(null, v));
-		REPLACEMENT_MAPPING_FUNC.put(Double.class, v -> Values.convertToDouble(null, v));
-		REPLACEMENT_MAPPING_FUNC.put(String.class, Function.identity());
-		REPLACEMENT_MAPPING_FUNC.put(BigDecimal.class, BigDecimal::new);
-		REPLACEMENT_MAPPING_FUNC.put(BigInteger.class, BigInteger::new);
-	}
+        REPLACEMENT_MAPPING_FUNC.put(Byte.class, v -> Values.convertToByte(null, v));
+        REPLACEMENT_MAPPING_FUNC.put(Short.class, v -> Values.convertToShort(null, v));
+        REPLACEMENT_MAPPING_FUNC.put(Integer.class, v -> Values.convertToInteger(null, v));
+        REPLACEMENT_MAPPING_FUNC.put(Long.class, v -> Values.convertToLong(null, v));
+        REPLACEMENT_MAPPING_FUNC.put(Float.class, v -> Values.convertToFloat(null, v));
+        REPLACEMENT_MAPPING_FUNC.put(Double.class, v -> Values.convertToDouble(null, v));
+        REPLACEMENT_MAPPING_FUNC.put(String.class, Function.identity());
+        REPLACEMENT_MAPPING_FUNC.put(BigDecimal.class, BigDecimal::new);
+        REPLACEMENT_MAPPING_FUNC.put(BigInteger.class, BigInteger::new);
+    }
 
-	private Set<String> maskedFields;
-	private String replacement;
+    private Set<String> maskedFields;
+    private String replacement;
 
     @Override
     public void configure(Map<String, ?> props) {
         final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
-		maskedFields = new HashSet<>(config.getList(FIELDS_CONFIG));
-		replacement = config.getString(REPLACEMENT_CONFIG);
+        maskedFields = new HashSet<>(config.getList(FIELDS_CONFIG));
+        replacement = config.getString(REPLACEMENT_CONFIG);
     }
 
     @Override
@@ -115,47 +100,47 @@ public abstract class MaskField<R extends ConnectRecord<R>> implements Transform
         return newRecord(record, updatedValue);
     }
 
-	private R applyWithSchema(R record) {
-		final Struct value = requireStruct(operatingValue(record), PURPOSE);
-		final Struct updatedValue = new Struct(value.schema());
-		for (Field field : value.schema().fields()) {
-			final Object origFieldValue = value.get(field);
-			updatedValue.put(field, maskedFields.contains(field.name()) ? masked(origFieldValue) : origFieldValue);
-		}
-		return newRecord(record, updatedValue);
-	}
+    private R applyWithSchema(R record) {
+        final Struct value = requireStruct(operatingValue(record), PURPOSE);
+        final Struct updatedValue = new Struct(value.schema());
+        for (Field field : value.schema().fields()) {
+            final Object origFieldValue = value.get(field);
+            updatedValue.put(field, maskedFields.contains(field.name()) ? masked(origFieldValue) : origFieldValue);
+        }
+        return newRecord(record, updatedValue);
+    }
 
-	private Object masked(Object value) {
-		if (value == null) {
-			return null;
-		}
-		return replacement == null ? maskWithNullValue(value) : maskWithCustomReplacement(value, replacement);
-	}
+    private Object masked(Object value) {
+        if (value == null) {
+            return null;
+        }
+        return replacement == null ? maskWithNullValue(value) : maskWithCustomReplacement(value, replacement);
+    }
 
-	private static Object maskWithCustomReplacement(Object value, String replacement) {
-		Function<String, ?> replacementMapper = REPLACEMENT_MAPPING_FUNC.get(value.getClass());
-		if (replacementMapper == null) {
-			throw new DataException("Cannot mask value of type " + value.getClass() + " with custom replacement.");
-		}
-		try {
-			return replacementMapper.apply(replacement);
-		} catch (NumberFormatException ex) {
-			throw new DataException("Unable to convert " + replacement + " (" + replacement.getClass() + ") to number", ex);
-		}
-	}
+    private static Object maskWithCustomReplacement(Object value, String replacement) {
+        Function<String, ?> replacementMapper = REPLACEMENT_MAPPING_FUNC.get(value.getClass());
+        if (replacementMapper == null) {
+            throw new DataException("Cannot mask value of type " + value.getClass() + " with custom replacement.");
+        }
+        try {
+            return replacementMapper.apply(replacement);
+        } catch (NumberFormatException ex) {
+            throw new DataException("Unable to convert " + replacement + " (" + replacement.getClass() + ") to number", ex);
+        }
+    }
 
-	private static Object maskWithNullValue(Object value) {
-		Object maskedValue = PRIMITIVE_VALUE_MAPPING.get(value.getClass());
-		if (maskedValue == null) {
-			if (value instanceof List)
-				maskedValue = Collections.emptyList();
-			else if (value instanceof Map)
-				maskedValue = Collections.emptyMap();
-			else
-				throw new DataException("Cannot mask value of type: " + value.getClass());
-		}
-		return maskedValue;
-	}
+    private static Object maskWithNullValue(Object value) {
+        Object maskedValue = PRIMITIVE_VALUE_MAPPING.get(value.getClass());
+        if (maskedValue == null) {
+            if (value instanceof List)
+                maskedValue = new ArrayList<>();
+            else if (value instanceof Map)
+                maskedValue = new HashMap<>();
+            else
+                throw new DataException("Cannot mask value of type: " + value.getClass());
+        }
+        return maskedValue;
+    }
 
     @Override
     public ConfigDef config() {

@@ -17,30 +17,18 @@
 package org.apache.kafka.streams.integration;
 
 import org.apache.kafka.common.serialization.Serdes;
-import org.apache.kafka.streams.KafkaStreams;
+import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.KafkaStreams.State;
-import org.apache.kafka.streams.KeyValue;
-import org.apache.kafka.streams.StreamsBuilder;
-import org.apache.kafka.streams.StreamsConfig;
-import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.integration.utils.EmbeddedKafkaCluster;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.kstream.Transformer;
 import org.apache.kafka.streams.processor.ProcessorContext;
-import org.apache.kafka.streams.processor.ThreadMetadata;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.Stores;
-import org.apache.kafka.test.IntegrationTest;
 import org.apache.kafka.test.TestUtils;
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.experimental.categories.Category;
-import org.junit.rules.TestName;
+import org.junit.jupiter.api.*;
 
 import java.io.IOException;
 import java.util.Properties;
@@ -48,65 +36,58 @@ import java.util.function.Predicate;
 
 import static org.apache.kafka.streams.integration.utils.IntegrationTestUtils.safeUniqueTestName;
 
-@Category({IntegrationTest.class})
+@Timeout(600)
+@Tag("integration")
 public class StandbyTaskCreationIntegrationTest {
+    private static final int NUM_BROKERS = 1;
 
-	private static final int NUM_BROKERS = 1;
+    public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(NUM_BROKERS);
 
-	public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(NUM_BROKERS);
+    @BeforeAll
+    public static void startCluster() throws IOException, InterruptedException {
+        CLUSTER.start();
+        CLUSTER.createTopic(INPUT_TOPIC, 2, 1);
+    }
 
-	@BeforeClass
-	public static void startCluster() throws IOException, InterruptedException {
-		CLUSTER.start();
-		CLUSTER.createTopic(INPUT_TOPIC, 2, 1);
-	}
+    @AfterAll
+    public static void closeCluster() {
+        CLUSTER.stop();
+    }
 
-	@AfterClass
-	public static void closeCluster() {
-		CLUSTER.stop();
-	}
+    private static final String INPUT_TOPIC = "input-topic";
 
-	@Rule
-	public TestName testName = new TestName();
+    private KafkaStreams client1;
+    private KafkaStreams client2;
+    private volatile boolean client1IsOk = false;
+    private volatile boolean client2IsOk = false;
 
-	private static final String INPUT_TOPIC = "input-topic";
-
-	private KafkaStreams client1;
-	private KafkaStreams client2;
-	private volatile boolean client1IsOk = false;
-	private volatile boolean client2IsOk = false;
-
-	@After
-	public void after() {
+    @AfterEach
+    public void after() {
         client1.close();
         client2.close();
     }
 
-    private Properties streamsConfiguration() {
-		final String safeTestName = safeUniqueTestName(getClass(), testName);
-		final Properties streamsConfiguration = new Properties();
-		streamsConfiguration.put(StreamsConfig.APPLICATION_ID_CONFIG, "app-" + safeTestName);
-		streamsConfiguration.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, CLUSTER.bootstrapServers());
-		streamsConfiguration.put(StreamsConfig.STATE_DIR_CONFIG, TestUtils.tempDirectory().getPath());
-		streamsConfiguration.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.Integer().getClass());
+    private Properties streamsConfiguration(final TestInfo testInfo) {
+        final String safeTestName = safeUniqueTestName(getClass(), testInfo);
+        final Properties streamsConfiguration = new Properties();
+        streamsConfiguration.put(StreamsConfig.APPLICATION_ID_CONFIG, "app-" + safeTestName);
+        streamsConfiguration.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, CLUSTER.bootstrapServers());
+        streamsConfiguration.put(StreamsConfig.STATE_DIR_CONFIG, TestUtils.tempDirectory().getPath());
+        streamsConfiguration.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.Integer().getClass());
         streamsConfiguration.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.Integer().getClass());
         streamsConfiguration.put(StreamsConfig.NUM_STANDBY_REPLICAS_CONFIG, 1);
         return streamsConfiguration;
     }
 
     @Test
-    public void shouldNotCreateAnyStandByTasksForStateStoreWithLoggingDisabled() throws Exception {
+    @SuppressWarnings("deprecation")
+    public void shouldNotCreateAnyStandByTasksForStateStoreWithLoggingDisabled(final TestInfo testInfo) throws Exception {
         final StreamsBuilder builder = new StreamsBuilder();
         final String stateStoreName = "myTransformState";
-        final StoreBuilder<KeyValueStore<Integer, Integer>> keyValueStoreBuilder =
-            Stores.keyValueStoreBuilder(Stores.persistentKeyValueStore(stateStoreName),
-                                        Serdes.Integer(),
-                                        Serdes.Integer()).withLoggingDisabled();
+        final StoreBuilder<KeyValueStore<Integer, Integer>> keyValueStoreBuilder = Stores.keyValueStoreBuilder(Stores.persistentKeyValueStore(stateStoreName), Serdes.Integer(), Serdes.Integer()).withLoggingDisabled();
         builder.addStateStore(keyValueStoreBuilder);
-        builder.stream(INPUT_TOPIC, Consumed.with(Serdes.Integer(), Serdes.Integer()))
-            .transform(() -> new Transformer<Integer, Integer, KeyValue<Integer, Integer>>() {
-                @SuppressWarnings("unchecked")
-                @Override
+        builder.stream(INPUT_TOPIC, Consumed.with(Serdes.Integer(), Serdes.Integer())).transform(() -> new Transformer<Integer, Integer, KeyValue<Integer, Integer>>() {
+            @Override
                 public void init(final ProcessorContext context) {}
 
                 @Override
@@ -119,7 +100,7 @@ public class StandbyTaskCreationIntegrationTest {
             }, stateStoreName);
 
         final Topology topology = builder.build();
-        createClients(topology, streamsConfiguration(), topology, streamsConfiguration());
+        createClients(topology, streamsConfiguration(testInfo), topology, streamsConfiguration(testInfo));
 
         setStateListenersForVerification(thread -> thread.standbyTasks().isEmpty() && !thread.activeTasks().isEmpty());
 
@@ -131,21 +112,16 @@ public class StandbyTaskCreationIntegrationTest {
     }
 
     @Test
-    public void shouldCreateStandByTasksForMaterializedAndOptimizedSourceTables() throws Exception {
-        final Properties streamsConfiguration1 = streamsConfiguration();
-		streamsConfiguration1.put(StreamsConfig.TOPOLOGY_OPTIMIZATION_CONFIG, StreamsConfig.OPTIMIZE);
-        final Properties streamsConfiguration2 = streamsConfiguration();
-		streamsConfiguration2.put(StreamsConfig.TOPOLOGY_OPTIMIZATION_CONFIG, StreamsConfig.OPTIMIZE);
+    public void shouldCreateStandByTasksForMaterializedAndOptimizedSourceTables(final TestInfo testInfo) throws Exception {
+        final Properties streamsConfiguration1 = streamsConfiguration(testInfo);
+        streamsConfiguration1.put(StreamsConfig.TOPOLOGY_OPTIMIZATION_CONFIG, StreamsConfig.OPTIMIZE);
+        final Properties streamsConfiguration2 = streamsConfiguration(testInfo);
+        streamsConfiguration2.put(StreamsConfig.TOPOLOGY_OPTIMIZATION_CONFIG, StreamsConfig.OPTIMIZE);
 
         final StreamsBuilder builder = new StreamsBuilder();
         builder.table(INPUT_TOPIC, Consumed.with(Serdes.Integer(), Serdes.Integer()), Materialized.as("source-table"));
 
-        createClients(
-            builder.build(streamsConfiguration1),
-            streamsConfiguration1,
-            builder.build(streamsConfiguration2),
-            streamsConfiguration2
-        );
+        createClients(builder.build(streamsConfiguration1), streamsConfiguration1, builder.build(streamsConfiguration2), streamsConfiguration2);
 
         setStateListenersForVerification(thread -> !thread.standbyTasks().isEmpty() && !thread.activeTasks().isEmpty());
 
@@ -167,15 +143,13 @@ public class StandbyTaskCreationIntegrationTest {
 
     private void setStateListenersForVerification(final Predicate<ThreadMetadata> taskCondition) {
         client1.setStateListener((newState, oldState) -> {
-            if (newState == State.RUNNING &&
-                client1.localThreadsMetadata().stream().allMatch(taskCondition)) {
+            if (newState == State.RUNNING && client1.metadataForLocalThreads().stream().allMatch(taskCondition)) {
 
                 client1IsOk = true;
             }
         });
         client2.setStateListener((newState, oldState) -> {
-            if (newState == State.RUNNING &&
-                client2.localThreadsMetadata().stream().allMatch(taskCondition)) {
+            if (newState == State.RUNNING && client2.metadataForLocalThreads().stream().allMatch(taskCondition)) {
 
                 client2IsOk = true;
             }

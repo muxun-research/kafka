@@ -19,12 +19,7 @@ package kafka.test.junit;
 
 import kafka.test.ClusterConfig;
 import kafka.test.ClusterGenerator;
-import kafka.test.annotation.ClusterTestDefaults;
-import kafka.test.annotation.ClusterConfigProperty;
-import kafka.test.annotation.ClusterTemplate;
-import kafka.test.annotation.ClusterTest;
-import kafka.test.annotation.ClusterTests;
-import kafka.test.annotation.Type;
+import kafka.test.annotation.*;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.TestTemplateInvocationContext;
 import org.junit.jupiter.api.extension.TestTemplateInvocationContextProvider;
@@ -43,7 +38,7 @@ import java.util.stream.Stream;
  * of a few custom annotations. These annotations are placed on so-called test template methods. Template methods look
  * like normal JUnit test methods, but instead of being invoked directly, they are used as templates for generating
  * multiple test invocations.
- * <p>
+ *
  * Test class that use this extension should use one of the following annotations on each template method:
  *
  * <ul>
@@ -51,14 +46,14 @@ import java.util.stream.Stream;
  *     <li>{@link ClusterTests}, provide multiple instances of @ClusterTest</li>
  *     <li>{@link ClusterTemplate}, define a static method that generates cluster configurations</li>
  * </ul>
- * <p>
+ *
  * Any combination of these annotations may be used on a given test template method. If no test invocations are
  * generated after processing the annotations, an error is thrown.
- * <p>
+ *
  * Depending on which annotations are used, and what values are given, different {@link ClusterConfig} will be
  * generated. Each ClusterConfig is used to create an underlying Kafka cluster that is used for the actual test
  * invocation.
- * <p>
+ *
  * For example:
  *
  * <pre>
@@ -70,141 +65,138 @@ import java.util.stream.Stream;
  *   }
  * }
  * </pre>
- * <p>
+ *
  * will generate two invocations of "someTest" (since ClusterType.Both was given). For each invocation, the test class
  * SomeIntegrationTest will be instantiated, lifecycle methods (before/after) will be run, and "someTest" will be invoked.
+ *
  **/
 public class ClusterTestExtensions implements TestTemplateInvocationContextProvider {
-	@Override
-	public boolean supportsTestTemplate(ExtensionContext context) {
-		return true;
-	}
+    @Override
+    public boolean supportsTestTemplate(ExtensionContext context) {
+        return true;
+    }
 
-	@Override
-	public Stream<TestTemplateInvocationContext> provideTestTemplateInvocationContexts(ExtensionContext context) {
-		ClusterTestDefaults defaults = getClusterTestDefaults(context.getRequiredTestClass());
-		List<TestTemplateInvocationContext> generatedContexts = new ArrayList<>();
+    @Override
+    public Stream<TestTemplateInvocationContext> provideTestTemplateInvocationContexts(ExtensionContext context) {
+        ClusterTestDefaults defaults = getClusterTestDefaults(context.getRequiredTestClass());
+        List<TestTemplateInvocationContext> generatedContexts = new ArrayList<>();
 
-		// Process the @ClusterTemplate annotation
-		ClusterTemplate clusterTemplateAnnot = context.getRequiredTestMethod().getDeclaredAnnotation(ClusterTemplate.class);
-		if (clusterTemplateAnnot != null) {
-			processClusterTemplate(context, clusterTemplateAnnot, generatedContexts::add);
-			if (generatedContexts.size() == 0) {
-				throw new IllegalStateException("ClusterConfig generator method should provide at least one config");
-			}
-		}
+        // Process the @ClusterTemplate annotation
+        ClusterTemplate clusterTemplateAnnot = context.getRequiredTestMethod().getDeclaredAnnotation(ClusterTemplate.class);
+        if (clusterTemplateAnnot != null) {
+            processClusterTemplate(context, clusterTemplateAnnot, generatedContexts::add);
+            if (generatedContexts.size() == 0) {
+                throw new IllegalStateException("ClusterConfig generator method should provide at least one config");
+            }
+        }
 
-		// Process single @ClusterTest annotation
-		ClusterTest clusterTestAnnot = context.getRequiredTestMethod().getDeclaredAnnotation(ClusterTest.class);
-		if (clusterTestAnnot != null) {
-			processClusterTest(context, clusterTestAnnot, defaults, generatedContexts::add);
-		}
+        // Process single @ClusterTest annotation
+        ClusterTest clusterTestAnnot = context.getRequiredTestMethod().getDeclaredAnnotation(ClusterTest.class);
+        if (clusterTestAnnot != null) {
+            processClusterTest(context, clusterTestAnnot, defaults, generatedContexts::add);
+        }
 
-		// Process multiple @ClusterTest annotation within @ClusterTests
-		ClusterTests clusterTestsAnnot = context.getRequiredTestMethod().getDeclaredAnnotation(ClusterTests.class);
-		if (clusterTestsAnnot != null) {
-			for (ClusterTest annot : clusterTestsAnnot.value()) {
-				processClusterTest(context, annot, defaults, generatedContexts::add);
-			}
-		}
+        // Process multiple @ClusterTest annotation within @ClusterTests
+        ClusterTests clusterTestsAnnot = context.getRequiredTestMethod().getDeclaredAnnotation(ClusterTests.class);
+        if (clusterTestsAnnot != null) {
+            for (ClusterTest annot : clusterTestsAnnot.value()) {
+                processClusterTest(context, annot, defaults, generatedContexts::add);
+            }
+        }
 
-		if (generatedContexts.size() == 0) {
-			throw new IllegalStateException("Please annotate test methods with @ClusterTemplate, @ClusterTest, or " +
-					"@ClusterTests when using the ClusterTestExtensions provider");
-		}
+        if (generatedContexts.size() == 0) {
+            throw new IllegalStateException("Please annotate test methods with @ClusterTemplate, @ClusterTest, or " + "@ClusterTests when using the ClusterTestExtensions provider");
+        }
 
-		return generatedContexts.stream();
-	}
+        return generatedContexts.stream();
+    }
 
-	private void processClusterTemplate(ExtensionContext context, ClusterTemplate annot,
-										Consumer<TestTemplateInvocationContext> testInvocations) {
-		// If specified, call cluster config generated method (must be static)
-		List<ClusterConfig> generatedClusterConfigs = new ArrayList<>();
-		if (!annot.value().isEmpty()) {
-			generateClusterConfigurations(context, annot.value(), generatedClusterConfigs::add);
-		} else {
-			// Ensure we have at least one cluster config
-			generatedClusterConfigs.add(ClusterConfig.defaultClusterBuilder().build());
-		}
+    private void processClusterTemplate(ExtensionContext context, ClusterTemplate annot, Consumer<TestTemplateInvocationContext> testInvocations) {
+        // If specified, call cluster config generated method (must be static)
+        List<ClusterConfig> generatedClusterConfigs = new ArrayList<>();
+        if (!annot.value().isEmpty()) {
+            generateClusterConfigurations(context, annot.value(), generatedClusterConfigs::add);
+        } else {
+            // Ensure we have at least one cluster config
+            generatedClusterConfigs.add(ClusterConfig.defaultClusterBuilder().build());
+        }
 
-		generatedClusterConfigs.forEach(config -> config.clusterType().invocationContexts(config, testInvocations));
-	}
+        generatedClusterConfigs.forEach(config -> config.clusterType().invocationContexts(config, testInvocations));
+    }
 
-	private void generateClusterConfigurations(ExtensionContext context, String generateClustersMethods, ClusterGenerator generator) {
-		Object testInstance = context.getTestInstance().orElse(null);
-		Method method = ReflectionUtils.getRequiredMethod(context.getRequiredTestClass(), generateClustersMethods, ClusterGenerator.class);
-		ReflectionUtils.invokeMethod(method, testInstance, generator);
-	}
+    private void generateClusterConfigurations(ExtensionContext context, String generateClustersMethods, ClusterGenerator generator) {
+        Object testInstance = context.getTestInstance().orElse(null);
+        Method method = ReflectionUtils.getRequiredMethod(context.getRequiredTestClass(), generateClustersMethods, ClusterGenerator.class);
+        ReflectionUtils.invokeMethod(method, testInstance, generator);
+    }
 
-	private void processClusterTest(ExtensionContext context, ClusterTest annot, ClusterTestDefaults defaults,
-									Consumer<TestTemplateInvocationContext> testInvocations) {
-		final Type type;
-		if (annot.clusterType() == Type.DEFAULT) {
-			type = defaults.clusterType();
-		} else {
-			type = annot.clusterType();
-		}
+    private void processClusterTest(ExtensionContext context, ClusterTest annot, ClusterTestDefaults defaults, Consumer<TestTemplateInvocationContext> testInvocations) {
+        final Type type;
+        if (annot.clusterType() == Type.DEFAULT) {
+            type = defaults.clusterType();
+        } else {
+            type = annot.clusterType();
+        }
 
-		final int brokers;
-		if (annot.brokers() == 0) {
-			brokers = defaults.brokers();
-		} else {
-			brokers = annot.brokers();
-		}
+        final int brokers;
+        if (annot.brokers() == 0) {
+            brokers = defaults.brokers();
+        } else {
+            brokers = annot.brokers();
+        }
 
-		final int controllers;
-		if (annot.controllers() == 0) {
-			controllers = defaults.controllers();
-		} else {
-			controllers = annot.controllers();
-		}
+        final int controllers;
+        if (annot.controllers() == 0) {
+            controllers = defaults.controllers();
+        } else {
+            controllers = annot.controllers();
+        }
 
-		if (brokers <= 0 || controllers <= 0) {
-			throw new IllegalArgumentException("Number of brokers/controllers must be greater than zero.");
-		}
+        if (brokers <= 0 || controllers <= 0) {
+            throw new IllegalArgumentException("Number of brokers/controllers must be greater than zero.");
+        }
 
-		final boolean autoStart;
-		switch (annot.autoStart()) {
-			case YES:
-				autoStart = true;
-				break;
-			case NO:
-				autoStart = false;
-				break;
-			case DEFAULT:
-				autoStart = defaults.autoStart();
-				break;
-			default:
-				throw new IllegalStateException();
-		}
+        final boolean autoStart;
+        switch (annot.autoStart()) {
+            case YES:
+                autoStart = true;
+                break;
+            case NO:
+                autoStart = false;
+                break;
+            case DEFAULT:
+                autoStart = defaults.autoStart();
+                break;
+            default:
+                throw new IllegalStateException();
+        }
 
-		ClusterConfig.Builder builder = ClusterConfig.clusterBuilder(type, brokers, controllers, autoStart, annot.securityProtocol());
-		if (!annot.name().isEmpty()) {
-			builder.name(annot.name());
-		} else {
-			builder.name(context.getDisplayName());
-		}
-		if (!annot.listener().isEmpty()) {
-			builder.listenerName(annot.listener());
-		}
+        ClusterConfig.Builder builder = ClusterConfig.clusterBuilder(type, brokers, controllers, autoStart, annot.securityProtocol(), annot.metadataVersion());
+        if (!annot.name().isEmpty()) {
+            builder.name(annot.name());
+        } else {
+            builder.name(context.getRequiredTestMethod().getName());
+        }
+        if (!annot.listener().isEmpty()) {
+            builder.listenerName(annot.listener());
+        }
 
-		Properties properties = new Properties();
-		for (ClusterConfigProperty property : annot.serverProperties()) {
-			properties.put(property.key(), property.value());
-		}
+        Properties properties = new Properties();
+        for (ClusterConfigProperty property : annot.serverProperties()) {
+            properties.put(property.key(), property.value());
+        }
 
-		ClusterConfig config = builder.build();
-		config.serverProperties().putAll(properties);
-		type.invocationContexts(config, testInvocations);
-	}
+        ClusterConfig config = builder.build();
+        config.serverProperties().putAll(properties);
+        type.invocationContexts(config, testInvocations);
+    }
 
-	private ClusterTestDefaults getClusterTestDefaults(Class<?> testClass) {
-		return Optional.ofNullable(testClass.getDeclaredAnnotation(ClusterTestDefaults.class))
-				.orElseGet(() -> EmptyClass.class.getDeclaredAnnotation(ClusterTestDefaults.class));
-	}
+    private ClusterTestDefaults getClusterTestDefaults(Class<?> testClass) {
+        return Optional.ofNullable(testClass.getDeclaredAnnotation(ClusterTestDefaults.class)).orElseGet(() -> EmptyClass.class.getDeclaredAnnotation(ClusterTestDefaults.class));
+    }
 
-	@ClusterTestDefaults
-	private final static class EmptyClass {
-		// Just used as a convenience to get default values from the annotation
-	}
+    @ClusterTestDefaults
+    private final static class EmptyClass {
+        // Just used as a convenience to get default values from the annotation
+    }
 }

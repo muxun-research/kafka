@@ -29,54 +29,45 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 public class RecordsSerdeTest {
 
-	@Test
-	public void testSerdeRecords() throws Exception {
-		MemoryRecords records = MemoryRecords.withRecords(CompressionType.NONE,
-				new SimpleRecord("foo".getBytes()),
-				new SimpleRecord("bar".getBytes()));
+    @Test
+    public void testSerdeRecords() {
+        MemoryRecords records = MemoryRecords.withRecords(CompressionType.NONE, new SimpleRecord("foo".getBytes()), new SimpleRecord("bar".getBytes()));
 
-		SimpleRecordsMessageData message = new SimpleRecordsMessageData()
-				.setTopic("foo")
-				.setRecordSet(records);
+        SimpleRecordsMessageData message = new SimpleRecordsMessageData().setTopic("foo").setRecordSet(records);
 
-		testAllRoundTrips(message);
-	}
+        testAllRoundTrips(message);
+    }
 
-	@Test
-	public void testSerdeNullRecords() throws Exception {
-		SimpleRecordsMessageData message = new SimpleRecordsMessageData()
-				.setTopic("foo");
-		assertNull(message.recordSet());
+    @Test
+    public void testSerdeNullRecords() {
+        SimpleRecordsMessageData message = new SimpleRecordsMessageData().setTopic("foo");
+        assertNull(message.recordSet());
 
-		testAllRoundTrips(message);
-	}
+        testAllRoundTrips(message);
+    }
 
-	@Test
-	public void testSerdeEmptyRecords() throws Exception {
-		SimpleRecordsMessageData message = new SimpleRecordsMessageData()
-				.setTopic("foo")
-				.setRecordSet(MemoryRecords.EMPTY);
-		testAllRoundTrips(message);
-	}
+    @Test
+    public void testSerdeEmptyRecords() {
+        SimpleRecordsMessageData message = new SimpleRecordsMessageData().setTopic("foo").setRecordSet(MemoryRecords.EMPTY);
+        testAllRoundTrips(message);
+    }
 
-	private void testAllRoundTrips(SimpleRecordsMessageData message) throws Exception {
-		for (short version = SimpleRecordsMessageData.LOWEST_SUPPORTED_VERSION;
-			 version <= SimpleRecordsMessageData.HIGHEST_SUPPORTED_VERSION;
-			 version++) {
-			testRoundTrip(message, version);
-		}
-	}
+    private void testAllRoundTrips(SimpleRecordsMessageData message) {
+        for (short version = SimpleRecordsMessageData.LOWEST_SUPPORTED_VERSION; version <= SimpleRecordsMessageData.HIGHEST_SUPPORTED_VERSION; version++) {
+            testRoundTrip(message, version);
+        }
+    }
 
-	private void testRoundTrip(SimpleRecordsMessageData message, short version) {
-		ByteBuffer buf = MessageUtil.toByteBuffer(message, version);
-		SimpleRecordsMessageData message2 = deserialize(buf.duplicate(), version);
-		assertEquals(message, message2);
-		assertEquals(message.hashCode(), message2.hashCode());
-	}
+    private void testRoundTrip(SimpleRecordsMessageData message, short version) {
+        ByteBuffer buf = MessageUtil.toByteBuffer(message, version);
+        SimpleRecordsMessageData message2 = deserialize(buf.duplicate(), version);
+        assertEquals(message, message2);
+        assertEquals(message.hashCode(), message2.hashCode());
+    }
 
-	private SimpleRecordsMessageData deserialize(ByteBuffer buffer, short version) {
-		ByteBufferAccessor readable = new ByteBufferAccessor(buffer);
-		return new SimpleRecordsMessageData(readable, version);
-	}
+    private SimpleRecordsMessageData deserialize(ByteBuffer buffer, short version) {
+        ByteBufferAccessor readable = new ByteBufferAccessor(buffer);
+        return new SimpleRecordsMessageData(readable, version);
+    }
 
 }

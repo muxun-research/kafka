@@ -28,34 +28,32 @@ import java.util.Map;
 
 public class ErrantRecordSinkConnector extends MonitorableSinkConnector {
 
-	@Override
-	public Class<? extends Task> taskClass() {
-		return ErrantRecordSinkTask.class;
-	}
+    @Override
+    public Class<? extends Task> taskClass() {
+        return ErrantRecordSinkTask.class;
+    }
 
-	public static class ErrantRecordSinkTask extends MonitorableSinkTask {
-		private ErrantRecordReporter reporter;
+    public static class ErrantRecordSinkTask extends MonitorableSinkTask {
+        private ErrantRecordReporter reporter;
 
-		public ErrantRecordSinkTask() {
-			super();
-		}
+        public ErrantRecordSinkTask() {
+            super();
+        }
 
-		@Override
-		public void start(Map<String, String> props) {
-			super.start(props);
-			reporter = context.errantRecordReporter();
-		}
+        @Override
+        public void start(Map<String, String> props) {
+            super.start(props);
+            reporter = context.errantRecordReporter();
+        }
 
-		@Override
-		public void put(Collection<SinkRecord> records) {
-			for (SinkRecord rec : records) {
-				taskHandle.record();
-				TopicPartition tp = cachedTopicPartitions
-						.computeIfAbsent(rec.topic(), v -> new HashMap<>())
-						.computeIfAbsent(rec.kafkaPartition(), v -> new TopicPartition(rec.topic(), rec.kafkaPartition()));
-				committedOffsets.put(tp, committedOffsets.getOrDefault(tp, 0L) + 1);
-				reporter.report(rec, new Throwable());
-			}
-		}
-	}
+        @Override
+        public void put(Collection<SinkRecord> records) {
+            for (SinkRecord rec : records) {
+                taskHandle.record();
+                TopicPartition tp = cachedTopicPartitions.computeIfAbsent(rec.topic(), v -> new HashMap<>()).computeIfAbsent(rec.kafkaPartition(), v -> new TopicPartition(rec.topic(), rec.kafkaPartition()));
+                committedOffsets.put(tp, committedOffsets.getOrDefault(tp, 0) + 1);
+                reporter.report(rec, new Throwable());
+            }
+        }
+    }
 }

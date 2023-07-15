@@ -30,23 +30,25 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class EnvelopeResponseTest {
 
-	@Test
-	public void testToSend() {
-		for (short version : ApiKeys.ENVELOPE.allVersions()) {
-			ByteBuffer responseData = ByteBuffer.wrap("foobar".getBytes());
-			EnvelopeResponse response = new EnvelopeResponse(responseData, Errors.NONE);
-			short headerVersion = ApiKeys.ENVELOPE.responseHeaderVersion(version);
-			ResponseHeader header = new ResponseHeader(15, headerVersion);
+    @Test
+    public void testToSend() {
+        for (short version : ApiKeys.ENVELOPE.allVersions()) {
+            ByteBuffer responseData = ByteBuffer.wrap("foobar".getBytes());
+            EnvelopeResponse response = new EnvelopeResponse(responseData, Errors.NONE);
+            short headerVersion = ApiKeys.ENVELOPE.responseHeaderVersion(version);
+            ResponseHeader header = new ResponseHeader(15, headerVersion);
 
-			Send send = response.toSend(header, version);
-			ByteBuffer buffer = TestUtils.toBuffer(send);
-			assertEquals(send.size() - 4, buffer.getInt());
-			assertEquals(header, ResponseHeader.parse(buffer, headerVersion));
+            Send send = response.toSend(header, version);
+            ByteBuffer buffer = TestUtils.toBuffer(send);
+            assertEquals(send.size() - 4, buffer.getInt());
+            ResponseHeader parsedHeader = ResponseHeader.parse(buffer, headerVersion);
+            assertEquals(header.size(), parsedHeader.size());
+            assertEquals(header, parsedHeader);
 
-			EnvelopeResponseData parsedResponseData = new EnvelopeResponseData();
-			parsedResponseData.read(new ByteBufferAccessor(buffer), version);
-			assertEquals(response.data(), parsedResponseData);
-		}
-	}
+            EnvelopeResponseData parsedResponseData = new EnvelopeResponseData();
+            parsedResponseData.read(new ByteBufferAccessor(buffer), version);
+            assertEquals(response.data(), parsedResponseData);
+        }
+    }
 
 }

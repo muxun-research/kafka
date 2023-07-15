@@ -17,23 +17,24 @@
 
 package kafka.tools
 
-import java.io.{ByteArrayOutputStream, PrintStream}
-import java.nio.file.Files
-import java.util.{HashMap, Optional, Map => JMap}
 import kafka.tools.ConsoleConsumer.ConsumerWrapper
 import kafka.utils.{Exit, TestUtils}
-import org.apache.kafka.clients.consumer.{ConsumerRecord, MockConsumer, OffsetResetStrategy}
-import org.apache.kafka.common.{MessageFormatter, TopicPartition}
-import org.apache.kafka.common.record.TimestampType
-import org.apache.kafka.clients.consumer.ConsumerConfig
-import org.apache.kafka.test.MockDeserializer
-import org.mockito.Mockito._
-import org.mockito.ArgumentMatchers
-import ArgumentMatchers._
+import org.apache.kafka.clients.consumer._
+import org.apache.kafka.common.errors.TimeoutException
 import org.apache.kafka.common.header.internals.RecordHeaders
+import org.apache.kafka.common.record.TimestampType
+import org.apache.kafka.common.{MessageFormatter, TopicPartition}
+import org.apache.kafka.server.util.MockTime
+import org.apache.kafka.test.MockDeserializer
 import org.junit.jupiter.api.Assertions._
 import org.junit.jupiter.api.{BeforeEach, Test}
+import org.mockito.ArgumentMatchers
+import org.mockito.ArgumentMatchers._
+import org.mockito.Mockito._
 
+import java.io.{ByteArrayOutputStream, PrintStream}
+import java.time.Duration
+import java.util.{HashMap, Optional, Map => JMap}
 import scala.jdk.CollectionConverters._
 
 class ConsoleConsumerTest {
@@ -41,6 +42,32 @@ class ConsoleConsumerTest {
   @BeforeEach
   def setup(): Unit = {
     ConsoleConsumer.messageCount = 0
+  }
+
+  @Test
+  def shouldThrowTimeoutExceptionWhenTimeoutIsReached(): Unit = {
+    val topic = "test"
+    val time = new MockTime
+    val timeoutMs = 1000
+
+    val mockConsumer = mock(classOf[Consumer[Array[Byte], Array[Byte]]])
+
+    when(mockConsumer.poll(Duration.ofMillis(timeoutMs))).thenAnswer { _ =>
+      time.sleep(timeoutMs / 2 + 1)
+      ConsumerRecords.EMPTY
+    }
+
+    val consumer = new ConsumerWrapper(
+      topic = Some(topic),
+      partitionId = None,
+      offset = None,
+      includedTopics = None,
+      consumer = mockConsumer,
+      timeoutMs = timeoutMs,
+      time = time
+    )
+
+    assertThrows(classOf[TimeoutException], () => consumer.receive())
   }
 
   @Test
@@ -127,6 +154,58 @@ class ConsoleConsumerTest {
     //Then
     assertEquals("localhost:9092", config.bootstrapServer)
     assertEquals("test", config.topicArg)
+    assertEquals(true, config.fromBeginning)
+  }
+
+  @Test
+  def shouldParseIncludeArgument(): Unit = {
+    //Given
+    val args: Array[String] = Array(
+      "--bootstrap-server", "localhost:9092",
+      "--include", "includeTest*",
+      "--from-beginning")
+
+    //When
+    val config = new ConsoleConsumer.ConsumerConfig(args)
+
+    //Then
+    assertEquals("localhost:9092", config.bootstrapServer)
+    assertEquals("includeTest*", config.includedTopicsArg)
+    assertEquals(true, config.fromBeginning)
+  }
+
+  @Test
+  def shouldParseWhitelistArgument(): Unit = {
+    //Given
+    val args: Array[String] = Array(
+      "--bootstrap-server", "localhost:9092",
+      "--whitelist", "whitelistTest*",
+      "--from-beginning")
+
+    //When
+    val config = new ConsoleConsumer.ConsumerConfig(args)
+
+    //Then
+    assertEquals("localhost:9092", config.bootstrapServer)
+    assertEquals("whitelistTest*", config.includedTopicsArg)
+    assertEquals(true, config.fromBeginning)
+  }
+
+  @Test
+  def shouldIgnoreWhitelistArgumentIfIncludeSpecified(): Unit = {
+    //Given
+    val args: Array[String] = Array(
+      "--bootstrap-server", "localhost:9092",
+      "--include", "includeTest*",
+      "--whitelist", "whitelistTest*",
+      "--from-beginning")
+
+    //When
+    val config = new ConsoleConsumer.ConsumerConfig(args)
+
+    //Then
+    assertEquals("localhost:9092", config.bootstrapServer)
+    assertEquals("includeTest*", config.includedTopicsArg)
     assertEquals(true, config.fromBeginning)
   }
 
@@ -283,11 +362,7 @@ class ConsoleConsumerTest {
 
   @Test
   def shouldParseConfigsFromFile(): Unit = {
-    val propsFile = TestUtils.tempFile()
-    val propsStream = Files.newOutputStream(propsFile.toPath)
-    propsStream.write("request.timeout.ms=1000\n".getBytes())
-    propsStream.write("group.id=group1".getBytes())
-    propsStream.close()
+    val propsFile = TestUtils.tempPropertiesFile(Map("request.timeout.ms" -> "1000", "group.id" -> "group1"))
     val args: Array[String] = Array(
       "--bootstrap-server", "localhost:9092",
       "--topic", "test",
@@ -305,10 +380,7 @@ class ConsoleConsumerTest {
     Exit.setExitProcedure((_, message) => throw new IllegalArgumentException(message.orNull))
 
     // different in all three places
-    var propsFile = TestUtils.tempFile()
-    var propsStream = Files.newOutputStream(propsFile.toPath)
-    propsStream.write("group.id=group-from-file".getBytes())
-    propsStream.close()
+    var propsFile = TestUtils.tempPropertiesFile(Map("group.id" -> "group-from-file"))
     var args: Array[String] = Array(
       "--bootstrap-server", "localhost:9092",
       "--topic", "test",
@@ -320,10 +392,7 @@ class ConsoleConsumerTest {
     assertThrows(classOf[IllegalArgumentException], () => new ConsoleConsumer.ConsumerConfig(args))
 
     // the same in all three places
-    propsFile = TestUtils.tempFile()
-    propsStream = Files.newOutputStream(propsFile.toPath)
-    propsStream.write("group.id=test-group".getBytes())
-    propsStream.close()
+    propsFile = TestUtils.tempPropertiesFile(Map("group.id" -> "test-group"))
     args = Array(
       "--bootstrap-server", "localhost:9092",
       "--topic", "test",
@@ -337,10 +406,7 @@ class ConsoleConsumerTest {
     assertEquals("test-group", props.getProperty("group.id"))
 
     // different via --consumer-property and --consumer.config
-    propsFile = TestUtils.tempFile()
-    propsStream = Files.newOutputStream(propsFile.toPath)
-    propsStream.write("group.id=group-from-file".getBytes())
-    propsStream.close()
+    propsFile = TestUtils.tempPropertiesFile(Map("group.id" -> "group-from-file"))
     args = Array(
       "--bootstrap-server", "localhost:9092",
       "--topic", "test",
@@ -361,10 +427,7 @@ class ConsoleConsumerTest {
     assertThrows(classOf[IllegalArgumentException], () => new ConsoleConsumer.ConsumerConfig(args))
 
     // different via --group and --consumer.config
-    propsFile = TestUtils.tempFile()
-    propsStream = Files.newOutputStream(propsFile.toPath)
-    propsStream.write("group.id=group-from-file".getBytes())
-    propsStream.close()
+    propsFile = TestUtils.tempPropertiesFile(Map("group.id" -> "group-from-file"))
     args = Array(
       "--bootstrap-server", "localhost:9092",
       "--topic", "test",
@@ -401,9 +464,31 @@ class ConsoleConsumerTest {
     assertTrue(config.formatterArgs.containsKey("key.deserializer.my-props"))
     val formatter = config.formatter.asInstanceOf[DefaultMessageFormatter]
     assertTrue(formatter.keyDeserializer.get.isInstanceOf[MockDeserializer])
-    assertEquals(1, formatter.keyDeserializer.get.asInstanceOf[MockDeserializer].configs.size)
-    assertEquals("abc", formatter.keyDeserializer.get.asInstanceOf[MockDeserializer].configs.get("my-props"))
-    assertTrue(formatter.keyDeserializer.get.asInstanceOf[MockDeserializer].isKey)
+    val keyDeserializer = formatter.keyDeserializer.get.asInstanceOf[MockDeserializer]
+    assertEquals(1, keyDeserializer.configs.size)
+    assertEquals("abc", keyDeserializer.configs.get("my-props"))
+    assertTrue(keyDeserializer.isKey)
+  }
+
+  @Test
+  def testCustomConfigShouldBePassedToConfigureMethod(): Unit = {
+    val propsFile = TestUtils.tempPropertiesFile(Map("key.deserializer.my-props" -> "abc", "print.key" -> "false"))
+    val args = Array(
+      "--bootstrap-server", "localhost:9092",
+      "--topic", "test",
+      "--property", "print.key=true",
+      "--property", "key.deserializer=org.apache.kafka.test.MockDeserializer",
+      "--formatter-config", propsFile.getAbsolutePath
+    )
+    val config = new ConsoleConsumer.ConsumerConfig(args)
+    assertTrue(config.formatter.isInstanceOf[DefaultMessageFormatter])
+    assertTrue(config.formatterArgs.containsKey("key.deserializer.my-props"))
+    val formatter = config.formatter.asInstanceOf[DefaultMessageFormatter]
+    assertTrue(formatter.keyDeserializer.get.isInstanceOf[MockDeserializer])
+    val keyDeserializer = formatter.keyDeserializer.get.asInstanceOf[MockDeserializer]
+    assertEquals(1, keyDeserializer.configs.size)
+    assertEquals("abc", keyDeserializer.configs.get("my-props"))
+    assertTrue(keyDeserializer.isKey)
   }
 
   @Test
@@ -516,4 +601,73 @@ class ConsoleConsumerTest {
     assertEquals("", out.toString)
   }
 
+  @Test
+  def shouldExitIfNoTopicOrFilterSpecified(): Unit = {
+    Exit.setExitProcedure((_, message) => throw new IllegalArgumentException(message.orNull))
+    //Given
+    val args: Array[String] = Array(
+      "--bootstrap-server", "localhost:9092")
+
+    try assertThrows(classOf[IllegalArgumentException], () => new ConsoleConsumer.ConsumerConfig(args))
+    finally Exit.resetExitProcedure()
+  }
+
+  @Test
+  def shouldExitIfTopicAndIncludeSpecified(): Unit = {
+    Exit.setExitProcedure((_, message) => throw new IllegalArgumentException(message.orNull))
+    //Given
+    val args: Array[String] = Array(
+      "--bootstrap-server", "localhost:9092",
+      "--topic", "test",
+      "--include", "includeTest*")
+
+    try assertThrows(classOf[IllegalArgumentException], () => new ConsoleConsumer.ConsumerConfig(args))
+    finally Exit.resetExitProcedure()
+  }
+
+  @Test
+  def shouldExitIfTopicAndWhitelistSpecified(): Unit = {
+    Exit.setExitProcedure((_, message) => throw new IllegalArgumentException(message.orNull))
+    //Given
+    val args: Array[String] = Array(
+      "--bootstrap-server", "localhost:9092",
+      "--topic", "test",
+      "--whitelist", "whitelistTest*")
+
+    try assertThrows(classOf[IllegalArgumentException], () => new ConsoleConsumer.ConsumerConfig(args))
+    finally Exit.resetExitProcedure()
+  }
+
+  @Test
+  def testClientIdOverride(): Unit = {
+    //Given
+    val args: Array[String] = Array(
+      "--bootstrap-server", "localhost:9092",
+      "--topic", "test",
+      "--from-beginning",
+      "--consumer-property", "client.id=consumer-1")
+
+    //When
+    val config = new ConsoleConsumer.ConsumerConfig(args)
+    val consumerProperties = ConsoleConsumer.consumerProps(config)
+
+    //Then
+    assertEquals("consumer-1", consumerProperties.getProperty(ConsumerConfig.CLIENT_ID_CONFIG))
+  }
+
+  @Test
+  def testDefaultClientId(): Unit = {
+    //Given
+    val args: Array[String] = Array(
+      "--bootstrap-server", "localhost:9092",
+      "--topic", "test",
+      "--from-beginning")
+
+    //When
+    val config = new ConsoleConsumer.ConsumerConfig(args)
+    val consumerProperties = ConsoleConsumer.consumerProps(config)
+
+    //Then
+    assertEquals("console-consumer", consumerProperties.getProperty(ConsumerConfig.CLIENT_ID_CONFIG))
+  }
 }

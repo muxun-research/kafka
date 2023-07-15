@@ -21,16 +21,16 @@ import org.apache.kafka.common.network.TransferableChannel;
 import java.io.IOException;
 
 public class DefaultRecordsSend<T extends TransferableRecords> extends RecordsSend<T> {
-	public DefaultRecordsSend(T records) {
-		this(records, records.sizeInBytes());
-	}
+    public DefaultRecordsSend(T records) {
+        this(records, records.sizeInBytes());
+    }
 
-	public DefaultRecordsSend(T records, int maxBytesToWrite) {
-		super(records, maxBytesToWrite);
-	}
+    public DefaultRecordsSend(T records, int maxBytesToWrite) {
+        super(records, maxBytesToWrite);
+    }
 
-	@Override
-	protected long writeTo(TransferableChannel channel, long previouslyWritten, int remaining) throws IOException {
-		return records().writeTo(channel, previouslyWritten, remaining);
-	}
+    @Override
+    protected int writeTo(TransferableChannel channel, int previouslyWritten, int remaining) throws IOException {
+        return records().writeTo(channel, previouslyWritten, remaining);
+    }
 }

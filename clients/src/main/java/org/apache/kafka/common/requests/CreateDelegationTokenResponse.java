@@ -30,53 +30,44 @@ public class CreateDelegationTokenResponse extends AbstractResponse {
     private final CreateDelegationTokenResponseData data;
 
     public CreateDelegationTokenResponse(CreateDelegationTokenResponseData data) {
-		super(ApiKeys.CREATE_DELEGATION_TOKEN);
-		this.data = data;
+        super(ApiKeys.CREATE_DELEGATION_TOKEN);
+        this.data = data;
     }
 
     public static CreateDelegationTokenResponse parse(ByteBuffer buffer, short version) {
-		return new CreateDelegationTokenResponse(
-				new CreateDelegationTokenResponseData(new ByteBufferAccessor(buffer), version));
-	}
+        return new CreateDelegationTokenResponse(new CreateDelegationTokenResponseData(new ByteBufferAccessor(buffer), version));
+    }
 
-    public static CreateDelegationTokenResponse prepareResponse(int throttleTimeMs,
-            Errors error,
-            KafkaPrincipal owner,
-            long issueTimestamp,
-            long expiryTimestamp,
-            long maxTimestamp,
-            String tokenId,
-            ByteBuffer hmac) {
-        CreateDelegationTokenResponseData data = new CreateDelegationTokenResponseData()
-                .setThrottleTimeMs(throttleTimeMs)
-                .setErrorCode(error.code())
-                .setPrincipalType(owner.getPrincipalType())
-                .setPrincipalName(owner.getName())
-                .setIssueTimestampMs(issueTimestamp)
-                .setExpiryTimestampMs(expiryTimestamp)
-                .setMaxTimestampMs(maxTimestamp)
-                .setTokenId(tokenId)
-                .setHmac(hmac.array());
+    public static CreateDelegationTokenResponse prepareResponse(int version, int throttleTimeMs, Errors error, KafkaPrincipal owner, KafkaPrincipal tokenRequester, long issueTimestamp, long expiryTimestamp, long maxTimestamp, String tokenId, ByteBuffer hmac) {
+        CreateDelegationTokenResponseData data = new CreateDelegationTokenResponseData().setThrottleTimeMs(throttleTimeMs).setErrorCode(error.code()).setPrincipalType(owner.getPrincipalType()).setPrincipalName(owner.getName()).setIssueTimestampMs(issueTimestamp).setExpiryTimestampMs(expiryTimestamp).setMaxTimestampMs(maxTimestamp).setTokenId(tokenId).setHmac(hmac.array());
+        if (version > 2) {
+            data.setTokenRequesterPrincipalType(tokenRequester.getPrincipalType()).setTokenRequesterPrincipalName(tokenRequester.getName());
+        }
         return new CreateDelegationTokenResponse(data);
     }
 
-    public static CreateDelegationTokenResponse prepareResponse(int throttleTimeMs, Errors error, KafkaPrincipal owner) {
-        return prepareResponse(throttleTimeMs, error, owner, -1, -1, -1, "", ByteBuffer.wrap(new byte[] {}));
+    public static CreateDelegationTokenResponse prepareResponse(int version, int throttleTimeMs, Errors error, KafkaPrincipal owner, KafkaPrincipal requester) {
+        return prepareResponse(version, throttleTimeMs, error, owner, requester, -1, -1, -1, "", ByteBuffer.wrap(new byte[]{}));
     }
 
-	@Override
-	public CreateDelegationTokenResponseData data() {
-		return data;
-	}
+    @Override
+    public CreateDelegationTokenResponseData data() {
+        return data;
+    }
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-		return errorCounts(error());
+        return errorCounts(error());
     }
 
     @Override
     public int throttleTimeMs() {
         return data.throttleTimeMs();
+    }
+
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
     }
 
     public Errors error() {

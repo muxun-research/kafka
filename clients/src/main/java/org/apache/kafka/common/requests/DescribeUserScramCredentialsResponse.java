@@ -26,34 +26,39 @@ import java.util.Map;
 
 public class DescribeUserScramCredentialsResponse extends AbstractResponse {
 
-	private final DescribeUserScramCredentialsResponseData data;
+    private final DescribeUserScramCredentialsResponseData data;
 
-	public DescribeUserScramCredentialsResponse(DescribeUserScramCredentialsResponseData responseData) {
-		super(ApiKeys.DESCRIBE_USER_SCRAM_CREDENTIALS);
-		this.data = responseData;
-	}
+    public DescribeUserScramCredentialsResponse(DescribeUserScramCredentialsResponseData responseData) {
+        super(ApiKeys.DESCRIBE_USER_SCRAM_CREDENTIALS);
+        this.data = responseData;
+    }
 
-	@Override
-	public DescribeUserScramCredentialsResponseData data() {
-		return data;
-	}
+    @Override
+    public DescribeUserScramCredentialsResponseData data() {
+        return data;
+    }
 
-	@Override
-	public boolean shouldClientThrottle(short version) {
-		return true;
-	}
+    @Override
+    public boolean shouldClientThrottle(short version) {
+        return true;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		return errorCounts(data.results().stream().map(r -> Errors.forCode(r.errorCode())));
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	public static DescribeUserScramCredentialsResponse parse(ByteBuffer buffer, short version) {
-		return new DescribeUserScramCredentialsResponse(new DescribeUserScramCredentialsResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        return errorCounts(data.results().stream().map(r -> Errors.forCode(r.errorCode())));
+    }
+
+    public static DescribeUserScramCredentialsResponse parse(ByteBuffer buffer, short version) {
+        return new DescribeUserScramCredentialsResponse(new DescribeUserScramCredentialsResponseData(new ByteBufferAccessor(buffer), version));
+    }
 }

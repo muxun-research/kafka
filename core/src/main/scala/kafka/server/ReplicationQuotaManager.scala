@@ -16,20 +16,17 @@
   */
 package kafka.server
 
-import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
-import java.util.concurrent.locks.ReentrantReadWriteLock
-
-import scala.collection.Seq
-
 import kafka.server.Constants._
 import kafka.server.ReplicationQuotaManagerConfig._
 import kafka.utils.CoreUtils._
 import kafka.utils.Logging
-import org.apache.kafka.common.metrics._
-
 import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.common.metrics._
 import org.apache.kafka.common.metrics.stats.SimpleRate
 import org.apache.kafka.common.utils.Time
+
+import java.util.concurrent.locks.ReentrantReadWriteLock
+import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 
 /**
   * Configuration settings for quota management
@@ -76,10 +73,10 @@ class ReplicationQuotaManager(val config: ReplicationQuotaManagerConfig,
                               private val time: Time) extends Logging with ReplicaQuota {
   private val lock = new ReentrantReadWriteLock()
   private val throttledPartitions = new ConcurrentHashMap[String, Seq[Int]]()
-  private var quota: Quota = null
+  private var quota: Quota = _
   private val sensorAccess = new SensorAccess(lock, metrics)
   private val rateMetricName = metrics.metricName("byte-rate", replicationType.toString,
-    s"Tracking byte-rate for ${replicationType}")
+    s"Tracking byte-rate for $replicationType")
 
   /**
     * Update the quota

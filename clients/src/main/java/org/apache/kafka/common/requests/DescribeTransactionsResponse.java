@@ -27,41 +27,46 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class DescribeTransactionsResponse extends AbstractResponse {
-	private final DescribeTransactionsResponseData data;
+    private final DescribeTransactionsResponseData data;
 
-	public DescribeTransactionsResponse(DescribeTransactionsResponseData data) {
-		super(ApiKeys.DESCRIBE_TRANSACTIONS);
-		this.data = data;
-	}
+    public DescribeTransactionsResponse(DescribeTransactionsResponseData data) {
+        super(ApiKeys.DESCRIBE_TRANSACTIONS);
+        this.data = data;
+    }
 
-	@Override
-	public DescribeTransactionsResponseData data() {
-		return data;
-	}
+    @Override
+    public DescribeTransactionsResponseData data() {
+        return data;
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> errorCounts = new HashMap<>();
-		for (TransactionState transactionState : data.transactionStates()) {
-			Errors error = Errors.forCode(transactionState.errorCode());
-			updateErrorCounts(errorCounts, error);
-		}
-		return errorCounts;
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        Map<Errors, Integer> errorCounts = new HashMap<>();
+        for (TransactionState transactionState : data.transactionStates()) {
+            Errors error = Errors.forCode(transactionState.errorCode());
+            updateErrorCounts(errorCounts, error);
+        }
+        return errorCounts;
+    }
 
-	public static DescribeTransactionsResponse parse(ByteBuffer buffer, short version) {
-		return new DescribeTransactionsResponse(new DescribeTransactionsResponseData(
-				new ByteBufferAccessor(buffer), version));
-	}
+    public static DescribeTransactionsResponse parse(ByteBuffer buffer, short version) {
+        return new DescribeTransactionsResponse(new DescribeTransactionsResponseData(new ByteBufferAccessor(buffer), version));
+    }
 
-	@Override
-	public String toString() {
-		return data.toString();
-	}
+    @Override
+    public String toString() {
+        return data.toString();
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
+
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
 }
+

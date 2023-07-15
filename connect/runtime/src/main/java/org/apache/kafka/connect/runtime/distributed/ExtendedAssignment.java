@@ -19,30 +19,11 @@ package org.apache.kafka.connect.runtime.distributed;
 import org.apache.kafka.common.protocol.types.Struct;
 import org.apache.kafka.connect.util.ConnectorTaskId;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
-import static org.apache.kafka.connect.runtime.distributed.ConnectProtocol.ASSIGNMENT_KEY_NAME;
-import static org.apache.kafka.connect.runtime.distributed.ConnectProtocol.CONFIG_OFFSET_KEY_NAME;
-import static org.apache.kafka.connect.runtime.distributed.ConnectProtocol.CONNECTOR_KEY_NAME;
-import static org.apache.kafka.connect.runtime.distributed.ConnectProtocol.CONNECTOR_TASK;
-import static org.apache.kafka.connect.runtime.distributed.ConnectProtocol.ERROR_KEY_NAME;
-import static org.apache.kafka.connect.runtime.distributed.ConnectProtocol.LEADER_KEY_NAME;
-import static org.apache.kafka.connect.runtime.distributed.ConnectProtocol.LEADER_URL_KEY_NAME;
-import static org.apache.kafka.connect.runtime.distributed.ConnectProtocol.TASKS_KEY_NAME;
-import static org.apache.kafka.connect.runtime.distributed.IncrementalCooperativeConnectProtocol.ASSIGNMENT_V1;
-import static org.apache.kafka.connect.runtime.distributed.IncrementalCooperativeConnectProtocol.CONNECTOR_ASSIGNMENT_V1;
-import static org.apache.kafka.connect.runtime.distributed.IncrementalCooperativeConnectProtocol.CONNECT_PROTOCOL_V1;
-import static org.apache.kafka.connect.runtime.distributed.IncrementalCooperativeConnectProtocol.REVOKED_KEY_NAME;
-import static org.apache.kafka.connect.runtime.distributed.IncrementalCooperativeConnectProtocol.SCHEDULED_DELAY_KEY_NAME;
+import static org.apache.kafka.connect.runtime.distributed.ConnectProtocol.*;
+import static org.apache.kafka.connect.runtime.distributed.IncrementalCooperativeConnectProtocol.*;
 
 /**
  * The extended assignment of connectors and tasks that includes revoked connectors and tasks
@@ -60,18 +41,17 @@ public class ExtendedAssignment extends ConnectProtocol.Assignment {
 
     /**
      * Create an assignment indicating responsibility for the given connector instances and task Ids.
-     *
-     * @param version Connect protocol version
-     * @param error error code for this assignment; {@code ConnectProtocol.Assignment.NO_ERROR}
-     *              indicates no error during assignment
-     * @param leader Connect group's leader Id; may be null only on the empty assignment
-     * @param leaderUrl Connect group's leader URL; may be null only on the empty assignment
-     * @param configOffset the offset in the config topic that this assignment is corresponding to
-     * @param connectorIds list of connectors that the worker should instantiate and run; may not be null
-     * @param taskIds list of task IDs that the worker should instantiate and run; may not be null
+     * @param version             Connect protocol version
+     * @param error               error code for this assignment; {@link ConnectProtocol.Assignment#NO_ERROR}
+     *                            indicates no error during assignment
+     * @param leader              Connect group's leader Id; may be null only on the empty assignment
+     * @param leaderUrl           Connect group's leader URL; may be null only on the empty assignment
+     * @param configOffset        the offset in the config topic that this assignment is corresponding to
+     * @param connectorIds        list of connectors that the worker should instantiate and run; may not be null
+     * @param taskIds             list of task IDs that the worker should instantiate and run; may not be null
      * @param revokedConnectorIds list of connectors that the worker should stop running; may not be null
-     * @param revokedTaskIds list of task IDs that the worker should stop running; may not be null
-     * @param delay the scheduled delay after which the worker should rejoin the group
+     * @param revokedTaskIds      list of task IDs that the worker should stop running; may not be null
+     * @param delay               the scheduled delay after which the worker should rejoin the group
      */
     public ExtendedAssignment(short version, short error, String leader, String leaderUrl, long configOffset,
 							  Collection<String> connectorIds, Collection<ConnectorTaskId> taskIds,

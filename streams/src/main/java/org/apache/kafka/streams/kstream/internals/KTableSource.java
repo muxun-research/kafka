@@ -17,29 +17,29 @@
 package org.apache.kafka.streams.kstream.internals;
 
 import org.apache.kafka.common.metrics.Sensor;
-import org.apache.kafka.streams.processor.AbstractProcessor;
-import org.apache.kafka.streams.processor.Processor;
-import org.apache.kafka.streams.processor.ProcessorContext;
-import org.apache.kafka.streams.processor.ProcessorSupplier;
+import org.apache.kafka.streams.processor.api.*;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
-import org.apache.kafka.streams.state.TimestampedKeyValueStore;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
+import org.apache.kafka.streams.state.internals.KeyValueStoreWrapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Objects;
 
-import static org.apache.kafka.streams.processor.internals.metrics.TaskMetrics.droppedRecordsSensorOrSkippedRecordsSensor;
+import static org.apache.kafka.streams.processor.internals.metrics.TaskMetrics.droppedRecordsSensor;
+import static org.apache.kafka.streams.state.VersionedKeyValueStore.PUT_RETURN_CODE_NOT_PUT;
+import static org.apache.kafka.streams.state.internals.KeyValueStoreWrapper.PUT_RETURN_CODE_IS_LATEST;
 
-public class KTableSource<K, V> implements ProcessorSupplier<K, V> {
-	private static final Logger LOG = LoggerFactory.getLogger(KTableSource.class);
+public class KTableSource<KIn, VIn> implements ProcessorSupplier<KIn, VIn, KIn, Change<VIn>> {
 
-	private final String storeName;
-	private String queryableName;
-	private boolean sendOldValues;
+    private static final Logger LOG = LoggerFactory.getLogger(KTableSource.class);
 
-	public KTableSource(final String storeName, final String queryableName) {
-		Objects.requireNonNull(storeName, "storeName can't be null");
+    private final String storeName;
+    private String queryableName;
+    private boolean sendOldValues;
+
+    public KTableSource(final String storeName, final String queryableName) {
+        Objects.requireNonNull(storeName, "storeName can't be null");
 
         this.storeName = storeName;
         this.queryableName = queryableName;
@@ -51,78 +51,83 @@ public class KTableSource<K, V> implements ProcessorSupplier<K, V> {
     }
 
     @Override
-    public Processor<K, V> get() {
+    public Processor<KIn, VIn, KIn, Change<VIn>> get() {
         return new KTableSourceProcessor();
     }
 
     // when source ktable requires sending old values, we just
     // need to set the queryable name as the store name to enforce materialization
     public void enableSendingOldValues() {
-		this.sendOldValues = true;
-		this.queryableName = storeName;
-	}
+        this.sendOldValues = true;
+        this.queryableName = storeName;
+    }
 
-	// when the source ktable requires materialization from downstream, we just
-	// need to set the queryable name as the store name to enforce materialization
-	public void materialize() {
-		this.queryableName = storeName;
-	}
+    // when the source ktable requires materialization from downstream, we just
+    // need to set the queryable name as the store name to enforce materialization
+    public void materialize() {
+        this.queryableName = storeName;
+    }
 
-	public boolean materialized() {
-		return queryableName != null;
-	}
+    public boolean materialized() {
+        return queryableName != null;
+    }
 
-	private class KTableSourceProcessor extends AbstractProcessor<K, V> {
+    private class KTableSourceProcessor implements Processor<KIn, VIn, KIn, Change<VIn>> {
 
-		private TimestampedKeyValueStore<K, V> store;
-		private TimestampedTupleForwarder<K, V> tupleForwarder;
-		private StreamsMetricsImpl metrics;
-		private Sensor droppedRecordsSensor;
+        private ProcessorContext<KIn, Change<VIn>> context;
+        private KeyValueStoreWrapper<KIn, VIn> store;
+        private TimestampedTupleForwarder<KIn, VIn> tupleForwarder;
+        private Sensor droppedRecordsSensor;
 
-		@SuppressWarnings("unchecked")
-		@Override
-        public void init(final ProcessorContext context) {
-            super.init(context);
-			metrics = (StreamsMetricsImpl) context.metrics();
-			droppedRecordsSensor = droppedRecordsSensorOrSkippedRecordsSensor(Thread.currentThread().getName(), context.taskId().toString(), metrics);
+        @SuppressWarnings("unchecked")
+        @Override
+        public void init(final ProcessorContext<KIn, Change<VIn>> context) {
+            this.context = context;
+            final StreamsMetricsImpl metrics = (StreamsMetricsImpl) context.metrics();
+            droppedRecordsSensor = droppedRecordsSensor(Thread.currentThread().getName(), context.taskId().toString(), metrics);
             if (queryableName != null) {
-                store = (TimestampedKeyValueStore<K, V>) context.getStateStore(queryableName);
-                tupleForwarder = new TimestampedTupleForwarder<>(
-                    store,
-                    context,
-                    new TimestampedCacheFlushListener<>(context),
-                    sendOldValues);
+                store = new KeyValueStoreWrapper<>(context, queryableName);
+                tupleForwarder = new TimestampedTupleForwarder<>(store.getStore(), context, new TimestampedCacheFlushListener<>(context), sendOldValues);
             }
         }
 
         @Override
-        public void process(final K key, final V value) {
+        public void process(final Record<KIn, VIn> record) {
             // if the key is null, then ignore the record
-            if (key == null) {
-				LOG.warn(
-						"Skipping record due to null key. topic=[{}] partition=[{}] offset=[{}]",
-						context().topic(), context().partition(), context().offset()
-				);
-				droppedRecordsSensor.record();
+            if (record.key() == null) {
+                if (context.recordMetadata().isPresent()) {
+                    final RecordMetadata recordMetadata = context.recordMetadata().get();
+                    LOG.warn("Skipping record due to null key. " + "topic=[{}] partition=[{}] offset=[{}]", recordMetadata.topic(), recordMetadata.partition(), recordMetadata.offset());
+                } else {
+                    LOG.warn("Skipping record due to null key. Topic, partition, and offset not known.");
+                }
+                droppedRecordsSensor.record();
                 return;
             }
 
             if (queryableName != null) {
-                final ValueAndTimestamp<V> oldValueAndTimestamp = store.get(key);
-                final V oldValue;
+                final ValueAndTimestamp<VIn> oldValueAndTimestamp = store.get(record.key());
+                final VIn oldValue;
                 if (oldValueAndTimestamp != null) {
                     oldValue = oldValueAndTimestamp.value();
-                    if (context().timestamp() < oldValueAndTimestamp.timestamp()) {
-                        LOG.warn("Detected out-of-order KTable update for {} at offset {}, partition {}.",
-                            store.name(), context().offset(), context().partition());
+                    if (record.timestamp() < oldValueAndTimestamp.timestamp()) {
+                        if (context.recordMetadata().isPresent()) {
+                            final RecordMetadata recordMetadata = context.recordMetadata().get();
+                            LOG.warn("Detected out-of-order KTable update for {}, " + "old timestamp=[{}] new timestamp=[{}]. " + "topic=[{}] partition=[{}] offset=[{}].", store.name(), oldValueAndTimestamp.timestamp(), record.timestamp(), recordMetadata.topic(), recordMetadata.partition(), recordMetadata.offset());
+                        } else {
+                            LOG.warn("Detected out-of-order KTable update for {}, " + "old timestamp=[{}] new timestamp=[{}]. " + "Topic, partition and offset not known.", store.name(), oldValueAndTimestamp.timestamp(), record.timestamp());
+                        }
                     }
                 } else {
                     oldValue = null;
                 }
-                store.put(key, ValueAndTimestamp.make(value, context().timestamp()));
-                tupleForwarder.maybeForward(key, value, oldValue);
+                final long putReturnCode = store.put(record.key(), record.value(), record.timestamp());
+                // if not put to store, do not forward downstream either
+                if (putReturnCode != PUT_RETURN_CODE_NOT_PUT) {
+                    tupleForwarder.maybeForward(record.withValue(new Change<>(record.value(), oldValue, putReturnCode == PUT_RETURN_CODE_IS_LATEST)));
+                }
             } else {
-                context().forward(key, new Change<>(value, null));
+                context.forward(record.withValue(new Change<>(record.value(), null, true)));
             }
         }
     }

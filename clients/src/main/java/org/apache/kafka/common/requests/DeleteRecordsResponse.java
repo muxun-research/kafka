@@ -28,47 +28,48 @@ import java.util.Map;
 
 public class DeleteRecordsResponse extends AbstractResponse {
 
-	public static final long INVALID_LOW_WATERMARK = -1L;
-	private final DeleteRecordsResponseData data;
+    public static final long INVALID_LOW_WATERMARK = -1L;
+    private final DeleteRecordsResponseData data;
 
-	/**
-	 * Possible error code:
-	 * <p>
-	 * OFFSET_OUT_OF_RANGE (1)
-	 * UNKNOWN_TOPIC_OR_PARTITION (3)
-	 * NOT_LEADER_OR_FOLLOWER (6)
-	 * REQUEST_TIMED_OUT (7)
-	 * UNKNOWN (-1)
-	 */
+    /**
+     * Possible error code:
+     * <p>
+     * OFFSET_OUT_OF_RANGE (1)
+     * UNKNOWN_TOPIC_OR_PARTITION (3)
+     * NOT_LEADER_OR_FOLLOWER (6)
+     * REQUEST_TIMED_OUT (7)
+     * UNKNOWN (-1)
+     */
 
-	public DeleteRecordsResponse(DeleteRecordsResponseData data) {
-		super(ApiKeys.DELETE_RECORDS);
-		this.data = data;
-	}
+    public DeleteRecordsResponse(DeleteRecordsResponseData data) {
+        super(ApiKeys.DELETE_RECORDS);
+        this.data = data;
+    }
 
-	@Override
-	public DeleteRecordsResponseData data() {
-		return data;
-	}
+    @Override
+    public DeleteRecordsResponseData data() {
+        return data;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> errorCounts = new HashMap<>();
-		data.topics().forEach(topicResponses ->
-				topicResponses.partitions().forEach(response ->
-						updateErrorCounts(errorCounts, Errors.forCode(response.errorCode()))
-				)
-		);
-		return errorCounts;
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
+
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        Map<Errors, Integer> errorCounts = new HashMap<>();
+        data.topics().forEach(topicResponses -> topicResponses.partitions().forEach(response -> updateErrorCounts(errorCounts, Errors.forCode(response.errorCode()))));
+        return errorCounts;
+    }
 
     public static DeleteRecordsResponse parse(ByteBuffer buffer, short version) {
-		return new DeleteRecordsResponse(new DeleteRecordsResponseData(new ByteBufferAccessor(buffer), version));
+        return new DeleteRecordsResponse(new DeleteRecordsResponseData(new ByteBufferAccessor(buffer), version));
     }
 
     @Override

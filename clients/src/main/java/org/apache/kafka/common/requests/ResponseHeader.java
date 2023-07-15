@@ -27,63 +27,94 @@ import java.util.Objects;
  * A response header in the kafka protocol.
  */
 public class ResponseHeader implements AbstractRequestResponse {
-	private final ResponseHeaderData data;
-	private final short headerVersion;
+    private final static int SIZE_NOT_INITIALIZED = -1;
+    private final ResponseHeaderData data;
+    private final short headerVersion;
+    private int size = SIZE_NOT_INITIALIZED;
 
-	public ResponseHeader(int correlationId, short headerVersion) {
-		this(new ResponseHeaderData().setCorrelationId(correlationId), headerVersion);
-	}
+    public ResponseHeader(int correlationId, short headerVersion) {
+        this(new ResponseHeaderData().setCorrelationId(correlationId), headerVersion);
+    }
 
-	public ResponseHeader(ResponseHeaderData data, short headerVersion) {
-		this.data = data;
-		this.headerVersion = headerVersion;
-	}
+    public ResponseHeader(ResponseHeaderData data, short headerVersion) {
+        this.data = data;
+        this.headerVersion = headerVersion;
+    }
 
-	public int size(ObjectSerializationCache serializationCache) {
-		return data().size(serializationCache, headerVersion);
-	}
+    /**
+     * Calculates the size of {@link ResponseHeader} in bytes.
+     * <p>
+     * This method to calculate size should be only when it is immediately followed by
+     * {@link #write(ByteBuffer, ObjectSerializationCache)} method call. In such cases, ObjectSerializationCache
+     * helps to avoid the serialization twice. In all other cases, {@link #size()} should be preferred instead.
+     * <p>
+     * Calls to this method leads to calculation of size every time it is invoked. {@link #size()} should be preferred
+     * instead.
+     * <p>
+     * Visible for testing.
+     */
+    int size(ObjectSerializationCache serializationCache) {
+        return data().size(serializationCache, headerVersion);
+    }
 
-	public int correlationId() {
-		return this.data.correlationId();
-	}
+    /**
+     * Returns the size of {@link ResponseHeader} in bytes.
+     * <p>
+     * Calls to this method are idempotent and inexpensive since it returns the cached value of size after the first
+     * invocation.
+     */
+    public int size() {
+        if (this.size == SIZE_NOT_INITIALIZED) {
+            this.size = size(new ObjectSerializationCache());
+        }
+        return size;
+    }
 
-	public short headerVersion() {
-		return headerVersion;
-	}
+    public int correlationId() {
+        return this.data.correlationId();
+    }
 
-	public ResponseHeaderData data() {
-		return data;
-	}
+    public short headerVersion() {
+        return headerVersion;
+    }
 
-	public void write(ByteBuffer buffer, ObjectSerializationCache serializationCache) {
-		data.write(new ByteBufferAccessor(buffer), serializationCache, headerVersion);
-	}
+    public ResponseHeaderData data() {
+        return data;
+    }
 
-	@Override
-	public String toString() {
-		return "ResponseHeader("
-				+ "correlationId=" + data.correlationId()
-				+ ", headerVersion=" + headerVersion
-				+ ")";
-	}
+    // visible for testing
+    void write(ByteBuffer buffer, ObjectSerializationCache serializationCache) {
+        data.write(new ByteBufferAccessor(buffer), serializationCache, headerVersion);
+    }
 
-	public static ResponseHeader parse(ByteBuffer buffer, short headerVersion) {
-		return new ResponseHeader(
-				new ResponseHeaderData(new ByteBufferAccessor(buffer), headerVersion),
-				headerVersion);
-	}
+    @Override
+    public String toString() {
+        return "ResponseHeader(" + "correlationId=" + data.correlationId() + ", headerVersion=" + headerVersion + ")";
+    }
 
-	@Override
-	public boolean equals(Object o) {
-		if (this == o) return true;
-		if (o == null || getClass() != o.getClass()) return false;
-		ResponseHeader that = (ResponseHeader) o;
-		return headerVersion == that.headerVersion &&
-				Objects.equals(data, that.data);
-	}
+    public static ResponseHeader parse(ByteBuffer buffer, short headerVersion) {
+        final int bufferStartPositionForHeader = buffer.position();
+        final ResponseHeader header = new ResponseHeader(new ResponseHeaderData(new ByteBufferAccessor(buffer), headerVersion), headerVersion);
+        // Size of header is calculated by the shift in the position of buffer's start position during parsing.
+        // Prior to parsing, the buffer's start position points to header data and after the parsing operation
+        // the buffer's start position points to api message. For more information on how the buffer is
+        // constructed, see RequestUtils#serialize()
+        header.size = Math.max(buffer.position() - bufferStartPositionForHeader, 0);
+        return header;
+    }
 
-	@Override
-	public int hashCode() {
-		return Objects.hash(data, headerVersion);
-	}
+    @Override
+    public boolean equals(Object o) {
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
+        ResponseHeader that = (ResponseHeader) o;
+        return headerVersion == that.headerVersion && Objects.equals(data, that.data);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(data, headerVersion);
+    }
 }

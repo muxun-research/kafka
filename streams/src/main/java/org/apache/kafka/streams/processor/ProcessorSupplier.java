@@ -32,7 +32,9 @@ import java.util.function.Supplier;
  * a violation of the supplier pattern and leads to runtime exceptions.
  * @param <K> the type of keys
  * @param <V> the type of values
+ * @deprecated Since 3.0. Use {@link org.apache.kafka.streams.processor.api.ProcessorSupplier} instead.
  */
+@Deprecated
 public interface ProcessorSupplier<K, V> extends ConnectedStoreProvider, Supplier<Processor<K, V>> {
 
 	/**

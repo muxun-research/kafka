@@ -17,11 +17,7 @@
 package org.apache.kafka.connect.integration;
 
 import org.apache.kafka.connect.errors.ConnectException;
-import org.apache.kafka.connect.health.ConnectClusterState;
-import org.apache.kafka.connect.health.ConnectorHealth;
-import org.apache.kafka.connect.health.ConnectorState;
-import org.apache.kafka.connect.health.ConnectorType;
-import org.apache.kafka.connect.health.TaskState;
+import org.apache.kafka.connect.health.*;
 import org.apache.kafka.connect.rest.ConnectRestExtension;
 import org.apache.kafka.connect.rest.ConnectRestExtensionContext;
 import org.apache.kafka.connect.util.clusters.EmbeddedConnectCluster;
@@ -40,11 +36,9 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
-import static org.apache.kafka.connect.runtime.ConnectorConfig.CONNECTOR_CLASS_CONFIG;
-import static org.apache.kafka.connect.runtime.ConnectorConfig.NAME_CONFIG;
-import static org.apache.kafka.connect.runtime.ConnectorConfig.TASKS_MAX_CONFIG;
+import static org.apache.kafka.connect.runtime.ConnectorConfig.*;
 import static org.apache.kafka.connect.runtime.SinkConnectorConfig.TOPICS_CONFIG;
-import static org.apache.kafka.connect.runtime.WorkerConfig.REST_EXTENSION_CLASSES_CONFIG;
+import static org.apache.kafka.connect.runtime.rest.RestServerConfig.REST_EXTENSION_CLASSES_CONFIG;
 import static org.apache.kafka.test.TestUtils.waitForCondition;
 import static org.junit.Assert.assertEquals;
 

@@ -26,21 +26,21 @@ package org.apache.kafka.streams.processor.api;
  */
 public abstract class ContextualProcessor<KIn, VIn, KOut, VOut> implements Processor<KIn, VIn, KOut, VOut> {
 
-	protected ProcessorContext<KOut, VOut> context;
+    private ProcessorContext<KOut, VOut> context;
 
-	protected ContextualProcessor() {
-	}
+    protected ContextualProcessor() {
+    }
 
-	@Override
-	public void init(final ProcessorContext<KOut, VOut> context) {
-		this.context = context;
-	}
+    @Override
+    public void init(final ProcessorContext<KOut, VOut> context) {
+        this.context = context;
+    }
 
-	/**
-	 * Get the processor's context set during {@link #init(ProcessorContext) initialization}.
-	 * @return the processor context; null only when called prior to {@link #init(ProcessorContext) initialization}.
-	 */
-	protected final ProcessorContext<KOut, VOut> context() {
-		return context;
-	}
+    /**
+     * Get the processor's context set during {@link #init(ProcessorContext) initialization}.
+     * @return the processor context; null only when called prior to {@link #init(ProcessorContext) initialization}.
+     */
+    protected final ProcessorContext<KOut, VOut> context() {
+        return context;
+    }
 }

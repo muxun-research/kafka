@@ -29,55 +29,60 @@ import java.util.Map;
 
 public class StopReplicaResponse extends AbstractResponse {
 
-	/**
-	 * Possible error code:
-	 * - {@link Errors#STALE_CONTROLLER_EPOCH}
-	 * - {@link Errors#STALE_BROKER_EPOCH}
-	 * - {@link Errors#FENCED_LEADER_EPOCH}
-	 * - {@link Errors#KAFKA_STORAGE_ERROR}
-	 */
-	private final StopReplicaResponseData data;
+    /**
+     * Possible error code:
+     * - {@link Errors#STALE_CONTROLLER_EPOCH}
+     * - {@link Errors#STALE_BROKER_EPOCH}
+     * - {@link Errors#FENCED_LEADER_EPOCH}
+     * - {@link Errors#KAFKA_STORAGE_ERROR}
+     */
+    private final StopReplicaResponseData data;
 
-	public StopReplicaResponse(StopReplicaResponseData data) {
-		super(ApiKeys.STOP_REPLICA);
-		this.data = data;
-	}
+    public StopReplicaResponse(StopReplicaResponseData data) {
+        super(ApiKeys.STOP_REPLICA);
+        this.data = data;
+    }
 
-	public List<StopReplicaPartitionError> partitionErrors() {
-		return data.partitionErrors();
-	}
+    public List<StopReplicaPartitionError> partitionErrors() {
+        return data.partitionErrors();
+    }
 
-	public Errors error() {
-		return Errors.forCode(data.errorCode());
-	}
+    public Errors error() {
+        return Errors.forCode(data.errorCode());
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		if (data.errorCode() != Errors.NONE.code())
-			// Minor optimization since the top-level error applies to all partitions
-			return Collections.singletonMap(error(), data.partitionErrors().size() + 1);
-		Map<Errors, Integer> errors = errorCounts(data.partitionErrors().stream().map(p -> Errors.forCode(p.errorCode())));
-		updateErrorCounts(errors, Errors.forCode(data.errorCode())); // top level error
-		return errors;
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        if (data.errorCode() != Errors.NONE.code())
+            // Minor optimization since the top-level error applies to all partitions
+            return Collections.singletonMap(error(), data.partitionErrors().size() + 1);
+        Map<Errors, Integer> errors = errorCounts(data.partitionErrors().stream().map(p -> Errors.forCode(p.errorCode())));
+        updateErrorCounts(errors, Errors.forCode(data.errorCode())); // top level error
+        return errors;
+    }
 
-	public static StopReplicaResponse parse(ByteBuffer buffer, short version) {
-		return new StopReplicaResponse(new StopReplicaResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    public static StopReplicaResponse parse(ByteBuffer buffer, short version) {
+        return new StopReplicaResponse(new StopReplicaResponseData(new ByteBufferAccessor(buffer), version));
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return DEFAULT_THROTTLE_TIME;
-	}
+    @Override
+    public int throttleTimeMs() {
+        return DEFAULT_THROTTLE_TIME;
+    }
 
-	@Override
-	public StopReplicaResponseData data() {
-		return data;
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        // Not supported by the response schema
+    }
 
-	@Override
-	public String toString() {
-		return data.toString();
-	}
+    @Override
+    public StopReplicaResponseData data() {
+        return data;
+    }
+
+    @Override
+    public String toString() {
+        return data.toString();
+    }
 
 }

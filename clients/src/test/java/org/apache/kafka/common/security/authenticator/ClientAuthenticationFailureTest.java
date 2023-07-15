@@ -60,7 +60,7 @@ public class ClientAuthenticationFailureTest {
     private final String topic = "test";
     private TestJaasConfig testJaasConfig;
 
-	@BeforeEach
+    @BeforeEach
     public void setup() throws Exception {
         LoginManager.closeAll();
         SecurityProtocol securityProtocol = SecurityProtocol.SASL_PLAINTEXT;
@@ -77,7 +77,7 @@ public class ClientAuthenticationFailureTest {
         server = createEchoServer(securityProtocol);
     }
 
-	@AfterEach
+    @AfterEach
     public void teardown() throws Exception {
         if (server != null)
             server.close();
@@ -91,11 +91,11 @@ public class ClientAuthenticationFailureTest {
         StringDeserializer deserializer = new StringDeserializer();
 
         try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props, deserializer, deserializer)) {
-			assertThrows(SaslAuthenticationException.class, () -> {
-				consumer.subscribe(Collections.singleton(topic));
-				consumer.poll(Duration.ofSeconds(10));
-			});
-		}
+            assertThrows(SaslAuthenticationException.class, () -> {
+                consumer.subscribe(Collections.singleton(topic));
+                consumer.poll(Duration.ofSeconds(10));
+            });
+        }
     }
 
     @Test
@@ -105,10 +105,10 @@ public class ClientAuthenticationFailureTest {
         StringSerializer serializer = new StringSerializer();
 
         try (KafkaProducer<String, String> producer = new KafkaProducer<>(props, serializer, serializer)) {
-			ProducerRecord<String, String> record = new ProducerRecord<>(topic, "message");
-			Future<RecordMetadata> future = producer.send(record);
-			TestUtils.assertFutureThrows(future, SaslAuthenticationException.class);
-		}
+            ProducerRecord<String, String> record = new ProducerRecord<>(topic, "message");
+            Future<RecordMetadata> future = producer.send(record);
+            TestUtils.assertFutureThrows(future, SaslAuthenticationException.class);
+        }
     }
 
     @Test
@@ -116,9 +116,9 @@ public class ClientAuthenticationFailureTest {
         Map<String, Object> props = new HashMap<>(saslClientConfigs);
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:" + server.port());
         try (Admin client = Admin.create(props)) {
-			KafkaFuture<Map<String, TopicDescription>> future = client.describeTopics(Collections.singleton("test")).all();
-			TestUtils.assertFutureThrows(future, SaslAuthenticationException.class);
-		}
+            KafkaFuture<Map<String, TopicDescription>> future = client.describeTopics(Collections.singleton("test")).allTopicNames();
+            TestUtils.assertFutureThrows(future, SaslAuthenticationException.class);
+        }
     }
 
     @Test
@@ -130,7 +130,7 @@ public class ClientAuthenticationFailureTest {
         StringSerializer serializer = new StringSerializer();
 
         try (KafkaProducer<String, String> producer = new KafkaProducer<>(props, serializer, serializer)) {
-			assertThrows(SaslAuthenticationException.class, producer::initTransactions);
+            assertThrows(SaslAuthenticationException.class, producer::initTransactions);
         }
     }
 

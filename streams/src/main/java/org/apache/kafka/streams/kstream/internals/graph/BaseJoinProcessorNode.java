@@ -25,21 +25,15 @@ import org.apache.kafka.streams.kstream.ValueJoinerWithKey;
  */
 abstract class BaseJoinProcessorNode<K, V1, V2, VR> extends GraphNode {
 
-	private final ProcessorParameters<K, V1, ?, ?> joinThisProcessorParameters;
-	private final ProcessorParameters<K, V2, ?, ?> joinOtherProcessorParameters;
-	private final ProcessorParameters<K, VR, ?, ?> joinMergeProcessorParameters;
-	private final ValueJoinerWithKey<? super K, ? super V1, ? super V2, ? extends VR> valueJoiner;
-	private final String thisJoinSideNodeName;
-	private final String otherJoinSideNodeName;
+    private final ProcessorParameters<K, V1, ?, ?> joinThisProcessorParameters;
+    private final ProcessorParameters<K, V2, ?, ?> joinOtherProcessorParameters;
+    private final ProcessorParameters<K, VR, ?, ?> joinMergeProcessorParameters;
+    private final ValueJoinerWithKey<? super K, ? super V1, ? super V2, ? extends VR> valueJoiner;
+    private final String thisJoinSideNodeName;
+    private final String otherJoinSideNodeName;
 
 
-	BaseJoinProcessorNode(final String nodeName,
-						  final ValueJoinerWithKey<? super K, ? super V1, ? super V2, ? extends VR> valueJoiner,
-						  final ProcessorParameters<K, V1, ?, ?> joinThisProcessorParameters,
-						  final ProcessorParameters<K, V2, ?, ?> joinOtherProcessorParameters,
-						  final ProcessorParameters<K, VR, ?, ?> joinMergeProcessorParameters,
-						  final String thisJoinSideNodeName,
-						  final String otherJoinSideNodeName) {
+    BaseJoinProcessorNode(final String nodeName, final ValueJoinerWithKey<? super K, ? super V1, ? super V2, ? extends VR> valueJoiner, final ProcessorParameters<K, V1, ?, ?> joinThisProcessorParameters, final ProcessorParameters<K, V2, ?, ?> joinOtherProcessorParameters, final ProcessorParameters<K, VR, ?, ?> joinMergeProcessorParameters, final String thisJoinSideNodeName, final String otherJoinSideNodeName) {
 
         super(nodeName);
 
@@ -51,21 +45,19 @@ abstract class BaseJoinProcessorNode<K, V1, V2, VR> extends GraphNode {
         this.otherJoinSideNodeName = otherJoinSideNodeName;
     }
 
-	ProcessorParameters<K, V1, ?, ?> thisProcessorParameters() {
-		return joinThisProcessorParameters;
-	}
+    // VisibleForTesting
+    public ProcessorParameters<K, V1, ?, ?> thisProcessorParameters() {
+        return joinThisProcessorParameters;
+    }
 
-	ProcessorParameters<K, V2, ?, ?> otherProcessorParameters() {
-		return joinOtherProcessorParameters;
-	}
+    // VisibleForTesting
+    public ProcessorParameters<K, V2, ?, ?> otherProcessorParameters() {
+        return joinOtherProcessorParameters;
+    }
 
-	ProcessorParameters<K, VR, ?, ?> mergeProcessorParameters() {
-		return joinMergeProcessorParameters;
-	}
-
-	ValueJoinerWithKey<? super K, ? super V1, ? super V2, ? extends VR> valueJoiner() {
-		return valueJoiner;
-	}
+    ProcessorParameters<K, VR, ?, ?> mergeProcessorParameters() {
+        return joinMergeProcessorParameters;
+    }
 
     String thisJoinSideNodeName() {
         return thisJoinSideNodeName;

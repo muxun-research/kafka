@@ -16,7 +16,6 @@
  */
 package kafka.cluster
 
-import org.apache.kafka.common.message.LeaderAndIsrRequestData.LeaderAndIsrPartitionState
 import org.junit.jupiter.api.Assertions.{assertEquals, assertFalse, assertTrue}
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.{Arguments, MethodSource}
@@ -95,7 +94,7 @@ class AssignmentStateTest extends AbstractPartitionTest {
       .setLeader(brokerId)
       .setLeaderEpoch(6)
       .setIsr(isr.asJava)
-      .setZkVersion(1)
+      .setPartitionEpoch(1)
       .setReplicas(replicas.asJava)
       .setIsNew(false)
     if (adding.nonEmpty)

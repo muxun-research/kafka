@@ -24,19 +24,16 @@ import javax.ws.rs.core.Configurable;
 
 public class ConnectRestExtensionContextImpl implements ConnectRestExtensionContext {
 
-    private Configurable<? extends Configurable> configurable;
-    private ConnectClusterState clusterState;
+    private final Configurable<? extends Configurable<?>> configurable;
+    private final ConnectClusterState clusterState;
 
-    public ConnectRestExtensionContextImpl(
-        Configurable<? extends Configurable> configurable,
-        ConnectClusterState clusterState
-    ) {
+    public ConnectRestExtensionContextImpl(Configurable<? extends Configurable<?>> configurable, ConnectClusterState clusterState) {
         this.configurable = configurable;
         this.clusterState = clusterState;
     }
 
     @Override
-    public Configurable<? extends Configurable> configurable() {
+    public Configurable<? extends Configurable<?>> configurable() {
         return configurable;
     }
 

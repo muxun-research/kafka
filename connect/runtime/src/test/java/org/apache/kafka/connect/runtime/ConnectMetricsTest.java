@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.connect.runtime;
 
+import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.metrics.stats.Avg;
@@ -31,14 +32,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNotSame;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.*;
 
-@SuppressWarnings("deprecation")
 public class ConnectMetricsTest {
 
     private static final Map<String, String> DEFAULT_WORKER_CONFIG = new HashMap<>();
@@ -46,8 +41,6 @@ public class ConnectMetricsTest {
     static {
         DEFAULT_WORKER_CONFIG.put(WorkerConfig.KEY_CONVERTER_CLASS_CONFIG, "org.apache.kafka.connect.json.JsonConverter");
         DEFAULT_WORKER_CONFIG.put(WorkerConfig.VALUE_CONVERTER_CLASS_CONFIG, "org.apache.kafka.connect.json.JsonConverter");
-        DEFAULT_WORKER_CONFIG.put(WorkerConfig.INTERNAL_KEY_CONVERTER_CLASS_CONFIG, "org.apache.kafka.connect.json.JsonConverter");
-        DEFAULT_WORKER_CONFIG.put(WorkerConfig.INTERNAL_VALUE_CONVERTER_CLASS_CONFIG, "org.apache.kafka.connect.json.JsonConverter");
     }
 
     private ConnectMetrics metrics;
@@ -148,10 +141,33 @@ public class ConnectMetricsTest {
         assertSame(originalSensor, recreatedSensor);
     }
 
+    @Test
+    public void testMetricReporters() {
+        assertEquals(1, metrics.metrics().reporters().size());
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    public void testDisableJmxReporter() {
+        Map<String, String> props = new HashMap<>(DEFAULT_WORKER_CONFIG);
+        props.put(CommonClientConfigs.AUTO_INCLUDE_JMX_REPORTER_CONFIG, "false");
+        ConnectMetrics cm = new ConnectMetrics("worker-testDisableJmxReporter", new WorkerConfig(WorkerConfig.baseConfigDef(), props), new MockTime(), "cluster-1");
+        assertTrue(cm.metrics().reporters().isEmpty());
+        cm.stop();
+    }
+
+    @Test
+    public void testExplicitlyEnableJmxReporter() {
+        Map<String, String> props = new HashMap<>(DEFAULT_WORKER_CONFIG);
+        props.put(CommonClientConfigs.METRIC_REPORTER_CLASSES_CONFIG, "org.apache.kafka.common.metrics.JmxReporter");
+        ConnectMetrics cm = new ConnectMetrics("worker-testExplicitlyEnableJmxReporter", new WorkerConfig(WorkerConfig.baseConfigDef(), props), new MockTime(), "cluster-1");
+        assertEquals(1, cm.metrics().reporters().size());
+        cm.stop();
+    }
+
     private Sensor addToGroup(ConnectMetrics connectMetrics, boolean shouldClose) {
         ConnectMetricsRegistry registry = connectMetrics.registry();
-        ConnectMetrics.MetricGroup metricGroup = connectMetrics.group(registry.taskGroupName(),
-                registry.connectorTagName(), "conn_name");
+        ConnectMetrics.MetricGroup metricGroup = connectMetrics.group(registry.taskGroupName(), registry.connectorTagName(), "conn_name");
 
         if (shouldClose) {
             metricGroup.close();

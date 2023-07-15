@@ -19,10 +19,12 @@ package org.apache.kafka.streams.processor;
 /**
  * An abstract implementation of {@link Processor} that manages the {@link ProcessorContext} instance and provides default no-op
  * implementation of {@link #close()}.
- *
  * @param <K> the type of keys
  * @param <V> the type of values
+ * @deprecated Since 3.0. Use {@link org.apache.kafka.streams.processor.api.Processor} or
+ * {@link org.apache.kafka.streams.processor.api.ContextualProcessor} instead.
  */
+@Deprecated
 public abstract class AbstractProcessor<K, V> implements Processor<K, V> {
 
     protected ProcessorContext context;

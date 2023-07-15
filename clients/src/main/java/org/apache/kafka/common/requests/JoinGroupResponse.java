@@ -28,12 +28,18 @@ public class JoinGroupResponse extends AbstractResponse {
 
     private final JoinGroupResponseData data;
 
-    public JoinGroupResponse(JoinGroupResponseData data) {
-		super(ApiKeys.JOIN_GROUP);
-		this.data = data;
+    public JoinGroupResponse(JoinGroupResponseData data, short version) {
+        super(ApiKeys.JOIN_GROUP);
+        this.data = data;
+
+        // All versions prior to version 7 do not support nullable
+        // string for the protocol name. Empty string should be used.
+        if (version < 7 && data.protocolName() == null) {
+            data.setProtocolName("");
+        }
     }
 
-	@Override
+    @Override
     public JoinGroupResponseData data() {
         return data;
     }
@@ -47,26 +53,31 @@ public class JoinGroupResponse extends AbstractResponse {
         return data.throttleTimeMs();
     }
 
-	public Errors error() {
-		return Errors.forCode(data.errorCode());
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		return errorCounts(Errors.forCode(data.errorCode()));
-	}
+    public Errors error() {
+        return Errors.forCode(data.errorCode());
+    }
 
-	public static JoinGroupResponse parse(ByteBuffer buffer, short version) {
-		return new JoinGroupResponse(new JoinGroupResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        return errorCounts(Errors.forCode(data.errorCode()));
+    }
 
-	@Override
-	public String toString() {
-		return data.toString();
-	}
+    public static JoinGroupResponse parse(ByteBuffer buffer, short version) {
+        return new JoinGroupResponse(new JoinGroupResponseData(new ByteBufferAccessor(buffer), version), version);
+    }
 
-	@Override
-	public boolean shouldClientThrottle(short version) {
-		return version >= 3;
+    @Override
+    public String toString() {
+        return data.toString();
+    }
+
+    @Override
+    public boolean shouldClientThrottle(short version) {
+        return version >= 3;
     }
 }

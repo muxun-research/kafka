@@ -26,34 +26,39 @@ import java.util.Map;
 
 public class AlterUserScramCredentialsResponse extends AbstractResponse {
 
-	private final AlterUserScramCredentialsResponseData data;
+    private final AlterUserScramCredentialsResponseData data;
 
-	public AlterUserScramCredentialsResponse(AlterUserScramCredentialsResponseData responseData) {
-		super(ApiKeys.ALTER_USER_SCRAM_CREDENTIALS);
-		this.data = responseData;
-	}
+    public AlterUserScramCredentialsResponse(AlterUserScramCredentialsResponseData responseData) {
+        super(ApiKeys.ALTER_USER_SCRAM_CREDENTIALS);
+        this.data = responseData;
+    }
 
-	@Override
-	public AlterUserScramCredentialsResponseData data() {
-		return data;
-	}
+    @Override
+    public AlterUserScramCredentialsResponseData data() {
+        return data;
+    }
 
-	@Override
-	public boolean shouldClientThrottle(short version) {
-		return true;
-	}
+    @Override
+    public boolean shouldClientThrottle(short version) {
+        return true;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		return errorCounts(data.results().stream().map(r -> Errors.forCode(r.errorCode())));
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	public static AlterUserScramCredentialsResponse parse(ByteBuffer buffer, short version) {
-		return new AlterUserScramCredentialsResponse(new AlterUserScramCredentialsResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        return errorCounts(data.results().stream().map(r -> Errors.forCode(r.errorCode())));
+    }
+
+    public static AlterUserScramCredentialsResponse parse(ByteBuffer buffer, short version) {
+        return new AlterUserScramCredentialsResponse(new AlterUserScramCredentialsResponseData(new ByteBufferAccessor(buffer), version));
+    }
 }

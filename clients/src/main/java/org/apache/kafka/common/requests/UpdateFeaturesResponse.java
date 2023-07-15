@@ -37,63 +37,61 @@ import java.util.Map;
  */
 public class UpdateFeaturesResponse extends AbstractResponse {
 
-	private final UpdateFeaturesResponseData data;
+    private final UpdateFeaturesResponseData data;
 
-	public UpdateFeaturesResponse(UpdateFeaturesResponseData data) {
-		super(ApiKeys.UPDATE_FEATURES);
-		this.data = data;
-	}
+    public UpdateFeaturesResponse(UpdateFeaturesResponseData data) {
+        super(ApiKeys.UPDATE_FEATURES);
+        this.data = data;
+    }
 
-	public ApiError topLevelError() {
-		return new ApiError(Errors.forCode(data.errorCode()), data.errorMessage());
-	}
+    public ApiError topLevelError() {
+        return new ApiError(Errors.forCode(data.errorCode()), data.errorMessage());
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> errorCounts = new HashMap<>();
-		updateErrorCounts(errorCounts, Errors.forCode(data.errorCode()));
-		for (UpdatableFeatureResult result : data.results()) {
-			updateErrorCounts(errorCounts, Errors.forCode(result.errorCode()));
-		}
-		return errorCounts;
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        Map<Errors, Integer> errorCounts = new HashMap<>();
+        updateErrorCounts(errorCounts, Errors.forCode(data.errorCode()));
+        for (UpdatableFeatureResult result : data.results()) {
+            updateErrorCounts(errorCounts, Errors.forCode(result.errorCode()));
+        }
+        return errorCounts;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
 
-	@Override
-	public String toString() {
-		return data.toString();
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	@Override
-	public UpdateFeaturesResponseData data() {
-		return data;
-	}
+    @Override
+    public String toString() {
+        return data.toString();
+    }
 
-	public static UpdateFeaturesResponse parse(ByteBuffer buffer, short version) {
-		return new UpdateFeaturesResponse(new UpdateFeaturesResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public UpdateFeaturesResponseData data() {
+        return data;
+    }
 
-	public static UpdateFeaturesResponse createWithErrors(ApiError topLevelError, Map<String, ApiError> updateErrors, int throttleTimeMs) {
-		final UpdatableFeatureResultCollection results = new UpdatableFeatureResultCollection();
-		for (final Map.Entry<String, ApiError> updateError : updateErrors.entrySet()) {
-			final String feature = updateError.getKey();
-			final ApiError error = updateError.getValue();
-			final UpdatableFeatureResult result = new UpdatableFeatureResult();
-			result.setFeature(feature)
-					.setErrorCode(error.error().code())
-					.setErrorMessage(error.message());
-			results.add(result);
-		}
-		final UpdateFeaturesResponseData responseData = new UpdateFeaturesResponseData()
-				.setThrottleTimeMs(throttleTimeMs)
-				.setErrorCode(topLevelError.error().code())
-				.setErrorMessage(topLevelError.message())
-				.setResults(results)
-				.setThrottleTimeMs(throttleTimeMs);
-		return new UpdateFeaturesResponse(responseData);
-	}
+    public static UpdateFeaturesResponse parse(ByteBuffer buffer, short version) {
+        return new UpdateFeaturesResponse(new UpdateFeaturesResponseData(new ByteBufferAccessor(buffer), version));
+    }
+
+    public static UpdateFeaturesResponse createWithErrors(ApiError topLevelError, Map<String, ApiError> updateErrors, int throttleTimeMs) {
+        final UpdatableFeatureResultCollection results = new UpdatableFeatureResultCollection();
+        for (final Map.Entry<String, ApiError> updateError : updateErrors.entrySet()) {
+            final String feature = updateError.getKey();
+            final ApiError error = updateError.getValue();
+            final UpdatableFeatureResult result = new UpdatableFeatureResult();
+            result.setFeature(feature).setErrorCode(error.error().code()).setErrorMessage(error.message());
+            results.add(result);
+        }
+        final UpdateFeaturesResponseData responseData = new UpdateFeaturesResponseData().setThrottleTimeMs(throttleTimeMs).setErrorCode(topLevelError.error().code()).setErrorMessage(topLevelError.message()).setResults(results).setThrottleTimeMs(throttleTimeMs);
+        return new UpdateFeaturesResponse(responseData);
+    }
 }

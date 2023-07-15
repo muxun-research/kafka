@@ -28,41 +28,39 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class SampleTaskWorker implements TaskWorker {
-	private final SampleTaskSpec spec;
-	private final ScheduledExecutorService executor;
-	private Future<Void> future;
-	private WorkerStatusTracker status;
+    private final SampleTaskSpec spec;
+    private final ScheduledExecutorService executor;
+    private Future<Void> future;
+    private WorkerStatusTracker status;
 
-	SampleTaskWorker(SampleTaskSpec spec) {
-		this.spec = spec;
-		this.executor = Executors.newSingleThreadScheduledExecutor(
-				ThreadUtils.createThreadFactory("SampleTaskWorker", false));
-		this.future = null;
-	}
+    SampleTaskWorker(SampleTaskSpec spec) {
+        this.spec = spec;
+        this.executor = Executors.newSingleThreadScheduledExecutor(ThreadUtils.createThreadFactory("SampleTaskWorker", false));
+        this.future = null;
+    }
 
-	@Override
-	public synchronized void start(Platform platform, WorkerStatusTracker status,
-								   final KafkaFutureImpl<String> haltFuture) throws Exception {
-		if (this.future != null)
-			return;
-		this.status = status;
-		this.status.update(new TextNode("active"));
+    @Override
+    public synchronized void start(Platform platform, WorkerStatusTracker status, final KafkaFutureImpl<String> haltFuture) throws Exception {
+        if (this.future != null)
+            return;
+        this.status = status;
+        this.status.update(new TextNode("active"));
 
-		Long exitMs = spec.nodeToExitMs().get(platform.curNode().name());
-		if (exitMs == null) {
-			exitMs = Long.MAX_VALUE;
-		}
-		this.future = platform.scheduler().schedule(executor, () -> {
-			haltFuture.complete(spec.error());
-			return null;
-		}, exitMs);
-	}
+        Long exitMs = spec.nodeToExitMs().get(platform.curNode().name());
+        if (exitMs == null) {
+            exitMs = Long.MAX_VALUE;
+        }
+        this.future = platform.scheduler().schedule(executor, () -> {
+            haltFuture.complete(spec.error());
+            return null;
+        }, exitMs);
+    }
 
-	@Override
-	public void stop(Platform platform) throws Exception {
-		this.future.cancel(false);
-		this.executor.shutdown();
-		this.executor.awaitTermination(1, TimeUnit.DAYS);
-		this.status.update(new TextNode("halted"));
-	}
-};
+    @Override
+    public void stop(Platform platform) throws Exception {
+        this.future.cancel(false);
+        this.executor.shutdown();
+        this.executor.awaitTermination(1, TimeUnit.DAYS);
+        this.status.update(new TextNode("halted"));
+    }
+}

@@ -21,11 +21,8 @@ import java.util.Objects;
 public abstract class AbstractStatus<T> {
 
     public enum State {
-        UNASSIGNED,
-        RUNNING,
-        PAUSED,
-        FAILED,
-        DESTROYED,
+        UNASSIGNED, RUNNING, PAUSED, FAILED, DESTROYED, // Never visible to users; destroyed Connector and Task instances are not shown
+        RESTARTING, STOPPED, // Only ever visible to users for Connector instances; never for Task instances
     }
 
     private final T id;

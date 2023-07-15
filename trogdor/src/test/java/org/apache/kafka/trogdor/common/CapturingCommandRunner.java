@@ -23,11 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class CapturingCommandRunner implements BasicPlatform.CommandRunner {
     private static final Logger log = LoggerFactory.getLogger(CapturingCommandRunner.class);
@@ -57,4 +53,4 @@ public class CapturingCommandRunner implements BasicPlatform.CommandRunner {
     public synchronized List<String> lines(String nodeName) {
         return new ArrayList<String>(getOrCreate(nodeName));
     }
-};
+}

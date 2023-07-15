@@ -23,7 +23,9 @@ import org.apache.kafka.streams.TestInputTopic;
 import org.apache.kafka.streams.TestOutputTopic;
 import org.apache.kafka.streams.TopologyTestDriver;
 import org.apache.kafka.test.TestUtils;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.Timeout;
 
 import java.util.Map;
 import java.util.TreeMap;
@@ -33,73 +35,46 @@ import static org.hamcrest.MatcherAssert.assertThat;
 
 public class RelationalSmokeTestTest extends SmokeTestUtil {
 
-	@Test
-	public void verifySmokeTestLogic() {
-		try (final TopologyTestDriver driver =
-					 new TopologyTestDriver(RelationalSmokeTest.App.getTopology(),
-							 RelationalSmokeTest.App.getConfig(
-									 "nothing:0",
-									 "test",
-									 "test",
-									 StreamsConfig.AT_LEAST_ONCE,
-									 TestUtils.tempDirectory().getAbsolutePath()
-							 ))) {
+    @Rule
+    public Timeout globalTimeout = Timeout.seconds(600);
 
-			final TestInputTopic<Integer, RelationalSmokeTest.Article> articles =
-					driver.createInputTopic(RelationalSmokeTest.ARTICLE_SOURCE,
-							new IntegerSerializer(),
-							new RelationalSmokeTest.Article.ArticleSerializer());
+    @Test
+    public void verifySmokeTestLogic() {
+        try (final TopologyTestDriver driver = new TopologyTestDriver(RelationalSmokeTest.App.getTopology(), RelationalSmokeTest.App.getConfig("nothing:0", "test", "test", StreamsConfig.AT_LEAST_ONCE, TestUtils.tempDirectory().getAbsolutePath()))) {
 
-			final TestInputTopic<Integer, RelationalSmokeTest.Comment> comments =
-					driver.createInputTopic(RelationalSmokeTest.COMMENT_SOURCE,
-							new IntegerSerializer(),
-							new RelationalSmokeTest.Comment.CommentSerializer());
+            final TestInputTopic<Integer, RelationalSmokeTest.Article> articles = driver.createInputTopic(RelationalSmokeTest.ARTICLE_SOURCE, new IntegerSerializer(), new RelationalSmokeTest.Article.ArticleSerializer());
 
-			final TestOutputTopic<Integer, RelationalSmokeTest.AugmentedArticle> augmentedArticles =
-					driver.createOutputTopic(RelationalSmokeTest.ARTICLE_RESULT_SINK,
-							new IntegerDeserializer(),
-							new RelationalSmokeTest.AugmentedArticle.AugmentedArticleDeserializer());
+            final TestInputTopic<Integer, RelationalSmokeTest.Comment> comments = driver.createInputTopic(RelationalSmokeTest.COMMENT_SOURCE, new IntegerSerializer(), new RelationalSmokeTest.Comment.CommentSerializer());
 
-			final TestOutputTopic<Integer, RelationalSmokeTest.AugmentedComment> augmentedComments =
-					driver.createOutputTopic(RelationalSmokeTest.COMMENT_RESULT_SINK,
-							new IntegerDeserializer(),
-							new RelationalSmokeTest.AugmentedComment.AugmentedCommentDeserializer());
+            final TestOutputTopic<Integer, RelationalSmokeTest.AugmentedArticle> augmentedArticles = driver.createOutputTopic(RelationalSmokeTest.ARTICLE_RESULT_SINK, new IntegerDeserializer(), new RelationalSmokeTest.AugmentedArticle.AugmentedArticleDeserializer());
 
-			final RelationalSmokeTest.DataSet dataSet =
-					RelationalSmokeTest.DataSet.generate(10, 30);
+            final TestOutputTopic<Integer, RelationalSmokeTest.AugmentedComment> augmentedComments = driver.createOutputTopic(RelationalSmokeTest.COMMENT_RESULT_SINK, new IntegerDeserializer(), new RelationalSmokeTest.AugmentedComment.AugmentedCommentDeserializer());
 
-			final Map<Integer, RelationalSmokeTest.Article> articleMap = new TreeMap<>();
-			for (final RelationalSmokeTest.Article article : dataSet.getArticles()) {
-				articles.pipeInput(article.getKey(), article, article.getTimestamp());
-				articleMap.put(article.getKey(), article);
-			}
+            final RelationalSmokeTest.DataSet dataSet = RelationalSmokeTest.DataSet.generate(10, 30);
 
-			final Map<Integer, Long> commentCounts = new TreeMap<>();
+            final Map<Integer, RelationalSmokeTest.Article> articleMap = new TreeMap<>();
+            for (final RelationalSmokeTest.Article article : dataSet.getArticles()) {
+                articles.pipeInput(article.getKey(), article, article.getTimestamp());
+                articleMap.put(article.getKey(), article);
+            }
 
-			final Map<Integer, RelationalSmokeTest.Comment> commentMap = new TreeMap<>();
-			for (final RelationalSmokeTest.Comment comment : dataSet.getComments()) {
-				comments.pipeInput(comment.getKey(), comment, comment.getTimestamp());
-				commentMap.put(comment.getKey(), comment);
-				commentCounts.put(comment.getArticleId(),
-						commentCounts.getOrDefault(comment.getArticleId(), 0L) + 1);
-			}
+            final Map<Integer, Long> commentCounts = new TreeMap<>();
 
-			final Map<Integer, RelationalSmokeTest.AugmentedArticle> augmentedArticleResults =
-					augmentedArticles.readKeyValuesToMap();
+            final Map<Integer, RelationalSmokeTest.Comment> commentMap = new TreeMap<>();
+            for (final RelationalSmokeTest.Comment comment : dataSet.getComments()) {
+                comments.pipeInput(comment.getKey(), comment, comment.getTimestamp());
+                commentMap.put(comment.getKey(), comment);
+                commentCounts.put(comment.getArticleId(), commentCounts.getOrDefault(comment.getArticleId(), 0L) + 1);
+            }
 
-			final Map<Integer, RelationalSmokeTest.AugmentedComment> augmentedCommentResults =
-					augmentedComments.readKeyValuesToMap();
+            final Map<Integer, RelationalSmokeTest.AugmentedArticle> augmentedArticleResults = augmentedArticles.readKeyValuesToMap();
 
-			assertThat(augmentedArticleResults.size(), is(dataSet.getArticles().length));
-			assertThat(augmentedCommentResults.size(), is(dataSet.getComments().length));
+            final Map<Integer, RelationalSmokeTest.AugmentedComment> augmentedCommentResults = augmentedComments.readKeyValuesToMap();
 
-			assertThat(
-					RelationalSmokeTest.App.verifySync(true,
-							articleMap,
-							commentMap,
-							augmentedArticleResults,
-							augmentedCommentResults),
-					is(true));
-		}
-	}
+            assertThat(augmentedArticleResults.size(), is(dataSet.getArticles().length));
+            assertThat(augmentedCommentResults.size(), is(dataSet.getComments().length));
+
+            assertThat(RelationalSmokeTest.App.verifySync(true, articleMap, commentMap, augmentedArticleResults, augmentedCommentResults), is(true));
+        }
+    }
 }

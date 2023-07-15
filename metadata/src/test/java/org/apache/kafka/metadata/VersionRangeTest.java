@@ -20,43 +20,41 @@ package org.apache.kafka.metadata;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 @Timeout(value = 40)
 public class VersionRangeTest {
-	@SuppressWarnings("unchecked")
-	private static VersionRange v(int a, int b) {
-		assertTrue(a <= Short.MAX_VALUE);
-		assertTrue(a >= Short.MIN_VALUE);
-		assertTrue(b <= Short.MAX_VALUE);
-		assertTrue(b >= Short.MIN_VALUE);
-		return new VersionRange((short) a, (short) b);
-	}
+    @SuppressWarnings("unchecked")
+    private static VersionRange v(int a, int b) {
+        assertTrue(a <= Short.MAX_VALUE);
+        assertTrue(a >= Short.MIN_VALUE);
+        assertTrue(b <= Short.MAX_VALUE);
+        assertTrue(b >= Short.MIN_VALUE);
+        return VersionRange.of((short) a, (short) b);
+    }
 
-	@Test
-	public void testEquality() {
-		assertEquals(v(1, 1), v(1, 1));
-		assertFalse(v(1, 1).equals(v(1, 2)));
-		assertFalse(v(2, 1).equals(v(1, 2)));
-		assertFalse(v(2, 1).equals(v(2, 2)));
-	}
+    @Test
+    public void testEquality() {
+        assertEquals(v(1, 1), v(1, 1));
+        assertNotEquals(v(1, 2), v(1, 1));
+        assertNotEquals(v(1, 2), v(2, 1));
+        assertNotEquals(v(2, 2), v(2, 1));
+    }
 
-	@Test
-	public void testContains() {
-		assertTrue(v(1, 1).contains(v(1, 1)));
-		assertFalse(v(1, 1).contains(v(1, 2)));
-		assertTrue(v(1, 2).contains(v(1, 1)));
-		assertFalse(v(4, 10).contains(v(3, 8)));
-		assertTrue(v(2, 12).contains(v(3, 11)));
-	}
+    @Test
+    public void testContains() {
+        assertTrue(v(1, 1).contains((short) 1));
+        assertFalse(v(1, 1).contains((short) 2));
+        assertTrue(v(1, 2).contains((short) 1));
+        assertFalse(v(4, 10).contains((short) 3));
+        assertTrue(v(2, 12).contains((short) 11));
+    }
 
-	@Test
-	public void testToString() {
-		assertEquals("1-2", v(1, 2).toString());
-		assertEquals("1", v(1, 1).toString());
-		assertEquals("1+", v(1, Short.MAX_VALUE).toString());
-		assertEquals("100-200", v(100, 200).toString());
-	}
+    @Test
+    public void testToString() {
+        assertEquals("1-2", v(1, 2).toString());
+        assertEquals("1", v(1, 1).toString());
+        assertEquals("1+", v(1, Short.MAX_VALUE).toString());
+        assertEquals("100-200", v(100, 200).toString());
+    }
 }

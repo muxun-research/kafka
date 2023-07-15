@@ -20,7 +20,6 @@ import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.annotation.InterfaceStability;
-import org.apache.kafka.common.internals.KafkaFutureImpl;
 
 import java.util.HashMap;
 import java.util.List;
@@ -30,47 +29,50 @@ import java.util.concurrent.ExecutionException;
 @InterfaceStability.Evolving
 public class DescribeProducersResult {
 
-	private final Map<TopicPartition, KafkaFutureImpl<PartitionProducerState>> futures;
+    private final Map<TopicPartition, KafkaFuture<PartitionProducerState>> futures;
 
-	DescribeProducersResult(Map<TopicPartition, KafkaFutureImpl<PartitionProducerState>> futures) {
-		this.futures = futures;
-	}
+    DescribeProducersResult(Map<TopicPartition, KafkaFuture<PartitionProducerState>> futures) {
+        this.futures = futures;
+    }
 
-	public KafkaFuture<PartitionProducerState> partitionResult(final TopicPartition partition) {
-		KafkaFuture<PartitionProducerState> future = futures.get(partition);
-		if (future == null) {
-			throw new IllegalArgumentException("Topic partition " + partition +
-					" was not included in the request");
-		}
-		return future;
-	}
+    public KafkaFuture<PartitionProducerState> partitionResult(final TopicPartition partition) {
+        KafkaFuture<PartitionProducerState> future = futures.get(partition);
+        if (future == null) {
+            throw new IllegalArgumentException("Topic partition " + partition + " was not included in the request");
+        }
+        return future;
+    }
 
-	public KafkaFuture<Map<TopicPartition, PartitionProducerState>> all() {
-		return KafkaFuture.allOf(futures.values().toArray(new KafkaFuture[0]))
-				.thenApply(nil -> {
-					Map<TopicPartition, PartitionProducerState> results = new HashMap<>(futures.size());
-					for (Map.Entry<TopicPartition, KafkaFutureImpl<PartitionProducerState>> entry : futures.entrySet()) {
-						try {
-							results.put(entry.getKey(), entry.getValue().get());
-						} catch (InterruptedException | ExecutionException e) {
-							// This should be unreachable, because allOf ensured that all the futures completed successfully.
-							throw new KafkaException(e);
-						}
-					}
-					return results;
-				});
-	}
+    public KafkaFuture<Map<TopicPartition, PartitionProducerState>> all() {
+        return KafkaFuture.allOf(futures.values().toArray(new KafkaFuture[0])).thenApply(nil -> {
+            Map<TopicPartition, PartitionProducerState> results = new HashMap<>(futures.size());
+            for (Map.Entry<TopicPartition, KafkaFuture<PartitionProducerState>> entry : futures.entrySet()) {
+                try {
+                    results.put(entry.getKey(), entry.getValue().get());
+                } catch (InterruptedException | ExecutionException e) {
+                    // This should be unreachable, because allOf ensured that all the futures completed successfully.
+                    throw new KafkaException(e);
+                }
+            }
+            return results;
+        });
+    }
 
-	public static class PartitionProducerState {
-		private final List<ProducerState> activeProducers;
+    public static class PartitionProducerState {
+        private final List<ProducerState> activeProducers;
 
-		public PartitionProducerState(List<ProducerState> activeProducers) {
-			this.activeProducers = activeProducers;
-		}
+        public PartitionProducerState(List<ProducerState> activeProducers) {
+            this.activeProducers = activeProducers;
+        }
 
-		public List<ProducerState> activeProducers() {
-			return activeProducers;
-		}
-	}
+        public List<ProducerState> activeProducers() {
+            return activeProducers;
+        }
+
+        @Override
+        public String toString() {
+            return "PartitionProducerState(" + "activeProducers=" + activeProducers + ')';
+        }
+    }
 
 }

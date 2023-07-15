@@ -28,38 +28,41 @@ import java.util.Map;
 
 public class CreatePartitionsResponse extends AbstractResponse {
 
-	private final CreatePartitionsResponseData data;
+    private final CreatePartitionsResponseData data;
 
-	public CreatePartitionsResponse(CreatePartitionsResponseData data) {
-		super(ApiKeys.CREATE_PARTITIONS);
-		this.data = data;
-	}
+    public CreatePartitionsResponse(CreatePartitionsResponseData data) {
+        super(ApiKeys.CREATE_PARTITIONS);
+        this.data = data;
+    }
 
-	@Override
-	public CreatePartitionsResponseData data() {
-		return data;
-	}
+    @Override
+    public CreatePartitionsResponseData data() {
+        return data;
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> counts = new HashMap<>();
-		data.results().forEach(result ->
-				updateErrorCounts(counts, Errors.forCode(result.errorCode()))
-		);
-		return counts;
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        Map<Errors, Integer> counts = new HashMap<>();
+        data.results().forEach(result -> updateErrorCounts(counts, Errors.forCode(result.errorCode())));
+        return counts;
+    }
 
-	public static CreatePartitionsResponse parse(ByteBuffer buffer, short version) {
-		return new CreatePartitionsResponse(new CreatePartitionsResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    public static CreatePartitionsResponse parse(ByteBuffer buffer, short version) {
+        return new CreatePartitionsResponse(new CreatePartitionsResponseData(new ByteBufferAccessor(buffer), version));
+    }
 
-	@Override
-	public boolean shouldClientThrottle(short version) {
-		return version >= 1;
-	}
+    @Override
+    public boolean shouldClientThrottle(short version) {
+        return version >= 1;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
+
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 }

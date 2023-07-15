@@ -24,15 +24,13 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class StringConverterTest {
     private static final String TOPIC = "topic";
     private static final String SAMPLE_STRING = "a string";
 
-    private StringConverter converter = new StringConverter();
+    private final StringConverter converter = new StringConverter();
 
 	@Test
 	public void testStringToBytes() {

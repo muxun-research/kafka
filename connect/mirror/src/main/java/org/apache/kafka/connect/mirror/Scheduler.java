@@ -20,96 +20,91 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.*;
 
 class Scheduler implements AutoCloseable {
-	private static Logger log = LoggerFactory.getLogger(Scheduler.class);
+    private static final Logger LOG = LoggerFactory.getLogger(Scheduler.class);
 
-	private final String name;
-	private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
-	private final Duration timeout;
-	private boolean closed = false;
+    private final String name;
+    private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
+    private final Duration timeout;
+    private boolean closed = false;
 
-	Scheduler(String name, Duration timeout) {
-		this.name = name;
-		this.timeout = timeout;
-	}
+    Scheduler(String name, Duration timeout) {
+        this.name = name;
+        this.timeout = timeout;
+    }
 
-	Scheduler(Class<?> clazz, Duration timeout) {
-		this("Scheduler for " + clazz.getSimpleName(), timeout);
-	}
+    Scheduler(Class<?> clazz, String role, Duration timeout) {
+        this("Scheduler for " + clazz.getSimpleName() + ": " + role, timeout);
+    }
 
-	void scheduleRepeating(Task task, Duration interval, String description) {
-		if (interval.toMillis() < 0L) {
-			return;
-		}
-		executor.scheduleAtFixedRate(() -> executeThread(task, description), 0, interval.toMillis(), TimeUnit.MILLISECONDS);
-	}
+    void scheduleRepeating(Task task, Duration interval, String description) {
+        if (interval.toMillis() < 0L) {
+            return;
+        }
+        executor.scheduleAtFixedRate(() -> executeThread(task, description), 0, interval.toMillis(), TimeUnit.MILLISECONDS);
+    }
 
-	void scheduleRepeatingDelayed(Task task, Duration interval, String description) {
-		if (interval.toMillis() < 0L) {
-			return;
-		}
-		executor.scheduleAtFixedRate(() -> executeThread(task, description), interval.toMillis(),
-				interval.toMillis(), TimeUnit.MILLISECONDS);
-	}
+    void scheduleRepeatingDelayed(Task task, Duration interval, String description) {
+        if (interval.toMillis() < 0L) {
+            return;
+        }
+        executor.scheduleAtFixedRate(() -> executeThread(task, description), interval.toMillis(), interval.toMillis(), TimeUnit.MILLISECONDS);
+    }
 
-	void execute(Task task, String description) {
-		try {
-			executor.submit(() -> executeThread(task, description)).get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-		} catch (InterruptedException e) {
-			log.warn("{} was interrupted running task: {}", name, description);
-		} catch (TimeoutException e) {
-			log.error("{} timed out running task: {}", name, description);
-		} catch (Throwable e) {
-			log.error("{} caught exception in task: {}", name, description, e);
-		}
-	}
+    void execute(Task task, String description) {
+        try {
+            executor.submit(() -> executeThread(task, description)).get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            LOG.warn("{} was interrupted running task: {}", name, description);
+        } catch (TimeoutException e) {
+            LOG.error("{} timed out running task: {}", name, description);
+        } catch (Throwable e) {
+            LOG.error("{} caught exception in task: {}", name, description, e);
+        }
+    }
 
-	public void close() {
-		closed = true;
-		executor.shutdown();
-		try {
-			boolean terminated = executor.awaitTermination(timeout.toMillis(), TimeUnit.MILLISECONDS);
-			if (!terminated) {
-				log.error("{} timed out during shutdown of internal scheduler.", name);
-			}
-		} catch (InterruptedException e) {
-			log.warn("{} was interrupted during shutdown of internal scheduler.", name);
-		}
-	}
+    public void close() {
+        closed = true;
+        executor.shutdown();
+        try {
+            boolean terminated = executor.awaitTermination(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            if (!terminated) {
+                LOG.error("{} timed out during shutdown of internal scheduler.", name);
+            }
+        } catch (InterruptedException e) {
+            LOG.warn("{} was interrupted during shutdown of internal scheduler.", name);
+        }
+    }
 
-	interface Task {
-		void run() throws InterruptedException, ExecutionException;
-	}
+    interface Task {
+        void run() throws InterruptedException, ExecutionException;
+    }
 
-	private void run(Task task, String description) {
-		try {
-			long start = System.currentTimeMillis();
-			task.run();
-			long elapsed = System.currentTimeMillis() - start;
-			log.info("{} took {} ms", description, elapsed);
-			if (elapsed > timeout.toMillis()) {
-				log.warn("{} took too long ({} ms) running task: {}", name, elapsed, description);
-			}
-		} catch (InterruptedException e) {
-			log.warn("{} was interrupted running task: {}", name, description);
-		} catch (Throwable e) {
-			log.error("{} caught exception in scheduled task: {}", name, description, e);
-		}
-	}
+    private void run(Task task, String description) {
+        try {
+            long start = System.currentTimeMillis();
+            task.run();
+            long elapsed = System.currentTimeMillis() - start;
+            LOG.info("{} took {} ms", description, elapsed);
+            if (elapsed > timeout.toMillis()) {
+                LOG.warn("{} took too long ({} ms) running task: {}", name, elapsed, description);
+            }
+        } catch (InterruptedException e) {
+            LOG.warn("{} was interrupted running task: {}", name, description);
+        } catch (Throwable e) {
+            LOG.error("{} caught exception in scheduled task: {}", name, description, e);
+        }
+    }
 
-	private void executeThread(Task task, String description) {
-		Thread.currentThread().setName(name + "-" + description);
-		if (closed) {
-			log.info("{} skipping task due to shutdown: {}", name, description);
-			return;
-		}
-		run(task, description);
-	}
+    private void executeThread(Task task, String description) {
+        Thread.currentThread().setName(name + "-" + description);
+        if (closed) {
+            LOG.info("{} skipping task due to shutdown: {}", name, description);
+            return;
+        }
+        run(task, description);
+    }
 }
 

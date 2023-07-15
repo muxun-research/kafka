@@ -38,14 +38,19 @@ import java.util.Map;
 public class InitProducerIdResponse extends AbstractResponse {
     private final InitProducerIdResponseData data;
 
-	public InitProducerIdResponse(InitProducerIdResponseData data) {
+    public InitProducerIdResponse(InitProducerIdResponseData data) {
         super(ApiKeys.INIT_PRODUCER_ID);
-		this.data = data;
-	}
+        this.data = data;
+    }
 
-	@Override
+    @Override
     public int throttleTimeMs() {
         return data.throttleTimeMs();
+    }
+
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
     }
 
     @Override
@@ -54,9 +59,9 @@ public class InitProducerIdResponse extends AbstractResponse {
     }
 
     @Override
-	public InitProducerIdResponseData data() {
-		return data;
-	}
+    public InitProducerIdResponseData data() {
+        return data;
+    }
 
 	public static InitProducerIdResponse parse(ByteBuffer buffer, short version) {
         return new InitProducerIdResponse(new InitProducerIdResponseData(new ByteBufferAccessor(buffer), version));

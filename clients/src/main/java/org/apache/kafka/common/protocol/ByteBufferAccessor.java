@@ -38,106 +38,117 @@ public class ByteBufferAccessor implements Readable, Writable {
         return buf.getShort();
     }
 
-	@Override
-	public int readInt() {
-		return buf.getInt();
-	}
-
-	@Override
-	public long readLong() {
-		return buf.getLong();
-	}
-
-	@Override
-	public double readDouble() {
-		return ByteUtils.readDouble(buf);
-	}
-
-	@Override
-	public void readArray(byte[] arr) {
-		buf.get(arr);
-	}
-
-	@Override
-	public int readUnsignedVarint() {
-		return ByteUtils.readUnsignedVarint(buf);
-	}
-
-	@Override
-	public ByteBuffer readByteBuffer(int length) {
-		ByteBuffer res = buf.slice();
-		res.limit(length);
-
-		buf.position(buf.position() + length);
-
-		return res;
-	}
-
-	@Override
-	public void writeByte(byte val) {
-		buf.put(val);
-	}
-
-	@Override
-	public void writeShort(short val) {
-		buf.putShort(val);
-	}
+    @Override
+    public int readInt() {
+        return buf.getInt();
+    }
 
     @Override
-	public void writeInt(int val) {
-		buf.putInt(val);
-	}
+    public long readLong() {
+        return buf.getLong();
+    }
 
-	@Override
-	public void writeLong(long val) {
-		buf.putLong(val);
-	}
+    @Override
+    public double readDouble() {
+        return ByteUtils.readDouble(buf);
+    }
 
-	@Override
-	public void writeDouble(double val) {
-		ByteUtils.writeDouble(val, buf);
-	}
+    @Override
+    public byte[] readArray(int size) {
+        int remaining = buf.remaining();
+        if (size > remaining) {
+            throw new RuntimeException("Error reading byte array of " + size + " byte(s): only " + remaining + " byte(s) available");
+        }
+        byte[] arr = new byte[size];
+        buf.get(arr);
+        return arr;
+    }
 
-	@Override
-	public void writeByteArray(byte[] arr) {
-		buf.put(arr);
-	}
+    @Override
+    public int readUnsignedVarint() {
+        return ByteUtils.readUnsignedVarint(buf);
+    }
 
-	@Override
-	public void writeUnsignedVarint(int i) {
-		ByteUtils.writeUnsignedVarint(i, buf);
-	}
+    @Override
+    public ByteBuffer readByteBuffer(int length) {
+        ByteBuffer res = buf.slice();
+        res.limit(length);
 
-	@Override
-	public void writeByteBuffer(ByteBuffer src) {
-		buf.put(src.duplicate());
-	}
+        buf.position(buf.position() + length);
 
-	@Override
-	public void writeVarint(int i) {
-		ByteUtils.writeVarint(i, buf);
-	}
+        return res;
+    }
 
-	@Override
-	public void writeVarlong(long i) {
-		ByteUtils.writeVarlong(i, buf);
-	}
+    @Override
+    public void writeByte(byte val) {
+        buf.put(val);
+    }
 
-	@Override
-	public int readVarint() {
-		return ByteUtils.readVarint(buf);
-	}
+    @Override
+    public void writeShort(short val) {
+        buf.putShort(val);
+    }
 
-	@Override
-	public long readVarlong() {
-		return ByteUtils.readVarlong(buf);
-	}
+    @Override
+    public void writeInt(int val) {
+        buf.putInt(val);
+    }
 
-	public void flip() {
-		buf.flip();
-	}
+    @Override
+    public void writeLong(long val) {
+        buf.putLong(val);
+    }
 
-	public ByteBuffer buffer() {
-		return buf;
-	}
+    @Override
+    public void writeDouble(double val) {
+        ByteUtils.writeDouble(val, buf);
+    }
+
+    @Override
+    public void writeByteArray(byte[] arr) {
+        buf.put(arr);
+    }
+
+    @Override
+    public void writeUnsignedVarint(int i) {
+        ByteUtils.writeUnsignedVarint(i, buf);
+    }
+
+    @Override
+    public void writeByteBuffer(ByteBuffer src) {
+        buf.put(src.duplicate());
+    }
+
+    @Override
+    public void writeVarint(int i) {
+        ByteUtils.writeVarint(i, buf);
+    }
+
+    @Override
+    public void writeVarlong(long i) {
+        ByteUtils.writeVarlong(i, buf);
+    }
+
+    @Override
+    public int readVarint() {
+        return ByteUtils.readVarint(buf);
+    }
+
+    @Override
+    public long readVarlong() {
+        return ByteUtils.readVarlong(buf);
+    }
+
+    @Override
+    public int remaining() {
+        return buf.remaining();
+    }
+
+    public void flip() {
+        buf.flip();
+    }
+
+    public ByteBuffer buffer() {
+        return buf;
+    }
 }

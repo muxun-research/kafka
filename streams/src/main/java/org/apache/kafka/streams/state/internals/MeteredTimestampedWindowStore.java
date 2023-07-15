@@ -19,6 +19,7 @@ package org.apache.kafka.streams.state.internals;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.common.utils.Time;
+import org.apache.kafka.streams.processor.internals.SerdeGetter;
 import org.apache.kafka.streams.state.TimestampedWindowStore;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
 import org.apache.kafka.streams.state.WindowStore;
@@ -28,6 +29,7 @@ import org.apache.kafka.streams.state.WindowStore;
  * inner WindowStore implementation do not need to provide its own metrics collecting functionality.
  * The inner {@link WindowStore} of this class is of type &lt;Bytes,byte[]&gt;, hence we use {@link Serde}s
  * to convert from &lt;K,ValueAndTimestamp&lt;V&gt&gt; to &lt;Bytes,byte[]&gt;
+ *
  * @param <K>
  * @param <V>
  */
@@ -45,12 +47,12 @@ class MeteredTimestampedWindowStore<K, V>
     }
 
     @SuppressWarnings("unchecked")
-	@Override
-	protected Serde<ValueAndTimestamp<V>> prepareValueSerde(final Serde<ValueAndTimestamp<V>> valueSerde, final Serde<?> contextKeySerde, final Serde<?> contextValueSerde) {
-		if (valueSerde == null) {
-			return new ValueAndTimestampSerde<>((Serde<V>) contextValueSerde);
-		} else {
-			return super.prepareValueSerde(valueSerde, contextKeySerde, contextValueSerde);
-		}
-	}
+    @Override
+    protected Serde<ValueAndTimestamp<V>> prepareValueSerde(final Serde<ValueAndTimestamp<V>> valueSerde, final SerdeGetter getter) {
+        if (valueSerde == null) {
+            return new ValueAndTimestampSerde<>((Serde<V>) getter.valueSerde());
+        } else {
+            return super.prepareValueSerde(valueSerde, getter);
+        }
+    }
 }

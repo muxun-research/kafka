@@ -20,7 +20,7 @@ package org.apache.kafka.streams;
 import java.util.Collections;
 
 public class TopologyTestDriverEosTest extends TopologyTestDriverTest {
-	TopologyTestDriverEosTest() {
-		super(Collections.singletonMap(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.EXACTLY_ONCE));
-	}
+    TopologyTestDriverEosTest() {
+        super(Collections.singletonMap(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.EXACTLY_ONCE_V2));
+    }
 }

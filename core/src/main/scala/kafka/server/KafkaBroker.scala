@@ -19,17 +19,22 @@ package kafka.server
 
 import com.yammer.metrics.core.MetricName
 import kafka.log.LogManager
-import kafka.metrics.{KafkaMetricsGroup, KafkaYammerMetrics, LinuxIoMetricsCollector}
+import kafka.metrics.LinuxIoMetricsCollector
 import kafka.network.SocketServer
-import kafka.utils.KafkaScheduler
+import kafka.security.CredentialProvider
+import kafka.utils.Logging
 import org.apache.kafka.common.ClusterResource
 import org.apache.kafka.common.internals.ClusterResourceListeners
 import org.apache.kafka.common.metrics.{Metrics, MetricsReporter}
+import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.utils.Time
+import org.apache.kafka.coordinator.group.GroupCoordinator
 import org.apache.kafka.metadata.BrokerState
 import org.apache.kafka.server.authorizer.Authorizer
+import org.apache.kafka.server.metrics.{KafkaMetricsGroup, KafkaYammerMetrics}
+import org.apache.kafka.server.util.Scheduler
 
-import scala.collection.Seq
+import java.util
 import scala.jdk.CollectionConverters._
 
 object KafkaBroker {
@@ -62,14 +67,11 @@ object KafkaBroker {
   val STARTED_MESSAGE = "Kafka Server started"
 }
 
-trait KafkaBroker extends KafkaMetricsGroup {
-  @volatile private var _brokerState: BrokerState = BrokerState.NOT_RUNNING
+trait KafkaBroker extends Logging {
 
   def authorizer: Option[Authorizer]
 
-  def brokerState: BrokerState = _brokerState
-
-  protected def brokerState_=(brokerState: BrokerState): Unit = _brokerState = brokerState
+  def brokerState: BrokerState
 
   def clusterId: String
 
@@ -77,7 +79,9 @@ trait KafkaBroker extends KafkaMetricsGroup {
 
   def dataPlaneRequestHandlerPool: KafkaRequestHandlerPool
 
-  def kafkaScheduler: KafkaScheduler
+  def dataPlaneRequestProcessor: KafkaApis
+
+  def kafkaScheduler: Scheduler
 
   def kafkaYammerMetrics: KafkaYammerMetrics
 
@@ -91,20 +95,40 @@ trait KafkaBroker extends KafkaMetricsGroup {
 
   def socketServer: SocketServer
 
-  // For backwards compatibility, we need to keep older metrics tied
-  // to their original name when this class was named `KafkaServer`
-  override def metricName(name: String, metricTags: scala.collection.Map[String, String]): MetricName = {
-    explicitMetricName(Server.MetricsPrefix, KafkaBroker.MetricsTypeName, name, metricTags)
+  def metadataCache: MetadataCache
+
+  def groupCoordinator: GroupCoordinator
+
+  def boundPort(listenerName: ListenerName): Int
+
+  def startup(): Unit
+
+  def awaitShutdown(): Unit
+
+  def shutdown(): Unit
+
+  def brokerTopicStats: BrokerTopicStats
+
+  def credentialProvider: CredentialProvider
+
+  def clientToControllerChannelManager: BrokerToControllerChannelManager
+
+  private val metricsGroup = new KafkaMetricsGroup(this.getClass) {
+    // For backwards compatibility, we need to keep older metrics tied
+    // to their original name when this class was named `KafkaServer`
+    override def metricName(name: String, tags: util.Map[String, String]): MetricName = {
+      KafkaMetricsGroup.explicitMetricName(Server.MetricsPrefix, KafkaBroker.MetricsTypeName, name, tags)
+    }
   }
 
-  newGauge("BrokerState", () => brokerState.value)
-  newGauge("ClusterId", () => clusterId)
-  newGauge("yammer-metrics-count", () => KafkaYammerMetrics.defaultRegistry.allMetrics.size)
+  metricsGroup.newGauge("BrokerState", () => brokerState.value)
+  metricsGroup.newGauge("ClusterId", () => clusterId)
+  metricsGroup.newGauge("yammer-metrics-count", () => KafkaYammerMetrics.defaultRegistry.allMetrics.size)
 
   private val linuxIoMetricsCollector = new LinuxIoMetricsCollector("/proc", Time.SYSTEM, logger.underlying)
 
   if (linuxIoMetricsCollector.usable()) {
-    newGauge("linux-disk-read-bytes", () => linuxIoMetricsCollector.readBytes())
-    newGauge("linux-disk-write-bytes", () => linuxIoMetricsCollector.writeBytes())
+    metricsGroup.newGauge("linux-disk-read-bytes", () => linuxIoMetricsCollector.readBytes())
+    metricsGroup.newGauge("linux-disk-write-bytes", () => linuxIoMetricsCollector.writeBytes())
   }
 }

@@ -23,46 +23,36 @@ import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.state.KeyValueBytesStoreSupplier;
 import org.apache.kafka.streams.state.KeyValueStore;
-import org.easymock.EasyMock;
-import org.easymock.EasyMockRunner;
-import org.easymock.Mock;
-import org.easymock.MockType;
 import org.hamcrest.CoreMatchers;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.Mock;
+import org.mockito.junit.MockitoJUnitRunner;
 
 import java.util.Collections;
 
-import static org.easymock.EasyMock.expect;
-import static org.easymock.EasyMock.replay;
-import static org.easymock.EasyMock.reset;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.core.IsInstanceOf.instanceOf;
 import static org.junit.Assert.assertThrows;
+import static org.mockito.Mockito.when;
 
-@RunWith(EasyMockRunner.class)
+@RunWith(MockitoJUnitRunner.StrictStubs.class)
 public class KeyValueStoreBuilderTest {
 
-    @Mock(type = MockType.NICE)
+    @Mock
     private KeyValueBytesStoreSupplier supplier;
-    @Mock(type = MockType.NICE)
+    @Mock
     private KeyValueStore<Bytes, byte[]> inner;
     private KeyValueStoreBuilder<String, String> builder;
 
     @Before
     public void setUp() {
-        EasyMock.expect(supplier.get()).andReturn(inner);
-		EasyMock.expect(supplier.name()).andReturn("name");
-		expect(supplier.metricsScope()).andReturn("metricScope");
-		EasyMock.replay(supplier);
-        builder = new KeyValueStoreBuilder<>(
-            supplier,
-            Serdes.String(),
-            Serdes.String(),
-            new MockTime()
-        );
+        when(supplier.get()).thenReturn(inner);
+        when(supplier.name()).thenReturn("name");
+        when(supplier.metricsScope()).thenReturn("metricScope");
+        builder = new KeyValueStoreBuilder<>(supplier, Serdes.String(), Serdes.String(), new MockTime());
     }
 
     @Test
@@ -108,9 +98,7 @@ public class KeyValueStoreBuilderTest {
     @Test
     public void shouldHaveCachingAndChangeLoggingWhenBothEnabled() {
         final KeyValueStore<String, String> store = builder
-                .withLoggingEnabled(Collections.emptyMap())
-                .withCachingEnabled()
-                .build();
+                .withLoggingEnabled(Collections.emptyMap()).withCachingEnabled().build();
         final WrappedStateStore caching = (WrappedStateStore) ((WrappedStateStore) store).wrapped();
         final WrappedStateStore changeLogging = (WrappedStateStore) caching.wrapped();
         assertThat(store, instanceOf(MeteredKeyValueStore.class));
@@ -119,38 +107,24 @@ public class KeyValueStoreBuilderTest {
         assertThat(changeLogging.wrapped(), CoreMatchers.equalTo(inner));
     }
 
-	@SuppressWarnings("all")
-	@Test
+    @SuppressWarnings("all")
+    @Test
     public void shouldThrowNullPointerIfInnerIsNull() {
-		assertThrows(NullPointerException.class, () -> new KeyValueStoreBuilder<>(null, Serdes.String(),
-				Serdes.String(), new MockTime()));
-	}
-
-	@Test
-    public void shouldThrowNullPointerIfKeySerdeIsNull() {
-		assertThrows(NullPointerException.class, () -> new KeyValueStoreBuilder<>(supplier, null, Serdes.String(), new MockTime()));
+        assertThrows(NullPointerException.class, () -> new KeyValueStoreBuilder<>(null, Serdes.String(), Serdes.String(), new MockTime()));
     }
 
-	@Test
-    public void shouldThrowNullPointerIfValueSerdeIsNull() {
-		assertThrows(NullPointerException.class, () -> new KeyValueStoreBuilder<>(supplier, Serdes.String(), null, new MockTime()));
-    }
-
-	@Test
+    @Test
     public void shouldThrowNullPointerIfTimeIsNull() {
-		assertThrows(NullPointerException.class, () -> new KeyValueStoreBuilder<>(supplier, Serdes.String(), Serdes.String(), null));
+        assertThrows(NullPointerException.class, () -> new KeyValueStoreBuilder<>(supplier, Serdes.String(), Serdes.String(), null));
     }
 
-	@Test
+    @Test
     public void shouldThrowNullPointerIfMetricsScopeIsNull() {
-		reset(supplier);
-		expect(supplier.get()).andReturn(new RocksDBStore("name", null));
-		expect(supplier.name()).andReturn("name");
-		replay(supplier);
+        when(supplier.name()).thenReturn("name");
+        when(supplier.metricsScope()).thenReturn(null);
 
-		final Exception e = assertThrows(NullPointerException.class,
-				() -> new KeyValueStoreBuilder<>(supplier, Serdes.String(), Serdes.String(), new MockTime()));
-		assertThat(e.getMessage(), equalTo("storeSupplier's metricsScope can't be null"));
-	}
+        final Exception e = assertThrows(NullPointerException.class, () -> new KeyValueStoreBuilder<>(supplier, Serdes.String(), Serdes.String(), new MockTime()));
+        assertThat(e.getMessage(), equalTo("storeSupplier's metricsScope can't be null"));
+    }
 
 }

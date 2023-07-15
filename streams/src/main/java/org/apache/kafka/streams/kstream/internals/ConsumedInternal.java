@@ -18,8 +18,8 @@ package org.apache.kafka.streams.kstream.internals;
 
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serde;
-import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.Topology;
+import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.processor.TimestampExtractor;
 
 public class ConsumedInternal<K, V> extends Consumed<K, V> {
@@ -37,7 +37,7 @@ public class ConsumedInternal<K, V> extends Consumed<K, V> {
     }
 
     public ConsumedInternal() {
-        this(Consumed.<K, V>with(null, null));
+        this(Consumed.with(null, null));
     }
 
     public Serde<K> keySerde() {

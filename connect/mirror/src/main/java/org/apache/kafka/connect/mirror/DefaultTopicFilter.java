@@ -30,72 +30,52 @@ import java.util.regex.Pattern;
  */
 public class DefaultTopicFilter implements TopicFilter {
 
-	public static final String TOPICS_INCLUDE_CONFIG = "topics";
-	private static final String TOPICS_INCLUDE_DOC = "List of topics and/or regexes to replicate.";
-	public static final String TOPICS_INCLUDE_DEFAULT = ".*";
+    public static final String TOPICS_INCLUDE_CONFIG = "topics";
+    private static final String TOPICS_INCLUDE_DOC = "List of topics and/or regexes to replicate.";
+    public static final String TOPICS_INCLUDE_DEFAULT = ".*";
 
-	public static final String TOPICS_EXCLUDE_CONFIG = "topics.exclude";
-	public static final String TOPICS_EXCLUDE_CONFIG_ALIAS = "topics.blacklist";
-	private static final String TOPICS_EXCLUDE_DOC = "List of topics and/or regexes that should not be replicated.";
-	public static final String TOPICS_EXCLUDE_DEFAULT = ".*[\\-\\.]internal, .*\\.replica, __.*";
+    public static final String TOPICS_EXCLUDE_CONFIG = "topics.exclude";
+    public static final String TOPICS_EXCLUDE_CONFIG_ALIAS = "topics.blacklist";
+    private static final String TOPICS_EXCLUDE_DOC = "List of topics and/or regexes that should not be replicated.";
+    public static final String TOPICS_EXCLUDE_DEFAULT = ".*[\\-\\.]internal, .*\\.replica, __.*";
 
-	private Pattern includePattern;
-	private Pattern excludePattern;
+    private Pattern includePattern;
+    private Pattern excludePattern;
 
-	@Override
-	public void configure(Map<String, ?> props) {
-		TopicFilterConfig config = new TopicFilterConfig(props);
-		includePattern = config.includePattern();
-		excludePattern = config.excludePattern();
-	}
+    @Override
+    public void configure(Map<String, ?> props) {
+        TopicFilterConfig config = new TopicFilterConfig(props);
+        includePattern = config.includePattern();
+        excludePattern = config.excludePattern();
+    }
 
-	@Override
-	public void close() {
-	}
+    private boolean included(String topic) {
+        return includePattern != null && includePattern.matcher(topic).matches();
+    }
 
-	private boolean included(String topic) {
-		return includePattern != null && includePattern.matcher(topic).matches();
-	}
+    private boolean excluded(String topic) {
+        return excludePattern != null && excludePattern.matcher(topic).matches();
+    }
 
-	private boolean excluded(String topic) {
-		return excludePattern != null && excludePattern.matcher(topic).matches();
-	}
+    @Override
+    public boolean shouldReplicateTopic(String topic) {
+        return included(topic) && !excluded(topic);
+    }
 
-	@Override
-	public boolean shouldReplicateTopic(String topic) {
-		return included(topic) && !excluded(topic);
-	}
+    static class TopicFilterConfig extends AbstractConfig {
 
-	static class TopicFilterConfig extends AbstractConfig {
+        static final ConfigDef DEF = new ConfigDef().define(TOPICS_INCLUDE_CONFIG, Type.LIST, TOPICS_INCLUDE_DEFAULT, Importance.HIGH, TOPICS_INCLUDE_DOC).define(TOPICS_EXCLUDE_CONFIG, Type.LIST, TOPICS_EXCLUDE_DEFAULT, Importance.HIGH, TOPICS_EXCLUDE_DOC).define(TOPICS_EXCLUDE_CONFIG_ALIAS, Type.LIST, null, Importance.HIGH, "Deprecated. Use " + TOPICS_EXCLUDE_CONFIG + " instead.");
 
-		static final ConfigDef DEF = new ConfigDef()
-				.define(TOPICS_INCLUDE_CONFIG,
-						Type.LIST,
-						TOPICS_INCLUDE_DEFAULT,
-						Importance.HIGH,
-						TOPICS_INCLUDE_DOC)
-				.define(TOPICS_EXCLUDE_CONFIG,
-						Type.LIST,
-						TOPICS_EXCLUDE_DEFAULT,
-						Importance.HIGH,
-						TOPICS_EXCLUDE_DOC)
-				.define(TOPICS_EXCLUDE_CONFIG_ALIAS,
-						Type.LIST,
-						null,
-						Importance.HIGH,
-						"Deprecated. Use " + TOPICS_EXCLUDE_CONFIG + " instead.");
+        TopicFilterConfig(Map<String, ?> props) {
+            super(DEF, ConfigUtils.translateDeprecatedConfigs(props, new String[][]{{TOPICS_EXCLUDE_CONFIG, TOPICS_EXCLUDE_CONFIG_ALIAS}}), false);
+        }
 
-		TopicFilterConfig(Map<String, ?> props) {
-			super(DEF, ConfigUtils.translateDeprecatedConfigs(props, new String[][]{
-					{TOPICS_EXCLUDE_CONFIG, TOPICS_EXCLUDE_CONFIG_ALIAS}}), false);
-		}
+        Pattern includePattern() {
+            return MirrorUtils.compilePatternList(getList(TOPICS_INCLUDE_CONFIG));
+        }
 
-		Pattern includePattern() {
-			return MirrorUtils.compilePatternList(getList(TOPICS_INCLUDE_CONFIG));
-		}
-
-		Pattern excludePattern() {
-			return MirrorUtils.compilePatternList(getList(TOPICS_EXCLUDE_CONFIG));
-		}
-	}
+        Pattern excludePattern() {
+            return MirrorUtils.compilePatternList(getList(TOPICS_EXCLUDE_CONFIG));
+        }
+    }
 }

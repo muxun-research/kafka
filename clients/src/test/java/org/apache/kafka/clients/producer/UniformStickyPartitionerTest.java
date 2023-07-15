@@ -40,14 +40,12 @@ public class UniformStickyPartitionerTest {
     private final static String TOPIC_A = "TOPIC_A";
     private final static String TOPIC_B = "TOPIC_B";
 
+    @SuppressWarnings("deprecation")
     @Test
     public void testRoundRobinWithUnavailablePartitions() {
         // Intentionally make the partition list not in partition order to test the edge
         // cases.
-        List<PartitionInfo> partitions = asList(
-                new PartitionInfo("test", 1, null, NODES, NODES),
-                new PartitionInfo("test", 2, NODES[1], NODES, NODES),
-                new PartitionInfo("test", 0, NODES[0], NODES, NODES));
+        List<PartitionInfo> partitions = asList(new PartitionInfo("test", 1, null, NODES, NODES), new PartitionInfo("test", 2, NODES[1], NODES, NODES), new PartitionInfo("test", 0, NODES[0], NODES, NODES));
         // When there are some unavailable partitions, we want to make sure that (1) we
         // always pick an available partition,
         // and (2) the available partitions are selected in a sticky way.
@@ -55,36 +53,33 @@ public class UniformStickyPartitionerTest {
         int countForPart2 = 0;
         int part = 0;
         Partitioner partitioner = new UniformStickyPartitioner();
-        Cluster cluster = new Cluster("clusterId", asList(NODES[0], NODES[1], NODES[2]), partitions,
-            Collections.<String>emptySet(), Collections.<String>emptySet());
+        Cluster cluster = new Cluster("clusterId", asList(NODES[0], NODES[1], NODES[2]), partitions, Collections.emptySet(), Collections.emptySet());
         for (int i = 0; i < 50; i++) {
-			part = partitioner.partition("test", null, null, null, null, cluster);
-			assertTrue(part == 0 || part == 2, "We should never choose a leader-less node in round robin");
+            part = partitioner.partition("test", null, null, null, null, cluster);
+            assertTrue(part == 0 || part == 2, "We should never choose a leader-less node in round robin");
             if (part == 0)
                 countForPart0++;
             else
                 countForPart2++;
         }
         // Simulates switching the sticky partition on a new batch.
-        partitioner.onNewBatch("test", cluster, part);       
+        partitioner.onNewBatch("test", cluster, part);
         for (int i = 1; i <= 50; i++) {
-			part = partitioner.partition("test", null, null, null, null, cluster);
-			assertTrue(part == 0 || part == 2, "We should never choose a leader-less node in round robin");
+            part = partitioner.partition("test", null, null, null, null, cluster);
+            assertTrue(part == 0 || part == 2, "We should never choose a leader-less node in round robin");
             if (part == 0)
                 countForPart0++;
             else
                 countForPart2++;
         }
-		assertEquals(countForPart0, countForPart2, "The distribution between two available partitions should be even");
+        assertEquals(countForPart0, countForPart2, "The distribution between two available partitions should be even");
     }
 
+    @SuppressWarnings("deprecation")
     @Test
-    public void testRoundRobinWithKeyBytes() throws InterruptedException {
-        List<PartitionInfo> allPartitions = asList(new PartitionInfo(TOPIC_A, 0, NODES[0], NODES, NODES),
-                new PartitionInfo(TOPIC_A, 1, NODES[1], NODES, NODES), new PartitionInfo(TOPIC_A, 2, NODES[1], NODES, NODES),
-                new PartitionInfo(TOPIC_B, 0, NODES[0], NODES, NODES));
-        Cluster testCluster = new Cluster("clusterId", asList(NODES[0], NODES[1], NODES[2]), allPartitions,
-                Collections.<String>emptySet(), Collections.<String>emptySet());
+    public void testRoundRobinWithKeyBytes() {
+        List<PartitionInfo> allPartitions = asList(new PartitionInfo(TOPIC_A, 0, NODES[0], NODES, NODES), new PartitionInfo(TOPIC_A, 1, NODES[1], NODES, NODES), new PartitionInfo(TOPIC_A, 2, NODES[1], NODES, NODES), new PartitionInfo(TOPIC_B, 0, NODES[0], NODES, NODES));
+        Cluster testCluster = new Cluster("clusterId", asList(NODES[0], NODES[1], NODES[2]), allPartitions, Collections.emptySet(), Collections.emptySet());
 
         final Map<Integer, Integer> partitionCount = new HashMap<>();
 
@@ -105,10 +100,10 @@ public class UniformStickyPartitionerTest {
         // Simulate a batch filling up and switching the sticky partition.
         partitioner.onNewBatch(TOPIC_A, testCluster, partition);
         partitioner.onNewBatch(TOPIC_B, testCluster, 0);
-        
+
         // Save old partition to ensure that the wrong partition does not trigger a new batch.
-        int oldPart = partition; 
-        
+        int oldPart = partition;
+
         for (int i = 0; i < 30; ++i) {
             partition = partitioner.partition(TOPIC_A, null, keyBytes, null, null, testCluster);
             Integer count = partitionCount.get(partition);
@@ -120,12 +115,12 @@ public class UniformStickyPartitionerTest {
                 partitioner.partition(TOPIC_B, null, keyBytes, null, null, testCluster);
             }
         }
-        
+
         int newPart = partition;
-        
+
         // Attempt to switch the partition with the wrong previous partition. Sticky partition should not change.
         partitioner.onNewBatch(TOPIC_A, testCluster, oldPart);
-        
+
         for (int i = 0; i < 30; ++i) {
             partition = partitioner.partition(TOPIC_A, null, keyBytes, null, null, testCluster);
             Integer count = partitionCount.get(partition);
@@ -136,19 +131,17 @@ public class UniformStickyPartitionerTest {
             if (i % 5 == 0) {
                 partitioner.partition(TOPIC_B, null, keyBytes, null, null, testCluster);
             }
-        } 
-               
+        }
+
         assertEquals(30, partitionCount.get(oldPart).intValue());
         assertEquals(60, partitionCount.get(newPart).intValue());
     }
-    
+
+    @SuppressWarnings("deprecation")
     @Test
-    public void testRoundRobinWithNullKeyBytes() throws InterruptedException {
-        List<PartitionInfo> allPartitions = asList(new PartitionInfo(TOPIC_A, 0, NODES[0], NODES, NODES),
-                new PartitionInfo(TOPIC_A, 1, NODES[1], NODES, NODES), new PartitionInfo(TOPIC_A, 2, NODES[1], NODES, NODES),
-                new PartitionInfo(TOPIC_B, 0, NODES[0], NODES, NODES));
-        Cluster testCluster = new Cluster("clusterId", asList(NODES[0], NODES[1], NODES[2]), allPartitions,
-                Collections.<String>emptySet(), Collections.<String>emptySet());
+    public void testRoundRobinWithNullKeyBytes() {
+        List<PartitionInfo> allPartitions = asList(new PartitionInfo(TOPIC_A, 0, NODES[0], NODES, NODES), new PartitionInfo(TOPIC_A, 1, NODES[1], NODES, NODES), new PartitionInfo(TOPIC_A, 2, NODES[1], NODES, NODES), new PartitionInfo(TOPIC_B, 0, NODES[0], NODES, NODES));
+        Cluster testCluster = new Cluster("clusterId", asList(NODES[0], NODES[1], NODES[2]), allPartitions, Collections.emptySet(), Collections.emptySet());
 
         final Map<Integer, Integer> partitionCount = new HashMap<>();
 

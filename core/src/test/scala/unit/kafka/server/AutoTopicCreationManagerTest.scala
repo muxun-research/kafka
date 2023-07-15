@@ -17,33 +17,29 @@
 
 package kafka.server
 
-import java.net.InetAddress
-import java.nio.ByteBuffer
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.{Collections, Optional, Properties}
-
 import kafka.controller.KafkaController
-import kafka.coordinator.group.GroupCoordinator
 import kafka.coordinator.transaction.TransactionCoordinator
 import kafka.utils.TestUtils
-import kafka.utils.TestUtils.createBroker
 import org.apache.kafka.clients.{ClientResponse, NodeApiVersions, RequestCompletionHandler}
+import org.apache.kafka.common.Node
 import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.internals.Topic.{GROUP_METADATA_TOPIC_NAME, TRANSACTION_STATE_TOPIC_NAME}
-import org.apache.kafka.common.message.{ApiVersionsResponseData, CreateTopicsRequestData}
-import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopic
-import org.apache.kafka.common.message.MetadataResponseData.MetadataResponseTopic
 import org.apache.kafka.common.network.{ClientInformation, ListenerName}
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 import org.apache.kafka.common.requests._
 import org.apache.kafka.common.security.auth.{KafkaPrincipal, KafkaPrincipalSerde, SecurityProtocol}
 import org.apache.kafka.common.utils.{SecurityUtils, Utils}
+import org.apache.kafka.coordinator.group.GroupCoordinator
 import org.junit.jupiter.api.Assertions.{assertEquals, assertThrows, assertTrue}
 import org.junit.jupiter.api.{BeforeEach, Test}
 import org.mockito.ArgumentMatchers.any
 import org.mockito.invocation.InvocationOnMock
 import org.mockito.{ArgumentCaptor, ArgumentMatchers, Mockito}
 
+import java.net.InetAddress
+import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.{Collections, Optional, Properties}
 import scala.collection.{Map, Seq}
 
 class AutoTopicCreationManagerTest {
@@ -73,16 +69,16 @@ class AutoTopicCreationManagerTest {
     props.setProperty(KafkaConfig.TransactionsTopicPartitionsProp, internalTopicReplicationFactor.toString)
 
     config = KafkaConfig.fromProps(props)
-    val aliveBrokers = Seq(createBroker(0, "host0", 0), createBroker(1, "host1", 1))
+    val aliveBrokers = Seq(new Node(0, "host0", 0), new Node(1, "host1", 1))
 
     Mockito.reset(metadataCache, controller, brokerToController, groupCoordinator, transactionCoordinator)
 
-    Mockito.when(metadataCache.getAliveBrokers).thenReturn(aliveBrokers)
+    Mockito.when(metadataCache.getAliveBrokerNodes(any(classOf[ListenerName]))).thenReturn(aliveBrokers)
   }
 
   @Test
   def testCreateOffsetTopic(): Unit = {
-    Mockito.when(groupCoordinator.offsetsTopicConfigs).thenReturn(new Properties)
+    Mockito.when(groupCoordinator.groupMetadataTopicConfigs).thenReturn(new Properties)
     testCreateTopic(GROUP_METADATA_TOPIC_NAME, true, internalTopicPartitions, internalTopicReplicationFactor)
   }
 
@@ -159,7 +155,7 @@ class AutoTopicCreationManagerTest {
 
   @Test
   def testInvalidReplicationFactorForConsumerOffsetsTopic(): Unit = {
-    Mockito.when(groupCoordinator.offsetsTopicConfigs).thenReturn(new Properties)
+    Mockito.when(groupCoordinator.groupMetadataTopicConfigs).thenReturn(new Properties)
     testErrorWithCreationInZk(Errors.INVALID_REPLICATION_FACTOR, Topic.GROUP_METADATA_TOPIC_NAME, isInternal = true)
   }
 
@@ -177,7 +173,7 @@ class AutoTopicCreationManagerTest {
 
   @Test
   def testTopicExistsErrorSwapForConsumerOffsetsTopic(): Unit = {
-    Mockito.when(groupCoordinator.offsetsTopicConfigs).thenReturn(new Properties)
+    Mockito.when(groupCoordinator.groupMetadataTopicConfigs).thenReturn(new Properties)
     testErrorWithCreationInZk(Errors.TOPIC_ALREADY_EXISTS, Topic.GROUP_METADATA_TOPIC_NAME, isInternal = true,
       expectedError = Some(Errors.LEADER_NOT_AVAILABLE))
   }
@@ -197,7 +193,7 @@ class AutoTopicCreationManagerTest {
 
   @Test
   def testRequestTimeoutErrorSwapForConsumerOffsetTopic(): Unit = {
-    Mockito.when(groupCoordinator.offsetsTopicConfigs).thenReturn(new Properties)
+    Mockito.when(groupCoordinator.groupMetadataTopicConfigs).thenReturn(new Properties)
     testErrorWithCreationInZk(Errors.REQUEST_TIMED_OUT, Topic.GROUP_METADATA_TOPIC_NAME, isInternal = true,
       expectedError = Some(Errors.LEADER_NOT_AVAILABLE))
   }
@@ -216,7 +212,7 @@ class AutoTopicCreationManagerTest {
 
   @Test
   def testUnknownTopicPartitionForConsumerOffsetTopic(): Unit = {
-    Mockito.when(groupCoordinator.offsetsTopicConfigs).thenReturn(new Properties)
+    Mockito.when(groupCoordinator.groupMetadataTopicConfigs).thenReturn(new Properties)
     testErrorWithCreationInZk(Errors.UNKNOWN_TOPIC_OR_PARTITION, Topic.GROUP_METADATA_TOPIC_NAME, isInternal = true)
   }
 

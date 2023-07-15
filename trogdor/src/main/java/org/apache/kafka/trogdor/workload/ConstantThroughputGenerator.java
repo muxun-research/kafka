@@ -16,7 +16,6 @@
  */
 
 package org.apache.kafka.trogdor.workload;
-
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.kafka.common.utils.Time;
@@ -27,87 +26,85 @@ import org.apache.kafka.common.utils.Time;
  * The lower the window size, the smoother the traffic will be. Using a 100ms window offers no noticeable spikes in
  * traffic while still being long enough to avoid too much overhead.
  * <p>
- * WARNING: Due to binary nature of throughput in terms of messages sent in a window, each window will send at least 1
- * message, and each window sends the same number of messages, rounded down. For example, 99 messages per second with a
- * 100ms window will only send 90 messages per second, or 9 messages per window. Another example, in order to send only
- * 5 messages per second, a window size of 200ms is required. In cases like these, both the `messagesPerSecond` and
- * `windowSizeMs` parameters should be adjusted together to achieve more accurate throughput.
- * <p>
  * Here is an example spec:
  * <p>
  * {
  * "type": "constant",
- * "messagesPerSecond": 500,
+ * "messagesPerWindow": 50,
  * "windowSizeMs": 100
  * }
  * <p>
  * This will produce a workload that runs 500 messages per second, with a maximum resolution of 50 messages per 100
  * millisecond.
+ * <p>
+ * If `messagesPerWindow` is less than or equal to 0, `throttle` will not throttle at all and will return immediately.
  */
 
 public class ConstantThroughputGenerator implements ThroughputGenerator {
-	private final int messagesPerSecond;
-	private final int messagesPerWindow;
-	private final long windowSizeMs;
+    private final int messagesPerWindow;
+    private final long windowSizeMs;
 
-	private long nextWindowStarts = 0;
-	private int messageTracker = 0;
+    private long nextWindowStarts = 0;
+    private int messageTracker = 0;
 
-	@JsonCreator
-	public ConstantThroughputGenerator(@JsonProperty("messagesPerSecond") int messagesPerSecond,
-									   @JsonProperty("windowSizeMs") long windowSizeMs) {
-		// Calcualte the default values.
-		if (windowSizeMs <= 0) {
-			windowSizeMs = 100;
-		}
-		this.windowSizeMs = windowSizeMs;
-		this.messagesPerSecond = messagesPerSecond;
+    @JsonCreator
+    public ConstantThroughputGenerator(@JsonProperty("messagesPerWindow") int messagesPerWindow, @JsonProperty("windowSizeMs") long windowSizeMs) {
+        // Calculate the default values.
+        if (windowSizeMs <= 0) {
+            windowSizeMs = 100;
+        }
+        this.windowSizeMs = windowSizeMs;
+        this.messagesPerWindow = messagesPerWindow;
+        calculateNextWindow();
+    }
 
-		// Use the rest of the parameters to calculate window properties.
-		this.messagesPerWindow = (int) ((long) messagesPerSecond / windowSizeMs);
-		calculateNextWindow();
-	}
+    @JsonProperty
+    public long windowSizeMs() {
+        return windowSizeMs;
+    }
 
-	@JsonProperty
-	public int messagesPerSecond() {
-		return messagesPerSecond;
-	}
+    @JsonProperty
+    public int messagesPerWindow() {
+        return messagesPerWindow;
+    }
 
-	private void calculateNextWindow() {
-		// Reset the message count.
-		messageTracker = 0;
+    private void calculateNextWindow() {
+        // Reset the message count.
+        messageTracker = 0;
 
-		// Calculate the next window start time.
-		long now = Time.SYSTEM.milliseconds();
-		if (nextWindowStarts > 0) {
-			while (nextWindowStarts < now) {
-				nextWindowStarts += windowSizeMs;
-			}
-		} else {
-			nextWindowStarts = now + windowSizeMs;
-		}
-	}
+        // Calculate the next window start time.
+        long now = Time.SYSTEM.milliseconds();
+        if (nextWindowStarts > 0) {
+            while (nextWindowStarts <= now) {
+                nextWindowStarts += windowSizeMs;
+            }
+        } else {
+            nextWindowStarts = now + windowSizeMs;
+        }
+    }
 
-	@Override
-	public synchronized void throttle() throws InterruptedException {
-		// Run unthrottled if messagesPerSecond is negative.
-		if (messagesPerSecond < 0) {
-			return;
-		}
+    @Override
+    public synchronized void throttle() throws InterruptedException {
+        // Run unthrottled if messagesPerWindow is not positive.
+        if (messagesPerWindow <= 0) {
+            return;
+        }
 
-		// Calculate the next window if we've moved beyond the current one.
-		if (Time.SYSTEM.milliseconds() >= nextWindowStarts) {
-			calculateNextWindow();
-		}
+        // Calculate the next window if we've moved beyond the current one.
+        if (Time.SYSTEM.milliseconds() >= nextWindowStarts) {
+            calculateNextWindow();
+        }
 
-		// Increment the message tracker.
-		messageTracker += 1;
+        // Increment the message tracker.
+        messageTracker += 1;
 
-		// Compare the tracked message count with the throttle limits.
-		if (messageTracker >= messagesPerWindow) {
+        // Compare the tracked message count with the throttle limits.
+        if (messageTracker >= messagesPerWindow) {
 
-			// Wait the difference in time between now and when the next window starts.
-			wait(nextWindowStarts - Time.SYSTEM.milliseconds());
-		}
-	}
+            // Wait the difference in time between now and when the next window starts.
+            while (nextWindowStarts > Time.SYSTEM.milliseconds()) {
+                wait(nextWindowStarts - Time.SYSTEM.milliseconds());
+            }
+        }
+    }
 }

@@ -23,13 +23,11 @@ import java.util.Objects;
 
 public class ConfigInfo {
 
-    private ConfigKeyInfo configKey;
-    private ConfigValueInfo configValue;
+    private final ConfigKeyInfo configKey;
+    private final ConfigValueInfo configValue;
 
     @JsonCreator
-    public ConfigInfo(
-        @JsonProperty("definition") ConfigKeyInfo configKey,
-        @JsonProperty("value") ConfigValueInfo configValue) {
+    public ConfigInfo(@JsonProperty("definition") ConfigKeyInfo configKey, @JsonProperty("value") ConfigValueInfo configValue) {
         this.configKey = configKey;
         this.configValue = configValue;
     }
@@ -60,6 +58,6 @@ public class ConfigInfo {
 
     @Override
     public String toString() {
-        return "[" + configKey.toString() + "," + configValue.toString() + "]";
+        return "[" + configKey + "," + configValue + "]";
     }
 }

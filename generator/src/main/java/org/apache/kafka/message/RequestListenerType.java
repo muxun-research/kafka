@@ -19,12 +19,9 @@ package org.apache.kafka.message;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 public enum RequestListenerType {
-	@JsonProperty("zkBroker")
-	ZK_BROKER,
+    @JsonProperty("zkBroker") ZK_BROKER,
 
-	@JsonProperty("broker")
-	BROKER,
+    @JsonProperty("broker") BROKER,
 
-	@JsonProperty("controller")
-	CONTROLLER;
+    @JsonProperty("controller") CONTROLLER
 }

@@ -32,155 +32,144 @@ import java.util.Map;
  * Checkpoint records emitted from MirrorCheckpointConnector. Encodes remote consumer group state.
  */
 public class Checkpoint {
-	public static final String TOPIC_KEY = "topic";
-	public static final String PARTITION_KEY = "partition";
-	public static final String CONSUMER_GROUP_ID_KEY = "group";
-	public static final String UPSTREAM_OFFSET_KEY = "upstreamOffset";
-	public static final String DOWNSTREAM_OFFSET_KEY = "offset";
-	public static final String METADATA_KEY = "metadata";
-	public static final String VERSION_KEY = "version";
-	public static final short VERSION = 0;
+    public static final String TOPIC_KEY = "topic";
+    public static final String PARTITION_KEY = "partition";
+    public static final String CONSUMER_GROUP_ID_KEY = "group";
+    public static final String UPSTREAM_OFFSET_KEY = "upstreamOffset";
+    public static final String DOWNSTREAM_OFFSET_KEY = "offset";
+    public static final String METADATA_KEY = "metadata";
+    public static final String VERSION_KEY = "version";
+    public static final short VERSION = 0;
 
-	public static final Schema VALUE_SCHEMA_V0 = new Schema(
-			new Field(UPSTREAM_OFFSET_KEY, Type.INT64),
-			new Field(DOWNSTREAM_OFFSET_KEY, Type.INT64),
-			new Field(METADATA_KEY, Type.STRING));
+    public static final Schema VALUE_SCHEMA_V0 = new Schema(new Field(UPSTREAM_OFFSET_KEY, Type.INT64), new Field(DOWNSTREAM_OFFSET_KEY, Type.INT64), new Field(METADATA_KEY, Type.STRING));
 
-	public static final Schema KEY_SCHEMA = new Schema(
-			new Field(CONSUMER_GROUP_ID_KEY, Type.STRING),
-			new Field(TOPIC_KEY, Type.STRING),
-			new Field(PARTITION_KEY, Type.INT32));
+    public static final Schema KEY_SCHEMA = new Schema(new Field(CONSUMER_GROUP_ID_KEY, Type.STRING), new Field(TOPIC_KEY, Type.STRING), new Field(PARTITION_KEY, Type.INT32));
 
-	public static final Schema HEADER_SCHEMA = new Schema(
-			new Field(VERSION_KEY, Type.INT16));
+    public static final Schema HEADER_SCHEMA = new Schema(new Field(VERSION_KEY, Type.INT16));
 
-	private String consumerGroupId;
-	private TopicPartition topicPartition;
-	private long upstreamOffset;
-	private long downstreamOffset;
-	private String metadata;
+    private final String consumerGroupId;
+    private final TopicPartition topicPartition;
+    private final long upstreamOffset;
+    private final long downstreamOffset;
+    private final String metadata;
 
-	public Checkpoint(String consumerGroupId, TopicPartition topicPartition, long upstreamOffset,
-					  long downstreamOffset, String metadata) {
-		this.consumerGroupId = consumerGroupId;
-		this.topicPartition = topicPartition;
-		this.upstreamOffset = upstreamOffset;
-		this.downstreamOffset = downstreamOffset;
-		this.metadata = metadata;
-	}
+    public Checkpoint(String consumerGroupId, TopicPartition topicPartition, long upstreamOffset, long downstreamOffset, String metadata) {
+        this.consumerGroupId = consumerGroupId;
+        this.topicPartition = topicPartition;
+        this.upstreamOffset = upstreamOffset;
+        this.downstreamOffset = downstreamOffset;
+        this.metadata = metadata;
+    }
 
-	public String consumerGroupId() {
-		return consumerGroupId;
-	}
+    public String consumerGroupId() {
+        return consumerGroupId;
+    }
 
-	public TopicPartition topicPartition() {
-		return topicPartition;
-	}
+    public TopicPartition topicPartition() {
+        return topicPartition;
+    }
 
-	public long upstreamOffset() {
-		return upstreamOffset;
-	}
+    public long upstreamOffset() {
+        return upstreamOffset;
+    }
 
-	public long downstreamOffset() {
-		return downstreamOffset;
-	}
+    public long downstreamOffset() {
+        return downstreamOffset;
+    }
 
-	public String metadata() {
-		return metadata;
-	}
+    public String metadata() {
+        return metadata;
+    }
 
-	public OffsetAndMetadata offsetAndMetadata() {
-		return new OffsetAndMetadata(downstreamOffset, metadata);
-	}
+    public OffsetAndMetadata offsetAndMetadata() {
+        return new OffsetAndMetadata(downstreamOffset, metadata);
+    }
 
-	@Override
-	public String toString() {
-		return String.format("Checkpoint{consumerGroupId=%s, topicPartition=%s, "
-						+ "upstreamOffset=%d, downstreamOffset=%d, metatadata=%s}",
-				consumerGroupId, topicPartition, upstreamOffset, downstreamOffset, metadata);
-	}
+    @Override
+    public String toString() {
+        return String.format("Checkpoint{consumerGroupId=%s, topicPartition=%s, " + "upstreamOffset=%d, downstreamOffset=%d, metadata=%s}", consumerGroupId, topicPartition, upstreamOffset, downstreamOffset, metadata);
+    }
 
-	ByteBuffer serializeValue(short version) {
-		Struct header = headerStruct(version);
-		Schema valueSchema = valueSchema(version);
-		Struct valueStruct = valueStruct(valueSchema);
-		ByteBuffer buffer = ByteBuffer.allocate(HEADER_SCHEMA.sizeOf(header) + valueSchema.sizeOf(valueStruct));
-		HEADER_SCHEMA.write(buffer, header);
-		valueSchema.write(buffer, valueStruct);
-		buffer.flip();
-		return buffer;
-	}
+    ByteBuffer serializeValue(short version) {
+        Struct header = headerStruct(version);
+        Schema valueSchema = valueSchema(version);
+        Struct valueStruct = valueStruct(valueSchema);
+        ByteBuffer buffer = ByteBuffer.allocate(HEADER_SCHEMA.sizeOf(header) + valueSchema.sizeOf(valueStruct));
+        HEADER_SCHEMA.write(buffer, header);
+        valueSchema.write(buffer, valueStruct);
+        buffer.flip();
+        return buffer;
+    }
 
-	ByteBuffer serializeKey() {
-		Struct struct = keyStruct();
-		ByteBuffer buffer = ByteBuffer.allocate(KEY_SCHEMA.sizeOf(struct));
-		KEY_SCHEMA.write(buffer, struct);
-		buffer.flip();
-		return buffer;
-	}
+    ByteBuffer serializeKey() {
+        Struct struct = keyStruct();
+        ByteBuffer buffer = ByteBuffer.allocate(KEY_SCHEMA.sizeOf(struct));
+        KEY_SCHEMA.write(buffer, struct);
+        buffer.flip();
+        return buffer;
+    }
 
-	public static Checkpoint deserializeRecord(ConsumerRecord<byte[], byte[]> record) {
-		ByteBuffer value = ByteBuffer.wrap(record.value());
-		Struct header = HEADER_SCHEMA.read(value);
-		short version = header.getShort(VERSION_KEY);
-		Schema valueSchema = valueSchema(version);
-		Struct valueStruct = valueSchema.read(value);
-		long upstreamOffset = valueStruct.getLong(UPSTREAM_OFFSET_KEY);
-		long downstreamOffset = valueStruct.getLong(DOWNSTREAM_OFFSET_KEY);
-		String metadata = valueStruct.getString(METADATA_KEY);
-		Struct keyStruct = KEY_SCHEMA.read(ByteBuffer.wrap(record.key()));
-		String group = keyStruct.getString(CONSUMER_GROUP_ID_KEY);
-		String topic = keyStruct.getString(TOPIC_KEY);
-		int partition = keyStruct.getInt(PARTITION_KEY);
-		return new Checkpoint(group, new TopicPartition(topic, partition), upstreamOffset,
-				downstreamOffset, metadata);
-	}
+    public static Checkpoint deserializeRecord(ConsumerRecord<byte[], byte[]> record) {
+        ByteBuffer value = ByteBuffer.wrap(record.value());
+        Struct header = HEADER_SCHEMA.read(value);
+        short version = header.getShort(VERSION_KEY);
+        Schema valueSchema = valueSchema(version);
+        Struct valueStruct = valueSchema.read(value);
+        long upstreamOffset = valueStruct.getLong(UPSTREAM_OFFSET_KEY);
+        long downstreamOffset = valueStruct.getLong(DOWNSTREAM_OFFSET_KEY);
+        String metadata = valueStruct.getString(METADATA_KEY);
+        Struct keyStruct = KEY_SCHEMA.read(ByteBuffer.wrap(record.key()));
+        String group = keyStruct.getString(CONSUMER_GROUP_ID_KEY);
+        String topic = keyStruct.getString(TOPIC_KEY);
+        int partition = keyStruct.getInt(PARTITION_KEY);
+        return new Checkpoint(group, new TopicPartition(topic, partition), upstreamOffset, downstreamOffset, metadata);
+    }
 
-	private static Schema valueSchema(short version) {
-		assert version == 0;
-		return VALUE_SCHEMA_V0;
-	}
+    private static Schema valueSchema(short version) {
+        assert version == 0;
+        return VALUE_SCHEMA_V0;
+    }
 
-	private Struct valueStruct(Schema schema) {
-		Struct struct = new Struct(schema);
-		struct.set(UPSTREAM_OFFSET_KEY, upstreamOffset);
-		struct.set(DOWNSTREAM_OFFSET_KEY, downstreamOffset);
-		struct.set(METADATA_KEY, metadata);
-		return struct;
-	}
+    private Struct valueStruct(Schema schema) {
+        Struct struct = new Struct(schema);
+        struct.set(UPSTREAM_OFFSET_KEY, upstreamOffset);
+        struct.set(DOWNSTREAM_OFFSET_KEY, downstreamOffset);
+        struct.set(METADATA_KEY, metadata);
+        return struct;
+    }
 
-	private Struct keyStruct() {
-		Struct struct = new Struct(KEY_SCHEMA);
-		struct.set(CONSUMER_GROUP_ID_KEY, consumerGroupId);
-		struct.set(TOPIC_KEY, topicPartition.topic());
-		struct.set(PARTITION_KEY, topicPartition.partition());
-		return struct;
-	}
+    private Struct keyStruct() {
+        Struct struct = new Struct(KEY_SCHEMA);
+        struct.set(CONSUMER_GROUP_ID_KEY, consumerGroupId);
+        struct.set(TOPIC_KEY, topicPartition.topic());
+        struct.set(PARTITION_KEY, topicPartition.partition());
+        return struct;
+    }
 
-	private Struct headerStruct(short version) {
-		Struct struct = new Struct(HEADER_SCHEMA);
-		struct.set(VERSION_KEY, version);
-		return struct;
-	}
+    private Struct headerStruct(short version) {
+        Struct struct = new Struct(HEADER_SCHEMA);
+        struct.set(VERSION_KEY, version);
+        return struct;
+    }
 
-	Map<String, ?> connectPartition() {
-		Map<String, Object> partition = new HashMap<>();
-		partition.put(CONSUMER_GROUP_ID_KEY, consumerGroupId);
-		partition.put(TOPIC_KEY, topicPartition.topic());
-		partition.put(PARTITION_KEY, topicPartition.partition());
-		return partition;
-	}
+    Map<String, ?> connectPartition() {
+        Map<String, Object> partition = new HashMap<>();
+        partition.put(CONSUMER_GROUP_ID_KEY, consumerGroupId);
+        partition.put(TOPIC_KEY, topicPartition.topic());
+        partition.put(PARTITION_KEY, topicPartition.partition());
+        return partition;
+    }
 
-	static String unwrapGroup(Map<String, ?> connectPartition) {
-		return connectPartition.get(CONSUMER_GROUP_ID_KEY).toString();
-	}
+    static String unwrapGroup(Map<String, ?> connectPartition) {
+        return connectPartition.get(CONSUMER_GROUP_ID_KEY).toString();
+    }
 
-	byte[] recordKey() {
-		return serializeKey().array();
-	}
+    byte[] recordKey() {
+        return serializeKey().array();
+    }
 
-	byte[] recordValue() {
-		return serializeValue(VERSION).array();
-	}
+    byte[] recordValue() {
+        return serializeValue(VERSION).array();
+    }
 }
 

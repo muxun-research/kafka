@@ -19,15 +19,12 @@ package org.apache.kafka.streams.kstream.internals;
 import org.apache.kafka.common.serialization.IntegerSerializer;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.apache.kafka.streams.KeyValueTimestamp;
+import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.kstream.Consumed;
-import org.apache.kafka.streams.KeyValue;
-import org.apache.kafka.streams.StreamsBuilder;
-import org.apache.kafka.streams.TopologyTestDriver;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KeyValueMapper;
-import org.apache.kafka.streams.TestInputTopic;
-import org.apache.kafka.test.MockProcessorSupplier;
+import org.apache.kafka.streams.processor.api.Record;
+import org.apache.kafka.test.MockApiProcessorSupplier;
 import org.apache.kafka.test.StreamsTestUtils;
 import org.junit.Test;
 
@@ -36,7 +33,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Properties;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.core.Is.is;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 
 public class KStreamFlatMapTest {
     private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.Integer(), Serdes.String());
@@ -58,9 +58,7 @@ public class KStreamFlatMapTest {
         final int[] expectedKeys = {0, 1, 2, 3};
 
         final KStream<Integer, String> stream;
-        final MockProcessorSupplier<String, String> supplier;
-
-        supplier = new MockProcessorSupplier<>();
+        final MockApiProcessorSupplier<String, String, Void, Void> supplier = new MockApiProcessorSupplier<>();
         stream = builder.stream(topicName, Consumed.with(Serdes.Integer(), Serdes.String()));
         stream.flatMap(mapper).process(supplier);
 
@@ -74,15 +72,17 @@ public class KStreamFlatMapTest {
 
 		assertEquals(6, supplier.theCapturedProcessor().processed().size());
 
-        final KeyValueTimestamp[] expected = {new KeyValueTimestamp<>("10", "V1", 0),
-            new KeyValueTimestamp<>("20", "V2", 0),
-            new KeyValueTimestamp<>("21", "V2", 0),
-            new KeyValueTimestamp<>("30", "V3", 0),
-            new KeyValueTimestamp<>("31", "V3", 0),
-            new KeyValueTimestamp<>("32", "V3", 0)};
+        final KeyValueTimestamp[] expected = {new KeyValueTimestamp<>("10", "V1", 0), new KeyValueTimestamp<>("20", "V2", 0), new KeyValueTimestamp<>("21", "V2", 0), new KeyValueTimestamp<>("30", "V3", 0), new KeyValueTimestamp<>("31", "V3", 0), new KeyValueTimestamp<>("32", "V3", 0)};
 
         for (int i = 0; i < expected.length; i++) {
-			assertEquals(expected[i], supplier.theCapturedProcessor().processed().get(i));
+            assertEquals(expected[i], supplier.theCapturedProcessor().processed().get(i));
         }
+    }
+
+    @Test
+    public void testKeyValueMapperResultNotNull() {
+        final KStreamFlatMap<String, Integer, String, Integer> supplier = new KStreamFlatMap<>((key, value) -> null);
+        final Throwable throwable = assertThrows(NullPointerException.class, () -> supplier.get().process(new Record<>("K", 0, 0L)));
+        assertThat(throwable.getMessage(), is("The provided KeyValueMapper returned null which is not allowed."));
     }
 }

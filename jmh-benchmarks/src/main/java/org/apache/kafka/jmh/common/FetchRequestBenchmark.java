@@ -19,31 +19,20 @@ package org.apache.kafka.jmh.common;
 
 import kafka.network.RequestConvertToJson;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.network.Send;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.requests.AbstractRequest;
 import org.apache.kafka.common.requests.ByteBufferChannel;
 import org.apache.kafka.common.requests.FetchRequest;
 import org.apache.kafka.common.requests.RequestHeader;
-import org.openjdk.jmh.annotations.Benchmark;
-import org.openjdk.jmh.annotations.BenchmarkMode;
-import org.openjdk.jmh.annotations.Fork;
-import org.openjdk.jmh.annotations.Level;
-import org.openjdk.jmh.annotations.Measurement;
-import org.openjdk.jmh.annotations.Mode;
-import org.openjdk.jmh.annotations.OutputTimeUnit;
-import org.openjdk.jmh.annotations.Param;
-import org.openjdk.jmh.annotations.Scope;
-import org.openjdk.jmh.annotations.Setup;
-import org.openjdk.jmh.annotations.State;
-import org.openjdk.jmh.annotations.Warmup;
+import org.openjdk.jmh.annotations.*;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 @State(Scope.Benchmark)
@@ -54,81 +43,80 @@ import java.util.concurrent.TimeUnit;
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 public class FetchRequestBenchmark {
 
-	@Param({"10", "500", "1000"})
-	private int topicCount;
+    @Param({"10", "500", "1000"})
+    private int topicCount;
 
-	@Param({"3", "10", "20"})
-	private int partitionCount;
+    @Param({"3", "10", "20"})
+    private int partitionCount;
 
-	Map<TopicPartition, FetchRequest.PartitionData> fetchData;
+    Map<TopicPartition, FetchRequest.PartitionData> fetchData;
 
-	RequestHeader header;
+    Map<Uuid, String> topicNames;
 
-	FetchRequest consumerRequest;
+    RequestHeader header;
 
-	FetchRequest replicaRequest;
+    FetchRequest consumerRequest;
 
-	ByteBuffer requestBuffer;
+    FetchRequest replicaRequest;
 
-	@Setup(Level.Trial)
-	public void setup() {
-		this.fetchData = new HashMap<>();
-		for (int topicIdx = 0; topicIdx < topicCount; topicIdx++) {
-			String topic = UUID.randomUUID().toString();
-			for (int partitionId = 0; partitionId < partitionCount; partitionId++) {
-				FetchRequest.PartitionData partitionData = new FetchRequest.PartitionData(
-						0, 0, 4096, Optional.empty());
-				fetchData.put(new TopicPartition(topic, partitionId), partitionData);
-			}
-		}
+    ByteBuffer requestBuffer;
 
-		this.header = new RequestHeader(ApiKeys.FETCH, ApiKeys.FETCH.latestVersion(), "jmh-benchmark", 100);
-		this.consumerRequest = FetchRequest.Builder.forConsumer(0, 0, fetchData)
-				.build(ApiKeys.FETCH.latestVersion());
-		this.replicaRequest = FetchRequest.Builder.forReplica(ApiKeys.FETCH.latestVersion(), 1, 0, 0, fetchData)
-				.build(ApiKeys.FETCH.latestVersion());
-		this.requestBuffer = this.consumerRequest.serialize();
+    @Setup(Level.Trial)
+    public void setup() {
+        this.fetchData = new HashMap<>();
+        this.topicNames = new HashMap<>();
+        for (int topicIdx = 0; topicIdx < topicCount; topicIdx++) {
+            String topic = Uuid.randomUuid().toString();
+            Uuid id = Uuid.randomUuid();
+            topicNames.put(id, topic);
+            for (int partitionId = 0; partitionId < partitionCount; partitionId++) {
+                FetchRequest.PartitionData partitionData = new FetchRequest.PartitionData(id, 0, 0, 4096, Optional.empty());
+                fetchData.put(new TopicPartition(topic, partitionId), partitionData);
+            }
+        }
 
-	}
+        this.header = new RequestHeader(ApiKeys.FETCH, ApiKeys.FETCH.latestVersion(), "jmh-benchmark", 100);
+        this.consumerRequest = FetchRequest.Builder.forConsumer(ApiKeys.FETCH.latestVersion(), 0, 0, fetchData).build(ApiKeys.FETCH.latestVersion());
+        this.replicaRequest = FetchRequest.Builder.forReplica(ApiKeys.FETCH.latestVersion(), 1, 1, 0, 0, fetchData).build(ApiKeys.FETCH.latestVersion());
+        this.requestBuffer = this.consumerRequest.serialize();
 
-	@Benchmark
-	public short testFetchRequestFromBuffer() {
-		return AbstractRequest.parseRequest(ApiKeys.FETCH, ApiKeys.FETCH.latestVersion(), requestBuffer).request.version();
-	}
+    }
 
-	@Benchmark
-	public int testFetchRequestForConsumer() {
-		FetchRequest fetchRequest = FetchRequest.Builder.forConsumer(0, 0, fetchData)
-				.build(ApiKeys.FETCH.latestVersion());
-		return fetchRequest.fetchData().size();
-	}
+    @Benchmark
+    public short testFetchRequestFromBuffer() {
+        return AbstractRequest.parseRequest(ApiKeys.FETCH, ApiKeys.FETCH.latestVersion(), requestBuffer).request.version();
+    }
 
-	@Benchmark
-	public int testFetchRequestForReplica() {
-		FetchRequest fetchRequest = FetchRequest.Builder.forReplica(
-				ApiKeys.FETCH.latestVersion(), 1, 0, 0, fetchData)
-				.build(ApiKeys.FETCH.latestVersion());
-		return fetchRequest.fetchData().size();
-	}
+    @Benchmark
+    public int testFetchRequestForConsumer() {
+        FetchRequest fetchRequest = FetchRequest.Builder.forConsumer(ApiKeys.FETCH.latestVersion(), 0, 0, fetchData).build(ApiKeys.FETCH.latestVersion());
+        return fetchRequest.fetchData(topicNames).size();
+    }
 
-	@Benchmark
-	public int testSerializeFetchRequestForConsumer() throws IOException {
-		Send send = consumerRequest.toSend(header);
-		ByteBufferChannel channel = new ByteBufferChannel(send.size());
-		send.writeTo(channel);
-		return channel.buffer().limit();
-	}
+    @Benchmark
+    public int testFetchRequestForReplica() {
+        FetchRequest fetchRequest = FetchRequest.Builder.forReplica(ApiKeys.FETCH.latestVersion(), 1, 1, 0, 0, fetchData).build(ApiKeys.FETCH.latestVersion());
+        return fetchRequest.fetchData(topicNames).size();
+    }
 
-	@Benchmark
-	public int testSerializeFetchRequestForReplica() throws IOException {
-		Send send = replicaRequest.toSend(header);
-		ByteBufferChannel channel = new ByteBufferChannel(send.size());
-		send.writeTo(channel);
-		return channel.buffer().limit();
-	}
+    @Benchmark
+    public int testSerializeFetchRequestForConsumer() throws IOException {
+        Send send = consumerRequest.toSend(header);
+        ByteBufferChannel channel = new ByteBufferChannel(send.size());
+        send.writeTo(channel);
+        return channel.buffer().limit();
+    }
 
-	@Benchmark
-	public String testRequestToJson() {
-		return RequestConvertToJson.request(consumerRequest).toString();
-	}
+    @Benchmark
+    public int testSerializeFetchRequestForReplica() throws IOException {
+        Send send = replicaRequest.toSend(header);
+        ByteBufferChannel channel = new ByteBufferChannel(send.size());
+        send.writeTo(channel);
+        return channel.buffer().limit();
+    }
+
+    @Benchmark
+    public String testRequestToJson() {
+        return RequestConvertToJson.request(consumerRequest).toString();
+    }
 }

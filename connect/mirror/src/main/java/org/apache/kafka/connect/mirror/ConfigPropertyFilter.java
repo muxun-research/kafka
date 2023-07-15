@@ -28,13 +28,32 @@ import java.util.Map;
 @InterfaceStability.Evolving
 public interface ConfigPropertyFilter extends Configurable, AutoCloseable {
 
-	boolean shouldReplicateConfigProperty(String prop);
+    /**
+     * Specifies whether to replicate the given topic configuration.
+     * Note that if a property has a default value on the source cluster,
+     * {@link #shouldReplicateSourceDefault(String)} will also be called to
+     * determine how that property should be synced.
+     */
+    boolean shouldReplicateConfigProperty(String prop);
 
-	default void close() {
-		//nop
-	}
+    /**
+     * Specifies how to replicate the given topic configuration property
+     * that has a default value on the source cluster. Only invoked for properties
+     * that {@link #shouldReplicateConfigProperty(String)} has returned
+     * {@code true} for.
+     * @return {@code true} if the default value from the source topic should be synced
+     * to the target topic, and {@code false} if the default value for the target topic
+     * should be used instead
+     */
+    default boolean shouldReplicateSourceDefault(String prop) {
+        return false;
+    }
 
-	default void configure(Map<String, ?> props) {
-		//nop
-	}
+    default void close() {
+        //nop
+    }
+
+    default void configure(Map<String, ?> props) {
+        //nop
+    }
 }

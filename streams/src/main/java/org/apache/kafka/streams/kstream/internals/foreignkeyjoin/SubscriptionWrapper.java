@@ -23,90 +23,115 @@ import java.util.Objects;
 
 
 public class SubscriptionWrapper<K> {
-	static final byte CURRENT_VERSION = 0;
+    static final byte VERSION_0 = 0;
+    static final byte VERSION_1 = 1;
 
-	private final long[] hash;
-	private final Instruction instruction;
-	private final byte version;
-	private final K primaryKey;
+    static final byte CURRENT_VERSION = VERSION_1;
 
-	public enum Instruction {
-		//Send nothing. Do not propagate.
-		DELETE_KEY_NO_PROPAGATE((byte) 0x00),
+    // v0 fields:
+    private final long[] hash;
+    private final Instruction instruction;
+    private final byte version;
+    private final K primaryKey;
+    // v1 fields:
+    private final Integer primaryPartition;
 
-		//Send (k, null)
-		DELETE_KEY_AND_PROPAGATE((byte) 0x01),
+    public enum Instruction {
+        //Send nothing. Do not propagate.
+        DELETE_KEY_NO_PROPAGATE((byte) 0x00),
 
-		//(changing foreign key, but FK+Val may not exist)
-		//Send (k, fk-val) OR
-		//Send (k, null) if fk-val does not exist
-		PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE((byte) 0x02),
+        //Send (k, null)
+        DELETE_KEY_AND_PROPAGATE((byte) 0x01),
 
-		//(first time ever sending key)
-		//Send (k, fk-val) only if fk-val exists.
-		PROPAGATE_ONLY_IF_FK_VAL_AVAILABLE((byte) 0x03);
+        //(changing foreign key, but FK+Val may not exist)
+        //Send (k, fk-val) OR
+        //Send (k, null) if fk-val does not exist
+        PROPAGATE_NULL_IF_NO_FK_VAL_AVAILABLE((byte) 0x02),
 
-		private final byte value;
+        //(first time ever sending key)
+        //Send (k, fk-val) only if fk-val exists.
+        PROPAGATE_ONLY_IF_FK_VAL_AVAILABLE((byte) 0x03);
 
-		Instruction(final byte value) {
-			this.value = value;
-		}
+        private final byte value;
 
-		public byte getValue() {
-			return value;
-		}
+        Instruction(final byte value) {
+            this.value = value;
+        }
 
-		public static Instruction fromValue(final byte value) {
-			for (final Instruction i : values()) {
-				if (i.value == value) {
-					return i;
-				}
-			}
-			throw new IllegalArgumentException("Unknown instruction byte value = " + value);
-		}
-	}
+        public byte getValue() {
+            return value;
+        }
 
-	public SubscriptionWrapper(final long[] hash, final Instruction instruction, final K primaryKey) {
-		this(hash, instruction, primaryKey, CURRENT_VERSION);
-	}
+        public static Instruction fromValue(final byte value) {
+            for (final Instruction i : values()) {
+                if (i.value == value) {
+                    return i;
+                }
+            }
+            throw new IllegalArgumentException("Unknown instruction byte value = " + value);
+        }
+    }
 
-	public SubscriptionWrapper(final long[] hash, final Instruction instruction, final K primaryKey, final byte version) {
-		Objects.requireNonNull(instruction, "instruction cannot be null. Required by downstream processor.");
-		Objects.requireNonNull(primaryKey, "primaryKey cannot be null. Required by downstream processor.");
-		if (version != CURRENT_VERSION) {
-			throw new UnsupportedVersionException("SubscriptionWrapper does not support version " + version);
-		}
+    public SubscriptionWrapper(final long[] hash, final Instruction instruction, final K primaryKey, final Integer primaryPartition) {
+        this(hash, instruction, primaryKey, CURRENT_VERSION, primaryPartition);
+    }
 
-		this.instruction = instruction;
-		this.hash = hash;
-		this.primaryKey = primaryKey;
-		this.version = version;
-	}
+    public SubscriptionWrapper(final long[] hash, final Instruction instruction, final K primaryKey, final byte version, final Integer primaryPartition) {
+        Objects.requireNonNull(instruction, "instruction cannot be null. Required by downstream processor.");
+        Objects.requireNonNull(primaryKey, "primaryKey cannot be null. Required by downstream processor.");
+        if (version < 0 || version > CURRENT_VERSION) {
+            throw new UnsupportedVersionException("SubscriptionWrapper does not support version " + version);
+        }
 
-	public Instruction getInstruction() {
-		return instruction;
-	}
+        this.instruction = instruction;
+        this.hash = hash;
+        this.primaryKey = primaryKey;
+        this.version = version;
+        this.primaryPartition = primaryPartition;
+    }
 
-	public long[] getHash() {
-		return hash;
-	}
+    public Instruction getInstruction() {
+        return instruction;
+    }
 
-	public K getPrimaryKey() {
-		return primaryKey;
-	}
+    public long[] getHash() {
+        return hash;
+    }
 
-	public byte getVersion() {
-		return version;
-	}
+    public K getPrimaryKey() {
+        return primaryKey;
+    }
 
-	@Override
-	public String toString() {
-		return "SubscriptionWrapper{" +
-				"version=" + version +
-				", primaryKey=" + primaryKey +
-				", instruction=" + instruction +
-				", hash=" + Arrays.toString(hash) +
-				'}';
-	}
+    public byte getVersion() {
+        return version;
+    }
+
+    public Integer getPrimaryPartition() {
+        return primaryPartition;
+    }
+
+    @Override
+    public String toString() {
+        return "SubscriptionWrapper{" + "version=" + version + ", primaryKey=" + primaryKey + ", instruction=" + instruction + ", hash=" + Arrays.toString(hash) + ", primaryPartition=" + primaryPartition + '}';
+    }
+
+    @Override
+    public boolean equals(final Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        final SubscriptionWrapper<?> that = (SubscriptionWrapper<?>) o;
+        return version == that.version && Arrays.equals(hash, that.hash) && instruction == that.instruction && Objects.equals(primaryKey, that.primaryKey) && Objects.equals(primaryPartition, that.primaryPartition);
+    }
+
+    @Override
+    public int hashCode() {
+        int result = Objects.hash(instruction, version, primaryKey, primaryPartition);
+        result = 31 * result + Arrays.hashCode(hash);
+        return result;
+    }
 }
 

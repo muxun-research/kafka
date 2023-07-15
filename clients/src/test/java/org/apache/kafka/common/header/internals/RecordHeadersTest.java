@@ -21,15 +21,9 @@ import org.apache.kafka.common.header.Headers;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.Iterator;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class RecordHeadersTest {
 
@@ -128,7 +122,7 @@ public class RecordHeadersTest {
     }
 
     @Test
-    public void testReadOnly() throws IOException {
+    public void testReadOnly() {
         RecordHeaders headers = new RecordHeaders();
         headers.add(new RecordHeader("key", "value".getBytes()));
         Iterator<Header> headerIteratorBeforeClose = headers.iterator();
@@ -190,7 +184,7 @@ public class RecordHeadersTest {
     }
 
     @Test
-    public void testNew() throws IOException {
+    public void testNew() {
         RecordHeaders headers = new RecordHeaders();
         headers.add(new RecordHeader("key", "value".getBytes()));
         headers.setReadOnly();
@@ -199,8 +193,8 @@ public class RecordHeadersTest {
         newHeaders.add(new RecordHeader("key", "value2".getBytes()));
 
         //Ensure existing headers are not modified
-		assertHeader("key", "value", headers.lastHeader("key"));
-		assertEquals(1, getCount(headers));
+        assertHeader("key", "value", headers.lastHeader("key"));
+        assertEquals(1, getCount(headers));
 
 		//Ensure new headers are modified
 		assertHeader("key", "value2", newHeaders.lastHeader("key"));
@@ -230,7 +224,7 @@ public class RecordHeadersTest {
     
     static void assertHeader(String key, String value, Header actual) {
         assertEquals(key, actual.key());
-        assertTrue(Arrays.equals(value.getBytes(), actual.value()));
+        assertArrayEquals(value.getBytes(), actual.value());
     }
 
 }

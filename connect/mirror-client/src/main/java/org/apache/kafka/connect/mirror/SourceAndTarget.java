@@ -20,35 +20,35 @@ package org.apache.kafka.connect.mirror;
  * Directional pair of clusters, where source is replicated to target.
  */
 public class SourceAndTarget {
-	private String source;
-	private String target;
+    private final String source;
+    private final String target;
 
-	public SourceAndTarget(String source, String target) {
-		this.source = source;
-		this.target = target;
-	}
+    public SourceAndTarget(String source, String target) {
+        this.source = source;
+        this.target = target;
+    }
 
-	public String source() {
-		return source;
-	}
+    public String source() {
+        return source;
+    }
 
-	public String target() {
-		return target;
-	}
+    public String target() {
+        return target;
+    }
 
-	@Override
-	public String toString() {
-		return source + "->" + target;
-	}
+    @Override
+    public String toString() {
+        return source + "->" + target;
+    }
 
-	@Override
-	public int hashCode() {
-		return toString().hashCode();
-	}
+    @Override
+    public int hashCode() {
+        return toString().hashCode();
+    }
 
-	@Override
-	public boolean equals(Object other) {
-		return other != null && toString().equals(other.toString());
-	}
+    @Override
+    public boolean equals(Object other) {
+        return other != null && toString().equals(other.toString());
+    }
 }
 

@@ -27,7 +27,7 @@ import java.util.concurrent.TimeoutException;
 
 
 /**
- * Convenience methods for multi-cluster environments. Wraps MirrorClient (@see MirrorClient).
+ * Convenience methods for multi-cluster environments. Wraps {@link MirrorClient}
  * <p>
  * Properties passed to these methods are used to construct internal Admin and Consumer clients.
  * Sub-configs like "admin.xyz" are also supported. For example:
@@ -42,64 +42,58 @@ import java.util.concurrent.TimeoutException;
  */
 public final class RemoteClusterUtils {
 
-	// utility class
-	private RemoteClusterUtils() {
-	}
+    // utility class
+    private RemoteClusterUtils() {
+    }
 
-	/**
-	 * Find shortest number of hops from an upstream cluster.
-	 * Returns -1 if the cluster is unreachable
-	 */
-	public static int replicationHops(Map<String, Object> properties, String upstreamClusterAlias)
-			throws InterruptedException, TimeoutException {
-		try (MirrorClient client = new MirrorClient(properties)) {
-			return client.replicationHops(upstreamClusterAlias);
-		}
-	}
+    /**
+     * Find shortest number of hops from an upstream cluster.
+     * Returns -1 if the cluster is unreachable
+     */
+    public static int replicationHops(Map<String, Object> properties, String upstreamClusterAlias) throws InterruptedException, TimeoutException {
+        try (MirrorClient client = new MirrorClient(properties)) {
+            return client.replicationHops(upstreamClusterAlias);
+        }
+    }
 
-	/**
-	 * Find all heartbeat topics
-	 */
-	public static Set<String> heartbeatTopics(Map<String, Object> properties)
-			throws InterruptedException, TimeoutException {
-		try (MirrorClient client = new MirrorClient(properties)) {
-			return client.heartbeatTopics();
-		}
-	}
+    /**
+     * Find all heartbeat topics
+     */
+    public static Set<String> heartbeatTopics(Map<String, Object> properties) throws InterruptedException, TimeoutException {
+        try (MirrorClient client = new MirrorClient(properties)) {
+            return client.heartbeatTopics();
+        }
+    }
 
-	/**
-	 * Find all checkpoint topics
-	 */
-	public static Set<String> checkpointTopics(Map<String, Object> properties)
-			throws InterruptedException, TimeoutException {
-		try (MirrorClient client = new MirrorClient(properties)) {
-			return client.checkpointTopics();
-		}
-	}
+    /**
+     * Find all checkpoint topics
+     */
+    public static Set<String> checkpointTopics(Map<String, Object> properties) throws InterruptedException, TimeoutException {
+        try (MirrorClient client = new MirrorClient(properties)) {
+            return client.checkpointTopics();
+        }
+    }
 
-	/**
-	 * Find all upstream clusters
-	 */
-	public static Set<String> upstreamClusters(Map<String, Object> properties)
-			throws InterruptedException, TimeoutException {
-		try (MirrorClient client = new MirrorClient(properties)) {
-			return client.upstreamClusters();
-		}
-	}
+    /**
+     * Find all upstream clusters
+     */
+    public static Set<String> upstreamClusters(Map<String, Object> properties) throws InterruptedException, TimeoutException {
+        try (MirrorClient client = new MirrorClient(properties)) {
+            return client.upstreamClusters();
+        }
+    }
 
-	/**
-	 * Translate a remote consumer group's offsets into corresponding local offsets. Topics are automatically
-	 * renamed according to the ReplicationPolicy.
-	 * @param properties         @see MirrorClientConfig
-	 * @param consumerGroupId    group ID of remote consumer group
-	 * @param remoteClusterAlias alias of remote cluster
-	 * @param timeout            timeout
-	 */
-	public static Map<TopicPartition, OffsetAndMetadata> translateOffsets(Map<String, Object> properties,
-																		  String remoteClusterAlias, String consumerGroupId, Duration timeout)
-			throws InterruptedException, TimeoutException {
-		try (MirrorClient client = new MirrorClient(properties)) {
-			return client.remoteConsumerOffsets(consumerGroupId, remoteClusterAlias, timeout);
-		}
-	}
+    /**
+     * Translate a remote consumer group's offsets into corresponding local offsets. Topics are automatically
+     * renamed according to the ReplicationPolicy.
+     * @param properties         {@link MirrorClientConfig} properties to instantiate a {@link MirrorClient}
+     * @param consumerGroupId    group ID of remote consumer group
+     * @param remoteClusterAlias alias of remote cluster
+     * @param timeout            timeout
+     */
+    public static Map<TopicPartition, OffsetAndMetadata> translateOffsets(Map<String, Object> properties, String remoteClusterAlias, String consumerGroupId, Duration timeout) throws InterruptedException, TimeoutException {
+        try (MirrorClient client = new MirrorClient(properties)) {
+            return client.remoteConsumerOffsets(consumerGroupId, remoteClusterAlias, timeout);
+        }
+    }
 }

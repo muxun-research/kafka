@@ -19,41 +19,44 @@ package org.apache.kafka.common.utils;
 import org.apache.kafka.common.record.RecordBatch;
 
 public class ProducerIdAndEpoch {
-	public static final ProducerIdAndEpoch NONE = new ProducerIdAndEpoch(RecordBatch.NO_PRODUCER_ID, RecordBatch.NO_PRODUCER_EPOCH);
+    public static final ProducerIdAndEpoch NONE = new ProducerIdAndEpoch(RecordBatch.NO_PRODUCER_ID, RecordBatch.NO_PRODUCER_EPOCH);
 
-	public final long producerId;
-	public final short epoch;
+    public final long producerId;
+    public final short epoch;
 
-	public ProducerIdAndEpoch(long producerId, short epoch) {
-		this.producerId = producerId;
-		this.epoch = epoch;
-	}
+    public ProducerIdAndEpoch(long producerId, short epoch) {
+        this.producerId = producerId;
+        this.epoch = epoch;
+    }
 
-	public boolean isValid() {
-		return RecordBatch.NO_PRODUCER_ID < producerId;
-	}
+    public boolean isValid() {
+        return RecordBatch.NO_PRODUCER_ID < producerId;
+    }
 
-	@Override
-	public String toString() {
-		return "(producerId=" + producerId + ", epoch=" + epoch + ")";
-	}
+    @Override
+    public String toString() {
+        return "ProducerIdAndEpoch(producerId=" + producerId + ", epoch=" + epoch + ")";
+    }
 
-	@Override
-	public boolean equals(Object o) {
-		if (this == o) return true;
-		if (o == null || getClass() != o.getClass()) return false;
+    @Override
+    public boolean equals(Object o) {
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
 
-		ProducerIdAndEpoch that = (ProducerIdAndEpoch) o;
+        ProducerIdAndEpoch that = (ProducerIdAndEpoch) o;
 
-		if (producerId != that.producerId) return false;
-		return epoch == that.epoch;
-	}
+        if (producerId != that.producerId)
+            return false;
+        return epoch == that.epoch;
+    }
 
-	@Override
-	public int hashCode() {
-		int result = (int) (producerId ^ (producerId >>> 32));
-		result = 31 * result + (int) epoch;
-		return result;
-	}
+    @Override
+    public int hashCode() {
+        int result = (int) (producerId ^ (producerId >>> 32));
+        result = 31 * result + (int) epoch;
+        return result;
+    }
 
 }

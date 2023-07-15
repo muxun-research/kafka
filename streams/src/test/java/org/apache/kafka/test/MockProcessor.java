@@ -17,70 +17,77 @@
 package org.apache.kafka.test;
 
 import org.apache.kafka.streams.KeyValueTimestamp;
-import org.apache.kafka.streams.processor.AbstractProcessor;
 import org.apache.kafka.streams.processor.Cancellable;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.PunctuationType;
 import org.apache.kafka.streams.processor.api.Record;
+import org.apache.kafka.streams.processor.internals.InternalProcessorContext;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public class MockProcessor<K, V> extends AbstractProcessor<K, V> {
-	private final MockApiProcessor<K, V, Object, Object> delegate;
+@SuppressWarnings("deprecation") // Old PAPI. Needs to be migrated.
+public class MockProcessor<K, V> extends org.apache.kafka.streams.processor.AbstractProcessor<K, V> {
+    private final MockApiProcessor<K, V, Object, Object> delegate;
 
-    public MockProcessor(final PunctuationType punctuationType,
-                         final long scheduleInterval) {
-		delegate = new MockApiProcessor<>(punctuationType, scheduleInterval);
+    public MockProcessor(final PunctuationType punctuationType, final long scheduleInterval) {
+        delegate = new MockApiProcessor<>(punctuationType, scheduleInterval);
     }
 
     public MockProcessor() {
-		delegate = new MockApiProcessor<>();
+        delegate = new MockApiProcessor<>();
     }
 
-	@SuppressWarnings("unchecked")
-	@Override
-	public void init(final ProcessorContext context) {
-		super.init(context);
-		delegate.init((org.apache.kafka.streams.processor.api.ProcessorContext<Object, Object>) context);
-	}
+    @SuppressWarnings("unchecked")
+    @Override
+    public void init(final ProcessorContext context) {
+        super.init(context);
+        delegate.init((org.apache.kafka.streams.processor.api.ProcessorContext<Object, Object>) context);
+    }
 
-	@Override
-	public void process(final K key, final V value) {
-		delegate.process(new Record<>(key, value, context.timestamp(), context.headers()));
-	}
+    @Override
+    public void process(final K key, final V value) {
+        delegate.process(new Record<>(key, value, context.timestamp(), context.headers()));
+    }
 
-	public void checkAndClearProcessResult(final KeyValueTimestamp<?, ?>... expected) {
-		delegate.checkAndClearProcessResult(expected);
-	}
+    public void checkAndClearProcessResult(final KeyValueTimestamp<?, ?>... expected) {
+        delegate.checkAndClearProcessResult(expected);
+    }
 
-	public void requestCommit() {
-		delegate.requestCommit();
-	}
+    public void requestCommit() {
+        delegate.requestCommit();
+    }
 
-	public void checkEmptyAndClearProcessResult() {
-		delegate.checkEmptyAndClearProcessResult();
-	}
+    public void checkEmptyAndClearProcessResult() {
+        delegate.checkEmptyAndClearProcessResult();
+    }
 
-	public void checkAndClearPunctuateResult(final PunctuationType type, final long... expected) {
-		delegate.checkAndClearPunctuateResult(type, expected);
-	}
+    public void checkAndClearPunctuateResult(final PunctuationType type, final long... expected) {
+        delegate.checkAndClearPunctuateResult(type, expected);
+    }
 
-	public Map<K, ValueAndTimestamp<V>> lastValueAndTimestampPerKey() {
-		return delegate.lastValueAndTimestampPerKey();
-	}
+    public Map<K, ValueAndTimestamp<V>> lastValueAndTimestampPerKey() {
+        return delegate.lastValueAndTimestampPerKey();
+    }
 
-	public List<Long> punctuatedStreamTime() {
-		return delegate.punctuatedStreamTime();
-	}
+    public List<Long> punctuatedStreamTime() {
+        return delegate.punctuatedStreamTime();
+    }
 
-	public Cancellable scheduleCancellable() {
-		return delegate.scheduleCancellable();
-	}
+    public Cancellable scheduleCancellable() {
+        return delegate.scheduleCancellable();
+    }
 
-	public ArrayList<KeyValueTimestamp<K, V>> processed() {
-		return delegate.processed();
-	}
+    public ArrayList<KeyValueTimestamp<K, V>> processed() {
+        return delegate.processed();
+    }
+
+    @SuppressWarnings("unchecked")
+    public void addProcessorMetadata(final String key, final long value) {
+        if (context instanceof InternalProcessorContext) {
+            ((InternalProcessorContext<K, V>) context).addProcessorMetadataKeyValue(key, value);
+        }
+    }
 }

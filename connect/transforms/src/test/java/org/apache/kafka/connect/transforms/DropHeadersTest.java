@@ -32,86 +32,84 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class DropHeadersTest {
 
-	private DropHeaders<SourceRecord> xform = new DropHeaders<>();
+    private final DropHeaders<SourceRecord> xform = new DropHeaders<>();
 
-	private Map<String, ?> config(String... headers) {
-		Map<String, Object> result = new HashMap<>();
-		result.put(DropHeaders.HEADERS_FIELD, asList(headers));
-		return result;
-	}
+    private Map<String, ?> config(String... headers) {
+        Map<String, Object> result = new HashMap<>();
+        result.put(DropHeaders.HEADERS_FIELD, asList(headers));
+        return result;
+    }
 
-	@Test
-	public void dropExistingHeader() {
-		xform.configure(config("to-drop"));
-		ConnectHeaders expected = new ConnectHeaders();
-		expected.addString("existing", "existing-value");
-		ConnectHeaders headers = expected.duplicate();
-		headers.addString("to-drop", "existing-value");
-		SourceRecord original = sourceRecord(headers);
-		SourceRecord xformed = xform.apply(original);
-		assertNonHeaders(original, xformed);
-		assertEquals(expected, xformed.headers());
-	}
+    @Test
+    public void dropExistingHeader() {
+        xform.configure(config("to-drop"));
+        ConnectHeaders expected = new ConnectHeaders();
+        expected.addString("existing", "existing-value");
+        ConnectHeaders headers = expected.duplicate();
+        headers.addString("to-drop", "existing-value");
+        SourceRecord original = sourceRecord(headers);
+        SourceRecord xformed = xform.apply(original);
+        assertNonHeaders(original, xformed);
+        assertEquals(expected, xformed.headers());
+    }
 
-	@Test
-	public void dropExistingHeaderWithMultipleValues() {
-		xform.configure(config("to-drop"));
-		ConnectHeaders expected = new ConnectHeaders();
-		expected.addString("existing", "existing-value");
-		ConnectHeaders headers = expected.duplicate();
-		headers.addString("to-drop", "existing-value");
-		headers.addString("to-drop", "existing-other-value");
+    @Test
+    public void dropExistingHeaderWithMultipleValues() {
+        xform.configure(config("to-drop"));
+        ConnectHeaders expected = new ConnectHeaders();
+        expected.addString("existing", "existing-value");
+        ConnectHeaders headers = expected.duplicate();
+        headers.addString("to-drop", "existing-value");
+        headers.addString("to-drop", "existing-other-value");
 
-		SourceRecord original = sourceRecord(headers);
-		SourceRecord xformed = xform.apply(original);
-		assertNonHeaders(original, xformed);
-		assertEquals(expected, xformed.headers());
-	}
+        SourceRecord original = sourceRecord(headers);
+        SourceRecord xformed = xform.apply(original);
+        assertNonHeaders(original, xformed);
+        assertEquals(expected, xformed.headers());
+    }
 
-	@Test
-	public void dropNonExistingHeader() {
-		xform.configure(config("to-drop"));
-		ConnectHeaders expected = new ConnectHeaders();
-		expected.addString("existing", "existing-value");
-		ConnectHeaders headers = expected.duplicate();
+    @Test
+    public void dropNonExistingHeader() {
+        xform.configure(config("to-drop"));
+        ConnectHeaders expected = new ConnectHeaders();
+        expected.addString("existing", "existing-value");
+        ConnectHeaders headers = expected.duplicate();
 
-		SourceRecord original = sourceRecord(headers);
-		SourceRecord xformed = xform.apply(original);
-		assertNonHeaders(original, xformed);
-		assertEquals(expected, xformed.headers());
-	}
+        SourceRecord original = sourceRecord(headers);
+        SourceRecord xformed = xform.apply(original);
+        assertNonHeaders(original, xformed);
+        assertEquals(expected, xformed.headers());
+    }
 
-	@Test
-	public void configRejectsEmptyList() {
-		assertThrows(ConfigException.class, () -> xform.configure(config()));
-	}
+    @Test
+    public void configRejectsEmptyList() {
+        assertThrows(ConfigException.class, () -> xform.configure(config()));
+    }
 
-	private void assertNonHeaders(SourceRecord original, SourceRecord xformed) {
-		assertEquals(original.sourcePartition(), xformed.sourcePartition());
-		assertEquals(original.sourceOffset(), xformed.sourceOffset());
-		assertEquals(original.topic(), xformed.topic());
-		assertEquals(original.kafkaPartition(), xformed.kafkaPartition());
-		assertEquals(original.keySchema(), xformed.keySchema());
-		assertEquals(original.key(), xformed.key());
-		assertEquals(original.valueSchema(), xformed.valueSchema());
-		assertEquals(original.value(), xformed.value());
-		assertEquals(original.timestamp(), xformed.timestamp());
-	}
+    private void assertNonHeaders(SourceRecord original, SourceRecord xformed) {
+        assertEquals(original.sourcePartition(), xformed.sourcePartition());
+        assertEquals(original.sourceOffset(), xformed.sourceOffset());
+        assertEquals(original.topic(), xformed.topic());
+        assertEquals(original.kafkaPartition(), xformed.kafkaPartition());
+        assertEquals(original.keySchema(), xformed.keySchema());
+        assertEquals(original.key(), xformed.key());
+        assertEquals(original.valueSchema(), xformed.valueSchema());
+        assertEquals(original.value(), xformed.value());
+        assertEquals(original.timestamp(), xformed.timestamp());
+    }
 
-	private SourceRecord sourceRecord(ConnectHeaders headers) {
-		Map<String, ?> sourcePartition = singletonMap("foo", "bar");
-		Map<String, ?> sourceOffset = singletonMap("baz", "quxx");
-		String topic = "topic";
-		Integer partition = 0;
-		Schema keySchema = null;
-		Object key = "key";
-		Schema valueSchema = null;
-		Object value = "value";
-		Long timestamp = 0L;
+    private SourceRecord sourceRecord(ConnectHeaders headers) {
+        Map<String, ?> sourcePartition = singletonMap("foo", "bar");
+        Map<String, ?> sourceOffset = singletonMap("baz", "quxx");
+        String topic = "topic";
+        Integer partition = 0;
+        Schema keySchema = null;
+        Object key = "key";
+        Schema valueSchema = null;
+        Object value = "value";
+        Long timestamp = 0L;
 
-		SourceRecord record = new SourceRecord(sourcePartition, sourceOffset, topic, partition,
-				keySchema, key, valueSchema, value, timestamp, headers);
-		return record;
-	}
+        return new SourceRecord(sourcePartition, sourceOffset, topic, partition, keySchema, key, valueSchema, value, timestamp, headers);
+    }
 }
 

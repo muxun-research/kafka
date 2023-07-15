@@ -43,24 +43,27 @@ public class AlterReplicaLogDirsResponse extends AbstractResponse {
 		this.data = data;
 	}
 
-	@Override
-	public AlterReplicaLogDirsResponseData data() {
-		return data;
-	}
+    @Override
+    public AlterReplicaLogDirsResponseData data() {
+        return data;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
+
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
     }
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> errorCounts = new HashMap<>();
-		data.results().forEach(topicResult ->
-				topicResult.partitions().forEach(partitionResult ->
-						updateErrorCounts(errorCounts, Errors.forCode(partitionResult.errorCode()))));
-		return errorCounts;
-	}
+        Map<Errors, Integer> errorCounts = new HashMap<>();
+        data.results().forEach(topicResult -> topicResult.partitions().forEach(partitionResult -> updateErrorCounts(errorCounts, Errors.forCode(partitionResult.errorCode()))));
+        return errorCounts;
+    }
 
     public static AlterReplicaLogDirsResponse parse(ByteBuffer buffer, short version) {
 		return new AlterReplicaLogDirsResponse(new AlterReplicaLogDirsResponseData(new ByteBufferAccessor(buffer), version));

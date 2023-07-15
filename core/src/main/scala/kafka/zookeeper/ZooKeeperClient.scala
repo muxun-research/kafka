@@ -17,28 +17,27 @@
 
 package kafka.zookeeper
 
-import java.util.Locale
-import java.util.concurrent.locks.{ReentrantLock, ReentrantReadWriteLock}
-import java.util.concurrent._
-import java.util.{List => JList}
-
 import com.yammer.metrics.core.MetricName
-import kafka.metrics.KafkaMetricsGroup
 import kafka.utils.CoreUtils.{inLock, inReadLock, inWriteLock}
-import kafka.utils.{KafkaScheduler, Logging}
+import kafka.utils.Logging
 import kafka.zookeeper.ZooKeeperClient._
 import org.apache.kafka.common.utils.Time
+import org.apache.kafka.server.metrics.KafkaMetricsGroup
+import org.apache.kafka.server.util.KafkaScheduler
 import org.apache.zookeeper.AsyncCallback.{Children2Callback, DataCallback, StatCallback}
 import org.apache.zookeeper.KeeperException.Code
 import org.apache.zookeeper.Watcher.Event.{EventType, KeeperState}
 import org.apache.zookeeper.ZooKeeper.States
-import org.apache.zookeeper.data.{ACL, Stat}
 import org.apache.zookeeper._
 import org.apache.zookeeper.client.ZKClientConfig
+import org.apache.zookeeper.data.{ACL, Stat}
 
-import scala.jdk.CollectionConverters._
-import scala.collection.Seq
+import java.util
+import java.util.concurrent._
+import java.util.concurrent.locks.{ReentrantLock, ReentrantReadWriteLock}
+import java.util.{Locale, List => JList}
 import scala.collection.mutable.Set
+import scala.jdk.CollectionConverters._
 
 object ZooKeeperClient {
   val RetryBackoffMs = 1000
@@ -46,6 +45,7 @@ object ZooKeeperClient {
 
 /**
  * A ZooKeeper client that encourages pipelined requests.
+ *
  * @param connectString       comma separated host:port pairs, each corresponding to a zk server
  * @param sessionTimeoutMs    session timeout in milliseconds
  * @param connectionTimeoutMs connection timeout in milliseconds
@@ -60,24 +60,17 @@ class ZooKeeperClient(connectString: String,
                       time: Time,
                       metricGroup: String,
                       metricType: String,
-                      name: Option[String],
-                      zkClientConfig: Option[ZKClientConfig]) extends Logging with KafkaMetricsGroup {
+                      private[zookeeper] val clientConfig: ZKClientConfig,
+                      name: String) extends Logging {
 
-  def this(connectString: String,
-           sessionTimeoutMs: Int,
-           connectionTimeoutMs: Int,
-           maxInFlightRequests: Int,
-           time: Time,
-           metricGroup: String,
-           metricType: String) = {
-    this(connectString, sessionTimeoutMs, connectionTimeoutMs, maxInFlightRequests, time, metricGroup, metricType, None,
-      None)
+  private val metricsGroup: KafkaMetricsGroup = new KafkaMetricsGroup(this.getClass) {
+    override def metricName(name: String, metricTags: util.Map[String, String]): MetricName = {
+      KafkaMetricsGroup.explicitMetricName(metricGroup, metricType, name, metricTags)
+    }
   }
 
-  this.logIdent = name match {
-    case Some(n) => s"[ZooKeeperClient $n] "
-    case _ => "[ZooKeeperClient] "
-  }
+
+  this.logIdent = s"[ZooKeeperClient $name] "
   private val initializationLock = new ReentrantReadWriteLock()
   private val isConnectedOrExpiredLock = new ReentrantLock()
   private val isConnectedOrExpiredCondition = isConnectedOrExpiredLock.newCondition()
@@ -85,7 +78,7 @@ class ZooKeeperClient(connectString: String,
   private val zNodeChildChangeHandlers = new ConcurrentHashMap[String, ZNodeChildChangeHandler]().asScala
   private val inFlightRequests = new Semaphore(maxInFlightRequests)
   private val stateChangeHandlers = new ConcurrentHashMap[String, StateChangeHandler]().asScala
-  private[zookeeper] val reinitializeScheduler = new KafkaScheduler(threads = 1, s"zk-client-${threadPrefix}reinit-")
+  private[zookeeper] val reinitializeScheduler = new KafkaScheduler(1, true, s"zk-client-${threadPrefix}reinit-")
   private var isFirstConnectionEstablished = false
 
   private val metricNames = Set[String]()
@@ -104,20 +97,16 @@ class ZooKeeperClient(connectString: String,
     stateToEventTypeMap.map { case (state, eventType) =>
       val name = s"ZooKeeper${eventType}PerSec"
       metricNames += name
-      state -> newMeter(name, eventType.toLowerCase(Locale.ROOT), TimeUnit.SECONDS)
+      state -> metricsGroup.newMeter(name, eventType.toLowerCase(Locale.ROOT), TimeUnit.SECONDS)
     }
   }
-
-  private val clientConfig = zkClientConfig getOrElse new ZKClientConfig()
 
   info(s"Initializing a new session to $connectString.")
   // Fail-fast if there's an error during construction (so don't call initialize, which retries forever)
   @volatile private var zooKeeper = new ZooKeeper(connectString, sessionTimeoutMs, ZooKeeperClientWatcher,
     clientConfig)
 
-  private[zookeeper] def getClientConfig = clientConfig
-
-  newGauge("SessionState", () => connectionState.toString)
+  metricsGroup.newGauge("SessionState", () => connectionState.toString)
 
   metricNames += "SessionState"
 
@@ -127,10 +116,6 @@ class ZooKeeperClient(connectString: String,
     case e: Throwable =>
       close()
       throw e
-  }
-
-  override def metricName(name: String, metricTags: scala.collection.Map[String, String]): MetricName = {
-    explicitMetricName(metricGroup, metricType, name, metricTags)
   }
 
   /**
@@ -245,7 +230,6 @@ class ZooKeeperClient(connectString: String,
           Option(opResults).map(results => zkOps.zip(results.asScala).map { case (zkOp, result) =>
             ZkOpResult(zkOp, result)
           }).orNull
-
         zooKeeper.multi(zkOps.map(_.toZookeeperOp).asJava,
           (rc, path, ctx, opResults) =>
             callback(MultiResponse(Code.get(rc), path, Option(ctx), toZkOpResult(opResults), responseMetadata(sendTimeMs))),
@@ -362,7 +346,7 @@ class ZooKeeperClient(connectString: String,
       zNodeChildChangeHandlers.clear()
       stateChangeHandlers.clear()
       zooKeeper.close()
-      metricNames.foreach(removeMetric(_))
+      metricNames.foreach(metricsGroup.removeMetric(_))
     }
     info("Closed.")
   }
@@ -431,13 +415,13 @@ class ZooKeeperClient(connectString: String,
 
   // Visibility for testing
   private[zookeeper] def scheduleReinitialize(name: String, message: String, delayMs: Long): Unit = {
-    reinitializeScheduler.schedule(name, () => {
+    reinitializeScheduler.scheduleOnce(name, () => {
       info(message)
       reinitialize()
-    }, delayMs, period = -1L, unit = TimeUnit.MILLISECONDS)
+    }, delayMs)
   }
 
-  private def threadPrefix: String = name.map(n => n.replaceAll("\\s", "") + "-").getOrElse("")
+  private def threadPrefix: String = name.replaceAll("\\s", "") + "-"
 
   // package level visibility for testing only
   private[zookeeper] object ZooKeeperClientWatcher extends Watcher {
@@ -451,14 +435,14 @@ class ZooKeeperClient(connectString: String,
             isConnectedOrExpiredCondition.signalAll()
           }
           if (state == KeeperState.AuthFailed) {
-            error("Auth failed.")
+            error(s"Auth failed, initialized=$isFirstConnectionEstablished connectionState=$connectionState")
             stateChangeHandlers.values.foreach(_.onAuthFailure())
 
             // If this is during initial startup, we fail fast. Otherwise, schedule retry.
             val initialized = inLock(isConnectedOrExpiredLock) {
               isFirstConnectionEstablished
             }
-            if (initialized)
+            if (initialized && !connectionState.isAlive)
               scheduleReinitialize("auth-failed", "Reinitializing due to auth failure.", RetryBackoffMs)
           } else if (state == KeeperState.Expired) {
             scheduleReinitialize("session-expired", "Session expired.", delayMs = 0L)

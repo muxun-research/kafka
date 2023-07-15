@@ -28,59 +28,56 @@ import java.util.stream.Collectors;
 
 public class PredicateDoc {
 
-	private static final class DocInfo {
-		final String predicateName;
-		final String overview;
-		final ConfigDef configDef;
+    private static final class DocInfo {
+        final String predicateName;
+        final String overview;
+        final ConfigDef configDef;
 
-		private <P extends Predicate<?>> DocInfo(Class<P> predicateClass, String overview, ConfigDef configDef) {
-			this.predicateName = predicateClass.getName();
-			this.overview = overview;
-			this.configDef = configDef;
-		}
-	}
+        private <P extends Predicate<?>> DocInfo(Class<P> predicateClass, String overview, ConfigDef configDef) {
+            this.predicateName = predicateClass.getName();
+            this.overview = overview;
+            this.configDef = configDef;
+        }
+    }
 
-	private static final List<DocInfo> PREDICATES;
+    private static final List<DocInfo> PREDICATES;
 
-	static {
-		List<DocInfo> collect = new Plugins(Collections.emptyMap()).predicates().stream()
-				.map(p -> {
-					try {
-						String overviewDoc = (String) p.pluginClass().getDeclaredField("OVERVIEW_DOC").get(null);
-						ConfigDef configDef = (ConfigDef) p.pluginClass().getDeclaredField("CONFIG_DEF").get(null);
-						return new DocInfo(p.pluginClass(), overviewDoc, configDef);
-					} catch (ReflectiveOperationException e) {
-						throw new RuntimeException("Predicate class " + p.pluginClass().getName() + " lacks either a `public static final String OVERVIEW_DOC` or `public static final ConfigDef CONFIG_DEF`");
-					}
-				})
-				.collect(Collectors.toList());
-		collect.sort(Comparator.comparing(docInfo -> docInfo.predicateName));
-		PREDICATES = collect;
-	}
+    static {
+        List<DocInfo> collect = new Plugins(Collections.emptyMap()).predicates().stream().map(p -> {
+            try {
+                String overviewDoc = (String) p.pluginClass().getDeclaredField("OVERVIEW_DOC").get(null);
+                ConfigDef configDef = (ConfigDef) p.pluginClass().getDeclaredField("CONFIG_DEF").get(null);
+                return new DocInfo(p.pluginClass(), overviewDoc, configDef);
+            } catch (ReflectiveOperationException e) {
+                throw new RuntimeException("Predicate class " + p.pluginClass().getName() + " lacks either a `public static final String OVERVIEW_DOC` or `public static final ConfigDef CONFIG_DEF`");
+            }
+        }).sorted(Comparator.comparing(docInfo -> docInfo.predicateName)).collect(Collectors.toList());
+        PREDICATES = collect;
+    }
 
-	private static void printPredicateHtml(PrintStream out, DocInfo docInfo) {
-		out.println("<div id=\"" + docInfo.predicateName + "\">");
+    private static void printPredicateHtml(PrintStream out, DocInfo docInfo) {
+        out.println("<div id=\"" + docInfo.predicateName + "\">");
 
-		out.print("<h5>");
-		out.print(docInfo.predicateName);
-		out.println("</h5>");
+        out.print("<h5>");
+        out.print("<a href=\"#" + docInfo.predicateName + "\">" + docInfo.predicateName + "</a>");
+        out.println("</h5>");
 
-		out.println(docInfo.overview);
+        out.println(docInfo.overview);
 
-		out.println("<p/>");
+        out.println("<p/>");
 
-		out.println(docInfo.configDef.toHtml(6, key -> docInfo.predicateName + "_" + key));
+        out.println(docInfo.configDef.toHtml(6, key -> docInfo.predicateName + "_" + key));
 
-		out.println("</div>");
-	}
+        out.println("</div>");
+    }
 
-	private static void printHtml(PrintStream out) {
-		for (final DocInfo docInfo : PREDICATES) {
-			printPredicateHtml(out, docInfo);
-		}
-	}
+    private static void printHtml(PrintStream out) {
+        for (final DocInfo docInfo : PREDICATES) {
+            printPredicateHtml(out, docInfo);
+        }
+    }
 
-	public static void main(String... args) {
-		printHtml(System.out);
-	}
+    public static void main(String... args) {
+        printHtml(System.out);
+    }
 }

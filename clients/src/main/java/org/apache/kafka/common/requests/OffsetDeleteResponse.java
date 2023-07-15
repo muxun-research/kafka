@@ -17,13 +17,17 @@
 package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.message.OffsetDeleteResponseData;
+import org.apache.kafka.common.message.OffsetDeleteResponseData.OffsetDeleteResponsePartition;
+import org.apache.kafka.common.message.OffsetDeleteResponseData.OffsetDeleteResponseTopic;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
 
 import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 /**
  * Possible error codes:
@@ -44,41 +48,102 @@ import java.util.Map;
  */
 public class OffsetDeleteResponse extends AbstractResponse {
 
-	private final OffsetDeleteResponseData data;
+    public static class Builder {
+        OffsetDeleteResponseData data = new OffsetDeleteResponseData();
 
-	public OffsetDeleteResponse(OffsetDeleteResponseData data) {
-		super(ApiKeys.OFFSET_DELETE);
-		this.data = data;
-	}
+        private OffsetDeleteResponseTopic getOrCreateTopic(String topicName) {
+            OffsetDeleteResponseTopic topic = data.topics().find(topicName);
+            if (topic == null) {
+                topic = new OffsetDeleteResponseTopic().setName(topicName);
+                data.topics().add(topic);
+            }
+            return topic;
+        }
 
-	@Override
-	public OffsetDeleteResponseData data() {
-		return data;
-	}
+        public Builder addPartition(String topicName, int partitionIndex, Errors error) {
+            final OffsetDeleteResponseTopic topicResponse = getOrCreateTopic(topicName);
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> counts = new HashMap<>();
-		updateErrorCounts(counts, Errors.forCode(data.errorCode()));
-		data.topics().forEach(topic ->
-				topic.partitions().forEach(partition ->
-						updateErrorCounts(counts, Errors.forCode(partition.errorCode()))
-				)
-		);
-		return counts;
-	}
+            topicResponse.partitions().add(new OffsetDeleteResponsePartition().setPartitionIndex(partitionIndex).setErrorCode(error.code()));
 
-	public static OffsetDeleteResponse parse(ByteBuffer buffer, short version) {
-		return new OffsetDeleteResponse(new OffsetDeleteResponseData(new ByteBufferAccessor(buffer), version));
-	}
+            return this;
+        }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+        public <P> Builder addPartitions(String topicName, List<P> partitions, Function<P, Integer> partitionIndex, Errors error) {
+            final OffsetDeleteResponseTopic topicResponse = getOrCreateTopic(topicName);
 
-	@Override
-	public boolean shouldClientThrottle(short version) {
-		return version >= 0;
-	}
+            partitions.forEach(partition -> {
+                topicResponse.partitions().add(new OffsetDeleteResponsePartition().setPartitionIndex(partitionIndex.apply(partition)).setErrorCode(error.code()));
+            });
+
+            return this;
+        }
+
+        public Builder merge(OffsetDeleteResponseData newData) {
+            if (data.topics().isEmpty()) {
+                // If the current data is empty, we can discard it and use the new data.
+                data = newData;
+            } else {
+                // Otherwise, we have to merge them together.
+                newData.topics().forEach(newTopic -> {
+                    OffsetDeleteResponseTopic existingTopic = data.topics().find(newTopic.name());
+                    if (existingTopic == null) {
+                        // If no topic exists, we can directly copy the new topic data.
+                        data.topics().add(newTopic.duplicate());
+                    } else {
+                        // Otherwise, we add the partitions to the existing one. Note we
+                        // expect non-overlapping partitions here as we don't verify
+                        // if the partition is already in the list before adding it.
+                        newTopic.partitions().forEach(partition -> {
+                            existingTopic.partitions().add(partition.duplicate());
+                        });
+                    }
+                });
+            }
+
+            return this;
+        }
+
+        public OffsetDeleteResponse build() {
+            return new OffsetDeleteResponse(data);
+        }
+    }
+
+    private final OffsetDeleteResponseData data;
+
+    public OffsetDeleteResponse(OffsetDeleteResponseData data) {
+        super(ApiKeys.OFFSET_DELETE);
+        this.data = data;
+    }
+
+    @Override
+    public OffsetDeleteResponseData data() {
+        return data;
+    }
+
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        Map<Errors, Integer> counts = new HashMap<>();
+        updateErrorCounts(counts, Errors.forCode(data.errorCode()));
+        data.topics().forEach(topic -> topic.partitions().forEach(partition -> updateErrorCounts(counts, Errors.forCode(partition.errorCode()))));
+        return counts;
+    }
+
+    public static OffsetDeleteResponse parse(ByteBuffer buffer, short version) {
+        return new OffsetDeleteResponse(new OffsetDeleteResponseData(new ByteBufferAccessor(buffer), version));
+    }
+
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
+
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
+
+    @Override
+    public boolean shouldClientThrottle(short version) {
+        return version >= 0;
+    }
 }

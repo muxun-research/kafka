@@ -16,6 +16,11 @@
  */
 package org.apache.kafka.common.security.ssl.mock;
 
+import org.apache.kafka.common.config.types.Password;
+import org.apache.kafka.test.TestSslUtils;
+import org.apache.kafka.test.TestSslUtils.CertificateBuilder;
+import org.apache.kafka.test.TestUtils;
+
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactorySpi;
 import javax.net.ssl.ManagerFactoryParameters;
@@ -23,18 +28,10 @@ import javax.net.ssl.X509ExtendedKeyManager;
 import java.io.File;
 import java.io.IOException;
 import java.net.Socket;
-import java.security.GeneralSecurityException;
-import java.security.KeyPair;
-import java.security.KeyStore;
-import java.security.Principal;
-import java.security.PrivateKey;
+import java.security.*;
 import java.security.cert.X509Certificate;
 import java.util.HashMap;
 import java.util.Map;
-
-import org.apache.kafka.common.config.types.Password;
-import org.apache.kafka.test.TestSslUtils;
-import org.apache.kafka.test.TestSslUtils.CertificateBuilder;
 
 public class TestKeyManagerFactory extends KeyManagerFactorySpi {
     public static final String ALGORITHM = "TestAlgorithm";
@@ -70,7 +67,7 @@ public class TestKeyManagerFactory extends KeyManagerFactorySpi {
                 this.certificate = certBuilder.generate("CN=" + CN + ", O=A server", this.keyPair);
                 Map<String, X509Certificate> certificates = new HashMap<>();
                 certificates.put(ALIAS, certificate);
-                File trustStoreFile = File.createTempFile("testTrustStore", ".jks");
+                File trustStoreFile = TestUtils.tempFile("testTrustStore", ".jks");
                 mockTrustStoreFile = trustStoreFile.getPath();
                 TestSslUtils.createTrustStore(mockTrustStoreFile, new Password(TestSslUtils.TRUST_STORE_PASSWORD), certificates);
             } catch (IOException | GeneralSecurityException e) {

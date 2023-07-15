@@ -27,27 +27,26 @@ import org.apache.kafka.streams.processor.ProcessorContext;
  */
 public interface DeserializationExceptionHandler extends Configurable {
 
-	/**
-	 * Inspect a record and the exception received.
-	 * <p>
-	 * Note, that the passed in {@link ProcessorContext} only allows to access metadata like the task ID.
-	 * However, it cannot be used to emit records via {@link ProcessorContext#forward(Object, Object)};
-	 * calling {@code forward()} (and some other methods) would result in a runtime exception.
-	 * @param context   processor context
-	 * @param record    record that failed deserialization
-	 * @param exception the actual exception
-	 */
-	DeserializationHandlerResponse handle(final ProcessorContext context,
-                                          final ConsumerRecord<byte[], byte[]> record,
-                                          final Exception exception);
+    /**
+     * Inspect a record and the exception received.
+     * <p>
+     * Note, that the passed in {@link ProcessorContext} only allows to access metadata like the task ID.
+     * However, it cannot be used to emit records via {@link ProcessorContext#forward(Object, Object)};
+     * calling {@code forward()} (and some other methods) would result in a runtime exception.
+     * @param context   processor context
+     * @param record    record that failed deserialization
+     * @param exception the actual exception
+     */
+    @SuppressWarnings("deprecation")
+    // Old PAPI. Needs to be migrated.
+    DeserializationHandlerResponse handle(final ProcessorContext context, final ConsumerRecord<byte[], byte[]> record, final Exception exception);
 
     /**
      * Enumeration that describes the response from the exception handler.
      */
     enum DeserializationHandlerResponse {
         /* continue with processing */
-        CONTINUE(0, "CONTINUE"),
-        /* fail the processing and stop */
+        CONTINUE(0, "CONTINUE"), /* fail the processing and stop */
         FAIL(1, "FAIL");
 
         /** an english description of the api--this is for debugging and can change */

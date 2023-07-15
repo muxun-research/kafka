@@ -18,6 +18,8 @@ package org.apache.kafka.common.record;
 
 import org.apache.kafka.common.message.LeaderChangeMessage;
 import org.apache.kafka.common.message.LeaderChangeMessage.Voter;
+import org.apache.kafka.common.message.SnapshotFooterRecord;
+import org.apache.kafka.common.message.SnapshotHeaderRecord;
 import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.ObjectSerializationCache;
 import org.junit.jupiter.api.Test;
@@ -30,40 +32,42 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class ControlRecordUtilsTest {
 
-	@Test
-	public void testInvalidControlRecordType() {
-		IllegalArgumentException thrown = assertThrows(
-				IllegalArgumentException.class, () -> testDeserializeRecord(ControlRecordType.COMMIT));
-		assertEquals("Expected LEADER_CHANGE control record type(3), but found COMMIT", thrown.getMessage());
-	}
+    @Test
+    public void testCurrentVersions() {
+        // If any of these asserts fail, please make sure that Kafka supports reading and
+        // writing the latest version for these records.
+        assertEquals(LeaderChangeMessage.HIGHEST_SUPPORTED_VERSION, ControlRecordUtils.LEADER_CHANGE_CURRENT_VERSION);
+        assertEquals(SnapshotHeaderRecord.HIGHEST_SUPPORTED_VERSION, ControlRecordUtils.SNAPSHOT_HEADER_CURRENT_VERSION);
+        assertEquals(SnapshotFooterRecord.HIGHEST_SUPPORTED_VERSION, ControlRecordUtils.SNAPSHOT_FOOTER_CURRENT_VERSION);
+    }
 
-	@Test
-	public void testDeserializeByteData() {
-		testDeserializeRecord(ControlRecordType.LEADER_CHANGE);
-	}
+    @Test
+    public void testInvalidControlRecordType() {
+        IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class, () -> testDeserializeRecord(ControlRecordType.COMMIT));
+        assertEquals("Expected LEADER_CHANGE control record type(2), but found COMMIT", thrown.getMessage());
+    }
 
-	private void testDeserializeRecord(ControlRecordType controlRecordType) {
-		final int leaderId = 1;
-		final int voterId = 2;
-		LeaderChangeMessage data = new LeaderChangeMessage()
-				.setLeaderId(leaderId)
-				.setVoters(Collections.singletonList(
-						new Voter().setVoterId(voterId)));
+    @Test
+    public void testDeserializeByteData() {
+        testDeserializeRecord(ControlRecordType.LEADER_CHANGE);
+    }
 
-		ByteBuffer valueBuffer = ByteBuffer.allocate(256);
-		data.write(new ByteBufferAccessor(valueBuffer), new ObjectSerializationCache(), data.highestSupportedVersion());
-		valueBuffer.flip();
+    private void testDeserializeRecord(ControlRecordType controlRecordType) {
+        final int leaderId = 1;
+        final int voterId = 2;
+        LeaderChangeMessage data = new LeaderChangeMessage().setLeaderId(leaderId).setVoters(Collections.singletonList(new Voter().setVoterId(voterId)));
 
-		byte[] keyData = new byte[]{0, 0, 0, (byte) controlRecordType.type};
+        ByteBuffer valueBuffer = ByteBuffer.allocate(256);
+        data.write(new ByteBufferAccessor(valueBuffer), new ObjectSerializationCache(), data.highestSupportedVersion());
+        valueBuffer.flip();
 
-		DefaultRecord record = new DefaultRecord(
-				256, (byte) 0, 0, 0L, 0, ByteBuffer.wrap(keyData), valueBuffer, null
-		);
+        byte[] keyData = new byte[]{0, 0, 0, (byte) controlRecordType.type()};
 
-		LeaderChangeMessage deserializedData = ControlRecordUtils.deserializeLeaderChangeMessage(record);
+        DefaultRecord record = new DefaultRecord(256, (byte) 0, 0, 0L, 0, ByteBuffer.wrap(keyData), valueBuffer, null);
 
-		assertEquals(leaderId, deserializedData.leaderId());
-		assertEquals(Collections.singletonList(
-				new Voter().setVoterId(voterId)), deserializedData.voters());
-	}
+        LeaderChangeMessage deserializedData = ControlRecordUtils.deserializeLeaderChangeMessage(record);
+
+        assertEquals(leaderId, deserializedData.leaderId());
+        assertEquals(Collections.singletonList(new Voter().setVoterId(voterId)), deserializedData.voters());
+    }
 }

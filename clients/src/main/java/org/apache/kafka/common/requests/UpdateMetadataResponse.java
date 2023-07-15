@@ -26,34 +26,39 @@ import java.util.Map;
 
 public class UpdateMetadataResponse extends AbstractResponse {
 
-	private final UpdateMetadataResponseData data;
+    private final UpdateMetadataResponseData data;
 
-	public UpdateMetadataResponse(UpdateMetadataResponseData data) {
-		super(ApiKeys.UPDATE_METADATA);
-		this.data = data;
-	}
+    public UpdateMetadataResponse(UpdateMetadataResponseData data) {
+        super(ApiKeys.UPDATE_METADATA);
+        this.data = data;
+    }
 
-	public Errors error() {
-		return Errors.forCode(data.errorCode());
-	}
+    public Errors error() {
+        return Errors.forCode(data.errorCode());
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		return errorCounts(error());
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        return errorCounts(error());
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return DEFAULT_THROTTLE_TIME;
-	}
+    @Override
+    public int throttleTimeMs() {
+        return DEFAULT_THROTTLE_TIME;
+    }
 
-	public static UpdateMetadataResponse parse(ByteBuffer buffer, short version) {
-		return new UpdateMetadataResponse(new UpdateMetadataResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        // Not supported by the response schema
+    }
 
-	@Override
-	public UpdateMetadataResponseData data() {
-		return data;
-	}
+    public static UpdateMetadataResponse parse(ByteBuffer buffer, short version) {
+        return new UpdateMetadataResponse(new UpdateMetadataResponseData(new ByteBufferAccessor(buffer), version));
+    }
+
+    @Override
+    public UpdateMetadataResponseData data() {
+        return data;
+    }
 
 }

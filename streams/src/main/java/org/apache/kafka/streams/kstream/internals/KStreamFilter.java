@@ -17,32 +17,32 @@
 package org.apache.kafka.streams.kstream.internals;
 
 import org.apache.kafka.streams.kstream.Predicate;
-import org.apache.kafka.streams.processor.api.ContextualProcessor;
-import org.apache.kafka.streams.processor.api.Processor;
-import org.apache.kafka.streams.processor.api.ProcessorSupplier;
-import org.apache.kafka.streams.processor.api.Record;
+import org.apache.kafka.streams.processor.api.ContextualFixedKeyProcessor;
+import org.apache.kafka.streams.processor.api.FixedKeyProcessor;
+import org.apache.kafka.streams.processor.api.FixedKeyProcessorSupplier;
+import org.apache.kafka.streams.processor.api.FixedKeyRecord;
 
-class KStreamFilter<K, V> implements ProcessorSupplier<K, V, K, V> {
+class KStreamFilter<K, V> implements FixedKeyProcessorSupplier<K, V, V> {
 
-	private final Predicate<K, V> predicate;
-	private final boolean filterNot;
+    private final Predicate<K, V> predicate;
+    private final boolean filterNot;
 
-	public KStreamFilter(final Predicate<K, V> predicate, final boolean filterNot) {
-		this.predicate = predicate;
-		this.filterNot = filterNot;
-	}
+    public KStreamFilter(final Predicate<K, V> predicate, final boolean filterNot) {
+        this.predicate = predicate;
+        this.filterNot = filterNot;
+    }
 
-	@Override
-	public Processor<K, V, K, V> get() {
-		return new KStreamFilterProcessor();
-	}
+    @Override
+    public FixedKeyProcessor<K, V, V> get() {
+        return new KStreamFilterProcessor();
+    }
 
-	private class KStreamFilterProcessor extends ContextualProcessor<K, V, K, V> {
-		@Override
-		public void process(final Record<K, V> record) {
-			if (filterNot ^ predicate.test(record.key(), record.value())) {
-				context().forward(record);
-			}
-		}
-	}
+    private class KStreamFilterProcessor extends ContextualFixedKeyProcessor<K, V, V> {
+        @Override
+        public void process(final FixedKeyRecord<K, V> record) {
+            if (filterNot ^ predicate.test(record.key(), record.value())) {
+                context().forward(record);
+            }
+        }
+    }
 }

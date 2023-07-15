@@ -22,7 +22,8 @@
   "name": "DescribeDelegationTokenRequest",
   // Version 1 is the same as version 0.
   // Version 2 adds flexible version support
-  "validVersions": "0-2",
+  // Version 3 adds token requester into the response
+  "validVersions": "0-3",
   "flexibleVersions": "2+",
   "fields": [
     {

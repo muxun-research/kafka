@@ -26,66 +26,54 @@ import org.apache.kafka.streams.processor.internals.metrics.ProcessorNodeMetrics
 import static org.apache.kafka.streams.kstream.internals.WrappingNullableUtils.prepareKeyDeserializer;
 import static org.apache.kafka.streams.kstream.internals.WrappingNullableUtils.prepareValueDeserializer;
 
-public class SourceNode<KIn, VIn, KOut, VOut> extends ProcessorNode<KIn, VIn, KOut, VOut> {
+public class SourceNode<KIn, VIn> extends ProcessorNode<KIn, VIn, KIn, VIn> {
 
-	private InternalProcessorContext context;
-	private Deserializer<KIn> keyDeserializer;
-	private Deserializer<VIn> valDeserializer;
-	private final TimestampExtractor timestampExtractor;
-	private Sensor processAtSourceSensor;
+    private InternalProcessorContext<KIn, VIn> context;
+    private Deserializer<KIn> keyDeserializer;
+    private Deserializer<VIn> valDeserializer;
+    private final TimestampExtractor timestampExtractor;
+    private Sensor processAtSourceSensor;
 
-	public SourceNode(final String name,
-					  final TimestampExtractor timestampExtractor,
-					  final Deserializer<KIn> keyDeserializer,
-					  final Deserializer<VIn> valDeserializer) {
-		super(name);
-		this.timestampExtractor = timestampExtractor;
-		this.keyDeserializer = keyDeserializer;
-		this.valDeserializer = valDeserializer;
-	}
+    public SourceNode(final String name, final TimestampExtractor timestampExtractor, final Deserializer<KIn> keyDeserializer, final Deserializer<VIn> valDeserializer) {
+        super(name);
+        this.timestampExtractor = timestampExtractor;
+        this.keyDeserializer = keyDeserializer;
+        this.valDeserializer = valDeserializer;
+    }
 
-	public SourceNode(final String name,
-					  final Deserializer<KIn> keyDeserializer,
-					  final Deserializer<VIn> valDeserializer) {
-		this(name, null, keyDeserializer, valDeserializer);
-	}
+    public SourceNode(final String name, final Deserializer<KIn> keyDeserializer, final Deserializer<VIn> valDeserializer) {
+        this(name, null, keyDeserializer, valDeserializer);
+    }
 
-	KIn deserializeKey(final String topic, final Headers headers, final byte[] data) {
-		return keyDeserializer.deserialize(topic, headers, data);
-	}
+    KIn deserializeKey(final String topic, final Headers headers, final byte[] data) {
+        return keyDeserializer.deserialize(topic, headers, data);
+    }
 
-	VIn deserializeValue(final String topic, final Headers headers, final byte[] data) {
-		return valDeserializer.deserialize(topic, headers, data);
-	}
+    VIn deserializeValue(final String topic, final Headers headers, final byte[] data) {
+        return valDeserializer.deserialize(topic, headers, data);
+    }
 
     @Override
-    public void init(final InternalProcessorContext context) {
-		// It is important to first create the sensor before calling init on the
-		// parent object. Otherwise due to backwards compatibility an empty sensor
-		// without parent is created with the same name.
-		// Once the backwards compatibility is not needed anymore it might be possible to
-		// change this.
-		processAtSourceSensor = ProcessorNodeMetrics.processorAtSourceSensorOrForwardSensor(
-				Thread.currentThread().getName(),
-				context.taskId().toString(),
-				context.currentNode().name(),
-				context.metrics()
-		);
-		super.init(context);
-		this.context = context;
+    public void init(final InternalProcessorContext<KIn, VIn> context) {
+        // It is important to first create the sensor before calling init on the
+        // parent object. Otherwise due to backwards compatibility an empty sensor
+        // without parent is created with the same name.
+        // Once the backwards compatibility is not needed anymore it might be possible to
+        // change this.
+        processAtSourceSensor = ProcessorNodeMetrics.processAtSourceSensor(Thread.currentThread().getName(), context.taskId().toString(), context.currentNode().name(), context.metrics());
+        super.init(context);
+        this.context = context;
 
-		final Deserializer<?> contextKeyDeserializer = ProcessorContextUtils.getKeyDeserializer(context);
-		final Deserializer<?> contextValueDeserializer = ProcessorContextUtils.getValueDeserializer(context);
-		keyDeserializer = prepareKeyDeserializer(keyDeserializer, contextKeyDeserializer, contextValueDeserializer);
-		valDeserializer = prepareValueDeserializer(valDeserializer, contextKeyDeserializer, contextValueDeserializer);
-	}
+        keyDeserializer = prepareKeyDeserializer(keyDeserializer, context, name());
+        valDeserializer = prepareValueDeserializer(valDeserializer, context, name());
+    }
 
 
-	@Override
-	public void process(final Record<KIn, VIn> record) {
-		context.forward(record);
-		processAtSourceSensor.record(1.0d, context.currentSystemTimeMs());
-	}
+    @Override
+    public void process(final Record<KIn, VIn> record) {
+        context.forward(record);
+        processAtSourceSensor.record(1.0d, context.currentSystemTimeMs());
+    }
 
     /**
      * @return a string representation of this node, useful for debugging.

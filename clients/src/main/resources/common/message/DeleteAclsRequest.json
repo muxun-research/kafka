@@ -17,12 +17,15 @@
   "apiKey": 31,
   "type": "request",
   "listeners": [
-    "zkBroker"
+    "zkBroker",
+    "broker",
+    "controller"
   ],
   "name": "DeleteAclsRequest",
   // Version 1 adds the pattern type.
   // Version 2 enables flexible versions.
-  "validVersions": "0-2",
+  // Version 3 adds the user resource type.
+  "validVersions": "0-3",
   "flexibleVersions": "2+",
   "fields": [
     {
@@ -57,13 +60,28 @@
           "type": "string",
           "versions": "0+",
           "nullableVersions": "0+",
-        "about": "The principal filter, or null to accept all principals." },
-      { "name": "HostFilter", "type": "string", "versions": "0+", "nullableVersions": "0+",
-        "about": "The host filter, or null to accept all hosts." },
-      { "name": "Operation", "type": "int8", "versions": "0+",
-        "about": "The ACL operation." },
-      { "name": "PermissionType", "type": "int8", "versions": "0+",
-        "about": "The permission type." }
-    ]}
+          "about": "The principal filter, or null to accept all principals."
+        },
+        {
+          "name": "HostFilter",
+          "type": "string",
+          "versions": "0+",
+          "nullableVersions": "0+",
+          "about": "The host filter, or null to accept all hosts."
+        },
+        {
+          "name": "Operation",
+          "type": "int8",
+          "versions": "0+",
+          "about": "The ACL operation."
+        },
+        {
+          "name": "PermissionType",
+          "type": "int8",
+          "versions": "0+",
+          "about": "The permission type."
+        }
+      ]
+    }
   ]
 }

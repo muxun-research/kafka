@@ -63,6 +63,10 @@ private[transaction] sealed trait TransactionState {
    * Get the name of this state. This is exposed through the `DescribeTransactions` API.
    */
   def name: String
+
+  def validPreviousStates: Set[TransactionState]
+
+  def isExpirationAllowed: Boolean = false
 }
 
 /**
@@ -74,6 +78,9 @@ private[transaction] sealed trait TransactionState {
 private[transaction] case object Empty extends TransactionState {
   val id: Byte = 0
   val name: String = "Empty"
+  val validPreviousStates: Set[TransactionState] = Set(Empty, CompleteCommit, CompleteAbort)
+
+  override def isExpirationAllowed: Boolean = true
 }
 
 /**
@@ -87,6 +94,7 @@ private[transaction] case object Empty extends TransactionState {
 private[transaction] case object Ongoing extends TransactionState {
   val id: Byte = 1
   val name: String = "Ongoing"
+  val validPreviousStates: Set[TransactionState] = Set(Ongoing, Empty, CompleteCommit, CompleteAbort)
 }
 
 /**
@@ -97,6 +105,7 @@ private[transaction] case object Ongoing extends TransactionState {
 private[transaction] case object PrepareCommit extends TransactionState {
   val id: Byte = 2
   val name: String = "PrepareCommit"
+  val validPreviousStates: Set[TransactionState] = Set(Ongoing)
 }
 
 /**
@@ -107,6 +116,7 @@ private[transaction] case object PrepareCommit extends TransactionState {
 private[transaction] case object PrepareAbort extends TransactionState {
   val id: Byte = 3
   val name: String = "PrepareAbort"
+  val validPreviousStates: Set[TransactionState] = Set(Ongoing, PrepareEpochFence)
 }
 
 /**
@@ -117,6 +127,9 @@ private[transaction] case object PrepareAbort extends TransactionState {
 private[transaction] case object CompleteCommit extends TransactionState {
   val id: Byte = 4
   val name: String = "CompleteCommit"
+  val validPreviousStates: Set[TransactionState] = Set(PrepareCommit)
+
+  override def isExpirationAllowed: Boolean = true
 }
 
 /**
@@ -127,6 +140,9 @@ private[transaction] case object CompleteCommit extends TransactionState {
 private[transaction] case object CompleteAbort extends TransactionState {
   val id: Byte = 5
   val name: String = "CompleteAbort"
+  val validPreviousStates: Set[TransactionState] = Set(PrepareAbort)
+
+  override def isExpirationAllowed: Boolean = true
 }
 
 /**
@@ -135,6 +151,7 @@ private[transaction] case object CompleteAbort extends TransactionState {
 private[transaction] case object Dead extends TransactionState {
   val id: Byte = 6
   val name: String = "Dead"
+  val validPreviousStates: Set[TransactionState] = Set(Empty, CompleteAbort, CompleteCommit)
 }
 
 /**
@@ -144,6 +161,7 @@ private[transaction] case object Dead extends TransactionState {
 private[transaction] case object PrepareEpochFence extends TransactionState {
   val id: Byte = 7
   val name: String = "PrepareEpochFence"
+  val validPreviousStates: Set[TransactionState] = Set(Ongoing)
 }
 
 private[transaction] object TransactionMetadata {
@@ -160,20 +178,6 @@ private[transaction] object TransactionMetadata {
             lastProducerEpoch: Short, txnTimeoutMs: Int, state: TransactionState, timestamp: Long) =
     new TransactionMetadata(transactionalId, producerId, lastProducerId, producerEpoch, lastProducerEpoch,
       txnTimeoutMs, state, collection.mutable.Set.empty[TopicPartition], timestamp, timestamp)
-
-  def isValidTransition(oldState: TransactionState, newState: TransactionState): Boolean =
-    TransactionMetadata.validPreviousStates(newState).contains(oldState)
-
-  private val validPreviousStates: Map[TransactionState, Set[TransactionState]] =
-    Map(Empty -> Set(Empty, CompleteCommit, CompleteAbort),
-      Ongoing -> Set(Ongoing, Empty, CompleteCommit, CompleteAbort),
-      PrepareCommit -> Set(Ongoing),
-      PrepareAbort -> Set(Ongoing, PrepareEpochFence),
-      CompleteCommit -> Set(PrepareCommit),
-      CompleteAbort -> Set(PrepareAbort),
-      Dead -> Set(Empty, CompleteAbort, CompleteCommit),
-      PrepareEpochFence -> Set(Ongoing)
-    )
 
   def isEpochExhausted(producerEpoch: Short): Boolean = producerEpoch >= Short.MaxValue - 1
 }
@@ -380,11 +384,14 @@ private[transaction] class TransactionMetadata(val transactionalId: String,
     if (newProducerId < 0)
       throw new IllegalArgumentException(s"Illegal new producer id $newProducerId")
 
-    if (newEpoch < 0)
+    // The epoch is initialized to NO_PRODUCER_EPOCH when the TransactionMetadata
+    // is created for the first time and it could stay like this until transitioning
+    // to Dead.
+    if (newState != Dead && newEpoch < 0)
       throw new IllegalArgumentException(s"Illegal new producer epoch $newEpoch")
 
     // check that the new state transition is valid and update the pending state if necessary
-    if (TransactionMetadata.validPreviousStates(newState).contains(state)) {
+    if (newState.validPreviousStates.contains(state)) {
       val transitMetadata = TxnTransitMetadata(newProducerId, producerId, newEpoch, newLastEpoch, newTxnTimeoutMs, newState,
         newTopicPartitions, newTxnStartTimestamp, updateTimestamp)
       debug(s"TransactionalId $transactionalId prepare transition from $state to $transitMetadata")

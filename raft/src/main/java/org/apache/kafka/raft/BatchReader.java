@@ -17,8 +17,6 @@
 package org.apache.kafka.raft;
 
 import java.util.Iterator;
-import java.util.List;
-import java.util.Objects;
 import java.util.OptionalLong;
 
 /**
@@ -29,84 +27,31 @@ import java.util.OptionalLong;
  * is that it allows us to push blocking operations such as reads from disk outside
  * of the Raft IO thread. This helps to ensure that a slow state machine will not
  * affect replication.
- * @param <T> record type (see {@link org.apache.kafka.raft.RecordSerde})
+ * @param <T> record type (see {@link org.apache.kafka.server.common.serialization.RecordSerde})
  */
-public interface BatchReader<T> extends Iterator<BatchReader.Batch<T>>, AutoCloseable {
+public interface BatchReader<T> extends Iterator<Batch<T>>, AutoCloseable {
 
-	/**
-	 * Get the base offset of the readable batches. Note that this value is a constant
-	 * which is defined when the {@link BatchReader} instance is constructed. It does
-	 * not change based on reader progress.
-	 * @return the base offset
-	 */
-	long baseOffset();
+    /**
+     * Get the base offset of the readable batches. Note that this value is a constant
+     * which is defined when the {@link BatchReader} instance is constructed. It does
+     * not change based on reader progress.
+     * @return the base offset
+     */
+    long baseOffset();
 
-	/**
-	 * Get the last offset of the batch if it is known. When reading from disk, we may
-	 * not know the last offset of a set of records until it has been read from disk.
-	 * In this case, the state machine cannot advance to the next committed data until
-	 * all batches from the {@link BatchReader} instance have been consumed.
-	 * @return optional last offset
-	 */
-	OptionalLong lastOffset();
+    /**
+     * Get the last offset of the batch if it is known. When reading from disk, we may
+     * not know the last offset of a set of records until it has been read from disk.
+     * In this case, the state machine cannot advance to the next committed data until
+     * all batches from the {@link BatchReader} instance have been consumed.
+     * @return optional last offset
+     */
+    OptionalLong lastOffset();
 
-	/**
-	 * Close this reader. It is the responsibility of the {@link RaftClient.Listener}
-	 * to close each reader passed to {@link RaftClient.Listener#handleCommit(BatchReader)}.
-	 */
-	@Override
-	void close();
-
-	class Batch<T> {
-		private final long baseOffset;
-		private final int epoch;
-		private final List<T> records;
-
-		public Batch(long baseOffset, int epoch, List<T> records) {
-			this.baseOffset = baseOffset;
-			this.epoch = epoch;
-			this.records = records;
-		}
-
-		public long lastOffset() {
-			return baseOffset + records.size() - 1;
-		}
-
-		public long baseOffset() {
-			return baseOffset;
-		}
-
-		public List<T> records() {
-			return records;
-		}
-
-		public int epoch() {
-			return epoch;
-		}
-
-		@Override
-		public String toString() {
-			return "Batch(" +
-					"baseOffset=" + baseOffset +
-					", epoch=" + epoch +
-					", records=" + records +
-					')';
-		}
-
-		@Override
-		public boolean equals(Object o) {
-			if (this == o) return true;
-			if (o == null || getClass() != o.getClass()) return false;
-			Batch<?> batch = (Batch<?>) o;
-			return baseOffset == batch.baseOffset &&
-					epoch == batch.epoch &&
-					Objects.equals(records, batch.records);
-		}
-
-		@Override
-		public int hashCode() {
-			return Objects.hash(baseOffset, epoch, records);
-		}
-	}
-
+    /**
+     * Close this reader. It is the responsibility of the {@link RaftClient.Listener}
+     * to close each reader passed to {@link RaftClient.Listener#handleCommit(BatchReader)}.
+     */
+    @Override
+    void close();
 }

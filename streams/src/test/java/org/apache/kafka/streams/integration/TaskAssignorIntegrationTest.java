@@ -37,6 +37,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.rules.TestName;
+import org.junit.rules.Timeout;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
@@ -45,27 +46,25 @@ import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
-import static org.apache.kafka.common.utils.Utils.mkEntry;
-import static org.apache.kafka.common.utils.Utils.mkMap;
-import static org.apache.kafka.common.utils.Utils.mkObjectProperties;
+import static org.apache.kafka.common.utils.Utils.*;
 import static org.apache.kafka.streams.integration.utils.IntegrationTestUtils.safeUniqueTestName;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.instanceOf;
-import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.sameInstance;
+import static org.hamcrest.Matchers.*;
 
 @Category(IntegrationTest.class)
 public class TaskAssignorIntegrationTest {
+    @Rule
+    public Timeout globalTimeout = Timeout.seconds(600);
 
-	public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(1);
+    public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(1);
 
-	@BeforeClass
-	public static void startCluster() throws IOException {
-		CLUSTER.start();
-	}
+    @BeforeClass
+    public static void startCluster() throws IOException {
+        CLUSTER.start();
+    }
 
-	@AfterClass
-	public static void closeCluster() {
+    @AfterClass
+    public static void closeCluster() {
 		CLUSTER.stop();
 	}
 

@@ -18,12 +18,7 @@
 package org.apache.kafka.connect.runtime.health;
 
 import org.apache.kafka.connect.errors.ConnectException;
-import org.apache.kafka.connect.health.ConnectClusterDetails;
-import org.apache.kafka.connect.health.ConnectClusterState;
-import org.apache.kafka.connect.health.ConnectorHealth;
-import org.apache.kafka.connect.health.ConnectorState;
-import org.apache.kafka.connect.health.ConnectorType;
-import org.apache.kafka.connect.health.TaskState;
+import org.apache.kafka.connect.health.*;
 import org.apache.kafka.connect.runtime.Herder;
 import org.apache.kafka.connect.runtime.rest.entities.ConnectorStateInfo;
 import org.apache.kafka.connect.util.FutureCallback;
@@ -72,13 +67,7 @@ public class ConnectClusterStateImpl implements ConnectClusterState {
             state.connector().trace()
         );
         Map<Integer, TaskState> taskStates = taskStates(state.tasks());
-        ConnectorHealth connectorHealth = new ConnectorHealth(
-            connName,
-            connectorState,
-            taskStates,
-            ConnectorType.valueOf(state.type().name())
-        );
-        return connectorHealth;
+        return new ConnectorHealth(connName, connectorState, taskStates, ConnectorType.valueOf(state.type().name()));
     }
 
     @Override

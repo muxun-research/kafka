@@ -17,15 +17,15 @@
 
 package kafka.utils
 
-import java.util.concurrent.TimeUnit
-
 import org.apache.kafka.common.MetricName
-import org.apache.kafka.common.metrics.{KafkaMetric, MetricConfig, Quota, QuotaViolationException}
 import org.apache.kafka.common.metrics.stats.{Rate, Value}
-
-import scala.jdk.CollectionConverters._
+import org.apache.kafka.common.metrics.{KafkaMetric, MetricConfig, Quota, QuotaViolationException}
+import org.apache.kafka.server.util.MockTime
 import org.junit.jupiter.api.Assertions._
 import org.junit.jupiter.api.Test
+
+import java.util.concurrent.TimeUnit
+import scala.jdk.CollectionConverters._
 
 class QuotaUtilsTest {
 

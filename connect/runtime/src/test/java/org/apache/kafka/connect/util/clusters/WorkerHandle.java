@@ -47,57 +47,64 @@ public class WorkerHandle {
      * @return the worker's handle
      */
     public static WorkerHandle start(String name, Map<String, String> workerProperties) {
-		return new WorkerHandle(name, new ConnectDistributed().startConnect(workerProperties));
-	}
+        return new WorkerHandle(name, new ConnectDistributed().startConnect(workerProperties));
+    }
 
-	/**
-	 * Stop this worker.
-	 */
-	public void stop() {
-		worker.stop();
-	}
+    /**
+     * Stop this worker.
+     */
+    public void stop() {
+        worker.stop();
+    }
 
-	/**
-	 * Determine if this worker is running.
-	 * @return true if the worker is running, or false otherwise
-	 */
-	public boolean isRunning() {
-		return worker.isRunning();
-	}
+    /**
+     * Determine if this worker is running.
+     * @return true if the worker is running, or false otherwise
+     */
+    public boolean isRunning() {
+        return worker.isRunning();
+    }
 
-	/**
-	 * Get the workers's name corresponding to this handle.
-	 * @return the worker's name
-	 */
-	public String name() {
-		return workerName;
-	}
+    /**
+     * Get the workers's name corresponding to this handle.
+     * @return the worker's name
+     */
+    public String name() {
+        return workerName;
+    }
 
-	/**
-	 * Get the workers's url that accepts requests to its REST endpoint.
-	 * @return the worker's url
-	 */
-	public URI url() {
-		return worker.restUrl();
-	}
+    /**
+     * Get the workers's url that accepts requests to its REST endpoint.
+     * @return the worker's url
+     */
+    public URI url() {
+        return worker.rest().serverUrl();
+    }
 
-	/**
-	 * Get the workers's url that accepts requests to its Admin REST endpoint.
-	 * @return the worker's admin url
-	 */
-	public URI adminUrl() {
-		return worker.adminUrl();
-	}
+    /**
+     * Get the workers's url that accepts requests to its Admin REST endpoint.
+     * @return the worker's admin url
+     */
+    public URI adminUrl() {
+        return worker.rest().adminUrl();
+    }
 
-	@Override
-	public String toString() {
-		return "WorkerHandle{" +
-				"workerName='" + workerName + '\'' +
-				"workerURL='" + worker.restUrl() + '\'' +
-				'}';
-	}
+    /**
+     * Set a new timeout for REST requests to the worker. Useful if a request is expected
+     * to block, since the time spent awaiting that request can be reduced and test runtime
+     * bloat can be avoided.
+     * @param requestTimeoutMs the new timeout in milliseconds; must be positive
+     */
+    public void requestTimeout(long requestTimeoutMs) {
+        worker.rest().requestTimeout(requestTimeoutMs);
+    }
 
-	@Override
+    @Override
+    public String toString() {
+        return "WorkerHandle{" + "workerName='" + workerName + '\'' + "workerURL='" + worker.rest().serverUrl() + '\'' + '}';
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) {
             return true;

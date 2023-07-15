@@ -24,25 +24,44 @@ import org.apache.kafka.common.feature.{Features, SupportedVersionRange}
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.{ClusterResource, Endpoint, Node}
+import org.apache.kafka.metadata.{BrokerRegistration, VersionRange}
 import org.apache.kafka.server.authorizer.AuthorizerServerInfo
 
 import java.util
-import scala.collection.Seq
+import scala.compat.java8.OptionConverters._
 import scala.jdk.CollectionConverters._
 
 object Broker {
   private[kafka] case class ServerInfo(clusterResource: ClusterResource,
                                        brokerId: Int,
                                        endpoints: util.List[Endpoint],
-                                       interBrokerEndpoint: Endpoint) extends AuthorizerServerInfo
+                                       interBrokerEndpoint: Endpoint,
+                                       earlyStartListeners: util.Set[String]) extends AuthorizerServerInfo
 
   def apply(id: Int, endPoints: Seq[EndPoint], rack: Option[String]): Broker = {
     new Broker(id, endPoints, rack, emptySupportedFeatures)
+  }
+
+  private def supportedFeatures(features: java.util.Map[String, VersionRange]): java.util
+  .Map[String, SupportedVersionRange] = {
+    features.asScala.map { case (name, range) =>
+      name -> new SupportedVersionRange(range.min(), range.max())
+    }.asJava
+  }
+
+  def fromBrokerRegistration(registration: BrokerRegistration): Broker = {
+    new Broker(
+      registration.id(),
+      registration.listeners().values().asScala.map(EndPoint.fromJava).toSeq,
+      registration.rack().asScala,
+      Features.supportedFeatures(supportedFeatures(registration.supportedFeatures()))
+    )
   }
 }
 
 /**
  * A Kafka broker.
+ *
  * @param id        a broker id
  * @param endPoints a collection of EndPoint. Each end-point is (host, port, listener name, security protocol).
  * @param rack      an optional rack
@@ -91,6 +110,7 @@ case class Broker(id: Int, endPoints: Seq[EndPoint], rack: Option[String], featu
     val clusterResource: ClusterResource = new ClusterResource(clusterId)
     val interBrokerEndpoint: Endpoint = endPoint(config.interBrokerListenerName).toJava
     val brokerEndpoints: util.List[Endpoint] = endPoints.toList.map(_.toJava).asJava
-    Broker.ServerInfo(clusterResource, id, brokerEndpoints, interBrokerEndpoint)
+    Broker.ServerInfo(clusterResource, id, brokerEndpoints, interBrokerEndpoint,
+      config.earlyStartListeners.map(_.value()).asJava)
   }
 }

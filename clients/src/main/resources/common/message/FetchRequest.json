@@ -25,7 +25,7 @@
   //
   // Version 1 is the same as version 0.
   //
-  // Starting in Version 2, the requestor must be able to handle Kafka Log
+  // Starting in Version 2, the requester must be able to handle Kafka Log
   // Message format version 1.
   //
   // Version 3 adds MaxBytes.  Starting in version 3, the partition ordering in
@@ -51,7 +51,13 @@
   // Version 12 adds flexible versions support as well as epoch validation through
   // the `LastFetchedEpoch` field
   //
-  "validVersions": "0-12",
+  // Version 13 replaces topic names with topic IDs (KIP-516). May return UNKNOWN_TOPIC_ID error code.
+  //
+  // Version 14 is the same as version 13 but it also receives a new error called OffsetMovedToTieredStorageException(KIP-405)
+  //
+  // Version 15 adds the ReplicaState which includes new field ReplicaEpoch and the ReplicaId. Also,
+  // deprecate the old ReplicaId field and set its default value to -1. (KIP-903)
+  "validVersions": "0-15",
   "flexibleVersions": "12+",
   "fields": [
     {
@@ -68,9 +74,34 @@
     {
       "name": "ReplicaId",
       "type": "int32",
-      "versions": "0+",
+      "versions": "0-14",
+      "default": "-1",
       "entityType": "brokerId",
       "about": "The broker ID of the follower, of -1 if this request is from a consumer."
+    },
+    {
+      "name": "ReplicaState",
+      "type": "ReplicaState",
+      "versions": "15+",
+      "taggedVersions": "15+",
+      "tag": 1,
+      "fields": [
+        {
+          "name": "ReplicaId",
+          "type": "int32",
+          "versions": "15+",
+          "default": "-1",
+          "entityType": "brokerId",
+          "about": "The replica ID of the follower, or -1 if this request is from a consumer."
+        },
+        {
+          "name": "ReplicaEpoch",
+          "type": "int64",
+          "versions": "15+",
+          "default": "-1",
+          "about": "The epoch of this follower, or -1 if not available."
+        }
+      ]
     },
     {
       "name": "MaxWaitMs",
@@ -125,9 +156,17 @@
         {
           "name": "Topic",
           "type": "string",
-          "versions": "0+",
+          "versions": "0-12",
           "entityType": "topicName",
+          "ignorable": true,
           "about": "The name of the topic to fetch."
+        },
+        {
+          "name": "TopicId",
+          "type": "uuid",
+          "versions": "13+",
+          "ignorable": true,
+          "about": "The unique topic ID"
         },
         {
           "name": "Partitions",
@@ -177,8 +216,10 @@
               "versions": "0+",
               "about": "The maximum bytes to fetch from this partition.  See KIP-74 for cases where this limit may not be honored."
             }
-          ]}
-    ]},
+          ]
+        }
+      ]
+    },
     {
       "name": "ForgottenTopicsData",
       "type": "[]ForgottenTopic",
@@ -189,9 +230,17 @@
         {
           "name": "Topic",
           "type": "string",
-          "versions": "7+",
+          "versions": "7-12",
           "entityType": "topicName",
-          "about": "The partition name."
+          "ignorable": true,
+          "about": "The topic name."
+        },
+        {
+          "name": "TopicId",
+          "type": "uuid",
+          "versions": "13+",
+          "ignorable": true,
+          "about": "The unique topic ID"
         },
         {
           "name": "Partitions",
@@ -201,7 +250,13 @@
         }
       ]
     },
-    { "name": "RackId", "type":  "string", "versions": "11+", "default": "", "ignorable": true,
-      "about": "Rack ID of the consumer making this request"}
+    {
+      "name": "RackId",
+      "type": "string",
+      "versions": "11+",
+      "default": "",
+      "ignorable": true,
+      "about": "Rack ID of the consumer making this request"
+    }
   ]
 }

@@ -34,18 +34,9 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.InetAddress;
-import java.net.MalformedURLException;
-import java.net.URL;
-import java.net.UnknownHostException;
+import java.net.*;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Scanner;
+import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -213,7 +204,6 @@ public class PushHttpMetricsReporter implements MetricsReporter {
                 }
             } catch (Throwable t) {
                 log.error("Error reporting metrics", t);
-                throw new KafkaException("Failed to report current metrics", t);
             } finally {
                 if (connection != null) {
                     connection.disconnect();

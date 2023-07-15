@@ -25,34 +25,32 @@ import java.util.Objects;
  * A struct containing information about the member to be removed.
  */
 public class MemberToRemove {
-	private final String groupInstanceId;
+    private final String groupInstanceId;
 
-	public MemberToRemove(String groupInstanceId) {
-		this.groupInstanceId = groupInstanceId;
-	}
+    public MemberToRemove(String groupInstanceId) {
+        this.groupInstanceId = groupInstanceId;
+    }
 
-	@Override
-	public boolean equals(Object o) {
-		if (o instanceof MemberToRemove) {
-			MemberToRemove otherMember = (MemberToRemove) o;
-			return this.groupInstanceId.equals(otherMember.groupInstanceId);
-		} else {
-			return false;
-		}
-	}
+    @Override
+    public boolean equals(Object o) {
+        if (o instanceof MemberToRemove) {
+            MemberToRemove otherMember = (MemberToRemove) o;
+            return this.groupInstanceId.equals(otherMember.groupInstanceId);
+        } else {
+            return false;
+        }
+    }
 
-	@Override
-	public int hashCode() {
-		return Objects.hash(groupInstanceId);
-	}
+    @Override
+    public int hashCode() {
+        return Objects.hash(groupInstanceId);
+    }
 
-	MemberIdentity toMemberIdentity() {
-		return new MemberIdentity()
-				.setGroupInstanceId(groupInstanceId)
-				.setMemberId(JoinGroupRequest.UNKNOWN_MEMBER_ID);
-	}
+    MemberIdentity toMemberIdentity() {
+        return new MemberIdentity().setGroupInstanceId(groupInstanceId).setMemberId(JoinGroupRequest.UNKNOWN_MEMBER_ID);
+    }
 
-	public String groupInstanceId() {
-		return groupInstanceId;
-	}
+    public String groupInstanceId() {
+        return groupInstanceId;
+    }
 }

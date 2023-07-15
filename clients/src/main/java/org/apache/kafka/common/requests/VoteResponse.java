@@ -30,11 +30,11 @@ import java.util.Map;
 
 /**
  * Possible error codes.
- * <p>
+ *
  * Top level errors:
  * - {@link Errors#CLUSTER_AUTHORIZATION_FAILED}
  * - {@link Errors#BROKER_NOT_AVAILABLE}
- * <p>
+ *
  * Partition level errors:
  * - {@link Errors#FENCED_LEADER_EPOCH}
  * - {@link Errors#INVALID_REQUEST}
@@ -42,57 +42,47 @@ import java.util.Map;
  * - {@link Errors#UNKNOWN_TOPIC_OR_PARTITION}
  */
 public class VoteResponse extends AbstractResponse {
-	private final VoteResponseData data;
+    private final VoteResponseData data;
 
-	public VoteResponse(VoteResponseData data) {
-		super(ApiKeys.VOTE);
-		this.data = data;
-	}
+    public VoteResponse(VoteResponseData data) {
+        super(ApiKeys.VOTE);
+        this.data = data;
+    }
 
-	public static VoteResponseData singletonResponse(Errors topLevelError,
-													 TopicPartition topicPartition,
-													 Errors partitionLevelError,
-													 int leaderEpoch,
-													 int leaderId,
-													 boolean voteGranted) {
-		return new VoteResponseData()
-				.setErrorCode(topLevelError.code())
-				.setTopics(Collections.singletonList(
-						new VoteResponseData.TopicData()
-								.setTopicName(topicPartition.topic())
-								.setPartitions(Collections.singletonList(
-										new VoteResponseData.PartitionData()
-												.setErrorCode(partitionLevelError.code())
-												.setLeaderId(leaderId)
-												.setLeaderEpoch(leaderEpoch)
-												.setVoteGranted(voteGranted)))));
-	}
+    public static VoteResponseData singletonResponse(Errors topLevelError, TopicPartition topicPartition, Errors partitionLevelError, int leaderEpoch, int leaderId, boolean voteGranted) {
+        return new VoteResponseData().setErrorCode(topLevelError.code()).setTopics(Collections.singletonList(new VoteResponseData.TopicData().setTopicName(topicPartition.topic()).setPartitions(Collections.singletonList(new VoteResponseData.PartitionData().setErrorCode(partitionLevelError.code()).setLeaderId(leaderId).setLeaderEpoch(leaderEpoch).setVoteGranted(voteGranted)))));
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> errors = new HashMap<>();
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        Map<Errors, Integer> errors = new HashMap<>();
 
-		errors.put(Errors.forCode(data.errorCode()), 1);
+        errors.put(Errors.forCode(data.errorCode()), 1);
 
-		for (VoteResponseData.TopicData topicResponse : data.topics()) {
-			for (VoteResponseData.PartitionData partitionResponse : topicResponse.partitions()) {
-				updateErrorCounts(errors, Errors.forCode(partitionResponse.errorCode()));
-			}
-		}
-		return errors;
-	}
+        for (VoteResponseData.TopicData topicResponse : data.topics()) {
+            for (VoteResponseData.PartitionData partitionResponse : topicResponse.partitions()) {
+                updateErrorCounts(errors, Errors.forCode(partitionResponse.errorCode()));
+            }
+        }
+        return errors;
+    }
 
-	@Override
-	public VoteResponseData data() {
-		return data;
-	}
+    @Override
+    public VoteResponseData data() {
+        return data;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return DEFAULT_THROTTLE_TIME;
-	}
+    @Override
+    public int throttleTimeMs() {
+        return DEFAULT_THROTTLE_TIME;
+    }
 
-	public static VoteResponse parse(ByteBuffer buffer, short version) {
-		return new VoteResponse(new VoteResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        // Not supported by the response schema
+    }
+
+    public static VoteResponse parse(ByteBuffer buffer, short version) {
+        return new VoteResponse(new VoteResponseData(new ByteBufferAccessor(buffer), version));
+    }
 }

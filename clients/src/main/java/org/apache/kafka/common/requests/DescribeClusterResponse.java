@@ -30,35 +30,38 @@ import java.util.stream.Collectors;
 
 public class DescribeClusterResponse extends AbstractResponse {
 
-	private final DescribeClusterResponseData data;
+    private final DescribeClusterResponseData data;
 
-	public DescribeClusterResponse(DescribeClusterResponseData data) {
-		super(ApiKeys.DESCRIBE_CLUSTER);
-		this.data = data;
-	}
+    public DescribeClusterResponse(DescribeClusterResponseData data) {
+        super(ApiKeys.DESCRIBE_CLUSTER);
+        this.data = data;
+    }
 
-	public Map<Integer, Node> nodes() {
-		return data.brokers().valuesList().stream()
-				.map(b -> new Node(b.brokerId(), b.host(), b.port(), b.rack()))
-				.collect(Collectors.toMap(Node::id, Function.identity()));
-	}
+    public Map<Integer, Node> nodes() {
+        return data.brokers().valuesList().stream().map(b -> new Node(b.brokerId(), b.host(), b.port(), b.rack())).collect(Collectors.toMap(Node::id, Function.identity()));
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		return errorCounts(Errors.forCode(data.errorCode()));
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        return errorCounts(Errors.forCode(data.errorCode()));
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
 
-	@Override
-	public DescribeClusterResponseData data() {
-		return data;
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	public static DescribeClusterResponse parse(ByteBuffer buffer, short version) {
-		return new DescribeClusterResponse(new DescribeClusterResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public DescribeClusterResponseData data() {
+        return data;
+    }
+
+    public static DescribeClusterResponse parse(ByteBuffer buffer, short version) {
+        return new DescribeClusterResponse(new DescribeClusterResponseData(new ByteBufferAccessor(buffer), version));
+    }
 }

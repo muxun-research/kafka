@@ -17,9 +17,15 @@
 
 package org.apache.kafka.metalog;
 
+import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Utils;
+import org.apache.kafka.metalog.LocalLogManager.LeaderChangeBatch;
+import org.apache.kafka.metalog.LocalLogManager.LocalRecordBatch;
 import org.apache.kafka.metalog.LocalLogManager.SharedLogData;
+import org.apache.kafka.raft.LeaderAndEpoch;
+import org.apache.kafka.server.common.ApiMessageAndVersion;
+import org.apache.kafka.snapshot.RawSnapshotReader;
 import org.apache.kafka.test.TestUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,116 +34,186 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 public class LocalLogManagerTestEnv implements AutoCloseable {
-	private static final Logger log =
-			LoggerFactory.getLogger(LocalLogManagerTestEnv.class);
+    private static final Logger log = LoggerFactory.getLogger(LocalLogManagerTestEnv.class);
 
-	/**
-	 * The first error we encountered during this test, or the empty string if we have
-	 * not encountered any.
-	 */
-	final AtomicReference<String> firstError = new AtomicReference<>(null);
+    private final String clusterId;
 
-	/**
-	 * The test directory, which we will delete once the test is over.
-	 */
-	private final File dir;
+    /**
+     * The first error we encountered during this test, or the empty string if we have
+     * not encountered any.
+     */
+    final AtomicReference<String> firstError = new AtomicReference<>(null);
 
-	/**
-	 * The shared data for our LocalLogManager instances.
-	 */
-	private final SharedLogData shared;
+    /**
+     * The test directory, which we will delete once the test is over.
+     */
+    private final File dir;
 
-	/**
-	 * A list of log managers.
-	 */
-	private final List<LocalLogManager> logManagers;
+    /**
+     * The shared data for our LocalLogManager instances.
+     */
+    private final SharedLogData shared;
 
-	public static LocalLogManagerTestEnv createWithMockListeners(int numManagers) throws Exception {
-		LocalLogManagerTestEnv testEnv = new LocalLogManagerTestEnv(numManagers);
-		try {
-			for (LocalLogManager logManager : testEnv.logManagers) {
-				logManager.register(new MockMetaLogManagerListener());
-			}
-		} catch (Exception e) {
-			testEnv.close();
-			throw e;
-		}
-		return testEnv;
-	}
+    /**
+     * A list of log managers.
+     */
+    private final List<LocalLogManager> logManagers;
 
-	public LocalLogManagerTestEnv(int numManagers) throws Exception {
-		dir = TestUtils.tempDirectory();
-		shared = new SharedLogData();
-		List<LocalLogManager> newLogManagers = new ArrayList<>(numManagers);
-		try {
-			for (int nodeId = 0; nodeId < numManagers; nodeId++) {
-				newLogManagers.add(new LocalLogManager(
-						new LogContext(String.format("[LocalLogManager %d] ", nodeId)),
-						nodeId,
-						shared,
-						String.format("LocalLogManager-%d_", nodeId)));
-			}
-			for (LocalLogManager logManager : newLogManagers) {
-				logManager.initialize();
-			}
-		} catch (Throwable t) {
-			for (LocalLogManager logManager : newLogManagers) {
-				logManager.close();
-			}
-			throw t;
-		}
-		this.logManagers = newLogManagers;
-	}
+    public static class Builder {
+        private final int numManagers;
+        private Optional<RawSnapshotReader> snapshotReader = Optional.empty();
+        private Consumer<SharedLogData> sharedLogDataInitializer = __ -> {
+        };
 
-	AtomicReference<String> firstError() {
-		return firstError;
-	}
+        public Builder(int numManagers) {
+            this.numManagers = numManagers;
+        }
 
-	File dir() {
-		return dir;
-	}
+        public Builder setSnapshotReader(RawSnapshotReader snapshotReader) {
+            this.snapshotReader = Optional.of(snapshotReader);
+            return this;
+        }
 
-	MetaLogLeader waitForLeader() throws InterruptedException {
-		AtomicReference<MetaLogLeader> value = new AtomicReference<>(null);
-		TestUtils.retryOnExceptionWithTimeout(3, 20000, () -> {
-			MetaLogLeader result = null;
-			for (LocalLogManager logManager : logManagers) {
-				MetaLogLeader leader = logManager.leader();
-				if (leader.nodeId() == logManager.nodeId()) {
-					if (result != null) {
-						throw new RuntimeException("node " + leader.nodeId() +
-								" thinks it's the leader, but so does " + result.nodeId());
-					}
-					result = leader;
-				}
-			}
-			if (result == null) {
-				throw new RuntimeException("No leader found.");
-			}
-			value.set(result);
-		});
-		return value.get();
-	}
+        public Builder setSharedLogDataInitializer(Consumer<SharedLogData> sharedLogDataInitializer) {
+            this.sharedLogDataInitializer = sharedLogDataInitializer;
+            return this;
+        }
 
-	public List<LocalLogManager> logManagers() {
-		return logManagers;
-	}
+        public LocalLogManagerTestEnv build() {
+            return new LocalLogManagerTestEnv(numManagers, snapshotReader, sharedLogDataInitializer);
+        }
 
-	@Override
-	public void close() throws InterruptedException {
-		try {
-			for (LocalLogManager logManager : logManagers) {
-				logManager.beginShutdown();
-			}
-			for (LocalLogManager logManager : logManagers) {
-				logManager.close();
-			}
-			Utils.delete(dir);
-		} catch (IOException e) {
-			log.error("Error deleting {}", dir.getAbsolutePath(), e);
-		}
-	}
+        public LocalLogManagerTestEnv buildWithMockListeners() {
+            LocalLogManagerTestEnv env = build();
+            try {
+                for (LocalLogManager logManager : env.logManagers) {
+                    logManager.register(new MockMetaLogManagerListener(logManager.nodeId().getAsInt()));
+                }
+            } catch (Exception e) {
+                try {
+                    env.close();
+                } catch (Exception t) {
+                    log.error("Error while closing new log environment", t);
+                }
+                throw e;
+            }
+            return env;
+        }
+    }
+
+    private LocalLogManagerTestEnv(int numManagers, Optional<RawSnapshotReader> snapshotReader, Consumer<SharedLogData> sharedLogDataInitializer) {
+        clusterId = Uuid.randomUuid().toString();
+        dir = TestUtils.tempDirectory();
+        shared = new SharedLogData(snapshotReader);
+        sharedLogDataInitializer.accept(shared);
+        List<LocalLogManager> newLogManagers = new ArrayList<>(numManagers);
+        try {
+            for (int nodeId = 0; nodeId < numManagers; nodeId++) {
+                newLogManagers.add(new LocalLogManager(new LogContext(String.format("[LocalLogManager %d] ", nodeId)), nodeId, shared, String.format("LocalLogManager-%d_", nodeId)));
+            }
+            for (LocalLogManager logManager : newLogManagers) {
+                logManager.initialize();
+            }
+        } catch (Throwable t) {
+            for (LocalLogManager logManager : newLogManagers) {
+                logManager.close();
+            }
+            throw t;
+        }
+        this.logManagers = newLogManagers;
+    }
+
+    /**
+     * Return all records in the log as a list.
+     */
+    public List<ApiMessageAndVersion> allRecords() {
+        return shared.allRecords();
+    }
+
+    /**
+     * Append some records to the log. This method is meant to be called before the
+     * controllers are started, to simulate a pre-existing metadata log.
+     * @param records The records to be appended. Will be added in a single batch.
+     */
+    public void appendInitialRecords(List<ApiMessageAndVersion> records) {
+        int initialLeaderEpoch = 1;
+        shared.append(new LeaderChangeBatch(new LeaderAndEpoch(OptionalInt.empty(), initialLeaderEpoch + 1)));
+        shared.append(new LocalRecordBatch(initialLeaderEpoch + 1, 0, records));
+        shared.append(new LeaderChangeBatch(new LeaderAndEpoch(OptionalInt.of(0), initialLeaderEpoch + 2)));
+    }
+
+    public String clusterId() {
+        return clusterId;
+    }
+
+    AtomicReference<String> firstError() {
+        return firstError;
+    }
+
+    File dir() {
+        return dir;
+    }
+
+    LeaderAndEpoch waitForLeader() throws InterruptedException {
+        AtomicReference<LeaderAndEpoch> value = new AtomicReference<>(null);
+        TestUtils.retryOnExceptionWithTimeout(20000, 3, () -> {
+            LeaderAndEpoch result = null;
+            for (LocalLogManager logManager : logManagers) {
+                LeaderAndEpoch leader = logManager.leaderAndEpoch();
+                int nodeId = logManager.nodeId().getAsInt();
+                if (leader.isLeader(nodeId)) {
+                    if (result != null) {
+                        throw new RuntimeException("node " + nodeId + " thinks it's the leader, but so does " + result.leaderId());
+                    }
+                    result = leader;
+                }
+            }
+            if (result == null) {
+                throw new RuntimeException("No leader found.");
+            }
+            value.set(result);
+        });
+        return value.get();
+    }
+
+    public List<LocalLogManager> logManagers() {
+        return logManagers;
+    }
+
+    public RawSnapshotReader waitForSnapshot(long committedOffset) throws InterruptedException {
+        return shared.waitForSnapshot(committedOffset);
+    }
+
+    public RawSnapshotReader waitForLatestSnapshot() throws InterruptedException {
+        return shared.waitForLatestSnapshot();
+    }
+
+    public long appendedBytes() {
+        return shared.appendedBytes();
+    }
+
+    public LeaderAndEpoch leaderAndEpoch() {
+        return shared.leaderAndEpoch();
+    }
+
+    @Override
+    public void close() throws InterruptedException {
+        try {
+            for (LocalLogManager logManager : logManagers) {
+                logManager.beginShutdown();
+            }
+            for (LocalLogManager logManager : logManagers) {
+                logManager.close();
+            }
+            Utils.delete(dir);
+        } catch (IOException e) {
+            log.error("Error deleting {}", dir.getAbsolutePath(), e);
+        }
+    }
 }

@@ -22,12 +22,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -35,127 +31,124 @@ import java.util.concurrent.ConcurrentHashMap;
  * This class is not completely thread safe.
  */
 public class InmemoryRemoteLogMetadataManager implements RemoteLogMetadataManager {
-	private static final Logger log = LoggerFactory.getLogger(InmemoryRemoteLogMetadataManager.class);
+    private static final Logger log = LoggerFactory.getLogger(InmemoryRemoteLogMetadataManager.class);
 
-	private Map<TopicIdPartition, RemotePartitionDeleteMetadata> idToPartitionDeleteMetadata =
-			new ConcurrentHashMap<>();
+    private Map<TopicIdPartition, RemotePartitionDeleteMetadata> idToPartitionDeleteMetadata = new ConcurrentHashMap<>();
 
-	private Map<TopicIdPartition, RemoteLogMetadataCache> idToRemoteLogMetadataCache = new ConcurrentHashMap<>();
+    private Map<TopicIdPartition, RemoteLogMetadataCache> idToRemoteLogMetadataCache = new ConcurrentHashMap<>();
 
-	@Override
-	public void addRemoteLogSegmentMetadata(RemoteLogSegmentMetadata remoteLogSegmentMetadata)
-			throws RemoteStorageException {
-		log.debug("Adding remote log segment : [{}]", remoteLogSegmentMetadata);
-		Objects.requireNonNull(remoteLogSegmentMetadata, "remoteLogSegmentMetadata can not be null");
+    private static final CompletableFuture<Void> COMPLETED_FUTURE = new CompletableFuture<>();
 
-		RemoteLogSegmentId remoteLogSegmentId = remoteLogSegmentMetadata.remoteLogSegmentId();
+    static {
+        COMPLETED_FUTURE.complete(null);
+    }
 
-		idToRemoteLogMetadataCache
-				.computeIfAbsent(remoteLogSegmentId.topicIdPartition(), id -> new RemoteLogMetadataCache())
-				.addCopyInProgressSegment(remoteLogSegmentMetadata);
-	}
+    @Override
+    public CompletableFuture<Void> addRemoteLogSegmentMetadata(RemoteLogSegmentMetadata remoteLogSegmentMetadata) {
+        log.debug("Adding remote log segment : [{}]", remoteLogSegmentMetadata);
+        Objects.requireNonNull(remoteLogSegmentMetadata, "remoteLogSegmentMetadata can not be null");
 
-	@Override
-	public void updateRemoteLogSegmentMetadata(RemoteLogSegmentMetadataUpdate metadataUpdate)
-			throws RemoteStorageException {
-		log.debug("Updating remote log segment: [{}]", metadataUpdate);
-		Objects.requireNonNull(metadataUpdate, "metadataUpdate can not be null");
+        RemoteLogSegmentId remoteLogSegmentId = remoteLogSegmentMetadata.remoteLogSegmentId();
 
-		getRemoteLogMetadataCache(metadataUpdate.remoteLogSegmentId().topicIdPartition())
-				.updateRemoteLogSegmentMetadata(metadataUpdate);
-	}
+        idToRemoteLogMetadataCache.computeIfAbsent(remoteLogSegmentId.topicIdPartition(), id -> new RemoteLogMetadataCache()).addCopyInProgressSegment(remoteLogSegmentMetadata);
 
-	private RemoteLogMetadataCache getRemoteLogMetadataCache(TopicIdPartition topicIdPartition)
-			throws RemoteResourceNotFoundException {
-		RemoteLogMetadataCache remoteLogMetadataCache = idToRemoteLogMetadataCache.get(topicIdPartition);
-		if (remoteLogMetadataCache == null) {
-			throw new RemoteResourceNotFoundException("No existing metadata found for partition: " + topicIdPartition);
-		}
+        return COMPLETED_FUTURE;
+    }
 
-		return remoteLogMetadataCache;
-	}
+    @Override
+    public CompletableFuture<Void> updateRemoteLogSegmentMetadata(RemoteLogSegmentMetadataUpdate metadataUpdate) throws RemoteStorageException {
+        log.debug("Updating remote log segment: [{}]", metadataUpdate);
+        Objects.requireNonNull(metadataUpdate, "metadataUpdate can not be null");
 
-	@Override
-	public Optional<RemoteLogSegmentMetadata> remoteLogSegmentMetadata(TopicIdPartition topicIdPartition,
-																	   int epochForOffset,
-																	   long offset)
-			throws RemoteStorageException {
-		Objects.requireNonNull(topicIdPartition, "topicIdPartition can not be null");
+        getRemoteLogMetadataCache(metadataUpdate.remoteLogSegmentId().topicIdPartition()).updateRemoteLogSegmentMetadata(metadataUpdate);
 
-		return getRemoteLogMetadataCache(topicIdPartition).remoteLogSegmentMetadata(epochForOffset, offset);
-	}
+        return COMPLETED_FUTURE;
+    }
 
-	@Override
-	public Optional<Long> highestOffsetForEpoch(TopicIdPartition topicIdPartition,
-												int leaderEpoch) throws RemoteStorageException {
-		Objects.requireNonNull(topicIdPartition, "topicIdPartition can not be null");
+    private RemoteLogMetadataCache getRemoteLogMetadataCache(TopicIdPartition topicIdPartition) throws RemoteResourceNotFoundException {
+        RemoteLogMetadataCache remoteLogMetadataCache = idToRemoteLogMetadataCache.get(topicIdPartition);
+        if (remoteLogMetadataCache == null) {
+            throw new RemoteResourceNotFoundException("No existing metadata found for partition: " + topicIdPartition);
+        }
 
-		return getRemoteLogMetadataCache(topicIdPartition).highestOffsetForEpoch(leaderEpoch);
-	}
+        return remoteLogMetadataCache;
+    }
 
-	@Override
-	public void putRemotePartitionDeleteMetadata(RemotePartitionDeleteMetadata remotePartitionDeleteMetadata)
-			throws RemoteStorageException {
-		log.debug("Adding delete state with: [{}]", remotePartitionDeleteMetadata);
-		Objects.requireNonNull(remotePartitionDeleteMetadata, "remotePartitionDeleteMetadata can not be null");
+    @Override
+    public Optional<RemoteLogSegmentMetadata> remoteLogSegmentMetadata(TopicIdPartition topicIdPartition, int epochForOffset, long offset) throws RemoteStorageException {
+        Objects.requireNonNull(topicIdPartition, "topicIdPartition can not be null");
 
-		TopicIdPartition topicIdPartition = remotePartitionDeleteMetadata.topicIdPartition();
+        return getRemoteLogMetadataCache(topicIdPartition).remoteLogSegmentMetadata(epochForOffset, offset);
+    }
 
-		RemotePartitionDeleteState targetState = remotePartitionDeleteMetadata.state();
-		RemotePartitionDeleteMetadata existingMetadata = idToPartitionDeleteMetadata.get(topicIdPartition);
-		RemotePartitionDeleteState existingState = existingMetadata != null ? existingMetadata.state() : null;
-		if (!RemotePartitionDeleteState.isValidTransition(existingState, targetState)) {
-			throw new IllegalStateException("Current state: " + existingState + ", target state: " + targetState);
-		}
+    @Override
+    public Optional<Long> highestOffsetForEpoch(TopicIdPartition topicIdPartition, int leaderEpoch) throws RemoteStorageException {
+        Objects.requireNonNull(topicIdPartition, "topicIdPartition can not be null");
 
-		idToPartitionDeleteMetadata.put(topicIdPartition, remotePartitionDeleteMetadata);
+        return getRemoteLogMetadataCache(topicIdPartition).highestOffsetForEpoch(leaderEpoch);
+    }
 
-		if (targetState == RemotePartitionDeleteState.DELETE_PARTITION_FINISHED) {
-			// Remove the association for the partition.
-			idToRemoteLogMetadataCache.remove(topicIdPartition);
-			idToPartitionDeleteMetadata.remove(topicIdPartition);
-		}
-	}
+    @Override
+    public CompletableFuture<Void> putRemotePartitionDeleteMetadata(RemotePartitionDeleteMetadata remotePartitionDeleteMetadata) {
+        log.debug("Adding delete state with: [{}]", remotePartitionDeleteMetadata);
+        Objects.requireNonNull(remotePartitionDeleteMetadata, "remotePartitionDeleteMetadata can not be null");
 
-	@Override
-	public Iterator<RemoteLogSegmentMetadata> listRemoteLogSegments(TopicIdPartition topicIdPartition)
-			throws RemoteStorageException {
-		Objects.requireNonNull(topicIdPartition, "topicIdPartition can not be null");
+        TopicIdPartition topicIdPartition = remotePartitionDeleteMetadata.topicIdPartition();
 
-		return getRemoteLogMetadataCache(topicIdPartition).listAllRemoteLogSegments();
-	}
+        RemotePartitionDeleteState targetState = remotePartitionDeleteMetadata.state();
+        RemotePartitionDeleteMetadata existingMetadata = idToPartitionDeleteMetadata.get(topicIdPartition);
+        RemotePartitionDeleteState existingState = existingMetadata != null ? existingMetadata.state() : null;
+        if (!RemotePartitionDeleteState.isValidTransition(existingState, targetState)) {
+            throw new IllegalStateException("Current state: " + existingState + ", target state: " + targetState);
+        }
 
-	@Override
-	public Iterator<RemoteLogSegmentMetadata> listRemoteLogSegments(TopicIdPartition topicIdPartition, int leaderEpoch)
-			throws RemoteStorageException {
-		Objects.requireNonNull(topicIdPartition, "topicIdPartition can not be null");
+        idToPartitionDeleteMetadata.put(topicIdPartition, remotePartitionDeleteMetadata);
 
-		return getRemoteLogMetadataCache(topicIdPartition).listRemoteLogSegments(leaderEpoch);
-	}
+        if (targetState == RemotePartitionDeleteState.DELETE_PARTITION_FINISHED) {
+            // Remove the association for the partition.
+            idToRemoteLogMetadataCache.remove(topicIdPartition);
+            idToPartitionDeleteMetadata.remove(topicIdPartition);
+        }
 
-	@Override
-	public void onPartitionLeadershipChanges(Set<TopicIdPartition> leaderPartitions,
-											 Set<TopicIdPartition> followerPartitions) {
-		// It is not applicable for this implementation. This will track the segments that are added/updated as part of
-		// this instance. It does not depend upon any leader or follower transitions.
-	}
+        return COMPLETED_FUTURE;
+    }
 
-	@Override
-	public void onStopPartitions(Set<TopicIdPartition> partitions) {
-		// It is not applicable for this implementation. This will track the segments that are added/updated as part of
-		// this instance. It does not depend upon stopped partitions.
-	}
+    @Override
+    public Iterator<RemoteLogSegmentMetadata> listRemoteLogSegments(TopicIdPartition topicIdPartition) throws RemoteStorageException {
+        Objects.requireNonNull(topicIdPartition, "topicIdPartition can not be null");
 
-	@Override
-	public void close() throws IOException {
-		// Clearing the references to the map and assigning empty immutable maps.
-		// Practically, this instance will not be used once it is closed.
-		idToPartitionDeleteMetadata = Collections.emptyMap();
-		idToRemoteLogMetadataCache = Collections.emptyMap();
-	}
+        return getRemoteLogMetadataCache(topicIdPartition).listAllRemoteLogSegments();
+    }
 
-	@Override
-	public void configure(Map<String, ?> configs) {
-		// Intentionally left blank here as nothing to be initialized here.
-	}
+    @Override
+    public Iterator<RemoteLogSegmentMetadata> listRemoteLogSegments(TopicIdPartition topicIdPartition, int leaderEpoch) throws RemoteStorageException {
+        Objects.requireNonNull(topicIdPartition, "topicIdPartition can not be null");
+
+        return getRemoteLogMetadataCache(topicIdPartition).listRemoteLogSegments(leaderEpoch);
+    }
+
+    @Override
+    public void onPartitionLeadershipChanges(Set<TopicIdPartition> leaderPartitions, Set<TopicIdPartition> followerPartitions) {
+        // It is not applicable for this implementation. This will track the segments that are added/updated as part of
+        // this instance. It does not depend upon any leader or follower transitions.
+    }
+
+    @Override
+    public void onStopPartitions(Set<TopicIdPartition> partitions) {
+        // It is not applicable for this implementation. This will track the segments that are added/updated as part of
+        // this instance. It does not depend upon stopped partitions.
+    }
+
+    @Override
+    public void close() throws IOException {
+        // Clearing the references to the map and assigning empty immutable maps.
+        // Practically, this instance will not be used once it is closed.
+        idToPartitionDeleteMetadata = Collections.emptyMap();
+        idToRemoteLogMetadataCache = Collections.emptyMap();
+    }
+
+    @Override
+    public void configure(Map<String, ?> configs) {
+        // Intentionally left blank here as nothing to be initialized here.
+    }
 }

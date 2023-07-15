@@ -27,13 +27,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Collections;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class SourceRecordTest {
 
@@ -62,7 +56,7 @@ public class SourceRecordTest {
     }
 
     @Test
-    public void shouldCreateSinkRecordWithEmtpyHeaders() {
+    public void shouldCreateSinkRecordWithEmptyHeaders() {
         assertEquals(SOURCE_PARTITION, record.sourcePartition());
         assertEquals(SOURCE_OFFSET, record.sourceOffset());
         assertEquals(TOPIC_NAME, record.topic());

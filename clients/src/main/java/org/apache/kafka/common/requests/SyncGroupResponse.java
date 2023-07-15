@@ -26,11 +26,11 @@ import java.util.Map;
 
 public class SyncGroupResponse extends AbstractResponse {
 
-	private final SyncGroupResponseData data;
+    private final SyncGroupResponseData data;
 
     public SyncGroupResponse(SyncGroupResponseData data) {
-		super(ApiKeys.SYNC_GROUP);
-		this.data = data;
+        super(ApiKeys.SYNC_GROUP);
+        this.data = data;
     }
 
     @Override
@@ -38,31 +38,36 @@ public class SyncGroupResponse extends AbstractResponse {
         return data.throttleTimeMs();
     }
 
-	public Errors error() {
-		return Errors.forCode(data.errorCode());
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		return errorCounts(Errors.forCode(data.errorCode()));
-	}
+    public Errors error() {
+        return Errors.forCode(data.errorCode());
+    }
 
-	@Override
-	public SyncGroupResponseData data() {
-		return data;
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        return errorCounts(Errors.forCode(data.errorCode()));
+    }
 
-	@Override
-	public String toString() {
-		return data.toString();
-	}
+    @Override
+    public SyncGroupResponseData data() {
+        return data;
+    }
 
-	public static SyncGroupResponse parse(ByteBuffer buffer, short version) {
-		return new SyncGroupResponse(new SyncGroupResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public String toString() {
+        return data.toString();
+    }
 
-	@Override
-	public boolean shouldClientThrottle(short version) {
-		return version >= 2;
-	}
+    public static SyncGroupResponse parse(ByteBuffer buffer, short version) {
+        return new SyncGroupResponse(new SyncGroupResponseData(new ByteBufferAccessor(buffer), version));
+    }
+
+    @Override
+    public boolean shouldClientThrottle(short version) {
+        return version >= 2;
+    }
 }

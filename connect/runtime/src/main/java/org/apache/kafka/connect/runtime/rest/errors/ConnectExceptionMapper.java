@@ -28,6 +28,9 @@ import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriInfo;
 import javax.ws.rs.ext.ExceptionMapper;
 
+/**
+ * Maps uncaught exceptions thrown while handling REST requests to appropriate {@link javax.ws.rs.core.Response}s
+ */
 public class ConnectExceptionMapper implements ExceptionMapper<Exception> {
     private static final Logger log = LoggerFactory.getLogger(ConnectExceptionMapper.class);
 
@@ -40,21 +43,15 @@ public class ConnectExceptionMapper implements ExceptionMapper<Exception> {
 
         if (exception instanceof ConnectRestException) {
             ConnectRestException restException = (ConnectRestException) exception;
-            return Response.status(restException.statusCode())
-                    .entity(new ErrorMessage(restException.errorCode(), restException.getMessage()))
-                    .build();
+            return Response.status(restException.statusCode()).entity(new ErrorMessage(restException.errorCode(), restException.getMessage())).build();
         }
 
-        if (exception instanceof NotFoundException) {
-            return Response.status(Response.Status.NOT_FOUND)
-                    .entity(new ErrorMessage(Response.Status.NOT_FOUND.getStatusCode(), exception.getMessage()))
-                    .build();
+        if (exception instanceof NotFoundException || exception instanceof javax.ws.rs.NotFoundException) {
+            return Response.status(Response.Status.NOT_FOUND).entity(new ErrorMessage(Response.Status.NOT_FOUND.getStatusCode(), exception.getMessage())).build();
         }
 
         if (exception instanceof AlreadyExistsException) {
-            return Response.status(Response.Status.CONFLICT)
-                    .entity(new ErrorMessage(Response.Status.CONFLICT.getStatusCode(), exception.getMessage()))
-                    .build();
+            return Response.status(Response.Status.CONFLICT).entity(new ErrorMessage(Response.Status.CONFLICT.getStatusCode(), exception.getMessage())).build();
         }
 
         if (!log.isDebugEnabled()) {
@@ -68,8 +65,6 @@ public class ConnectExceptionMapper implements ExceptionMapper<Exception> {
         } else {
             statusCode = Response.Status.INTERNAL_SERVER_ERROR.getStatusCode();
         }
-        return Response.status(statusCode)
-                .entity(new ErrorMessage(statusCode, exception.getMessage()))
-                .build();
+        return Response.status(statusCode).entity(new ErrorMessage(statusCode, exception.getMessage())).build();
     }
 }

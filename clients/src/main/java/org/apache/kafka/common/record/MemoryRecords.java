@@ -19,14 +19,12 @@ package org.apache.kafka.common.record;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.CorruptRecordException;
 import org.apache.kafka.common.message.LeaderChangeMessage;
+import org.apache.kafka.common.message.SnapshotFooterRecord;
+import org.apache.kafka.common.message.SnapshotHeaderRecord;
 import org.apache.kafka.common.network.TransferableChannel;
 import org.apache.kafka.common.record.MemoryRecords.RecordFilter.BatchRetention;
-import org.apache.kafka.common.utils.AbstractIterator;
-import org.apache.kafka.common.utils.BufferSupplier;
-import org.apache.kafka.common.utils.ByteBufferOutputStream;
-import org.apache.kafka.common.utils.CloseableIterator;
-import org.apache.kafka.common.utils.Time;
-import org.apache.kafka.common.utils.Utils;
+import org.apache.kafka.common.record.MemoryRecords.RecordFilter.BatchRetentionResult;
+import org.apache.kafka.common.utils.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,42 +51,39 @@ public class MemoryRecords extends AbstractRecords {
 
     private int validBytes = -1;
 
-	// Construct a writable memory records
-	private MemoryRecords(ByteBuffer buffer) {
-		Objects.requireNonNull(buffer, "buffer should not be null");
-		this.buffer = buffer;
-	}
+    // Construct a writable memory records
+    private MemoryRecords(ByteBuffer buffer) {
+        Objects.requireNonNull(buffer, "buffer should not be null");
+        this.buffer = buffer;
+    }
 
-	@Override
-	public int sizeInBytes() {
-		return buffer.limit();
-	}
+    @Override
+    public int sizeInBytes() {
+        return buffer.limit();
+    }
 
-	@Override
-	public long writeTo(TransferableChannel channel, long position, int length) throws IOException {
-		if (position > Integer.MAX_VALUE)
-			throw new IllegalArgumentException("position should not be greater than Integer.MAX_VALUE: " + position);
-		if (position + length > buffer.limit())
-			throw new IllegalArgumentException("position+length should not be greater than buffer.limit(), position: "
-					+ position + ", length: " + length + ", buffer.limit(): " + buffer.limit());
+    @Override
+    public int writeTo(TransferableChannel channel, int position, int length) throws IOException {
+        if (((long) position) + length > buffer.limit())
+            throw new IllegalArgumentException("position+length should not be greater than buffer.limit(), position: " + position + ", length: " + length + ", buffer.limit(): " + buffer.limit());
 
-		return Utils.tryWriteTo(channel, (int) position, length, buffer);
-	}
+        return Utils.tryWriteTo(channel, position, length, buffer);
+    }
 
-	/**
-	 * Write all records to the given channel (including partial records).
-	 * @param channel The channel to write to
-	 * @return The number of bytes written
-	 * @throws IOException For any IO errors writing to the channel
-	 */
-	public int writeFullyTo(GatheringByteChannel channel) throws IOException {
-		buffer.mark();
-		int written = 0;
-		while (written < sizeInBytes())
-			written += channel.write(buffer);
-		buffer.reset();
-		return written;
-	}
+    /**
+     * Write all records to the given channel (including partial records).
+     * @param channel The channel to write to
+     * @return The number of bytes written
+     * @throws IOException For any IO errors writing to the channel
+     */
+    public int writeFullyTo(GatheringByteChannel channel) throws IOException {
+        buffer.mark();
+        int written = 0;
+        while (written < sizeInBytes())
+            written += channel.write(buffer);
+        buffer.reset();
+        return written;
+    }
 
     /**
      * The total number of bytes in this message set not including any partial, trailing messages. This
@@ -145,20 +140,22 @@ public class MemoryRecords extends AbstractRecords {
      *                                    performance impact.
      * @return A FilterResult with a summary of the output (for metrics) and potentially an overflow buffer
      */
-    public FilterResult filterTo(TopicPartition partition, RecordFilter filter, ByteBuffer destinationBuffer,
-                                 int maxRecordBatchSize, BufferSupplier decompressionBufferSupplier) {
+    public FilterResult filterTo(TopicPartition partition, RecordFilter filter, ByteBuffer destinationBuffer, int maxRecordBatchSize, BufferSupplier decompressionBufferSupplier) {
         return filterTo(partition, batches(), filter, destinationBuffer, maxRecordBatchSize, decompressionBufferSupplier);
     }
 
-    private static FilterResult filterTo(TopicPartition partition, Iterable<MutableRecordBatch> batches,
-                                         RecordFilter filter, ByteBuffer destinationBuffer, int maxRecordBatchSize,
-                                         BufferSupplier decompressionBufferSupplier) {
+    /**
+     * Note: This method is also used to convert the first timestamp of the batch (which is usually the timestamp of the first record)
+     * to the delete horizon of the tombstones or txn markers which are present in the batch.
+     */
+    private static FilterResult filterTo(TopicPartition partition, Iterable<MutableRecordBatch> batches, RecordFilter filter, ByteBuffer destinationBuffer, int maxRecordBatchSize, BufferSupplier decompressionBufferSupplier) {
         FilterResult filterResult = new FilterResult(destinationBuffer);
         ByteBufferOutputStream bufferOutputStream = new ByteBufferOutputStream(destinationBuffer);
-
         for (MutableRecordBatch batch : batches) {
-            long maxOffset = -1L;
-            BatchRetention batchRetention = filter.checkBatchRetention(batch);
+            final BatchRetentionResult batchRetentionResult = filter.checkBatchRetention(batch);
+            final boolean containsMarkerForEmptyTxn = batchRetentionResult.containsMarkerForEmptyTxn;
+            final BatchRetention batchRetention = batchRetentionResult.batchRetention;
+
             filterResult.bytesRead += batch.sizeInBytes();
 
             if (batchRetention == BatchRetention.DELETE)
@@ -168,59 +165,45 @@ public class MemoryRecords extends AbstractRecords {
             // allow for the possibility that a previous version corrupted the log by writing a compressed record batch
             // with a magic value not matching the magic of the records (magic < 2). This will be fixed as we
             // recopy the messages to the destination buffer.
-
             byte batchMagic = batch.magic();
-            boolean writeOriginalBatch = true;
             List<Record> retainedRecords = new ArrayList<>();
 
-            try (final CloseableIterator<Record> iterator = batch.streamingIterator(decompressionBufferSupplier)) {
-                while (iterator.hasNext()) {
-                    Record record = iterator.next();
-                    filterResult.messagesRead += 1;
-
-                    if (filter.shouldRetainRecord(batch, record)) {
-                        // Check for log corruption due to KAFKA-4298. If we find it, make sure that we overwrite
-                        // the corrupted batch with correct data.
-                        if (!record.hasMagic(batchMagic))
-                            writeOriginalBatch = false;
-
-                        if (record.offset() > maxOffset)
-                            maxOffset = record.offset();
-
-                        retainedRecords.add(record);
-                    } else {
-                        writeOriginalBatch = false;
-                    }
-                }
-            }
+            final BatchFilterResult iterationResult = filterBatch(batch, decompressionBufferSupplier, filterResult, filter, batchMagic, true, retainedRecords);
+            boolean containsTombstones = iterationResult.containsTombstones;
+            boolean writeOriginalBatch = iterationResult.writeOriginalBatch;
+            long maxOffset = iterationResult.maxOffset;
 
             if (!retainedRecords.isEmpty()) {
-                if (writeOriginalBatch) {
+                // we check if the delete horizon should be set to a new value
+                // in which case, we need to reset the base timestamp and overwrite the timestamp deltas
+                // if the batch does not contain tombstones, then we don't need to overwrite batch
+                boolean needToSetDeleteHorizon = batch.magic() >= RecordBatch.MAGIC_VALUE_V2 && (containsTombstones || containsMarkerForEmptyTxn) && !batch.deleteHorizonMs().isPresent();
+                if (writeOriginalBatch && !needToSetDeleteHorizon) {
                     batch.writeTo(bufferOutputStream);
                     filterResult.updateRetainedBatchMetadata(batch, retainedRecords.size(), false);
                 } else {
-                    MemoryRecordsBuilder builder = buildRetainedRecordsInto(batch, retainedRecords, bufferOutputStream);
+                    final MemoryRecordsBuilder builder;
+                    long deleteHorizonMs;
+                    if (needToSetDeleteHorizon)
+                        deleteHorizonMs = filter.currentTime + filter.deleteRetentionMs;
+                    else
+                        deleteHorizonMs = batch.deleteHorizonMs().orElse(RecordBatch.NO_TIMESTAMP);
+                    builder = buildRetainedRecordsInto(batch, retainedRecords, bufferOutputStream, deleteHorizonMs);
+
                     MemoryRecords records = builder.build();
                     int filteredBatchSize = records.sizeInBytes();
                     if (filteredBatchSize > batch.sizeInBytes() && filteredBatchSize > maxRecordBatchSize)
-                        log.warn("Record batch from {} with last offset {} exceeded max record batch size {} after cleaning " +
-                                        "(new size is {}). Consumers with version earlier than 0.10.1.0 may need to " +
-                                        "increase their fetch sizes.",
-                                partition, batch.lastOffset(), maxRecordBatchSize, filteredBatchSize);
+                        log.warn("Record batch from {} with last offset {} exceeded max record batch size {} after cleaning " + "(new size is {}). Consumers with version earlier than 0.10.1.0 may need to " + "increase their fetch sizes.", partition, batch.lastOffset(), maxRecordBatchSize, filteredBatchSize);
 
                     MemoryRecordsBuilder.RecordsInfo info = builder.info();
-                    filterResult.updateRetainedBatchMetadata(info.maxTimestamp, info.shallowOffsetOfMaxTimestamp,
-                            maxOffset, retainedRecords.size(), filteredBatchSize);
+                    filterResult.updateRetainedBatchMetadata(info.maxTimestamp, info.shallowOffsetOfMaxTimestamp, maxOffset, retainedRecords.size(), filteredBatchSize);
                 }
             } else if (batchRetention == BatchRetention.RETAIN_EMPTY) {
                 if (batchMagic < RecordBatch.MAGIC_VALUE_V2)
                     throw new IllegalStateException("Empty batches are only supported for magic v2 and above");
 
                 bufferOutputStream.ensureRemaining(DefaultRecordBatch.RECORD_BATCH_OVERHEAD);
-                DefaultRecordBatch.writeEmptyHeader(bufferOutputStream.buffer(), batchMagic, batch.producerId(),
-                        batch.producerEpoch(), batch.baseSequence(), batch.baseOffset(), batch.lastOffset(),
-                        batch.partitionLeaderEpoch(), batch.timestampType(), batch.maxTimestamp(),
-                        batch.isTransactional(), batch.isControlBatch());
+                DefaultRecordBatch.writeEmptyHeader(bufferOutputStream.buffer(), batchMagic, batch.producerId(), batch.producerEpoch(), batch.baseSequence(), batch.baseOffset(), batch.lastOffset(), batch.partitionLeaderEpoch(), batch.timestampType(), batch.maxTimestamp(), batch.isTransactional(), batch.isControlBatch());
                 filterResult.updateRetainedBatchMetadata(batch, 0, true);
             }
 
@@ -236,20 +219,55 @@ public class MemoryRecords extends AbstractRecords {
         return filterResult;
     }
 
-    private static MemoryRecordsBuilder buildRetainedRecordsInto(RecordBatch originalBatch,
-                                                                 List<Record> retainedRecords,
-                                                                 ByteBufferOutputStream bufferOutputStream) {
+    private static BatchFilterResult filterBatch(RecordBatch batch, BufferSupplier decompressionBufferSupplier, FilterResult filterResult, RecordFilter filter, byte batchMagic, boolean writeOriginalBatch, List<Record> retainedRecords) {
+        long maxOffset = -1;
+        boolean containsTombstones = false;
+        try (final CloseableIterator<Record> iterator = batch.streamingIterator(decompressionBufferSupplier)) {
+            while (iterator.hasNext()) {
+                Record record = iterator.next();
+                filterResult.messagesRead += 1;
+
+                if (filter.shouldRetainRecord(batch, record)) {
+                    // Check for log corruption due to KAFKA-4298. If we find it, make sure that we overwrite
+                    // the corrupted batch with correct data.
+                    if (!record.hasMagic(batchMagic))
+                        writeOriginalBatch = false;
+
+                    if (record.offset() > maxOffset)
+                        maxOffset = record.offset();
+
+                    retainedRecords.add(record);
+
+                    if (!record.hasValue()) {
+                        containsTombstones = true;
+                    }
+                } else {
+                    writeOriginalBatch = false;
+                }
+            }
+            return new BatchFilterResult(writeOriginalBatch, containsTombstones, maxOffset);
+        }
+    }
+
+    private static class BatchFilterResult {
+        private final boolean writeOriginalBatch;
+        private final boolean containsTombstones;
+        private final long maxOffset;
+
+        private BatchFilterResult(final boolean writeOriginalBatch, final boolean containsTombstones, final long maxOffset) {
+            this.writeOriginalBatch = writeOriginalBatch;
+            this.containsTombstones = containsTombstones;
+            this.maxOffset = maxOffset;
+        }
+    }
+
+    private static MemoryRecordsBuilder buildRetainedRecordsInto(RecordBatch originalBatch, List<Record> retainedRecords, ByteBufferOutputStream bufferOutputStream, final long deleteHorizonMs) {
         byte magic = originalBatch.magic();
         TimestampType timestampType = originalBatch.timestampType();
-        long logAppendTime = timestampType == TimestampType.LOG_APPEND_TIME ?
-                originalBatch.maxTimestamp() : RecordBatch.NO_TIMESTAMP;
-        long baseOffset = magic >= RecordBatch.MAGIC_VALUE_V2 ?
-                originalBatch.baseOffset() : retainedRecords.get(0).offset();
+        long logAppendTime = timestampType == TimestampType.LOG_APPEND_TIME ? originalBatch.maxTimestamp() : RecordBatch.NO_TIMESTAMP;
+        long baseOffset = magic >= RecordBatch.MAGIC_VALUE_V2 ? originalBatch.baseOffset() : retainedRecords.get(0).offset();
 
-        MemoryRecordsBuilder builder = new MemoryRecordsBuilder(bufferOutputStream, magic,
-                originalBatch.compressionType(), timestampType, baseOffset, logAppendTime, originalBatch.producerId(),
-                originalBatch.producerEpoch(), originalBatch.baseSequence(), originalBatch.isTransactional(),
-                originalBatch.isControlBatch(), originalBatch.partitionLeaderEpoch(), bufferOutputStream.limit());
+        MemoryRecordsBuilder builder = new MemoryRecordsBuilder(bufferOutputStream, magic, originalBatch.compressionType(), timestampType, baseOffset, logAppendTime, originalBatch.producerId(), originalBatch.producerEpoch(), originalBatch.baseSequence(), originalBatch.isTransactional(), originalBatch.isControlBatch(), originalBatch.partitionLeaderEpoch(), bufferOutputStream.limit(), deleteHorizonMs);
 
         for (Record record : retainedRecords)
             builder.append(record);
@@ -277,10 +295,8 @@ public class MemoryRecords extends AbstractRecords {
 
     @Override
     public String toString() {
-		return "MemoryRecords(size=" + sizeInBytes() +
-				", buffer=" + buffer +
-				")";
-	}
+        return "MemoryRecords(size=" + sizeInBytes() + ", buffer=" + buffer + ")";
+    }
 
     @Override
     public boolean equals(Object o) {
@@ -300,6 +316,24 @@ public class MemoryRecords extends AbstractRecords {
     }
 
     public static abstract class RecordFilter {
+        public final long currentTime;
+        public final long deleteRetentionMs;
+
+        public RecordFilter(final long currentTime, final long deleteRetentionMs) {
+            this.currentTime = currentTime;
+            this.deleteRetentionMs = deleteRetentionMs;
+        }
+
+        public static class BatchRetentionResult {
+            public final BatchRetention batchRetention;
+            public final boolean containsMarkerForEmptyTxn;
+
+            public BatchRetentionResult(final BatchRetention batchRetention, final boolean containsMarkerForEmptyTxn) {
+                this.batchRetention = batchRetention;
+                this.containsMarkerForEmptyTxn = containsMarkerForEmptyTxn;
+            }
+        }
+
         public enum BatchRetention {
             DELETE, // Delete the batch without inspecting records
             RETAIN_EMPTY, // Retain the batch even if it is empty
@@ -310,7 +344,7 @@ public class MemoryRecords extends AbstractRecords {
          * Check whether the full batch can be discarded (i.e. whether we even need to
          * check the records individually).
          */
-        protected abstract BatchRetention checkBatchRetention(RecordBatch batch);
+        protected abstract BatchRetentionResult checkBatchRetention(RecordBatch batch);
 
         /**
          * Check whether a record should be retained in the log. Note that {@link #checkBatchRetention(RecordBatch)}
@@ -398,21 +432,20 @@ public class MemoryRecords extends AbstractRecords {
         return new MemoryRecords(buffer);
     }
 
-    public static MemoryRecordsBuilder builder(ByteBuffer buffer,
-                                               CompressionType compressionType,
-                                               TimestampType timestampType,
-                                               long baseOffset) {
+    public static MemoryRecordsBuilder builder(ByteBuffer buffer, CompressionType compressionType, TimestampType timestampType, long baseOffset) {
         return builder(buffer, RecordBatch.CURRENT_MAGIC_VALUE, compressionType, timestampType, baseOffset);
     }
 
-    public static MemoryRecordsBuilder idempotentBuilder(ByteBuffer buffer,
-                                                         CompressionType compressionType,
-                                                         long baseOffset,
-                                                         long producerId,
-                                                         short producerEpoch,
-                                                         int baseSequence) {
-        return builder(buffer, RecordBatch.CURRENT_MAGIC_VALUE, compressionType, TimestampType.CREATE_TIME,
-                baseOffset, System.currentTimeMillis(), producerId, producerEpoch, baseSequence);
+    public static MemoryRecordsBuilder builder(ByteBuffer buffer, CompressionType compressionType, TimestampType timestampType, long baseOffset, int maxSize) {
+        long logAppendTime = RecordBatch.NO_TIMESTAMP;
+        if (timestampType == TimestampType.LOG_APPEND_TIME)
+            logAppendTime = System.currentTimeMillis();
+
+        return new MemoryRecordsBuilder(buffer, RecordBatch.CURRENT_MAGIC_VALUE, compressionType, timestampType, baseOffset, logAppendTime, RecordBatch.NO_PRODUCER_ID, RecordBatch.NO_PRODUCER_EPOCH, RecordBatch.NO_SEQUENCE, false, false, RecordBatch.NO_PARTITION_LEADER_EPOCH, maxSize);
+    }
+
+    public static MemoryRecordsBuilder idempotentBuilder(ByteBuffer buffer, CompressionType compressionType, long baseOffset, long producerId, short producerEpoch, int baseSequence) {
+        return builder(buffer, RecordBatch.CURRENT_MAGIC_VALUE, compressionType, TimestampType.CREATE_TIME, baseOffset, System.currentTimeMillis(), producerId, producerEpoch, baseSequence);
     }
 
     public static MemoryRecordsBuilder builder(ByteBuffer buffer,
@@ -624,46 +657,46 @@ public class MemoryRecords extends AbstractRecords {
         return MemoryRecords.readableRecords(buffer);
     }
 
-    public static void writeEndTransactionalMarker(ByteBuffer buffer, long initialOffset, long timestamp,
-												   int partitionLeaderEpoch, long producerId, short producerEpoch,
-												   EndTransactionMarker marker) {
-		boolean isTransactional = true;
-		MemoryRecordsBuilder builder = new MemoryRecordsBuilder(buffer, RecordBatch.CURRENT_MAGIC_VALUE, CompressionType.NONE,
-				TimestampType.CREATE_TIME, initialOffset, timestamp, producerId, producerEpoch,
-				RecordBatch.NO_SEQUENCE, isTransactional, true, partitionLeaderEpoch,
-				buffer.capacity());
-		builder.appendEndTxnMarker(timestamp, marker);
-		builder.close();
-	}
+    public static void writeEndTransactionalMarker(ByteBuffer buffer, long initialOffset, long timestamp, int partitionLeaderEpoch, long producerId, short producerEpoch, EndTransactionMarker marker) {
+        boolean isTransactional = true;
+        try (MemoryRecordsBuilder builder = new MemoryRecordsBuilder(buffer, RecordBatch.CURRENT_MAGIC_VALUE, CompressionType.NONE, TimestampType.CREATE_TIME, initialOffset, timestamp, producerId, producerEpoch, RecordBatch.NO_SEQUENCE, isTransactional, true, partitionLeaderEpoch, buffer.capacity())) {
+            builder.appendEndTxnMarker(timestamp, marker);
+        }
+    }
 
-	public static MemoryRecords withLeaderChangeMessage(
-			long initialOffset,
-			long timestamp,
-			int leaderEpoch,
-			LeaderChangeMessage leaderChangeMessage
-	) {
-		// To avoid calling message toStruct multiple times, we supply a fixed message size
-		// for leader change, as it happens rare and the buffer could still grow if not sufficient in
-		// certain edge cases.
-		ByteBuffer buffer = ByteBuffer.allocate(256);
-		writeLeaderChangeMessage(buffer, initialOffset, timestamp, leaderEpoch, leaderChangeMessage);
-		buffer.flip();
-		return MemoryRecords.readableRecords(buffer);
-	}
+    public static MemoryRecords withLeaderChangeMessage(long initialOffset, long timestamp, int leaderEpoch, ByteBuffer buffer, LeaderChangeMessage leaderChangeMessage) {
+        writeLeaderChangeMessage(buffer, initialOffset, timestamp, leaderEpoch, leaderChangeMessage);
+        buffer.flip();
+        return MemoryRecords.readableRecords(buffer);
+    }
 
-	private static void writeLeaderChangeMessage(ByteBuffer buffer,
-												 long initialOffset,
-												 long timestamp,
-												 int leaderEpoch,
-												 LeaderChangeMessage leaderChangeMessage) {
-		MemoryRecordsBuilder builder = new MemoryRecordsBuilder(
-				buffer, RecordBatch.CURRENT_MAGIC_VALUE, CompressionType.NONE,
-				TimestampType.CREATE_TIME, initialOffset, timestamp,
-				RecordBatch.NO_PRODUCER_ID, RecordBatch.NO_PRODUCER_EPOCH, RecordBatch.NO_SEQUENCE,
-				false, true, leaderEpoch, buffer.capacity()
-		);
-		builder.appendLeaderChangeMessage(timestamp, leaderChangeMessage);
-		builder.close();
-	}
+    private static void writeLeaderChangeMessage(ByteBuffer buffer, long initialOffset, long timestamp, int leaderEpoch, LeaderChangeMessage leaderChangeMessage) {
+        try (MemoryRecordsBuilder builder = new MemoryRecordsBuilder(buffer, RecordBatch.CURRENT_MAGIC_VALUE, CompressionType.NONE, TimestampType.CREATE_TIME, initialOffset, timestamp, RecordBatch.NO_PRODUCER_ID, RecordBatch.NO_PRODUCER_EPOCH, RecordBatch.NO_SEQUENCE, false, true, leaderEpoch, buffer.capacity())) {
+            builder.appendLeaderChangeMessage(timestamp, leaderChangeMessage);
+        }
+    }
 
+    public static MemoryRecords withSnapshotHeaderRecord(long initialOffset, long timestamp, int leaderEpoch, ByteBuffer buffer, SnapshotHeaderRecord snapshotHeaderRecord) {
+        writeSnapshotHeaderRecord(buffer, initialOffset, timestamp, leaderEpoch, snapshotHeaderRecord);
+        buffer.flip();
+        return MemoryRecords.readableRecords(buffer);
+    }
+
+    private static void writeSnapshotHeaderRecord(ByteBuffer buffer, long initialOffset, long timestamp, int leaderEpoch, SnapshotHeaderRecord snapshotHeaderRecord) {
+        try (MemoryRecordsBuilder builder = new MemoryRecordsBuilder(buffer, RecordBatch.CURRENT_MAGIC_VALUE, CompressionType.NONE, TimestampType.CREATE_TIME, initialOffset, timestamp, RecordBatch.NO_PRODUCER_ID, RecordBatch.NO_PRODUCER_EPOCH, RecordBatch.NO_SEQUENCE, false, true, leaderEpoch, buffer.capacity())) {
+            builder.appendSnapshotHeaderMessage(timestamp, snapshotHeaderRecord);
+        }
+    }
+
+    public static MemoryRecords withSnapshotFooterRecord(long initialOffset, long timestamp, int leaderEpoch, ByteBuffer buffer, SnapshotFooterRecord snapshotFooterRecord) {
+        writeSnapshotFooterRecord(buffer, initialOffset, timestamp, leaderEpoch, snapshotFooterRecord);
+        buffer.flip();
+        return MemoryRecords.readableRecords(buffer);
+    }
+
+    private static void writeSnapshotFooterRecord(ByteBuffer buffer, long initialOffset, long timestamp, int leaderEpoch, SnapshotFooterRecord snapshotFooterRecord) {
+        try (MemoryRecordsBuilder builder = new MemoryRecordsBuilder(buffer, RecordBatch.CURRENT_MAGIC_VALUE, CompressionType.NONE, TimestampType.CREATE_TIME, initialOffset, timestamp, RecordBatch.NO_PRODUCER_ID, RecordBatch.NO_PRODUCER_EPOCH, RecordBatch.NO_SEQUENCE, false, true, leaderEpoch, buffer.capacity())) {
+            builder.appendSnapshotFooterMessage(timestamp, snapshotFooterRecord);
+        }
+    }
 }

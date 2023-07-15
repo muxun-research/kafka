@@ -23,45 +23,57 @@ import java.util.Map;
  */
 public class OffsetSpec {
 
-	public static class EarliestSpec extends OffsetSpec {
-	}
+    public static class EarliestSpec extends OffsetSpec {
+    }
 
-	public static class LatestSpec extends OffsetSpec {
-	}
+    public static class LatestSpec extends OffsetSpec {
+    }
 
-	public static class TimestampSpec extends OffsetSpec {
-		private final long timestamp;
+    public static class MaxTimestampSpec extends OffsetSpec {
+    }
 
-		TimestampSpec(long timestamp) {
-			this.timestamp = timestamp;
-		}
+    public static class TimestampSpec extends OffsetSpec {
+        private final long timestamp;
 
-		long timestamp() {
-			return timestamp;
-		}
-	}
+        TimestampSpec(long timestamp) {
+            this.timestamp = timestamp;
+        }
 
-	/**
-	 * Used to retrieve the latest offset of a partition
-	 */
-	public static OffsetSpec latest() {
-		return new LatestSpec();
-	}
+        long timestamp() {
+            return timestamp;
+        }
+    }
 
-	/**
-	 * Used to retrieve the earliest offset of a partition
-	 */
-	public static OffsetSpec earliest() {
-		return new EarliestSpec();
-	}
+    /**
+     * Used to retrieve the latest offset of a partition
+     */
+    public static OffsetSpec latest() {
+        return new LatestSpec();
+    }
 
-	/**
-	 * Used to retrieve the earliest offset whose timestamp is greater than
-	 * or equal to the given timestamp in the corresponding partition
-	 * @param timestamp in milliseconds
-	 */
-	public static OffsetSpec forTimestamp(long timestamp) {
-		return new TimestampSpec(timestamp);
-	}
+    /**
+     * Used to retrieve the earliest offset of a partition
+     */
+    public static OffsetSpec earliest() {
+        return new EarliestSpec();
+    }
+
+    /**
+     * Used to retrieve the earliest offset whose timestamp is greater than
+     * or equal to the given timestamp in the corresponding partition
+     * @param timestamp in milliseconds
+     */
+    public static OffsetSpec forTimestamp(long timestamp) {
+        return new TimestampSpec(timestamp);
+    }
+
+    /**
+     * Used to retrieve the offset with the largest timestamp of a partition
+     * as message timestamps can be specified client side this may not match
+     * the log end offset returned by LatestSpec
+     */
+    public static OffsetSpec maxTimestamp() {
+        return new MaxTimestampSpec();
+    }
 
 }

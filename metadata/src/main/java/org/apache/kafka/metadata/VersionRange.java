@@ -23,48 +23,67 @@ import java.util.Objects;
  * An immutable class which represents version ranges.
  */
 public class VersionRange {
-	public final static VersionRange ALL = new VersionRange((short) 0, Short.MAX_VALUE);
+    public final static VersionRange ALL = of((short) 0, Short.MAX_VALUE);
 
-	private final short min;
-	private final short max;
+    private final short min;
+    private final short max;
 
-	public VersionRange(short min, short max) {
-		this.min = min;
-		this.max = max;
-	}
+    private VersionRange(short min, short max) {
+        this.min = min;
+        this.max = max;
+    }
 
-	public short min() {
-		return min;
-	}
+    public static VersionRange of(short min, short max) {
+        return new VersionRange(min, max);
+    }
 
-	public short max() {
-		return max;
-	}
+    public static VersionRange of(int min, int max) {
+        return new VersionRange((short) min, (short) max);
+    }
 
-	public boolean contains(VersionRange other) {
-		return other.min >= min && other.max <= max;
-	}
+    public short min() {
+        return min;
+    }
 
-	@Override
-	public int hashCode() {
-		return Objects.hash(min, max);
-	}
+    public short max() {
+        return max;
+    }
 
-	@Override
-	public boolean equals(Object o) {
-		if (!(o instanceof VersionRange)) return false;
-		VersionRange other = (VersionRange) o;
-		return other.min == min && other.max == max;
-	}
+    /**
+     * Check if a given version is fully contained within this range
+     */
+    public boolean contains(short version) {
+        return version >= min && version <= max;
+    }
 
-	@Override
-	public String toString() {
-		if (min == max) {
-			return String.valueOf(min);
-		} else if (max == Short.MAX_VALUE) {
-			return String.valueOf(min) + "+";
-		} else {
-			return String.valueOf(min) + "-" + String.valueOf(max);
-		}
-	}
+    /**
+     * Check if a given version range has overlap with this one
+     */
+    public boolean intersects(VersionRange other) {
+        return other.min <= max && other.max >= min;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(min, max);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof VersionRange))
+            return false;
+        VersionRange other = (VersionRange) o;
+        return other.min == min && other.max == max;
+    }
+
+    @Override
+    public String toString() {
+        if (min == max) {
+            return String.valueOf(min);
+        } else if (max == Short.MAX_VALUE) {
+            return String.valueOf(min) + "+";
+        } else {
+            return String.valueOf(min) + "-" + String.valueOf(max);
+        }
+    }
 }

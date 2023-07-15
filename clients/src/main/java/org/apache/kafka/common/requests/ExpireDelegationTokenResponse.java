@@ -48,13 +48,18 @@ public class ExpireDelegationTokenResponse extends AbstractResponse {
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-		return errorCounts(error());
+        return errorCounts(error());
     }
 
-	@Override
-	public ExpireDelegationTokenResponseData data() {
-		return data;
-	}
+    @Override
+    public ExpireDelegationTokenResponseData data() {
+        return data;
+    }
+
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
     @Override
     public int throttleTimeMs() {

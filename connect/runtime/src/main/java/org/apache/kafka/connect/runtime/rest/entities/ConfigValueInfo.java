@@ -23,19 +23,14 @@ import java.util.List;
 import java.util.Objects;
 
 public class ConfigValueInfo {
-    private String name;
-    private String value;
-    private List<String> recommendedValues;
-    private List<String> errors;
-    private boolean visible;
+    private final String name;
+    private final String value;
+    private final List<String> recommendedValues;
+    private final List<String> errors;
+    private final boolean visible;
 
     @JsonCreator
-    public ConfigValueInfo(
-        @JsonProperty("name") String name,
-        @JsonProperty("value") String value,
-        @JsonProperty("recommended_values") List<String> recommendedValues,
-        @JsonProperty("errors") List<String> errors,
-        @JsonProperty("visible") boolean visible) {
+    public ConfigValueInfo(@JsonProperty("name") String name, @JsonProperty("value") String value, @JsonProperty("recommended_values") List<String> recommendedValues, @JsonProperty("errors") List<String> errors, @JsonProperty("visible") boolean visible) {
         this.name = name;
         this.value = value;
         this.recommendedValues = recommendedValues;
@@ -87,7 +82,7 @@ public class ConfigValueInfo {
 
     @Override
     public String toString() {
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
         sb.append("[")
             .append(name)
             .append(",")

@@ -39,7 +39,7 @@ public class ScramSaslServerTest {
     private ScramFormatter formatter;
     private ScramSaslServer saslServer;
 
-	@BeforeEach
+    @BeforeEach
     public void setUp() throws Exception {
         mechanism = ScramMechanism.SCRAM_SHA_256;
         formatter  = new ScramFormatter(mechanism);
@@ -47,30 +47,30 @@ public class ScramSaslServerTest {
         credentialCache.put(USER_A, formatter.generateCredential("passwordA", 4096));
         credentialCache.put(USER_B, formatter.generateCredential("passwordB", 4096));
         ScramServerCallbackHandler callbackHandler = new ScramServerCallbackHandler(credentialCache, new DelegationTokenCache(ScramMechanism.mechanismNames()));
-        saslServer = new ScramSaslServer(mechanism, new HashMap<String, Object>(), callbackHandler);
+        saslServer = new ScramSaslServer(mechanism, new HashMap<>(), callbackHandler);
     }
 
     @Test
     public void noAuthorizationIdSpecified() throws Exception {
-		byte[] nextChallenge = saslServer.evaluateResponse(clientFirstMessage(USER_A, null));
-		assertTrue(nextChallenge.length > 0, "Next challenge is empty");
-	}
+        byte[] nextChallenge = saslServer.evaluateResponse(clientFirstMessage(USER_A, null));
+        assertTrue(nextChallenge.length > 0, "Next challenge is empty");
+    }
 
-	@Test
-	public void authorizatonIdEqualsAuthenticationId() throws Exception {
-		byte[] nextChallenge = saslServer.evaluateResponse(clientFirstMessage(USER_A, USER_A));
-		assertTrue(nextChallenge.length > 0, "Next challenge is empty");
-	}
+    @Test
+    public void authorizationIdEqualsAuthenticationId() throws Exception {
+        byte[] nextChallenge = saslServer.evaluateResponse(clientFirstMessage(USER_A, USER_A));
+        assertTrue(nextChallenge.length > 0, "Next challenge is empty");
+    }
 
-	@Test
-	public void authorizatonIdNotEqualsAuthenticationId() {
-		assertThrows(SaslAuthenticationException.class, () -> saslServer.evaluateResponse(clientFirstMessage(USER_A, USER_B)));
-	}
+    @Test
+    public void authorizationIdNotEqualsAuthenticationId() {
+        assertThrows(SaslAuthenticationException.class, () -> saslServer.evaluateResponse(clientFirstMessage(USER_A, USER_B)));
+    }
 
-	private byte[] clientFirstMessage(String userName, String authorizationId) {
-		String nonce = formatter.secureRandomString();
-		String authorizationField = authorizationId != null ? "a=" + authorizationId : "";
-		String firstMessage = String.format("n,%s,n=%s,r=%s", authorizationField, userName, nonce);
-		return firstMessage.getBytes(StandardCharsets.UTF_8);
-	}
+    private byte[] clientFirstMessage(String userName, String authorizationId) {
+        String nonce = formatter.secureRandomString();
+        String authorizationField = authorizationId != null ? "a=" + authorizationId : "";
+        String firstMessage = String.format("n,%s,n=%s,r=%s", authorizationField, userName, nonce);
+        return firstMessage.getBytes(StandardCharsets.UTF_8);
+    }
 }

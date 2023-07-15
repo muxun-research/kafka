@@ -22,29 +22,29 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class ProtoUtilsTest {
-	@Test
-	public void testDelayedAllocationSchemaDetection() {
-		//verifies that schemas known to retain a reference to the underlying byte buffer are correctly detected.
-		for (ApiKeys key : ApiKeys.values()) {
-			switch (key) {
-				case PRODUCE:
-				case JOIN_GROUP:
-				case SYNC_GROUP:
-				case SASL_AUTHENTICATE:
-				case EXPIRE_DELEGATION_TOKEN:
-				case RENEW_DELEGATION_TOKEN:
-				case ALTER_USER_SCRAM_CREDENTIALS:
-				case ENVELOPE:
-					assertTrue(key.requiresDelayedAllocation, key + " should require delayed allocation");
-					break;
-				default:
-					if (key.forwardable)
-						assertTrue(key.requiresDelayedAllocation,
-								key + " should require delayed allocation since it is forwardable");
-					else
-						assertFalse(key.requiresDelayedAllocation, key + " should not require delayed allocation");
-					break;
-			}
-		}
+    @Test
+    public void testDelayedAllocationSchemaDetection() {
+        //verifies that schemas known to retain a reference to the underlying byte buffer are correctly detected.
+        for (ApiKeys key : ApiKeys.values()) {
+            switch (key) {
+                case PRODUCE:
+                case JOIN_GROUP:
+                case SYNC_GROUP:
+                case SASL_AUTHENTICATE:
+                case EXPIRE_DELEGATION_TOKEN:
+                case RENEW_DELEGATION_TOKEN:
+                case ALTER_USER_SCRAM_CREDENTIALS:
+                case ENVELOPE:
+                case CONSUMER_GROUP_HEARTBEAT:
+                    assertTrue(key.requiresDelayedAllocation, key + " should require delayed allocation");
+                    break;
+                default:
+                    if (key.forwardable)
+                        assertTrue(key.requiresDelayedAllocation, key + " should require delayed allocation since it is forwardable");
+                    else
+                        assertFalse(key.requiresDelayedAllocation, key + " should not require delayed allocation");
+                    break;
+            }
+        }
     }
 }

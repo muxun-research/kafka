@@ -25,65 +25,65 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class ExitTest {
-	@Test
-	public void shouldHaltImmediately() {
-		List<Object> list = new ArrayList<>();
-		Exit.setHaltProcedure((statusCode, message) -> {
-			list.add(statusCode);
-			list.add(message);
-		});
-		try {
-			int statusCode = 0;
-			String message = "mesaage";
-			Exit.halt(statusCode);
-			Exit.halt(statusCode, message);
-			assertEquals(Arrays.asList(statusCode, null, statusCode, message), list);
-		} finally {
-			Exit.resetHaltProcedure();
-		}
-	}
+    @Test
+    public void shouldHaltImmediately() {
+        List<Object> list = new ArrayList<>();
+        Exit.setHaltProcedure((statusCode, message) -> {
+            list.add(statusCode);
+            list.add(message);
+        });
+        try {
+            int statusCode = 0;
+            String message = "message";
+            Exit.halt(statusCode);
+            Exit.halt(statusCode, message);
+            assertEquals(Arrays.asList(statusCode, null, statusCode, message), list);
+        } finally {
+            Exit.resetHaltProcedure();
+        }
+    }
 
-	@Test
-	public void shouldExitImmediately() {
-		List<Object> list = new ArrayList<>();
-		Exit.setExitProcedure((statusCode, message) -> {
-			list.add(statusCode);
-			list.add(message);
-		});
-		try {
-			int statusCode = 0;
-			String message = "mesaage";
-			Exit.exit(statusCode);
-			Exit.exit(statusCode, message);
-			assertEquals(Arrays.asList(statusCode, null, statusCode, message), list);
-		} finally {
-			Exit.resetExitProcedure();
-		}
-	}
+    @Test
+    public void shouldExitImmediately() {
+        List<Object> list = new ArrayList<>();
+        Exit.setExitProcedure((statusCode, message) -> {
+            list.add(statusCode);
+            list.add(message);
+        });
+        try {
+            int statusCode = 0;
+            String message = "message";
+            Exit.exit(statusCode);
+            Exit.exit(statusCode, message);
+            assertEquals(Arrays.asList(statusCode, null, statusCode, message), list);
+        } finally {
+            Exit.resetExitProcedure();
+        }
+    }
 
-	@Test
-	public void shouldAddShutdownHookImmediately() {
-		List<Object> list = new ArrayList<>();
-		Exit.setShutdownHookAdder((name, runnable) -> {
-			list.add(name);
-			list.add(runnable);
-		});
-		try {
-			Runnable runnable = () -> {
-			};
-			String name = "name";
-			Exit.addShutdownHook(name, runnable);
-			assertEquals(Arrays.asList(name, runnable), list);
-		} finally {
-			Exit.resetShutdownHookAdder();
-		}
-	}
+    @Test
+    public void shouldAddShutdownHookImmediately() {
+        List<Object> list = new ArrayList<>();
+        Exit.setShutdownHookAdder((name, runnable) -> {
+            list.add(name);
+            list.add(runnable);
+        });
+        try {
+            Runnable runnable = () -> {
+            };
+            String name = "name";
+            Exit.addShutdownHook(name, runnable);
+            assertEquals(Arrays.asList(name, runnable), list);
+        } finally {
+            Exit.resetShutdownHookAdder();
+        }
+    }
 
-	@Test
-	public void shouldNotInvokeShutdownHookImmediately() {
-		List<Object> list = new ArrayList<>();
-		Runnable runnable = () -> list.add(this);
-		Exit.addShutdownHook("message", runnable);
-		assertEquals(0, list.size());
-	}
+    @Test
+    public void shouldNotInvokeShutdownHookImmediately() {
+        List<Object> list = new ArrayList<>();
+        Runnable runnable = () -> list.add(this);
+        Exit.addShutdownHook("message", runnable);
+        assertEquals(0, list.size());
+    }
 }

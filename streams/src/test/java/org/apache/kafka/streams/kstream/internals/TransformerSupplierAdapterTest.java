@@ -16,126 +16,102 @@
  */
 package org.apache.kafka.streams.kstream.internals;
 
-import java.util.Iterator;
-import java.util.Set;
-
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.kstream.Transformer;
 import org.apache.kafka.streams.kstream.TransformerSupplier;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.state.StoreBuilder;
-import org.easymock.EasyMock;
-import org.easymock.EasyMockSupport;
-import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.Mock;
+import org.mockito.junit.MockitoJUnitRunner;
 
-import static org.hamcrest.core.IsEqual.equalTo;
-import static org.hamcrest.core.IsSame.sameInstance;
-import static org.hamcrest.core.IsNot.not;
+import java.util.Iterator;
+import java.util.Set;
+
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.core.IsEqual.equalTo;
+import static org.hamcrest.core.IsNot.not;
+import static org.hamcrest.core.IsSame.sameInstance;
+import static org.mockito.Mockito.*;
 
-@SuppressWarnings("unchecked")
-public class TransformerSupplierAdapterTest extends EasyMockSupport {
+@RunWith(MockitoJUnitRunner.StrictStubs.class)
+public class TransformerSupplierAdapterTest {
 
+    @Mock
     private ProcessorContext context;
+    @Mock
     private Transformer<String, String, KeyValue<Integer, Integer>> transformer;
-	private TransformerSupplier<String, String, KeyValue<Integer, Integer>> transformerSupplier;
-	private Set<StoreBuilder<?>> stores;
+    @Mock
+    private TransformerSupplier<String, String, KeyValue<Integer, Integer>> transformerSupplier;
+    @Mock
+    private Set<StoreBuilder<?>> stores;
 
     final String key = "Hello";
     final String value = "World";
 
-    @Before
-    public void before() {
-        context = mock(ProcessorContext.class);
-        transformer = mock(Transformer.class);
-		transformerSupplier = mock(TransformerSupplier.class);
-		stores = mock(Set.class);
-    }
-
     @Test
-    public void shouldCallInitOfAdapteeTransformer() {
-        EasyMock.expect(transformerSupplier.get()).andReturn(transformer);
-        transformer.init(context);
-        replayAll();
+    public void shouldCallInitOfAdaptedTransformer() {
+        when(transformerSupplier.get()).thenReturn(transformer);
 
-        final TransformerSupplierAdapter<String, String, Integer, Integer> adapter =
-            new TransformerSupplierAdapter<>(transformerSupplier);
+        final TransformerSupplierAdapter<String, String, Integer, Integer> adapter = new TransformerSupplierAdapter<>(transformerSupplier);
         final Transformer<String, String, Iterable<KeyValue<Integer, Integer>>> adaptedTransformer = adapter.get();
         adaptedTransformer.init(context);
 
-        verifyAll();
+        verify(transformer).init(context);
     }
 
     @Test
-	public void shouldCallCloseOfAdapteeTransformer() {
-		EasyMock.expect(transformerSupplier.get()).andReturn(transformer);
-		transformer.close();
-		replayAll();
+    public void shouldCallCloseOfAdaptedTransformer() {
+        when(transformerSupplier.get()).thenReturn(transformer);
 
-		final TransformerSupplierAdapter<String, String, Integer, Integer> adapter =
-				new TransformerSupplierAdapter<>(transformerSupplier);
-		final Transformer<String, String, Iterable<KeyValue<Integer, Integer>>> adaptedTransformer = adapter.get();
-		adaptedTransformer.close();
+        final TransformerSupplierAdapter<String, String, Integer, Integer> adapter = new TransformerSupplierAdapter<>(transformerSupplier);
+        final Transformer<String, String, Iterable<KeyValue<Integer, Integer>>> adaptedTransformer = adapter.get();
+        adaptedTransformer.close();
 
-		verifyAll();
-	}
+        verify(transformer).close();
+    }
 
-	@Test
-	public void shouldCallStoresOfAdapteeTransformerSupplier() {
-		EasyMock.expect(transformerSupplier.stores()).andReturn(stores);
-		replayAll();
+    @Test
+    public void shouldCallStoresOfAdaptedTransformerSupplier() {
+        when(transformerSupplier.stores()).thenReturn(stores);
 
-		final TransformerSupplierAdapter<String, String, Integer, Integer> adapter =
-				new TransformerSupplierAdapter<>(transformerSupplier);
-		adapter.stores();
-		verifyAll();
-	}
+        final TransformerSupplierAdapter<String, String, Integer, Integer> adapter = new TransformerSupplierAdapter<>(transformerSupplier);
+        adapter.stores();
+    }
 
-	@Test
-	public void shouldCallTransformOfAdapteeTransformerAndReturnSingletonIterable() {
-		EasyMock.expect(transformerSupplier.get()).andReturn(transformer);
-		EasyMock.expect(transformer.transform(key, value)).andReturn(KeyValue.pair(0, 1));
-		replayAll();
+    @Test
+    public void shouldCallTransformOfAdaptedTransformerAndReturnSingletonIterable() {
+        when(transformerSupplier.get()).thenReturn(transformer);
+        when(transformer.transform(key, value)).thenReturn(KeyValue.pair(0, 1));
 
-		final TransformerSupplierAdapter<String, String, Integer, Integer> adapter =
-            new TransformerSupplierAdapter<>(transformerSupplier);
+        final TransformerSupplierAdapter<String, String, Integer, Integer> adapter = new TransformerSupplierAdapter<>(transformerSupplier);
         final Transformer<String, String, Iterable<KeyValue<Integer, Integer>>> adaptedTransformer = adapter.get();
         final Iterator<KeyValue<Integer, Integer>> iterator = adaptedTransformer.transform(key, value).iterator();
 
-        verifyAll();
         assertThat(iterator.hasNext(), equalTo(true));
         iterator.next();
         assertThat(iterator.hasNext(), equalTo(false));
     }
 
     @Test
-    public void shouldCallTransformOfAdapteeTransformerAndReturnEmptyIterable() {
-        EasyMock.expect(transformerSupplier.get()).andReturn(transformer);
-        EasyMock.expect(transformer.transform(key, value)).andReturn(null);
-        replayAll();
+    public void shouldCallTransformOfAdaptedTransformerAndReturnEmptyIterable() {
+        when(transformerSupplier.get()).thenReturn(transformer);
+        when(transformer.transform(key, value)).thenReturn(null);
 
-        final TransformerSupplierAdapter<String, String, Integer, Integer> adapter =
-            new TransformerSupplierAdapter<>(transformerSupplier);
+        final TransformerSupplierAdapter<String, String, Integer, Integer> adapter = new TransformerSupplierAdapter<>(transformerSupplier);
         final Transformer<String, String, Iterable<KeyValue<Integer, Integer>>> adaptedTransformer = adapter.get();
         final Iterator<KeyValue<Integer, Integer>> iterator = adaptedTransformer.transform(key, value).iterator();
 
-        verifyAll();
         assertThat(iterator.hasNext(), equalTo(false));
     }
 
     @Test
     public void shouldAlwaysGetNewAdapterTransformer() {
-        final Transformer<String, String, KeyValue<Integer, Integer>> transformer1 = mock(Transformer.class);
-        final Transformer<String, String, KeyValue<Integer, Integer>> transformer2 = mock(Transformer.class);
-        final Transformer<String, String, KeyValue<Integer, Integer>> transformer3 = mock(Transformer.class);
-        EasyMock.expect(transformerSupplier.get()).andReturn(transformer1);
-        transformer1.init(context);
-        EasyMock.expect(transformerSupplier.get()).andReturn(transformer2);
-        transformer2.init(context);
-        EasyMock.expect(transformerSupplier.get()).andReturn(transformer3);
-        transformer3.init(context);
-        replayAll();
+        @SuppressWarnings("unchecked") final Transformer<String, String, KeyValue<Integer, Integer>> transformer1 = mock(Transformer.class);
+        @SuppressWarnings("unchecked") final Transformer<String, String, KeyValue<Integer, Integer>> transformer2 = mock(Transformer.class);
+        @SuppressWarnings("unchecked") final Transformer<String, String, KeyValue<Integer, Integer>> transformer3 = mock(Transformer.class);
+        when(transformerSupplier.get()).thenReturn(transformer1).thenReturn(transformer2).thenReturn(transformer3);
 
         final TransformerSupplierAdapter<String, String, Integer, Integer> adapter =
             new TransformerSupplierAdapter<>(transformerSupplier);
@@ -146,10 +122,12 @@ public class TransformerSupplierAdapterTest extends EasyMockSupport {
         final Transformer<String, String, Iterable<KeyValue<Integer, Integer>>> adapterTransformer3 = adapter.get();
         adapterTransformer3.init(context);
 
-        verifyAll();
         assertThat(adapterTransformer1, not(sameInstance(adapterTransformer2)));
         assertThat(adapterTransformer2, not(sameInstance(adapterTransformer3)));
         assertThat(adapterTransformer3, not(sameInstance(adapterTransformer1)));
+        verify(transformer1).init(context);
+        verify(transformer2).init(context);
+        verify(transformer3).init(context);
     }
 
 }

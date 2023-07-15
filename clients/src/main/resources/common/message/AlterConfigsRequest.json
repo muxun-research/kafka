@@ -17,7 +17,9 @@
   "apiKey": 33,
   "type": "request",
   "listeners": [
-    "zkBroker"
+    "zkBroker",
+    "broker",
+    "controller"
   ],
   "name": "AlterConfigsRequest",
   // Version 1 is the same as version 0.
@@ -56,12 +58,24 @@
               "type": "string",
               "versions": "0+",
               "mapKey": true,
-          "about": "The configuration key name." },
-        { "name": "Value", "type": "string", "versions": "0+", "nullableVersions": "0+",
-          "about": "The value to set for the configuration key."}
-      ]}
-    ]},
-    { "name": "ValidateOnly", "type": "bool", "versions": "0+",
-      "about": "True if we should validate the request, but not change the configurations."}
+              "about": "The configuration key name."
+            },
+            {
+              "name": "Value",
+              "type": "string",
+              "versions": "0+",
+              "nullableVersions": "0+",
+              "about": "The value to set for the configuration key."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ValidateOnly",
+      "type": "bool",
+      "versions": "0+",
+      "about": "True if we should validate the request, but not change the configurations."
+    }
   ]
 }

@@ -28,27 +28,26 @@ import static org.hamcrest.MatcherAssert.assertThat;
 
 public class BlockBasedTableConfigWithAccessibleCacheTest {
 
-	static {
-		RocksDB.loadLibrary();
-	}
+    static {
+        RocksDB.loadLibrary();
+    }
 
-	@Test
-	public void shouldReturnNoBlockCacheIfNoneIsSet() {
-		final BlockBasedTableConfigWithAccessibleCache configWithAccessibleCache =
-				new BlockBasedTableConfigWithAccessibleCache();
+    @Test
+    public void shouldReturnNoBlockCacheIfNoneIsSet() {
+        final BlockBasedTableConfigWithAccessibleCache configWithAccessibleCache = new BlockBasedTableConfigWithAccessibleCache();
 
-		assertThat(configWithAccessibleCache.blockCache(), nullValue());
-	}
+        assertThat(configWithAccessibleCache.blockCache(), nullValue());
+    }
 
-	@Test
-	public void shouldSetBlockCacheAndMakeItAccessible() {
-		final BlockBasedTableConfigWithAccessibleCache configWithAccessibleCache =
-				new BlockBasedTableConfigWithAccessibleCache();
-		final Cache blockCache = new LRUCache(1024);
+    @Test
+    public void shouldSetBlockCacheAndMakeItAccessible() {
+        final BlockBasedTableConfigWithAccessibleCache configWithAccessibleCache = new BlockBasedTableConfigWithAccessibleCache();
+        try (final Cache blockCache = new LRUCache(1024)) {
 
-		final BlockBasedTableConfig updatedConfig = configWithAccessibleCache.setBlockCache(blockCache);
+            final BlockBasedTableConfig updatedConfig = configWithAccessibleCache.setBlockCache(blockCache);
 
-		assertThat(updatedConfig, sameInstance(configWithAccessibleCache));
-		assertThat(configWithAccessibleCache.blockCache(), sameInstance(blockCache));
-	}
+            assertThat(updatedConfig, sameInstance(configWithAccessibleCache));
+            assertThat(configWithAccessibleCache.blockCache(), sameInstance(blockCache));
+        }
+    }
 }

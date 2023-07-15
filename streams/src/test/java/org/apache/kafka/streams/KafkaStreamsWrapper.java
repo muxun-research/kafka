@@ -16,10 +16,11 @@
  */
 package org.apache.kafka.streams;
 
-import java.util.Properties;
-
-import org.apache.kafka.streams.KafkaStreams.State;
 import org.apache.kafka.streams.processor.internals.StreamThread;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Properties;
 
 /**
  *  This class allows to access the {@link KafkaStreams} a {@link StreamThread.StateListener} object.
@@ -27,14 +28,16 @@ import org.apache.kafka.streams.processor.internals.StreamThread;
  */
 public class KafkaStreamsWrapper extends KafkaStreams {
 
-    public KafkaStreamsWrapper(final Topology topology,
-                               final Properties props) {
+    public KafkaStreamsWrapper(final Topology topology, final Properties props) {
         super(topology, props);
+    }
+
+    public List<StreamThread> streamThreads() {
+        return new ArrayList<>(threads);
     }
 
     /**
      * An app can set a single {@link StreamThread.StateListener} so that the app is notified when state changes.
-     *
      * @param listener a new StreamThread state listener
      * @throws IllegalStateException if this {@code KafkaStreams} instance is not in state {@link State#CREATED CREATED}.
      */

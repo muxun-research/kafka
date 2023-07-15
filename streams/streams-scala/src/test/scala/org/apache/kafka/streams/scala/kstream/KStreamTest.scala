@@ -16,27 +16,19 @@
  */
 package org.apache.kafka.streams.scala.kstream
 
-import java.time.Duration.ofSeconds
-import java.time.Instant
-
 import org.apache.kafka.streams.KeyValue
-import org.apache.kafka.streams.kstream.{
-  JoinWindows,
-  Named,
-  Transformer,
-  ValueTransformer,
-  ValueTransformerSupplier,
-  ValueTransformerWithKey,
-  ValueTransformerWithKeySupplier
-}
+import org.apache.kafka.streams.kstream._
 import org.apache.kafka.streams.processor.ProcessorContext
 import org.apache.kafka.streams.scala.ImplicitConversions._
-import org.apache.kafka.streams.scala.serialization.Serdes._
 import org.apache.kafka.streams.scala.StreamsBuilder
+import org.apache.kafka.streams.scala.serialization.Serdes._
 import org.apache.kafka.streams.scala.utils.TestDriver
 import org.junit.jupiter.api.Assertions.{assertEquals, assertTrue}
 import org.junit.jupiter.api.Test
 
+import java.time.Duration.ofSeconds
+import java.time.{Duration, Instant}
+import scala.annotation.nowarn
 import scala.jdk.CollectionConverters._
 
 class KStreamTest extends TestDriver {
@@ -191,6 +183,7 @@ class KStreamTest extends TestDriver {
     testDriver.close()
   }
 
+  // noinspection ScalaDeprecation
   @Test
   def testJoinCorrectlyRecords(): Unit = {
     val builder = new StreamsBuilder()
@@ -200,7 +193,9 @@ class KStreamTest extends TestDriver {
 
     val stream1 = builder.stream[String, String](sourceTopic1)
     val stream2 = builder.stream[String, String](sourceTopic2)
-    stream1.join(stream2)((a, b) => s"$a-$b", JoinWindows.of(ofSeconds(1))).to(sinkTopic)
+    stream1
+      .join(stream2)((a, b) => s"$a-$b", JoinWindows.ofTimeDifferenceAndGrace(ofSeconds(1), Duration.ofHours(24)))
+      .to(sinkTopic)
 
     val now = Instant.now()
 
@@ -219,6 +214,7 @@ class KStreamTest extends TestDriver {
     testDriver.close()
   }
 
+  @nowarn
   @Test
   def testTransformCorrectlyRecords(): Unit = {
     class TestTransformer extends Transformer[String, String, KeyValue[String, String]] {
@@ -254,6 +250,7 @@ class KStreamTest extends TestDriver {
     testDriver.close()
   }
 
+  @nowarn
   @Test
   def testFlatTransformCorrectlyRecords(): Unit = {
     class TestTransformer extends Transformer[String, String, Iterable[KeyValue[String, String]]] {
@@ -289,6 +286,7 @@ class KStreamTest extends TestDriver {
     testDriver.close()
   }
 
+  @nowarn
   @Test
   def testCorrectlyFlatTransformValuesInRecords(): Unit = {
     class TestTransformer extends ValueTransformer[String, Iterable[String]] {
@@ -325,6 +323,7 @@ class KStreamTest extends TestDriver {
     testDriver.close()
   }
 
+  @nowarn
   @Test
   def testCorrectlyFlatTransformValuesInRecordsWithKey(): Unit = {
     class TestTransformer extends ValueTransformerWithKey[String, String, Iterable[String]] {
@@ -441,6 +440,7 @@ class KStreamTest extends TestDriver {
     assertEquals("my-name", joinNode.name())
   }
 
+  @nowarn
   @Test
   def testSettingNameOnTransform(): Unit = {
     class TestTransformer extends Transformer[String, String, KeyValue[String, String]] {

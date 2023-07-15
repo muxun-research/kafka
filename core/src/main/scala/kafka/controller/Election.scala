@@ -19,8 +19,6 @@ package kafka.controller
 import kafka.api.LeaderAndIsr
 import org.apache.kafka.common.TopicPartition
 
-import scala.collection.Seq
-
 case class ElectionResult(topicPartition: TopicPartition, leaderAndIsr: Option[LeaderAndIsr], liveReplicas: Seq[Int])
 
 object Election {
@@ -28,6 +26,7 @@ object Election {
   private def leaderForOffline(partition: TopicPartition,
                                leaderAndIsrOpt: Option[LeaderAndIsr],
                                uncleanLeaderElectionEnabled: Boolean,
+                               isLeaderRecoverySupported: Boolean,
                                controllerContext: ControllerContext): ElectionResult = {
 
     val assignment = controllerContext.partitionReplicaAssignment(partition)
@@ -40,7 +39,14 @@ object Election {
         val newLeaderAndIsrOpt = leaderOpt.map { leader =>
           val newIsr = if (isr.contains(leader)) isr.filter(replica => controllerContext.isReplicaOnline(replica, partition))
           else List(leader)
-          leaderAndIsr.newLeaderAndIsr(leader, newIsr)
+
+          if (!isr.contains(leader) && isLeaderRecoverySupported) {
+            // The new leader is not in the old ISR so mark the partition a RECOVERING
+            leaderAndIsr.newRecoveringLeaderAndIsr(leader, newIsr)
+          } else {
+            // Elect a new leader but keep the previous leader recovery state
+            leaderAndIsr.newLeaderAndIsr(leader, newIsr)
+          }
         }
         ElectionResult(partition, newLeaderAndIsrOpt, liveReplicas)
 
@@ -51,19 +57,22 @@ object Election {
 
   /**
    * Elect leaders for new or offline partitions.
+   *
    * @param controllerContext                        Context with the current state of the cluster
-   * @param partitionsWithUncleanLeaderElectionState A sequence of tuples representing the partitions
+   * @param isLeaderRecoverySupported                true leader recovery is support and should be set if election is unclean
+   * @param partitionsWithUncleanLeaderRecoveryState A sequence of tuples representing the partitions
    *                                                 that need election, their leader/ISR state, and whether
    *                                                 or not unclean leader election is enabled
    * @return The election results
    */
   def leaderForOffline(
                         controllerContext: ControllerContext,
-                        partitionsWithUncleanLeaderElectionState: Seq[(TopicPartition, Option[LeaderAndIsr], Boolean)]
+                        isLeaderRecoverySupported: Boolean,
+                        partitionsWithUncleanLeaderRecoveryState: Seq[(TopicPartition, Option[LeaderAndIsr], Boolean)]
                       ): Seq[ElectionResult] = {
-    partitionsWithUncleanLeaderElectionState.map {
+    partitionsWithUncleanLeaderRecoveryState.map {
       case (partition, leaderAndIsrOpt, uncleanLeaderElectionEnabled) =>
-        leaderForOffline(partition, leaderAndIsrOpt, uncleanLeaderElectionEnabled, controllerContext)
+        leaderForOffline(partition, leaderAndIsrOpt, uncleanLeaderElectionEnabled, isLeaderRecoverySupported, controllerContext)
     }
   }
 
@@ -80,6 +89,7 @@ object Election {
 
   /**
    * Elect leaders for partitions that are undergoing reassignment.
+   *
    * @param controllerContext Context with the current state of the cluster
    * @param leaderAndIsrs     A sequence of tuples representing the partitions that need election
    *                          and their respective leader/ISR states
@@ -105,6 +115,7 @@ object Election {
 
   /**
    * Elect preferred leaders.
+   *
    * @param controllerContext Context with the current state of the cluster
    * @param leaderAndIsrs     A sequence of tuples representing the partitions that need election
    *                          and their respective leader/ISR states
@@ -134,6 +145,7 @@ object Election {
 
   /**
    * Elect leaders for partitions whose current leaders are shutting down.
+   *
    * @param controllerContext Context with the current state of the cluster
    * @param leaderAndIsrs     A sequence of tuples representing the partitions that need election
    *                          and their respective leader/ISR states

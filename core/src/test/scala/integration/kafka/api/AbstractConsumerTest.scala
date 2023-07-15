@@ -16,25 +16,23 @@
  */
 package kafka.api
 
+import kafka.server.{BaseRequestTest, KafkaConfig}
+import kafka.utils.TestUtils
+import org.apache.kafka.clients.consumer._
+import org.apache.kafka.clients.producer.{KafkaProducer, ProducerConfig, ProducerRecord}
+import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.common.errors.WakeupException
+import org.apache.kafka.common.record.TimestampType
+import org.apache.kafka.server.util.ShutdownableThread
+import org.junit.jupiter.api.Assertions._
+import org.junit.jupiter.api.{BeforeEach, TestInfo}
+
 import java.time.Duration
 import java.util
 import java.util.Properties
-
-import org.apache.kafka.clients.consumer._
-import org.apache.kafka.clients.producer.{ProducerConfig, ProducerRecord}
-import org.apache.kafka.common.record.TimestampType
-import org.apache.kafka.common.TopicPartition
-import kafka.utils.{ShutdownableThread, TestUtils}
-import kafka.server.{BaseRequestTest, KafkaConfig}
-import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api.BeforeEach
-
-import scala.jdk.CollectionConverters._
-import scala.collection.mutable.{ArrayBuffer, Buffer}
-import org.apache.kafka.clients.producer.KafkaProducer
-import org.apache.kafka.common.errors.WakeupException
-
 import scala.collection.mutable
+import scala.collection.mutable.{ArrayBuffer, Buffer}
+import scala.jdk.CollectionConverters._
 
 /**
  * Extension point for consumer integration tests.
@@ -52,7 +50,7 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
   val group = "my-test"
   val producerClientId = "ConsumerTestProducer"
   val consumerClientId = "ConsumerTestConsumer"
-  val groupMaxSessionTimeoutMs = 30000L
+  val groupMaxSessionTimeoutMs = 60000L
 
   this.producerConfig.setProperty(ProducerConfig.ACKS_CONFIG, "all")
   this.producerConfig.setProperty(ProducerConfig.CLIENT_ID_CONFIG, producerClientId)
@@ -74,8 +72,8 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
   }
 
   @BeforeEach
-  override def setUp(): Unit = {
-    super.setUp()
+  override def setUp(testInfo: TestInfo): Unit = {
+    super.setUp(testInfo)
 
     // create the test topic with all the brokers as replicas
     createTopic(topic, 2, brokerCount)
@@ -96,7 +94,7 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
     }
   }
 
-  protected def createConsumerWithGroupId(groupId: String): KafkaConsumer[Array[Byte], Array[Byte]] = {
+  protected def createConsumerWithGroupId(groupId: String): Consumer[Array[Byte], Array[Byte]] = {
     val groupOverrideConfig = new Properties
     groupOverrideConfig.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId)
     createConsumer(configOverrides = groupOverrideConfig)
@@ -134,7 +132,7 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
       if (timestampType == TimestampType.CREATE_TIME) {
         assertEquals(timestampType, record.timestampType)
         val timestamp = startingTimestamp + i
-        assertEquals(timestamp.toLong, record.timestamp)
+        assertEquals(timestamp, record.timestamp)
       } else
         assertTrue(record.timestamp >= startingTimestamp && record.timestamp <= now,
           s"Got unexpected timestamp ${record.timestamp}. Timestamp should be between [$startingTimestamp, $now}]")
@@ -157,16 +155,36 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
       records ++= polledRecords.asScala
       records.size >= numRecords
     }
+
     TestUtils.pollRecordsUntilTrue(consumer, pollAction, waitTimeMs = 60000,
       msg = s"Timed out before consuming expected $numRecords records. " +
         s"The number consumed was ${records.size}.")
     records
   }
 
+
+  /**
+   * Creates topic 'topicName' with 'numPartitions' partitions and produces 'recordsPerPartition'
+   * records to each partition
+   */
+  protected def createTopicAndSendRecords(producer: KafkaProducer[Array[Byte], Array[Byte]],
+                                          topicName: String,
+                                          numPartitions: Int,
+                                          recordsPerPartition: Int): Set[TopicPartition] = {
+    createTopic(topicName, numPartitions, brokerCount)
+    var parts = Set[TopicPartition]()
+    for (partition <- 0 until numPartitions) {
+      val tp = new TopicPartition(topicName, partition)
+      sendRecords(producer, recordsPerPartition, tp)
+      parts = parts + tp
+    }
+    parts
+  }
+
   protected def sendAndAwaitAsyncCommit[K, V](consumer: Consumer[K, V],
                                               offsetsOpt: Option[Map[TopicPartition, OffsetAndMetadata]] = None): Unit = {
 
-    def sendAsyncCommit(callback: OffsetCommitCallback) = {
+    def sendAsyncCommit(callback: OffsetCommitCallback): Unit = {
       offsetsOpt match {
         case Some(offsets) => consumer.commitAsync(offsets.asJava, callback)
         case None => consumer.commitAsync(callback)
@@ -205,17 +223,17 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
     * number of consumers, so subscriptions.size must be greater or equal the resulting number of consumers in the group
     *
     * @param numOfConsumersToAdd number of consumers to create and add to the consumer group
-    * @param consumerGroup current consumer group
-    * @param consumerPollers current consumer pollers
-    * @param topicsToSubscribe topics to which new consumers will subscribe to
-    * @param subscriptions set of all topic partitions
-    */
+   * @param consumerGroup        current consumer group
+   * @param consumerPollers      current consumer pollers
+   * @param topicsToSubscribe    topics to which new consumers will subscribe to
+   * @param subscriptions        set of all topic partitions
+   */
   def addConsumersToGroupAndWaitForGroupAssignment(numOfConsumersToAdd: Int,
-                                                   consumerGroup: mutable.Buffer[KafkaConsumer[Array[Byte], Array[Byte]]],
+                                                   consumerGroup: mutable.Buffer[Consumer[Array[Byte], Array[Byte]]],
                                                    consumerPollers: mutable.Buffer[ConsumerAssignmentPoller],
                                                    topicsToSubscribe: List[String],
                                                    subscriptions: Set[TopicPartition],
-                                                   group: String = group): (mutable.Buffer[KafkaConsumer[Array[Byte], Array[Byte]]], mutable.Buffer[ConsumerAssignmentPoller]) = {
+                                                   group: String = group): (mutable.Buffer[Consumer[Array[Byte], Array[Byte]]], mutable.Buffer[ConsumerAssignmentPoller]) = {
     assertTrue(consumerGroup.size + numOfConsumersToAdd <= subscriptions.size)
     addConsumersToGroup(numOfConsumersToAdd, consumerGroup, consumerPollers, topicsToSubscribe, subscriptions, group)
     // wait until topics get re-assigned and validate assignment
@@ -228,19 +246,18 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
     * Create 'numOfConsumersToAdd' consumers add then to the consumer group 'consumerGroup', and create corresponding
     * pollers for these consumers.
     *
-    *
-    * @param numOfConsumersToAdd number of consumers to create and add to the consumer group
-    * @param consumerGroup current consumer group
-    * @param consumerPollers current consumer pollers
-    * @param topicsToSubscribe topics to which new consumers will subscribe to
-    * @param subscriptions set of all topic partitions
-    */
+   * @param numOfConsumersToAdd number of consumers to create and add to the consumer group
+    * @param consumerGroup      current consumer group
+   * @param consumerPollers     current consumer pollers
+   * @param topicsToSubscribe   topics to which new consumers will subscribe to
+   * @param subscriptions       set of all topic partitions
+   */
   def addConsumersToGroup(numOfConsumersToAdd: Int,
-                          consumerGroup: mutable.Buffer[KafkaConsumer[Array[Byte], Array[Byte]]],
+                          consumerGroup: mutable.Buffer[Consumer[Array[Byte], Array[Byte]]],
                           consumerPollers: mutable.Buffer[ConsumerAssignmentPoller],
                           topicsToSubscribe: List[String],
                           subscriptions: Set[TopicPartition],
-                          group: String = group): (mutable.Buffer[KafkaConsumer[Array[Byte], Array[Byte]]], mutable.Buffer[ConsumerAssignmentPoller]) = {
+                          group: String = group): (mutable.Buffer[Consumer[Array[Byte], Array[Byte]]], mutable.Buffer[ConsumerAssignmentPoller]) = {
     for (_ <- 0 until numOfConsumersToAdd) {
       val consumer = createConsumerWithGroupId(group)
       consumerGroup += consumer
@@ -251,21 +268,22 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
   }
 
   /**
-    * Wait for consumers to get partition assignment and validate it.
-    *
-    * @param consumerPollers consumer pollers corresponding to the consumer group we are testing
-    * @param subscriptions set of all topic partitions
-    * @param msg message to print when waiting for/validating assignment fails
-    */
+   * Wait for consumers to get partition assignment and validate it.
+   *
+   * @param consumerPollers consumer pollers corresponding to the consumer group we are testing
+   * @param subscriptions   set of all topic partitions
+   * @param msg             message to print when waiting for/validating assignment fails
+   */
   def validateGroupAssignment(consumerPollers: mutable.Buffer[ConsumerAssignmentPoller],
                               subscriptions: Set[TopicPartition],
                               msg: Option[String] = None,
-                              waitTime: Long = 10000L): Unit = {
+                              waitTime: Long = 10000L,
+                              expectedAssignment: Buffer[Set[TopicPartition]] = Buffer()): Unit = {
     val assignments = mutable.Buffer[Set[TopicPartition]]()
     TestUtils.waitUntilTrue(() => {
       assignments.clear()
       consumerPollers.foreach(assignments += _.consumerAssignment())
-      isPartitionAssignmentValid(assignments, subscriptions)
+      isPartitionAssignmentValid(assignments, subscriptions, expectedAssignment)
     }, msg.getOrElse(s"Did not get valid assignment for partitions $subscriptions. Instead, got $assignments"), waitTime)
   }
 
@@ -322,15 +340,16 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
 
   protected class ConsumerAssignmentPoller(consumer: Consumer[Array[Byte], Array[Byte]],
                                            topicsToSubscribe: List[String],
-                                           partitionsToAssign: Set[TopicPartition])
+                                           partitionsToAssign: Set[TopicPartition],
+                                           userRebalanceListener: ConsumerRebalanceListener)
     extends ShutdownableThread("daemon-consumer-assignment", false) {
 
     def this(consumer: Consumer[Array[Byte], Array[Byte]], topicsToSubscribe: List[String]) = {
-      this(consumer, topicsToSubscribe, Set.empty[TopicPartition])
+      this(consumer, topicsToSubscribe, Set.empty[TopicPartition], null)
     }
 
     def this(consumer: Consumer[Array[Byte], Array[Byte]], partitionsToAssign: Set[TopicPartition]) = {
-      this(consumer, List.empty[String], partitionsToAssign)
+      this(consumer, List.empty[String], partitionsToAssign, null)
     }
 
     @volatile var thrownException: Option[Throwable] = None
@@ -341,12 +360,16 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
     private var topicsSubscription = topicsToSubscribe
 
     val rebalanceListener: ConsumerRebalanceListener = new ConsumerRebalanceListener {
-      override def onPartitionsAssigned(partitions: util.Collection[TopicPartition]) = {
+      override def onPartitionsAssigned(partitions: util.Collection[TopicPartition]): Unit = {
         partitionAssignment ++= partitions.toArray(new Array[TopicPartition](0))
+        if (userRebalanceListener != null)
+          userRebalanceListener.onPartitionsAssigned(partitions)
       }
 
-      override def onPartitionsRevoked(partitions: util.Collection[TopicPartition]) = {
+      override def onPartitionsRevoked(partitions: util.Collection[TopicPartition]): Unit = {
         partitionAssignment --= partitions.toArray(new Array[TopicPartition](0))
+        if (userRebalanceListener != null)
+          userRebalanceListener.onPartitionsRevoked(partitions)
       }
     }
 
@@ -412,13 +435,15 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
    * 1. Every consumer got assigned at least one partition
    * 2. Each partition is assigned to only one consumer
    * 3. Every partition is assigned to one of the consumers
+   * 4. The assignment is the same as expected assignment (if provided)
    *
    * @param assignments set of consumer assignments; one per each consumer
-   * @param partitions set of partitions that consumers subscribed to
+   * @param partitions  set of partitions that consumers subscribed to
    * @return true if partition assignment is valid
    */
   def isPartitionAssignmentValid(assignments: Buffer[Set[TopicPartition]],
-                                 partitions: Set[TopicPartition]): Boolean = {
+                                 partitions: Set[TopicPartition],
+                                 expectedAssignment: Buffer[Set[TopicPartition]]): Boolean = {
     val allNonEmptyAssignments = assignments.forall(assignment => assignment.nonEmpty)
     if (!allNonEmptyAssignments) {
       // at least one consumer got empty assignment
@@ -437,7 +462,22 @@ abstract class AbstractConsumerTest extends BaseRequestTest {
     // than one consumer and the same number of partitions were missing from assignments.
     // Make sure that all unique assignments are the same as 'partitions'
     val uniqueAssignedPartitions = assignments.foldLeft(Set.empty[TopicPartition])(_ ++ _)
-    uniqueAssignedPartitions == partitions
+    if (uniqueAssignedPartitions != partitions) {
+      return false
+    }
+
+    // check the assignment is the same as the expected assignment if provided
+    // Note: since we've checked that each partition is assigned to only one consumer,
+    // we just need to check the assignment is included in the expected assignment
+    if (expectedAssignment.nonEmpty) {
+      for (assignment <- assignments) {
+        if (!expectedAssignment.contains(assignment)) {
+          return false
+        }
+      }
+    }
+
+    true
   }
 
 }

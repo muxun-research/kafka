@@ -22,11 +22,7 @@ import org.apache.kafka.common.cache.LRUCache;
 import org.apache.kafka.common.cache.SynchronizedCache;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.connector.ConnectRecord;
-import org.apache.kafka.connect.data.ConnectSchema;
-import org.apache.kafka.connect.data.Field;
-import org.apache.kafka.connect.data.Schema;
-import org.apache.kafka.connect.data.SchemaBuilder;
-import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.connect.data.*;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.transforms.util.SchemaUtil;
 import org.apache.kafka.connect.transforms.util.SimpleConfig;
@@ -40,11 +36,7 @@ import static org.apache.kafka.connect.transforms.util.Requirements.requireStruc
 public abstract class Flatten<R extends ConnectRecord<R>> implements Transformation<R> {
 
     public static final String OVERVIEW_DOC =
-            "Flatten a nested data structure, generating names for each field by concatenating the field names at each "
-                    + "level with a configurable delimiter character. Applies to Struct when schema present, or a Map "
-                    + "in the case of schemaless data. The default delimiter is '.'."
-                    + "<p/>Use the concrete transformation type designed for the record key (<code>" + Key.class.getName() + "</code>) "
-                    + "or value (<code>" + Value.class.getName() + "</code>).";
+            "Flatten a nested data structure, generating names for each field by concatenating the field names at each " + "level with a configurable delimiter character. Applies to Struct when schema present, or a Map " + "in the case of schemaless data. Array fields and their contents are not modified. The default delimiter is '.'." + "<p/>Use the concrete transformation type designed for the record key (<code>" + Key.class.getName() + "</code>) " + "or value (<code>" + Value.class.getName() + "</code>).";
 
     private static final String DELIMITER_CONFIG = "delimiter";
     private static final String DELIMITER_DEFAULT = ".";
@@ -124,6 +116,7 @@ public abstract class Flatten<R extends ConnectRecord<R>> implements Transformat
                 case BOOLEAN:
                 case STRING:
                 case BYTES:
+                case ARRAY:
                     newRecord.put(fieldName(fieldNamePrefix, entry.getKey()), entry.getValue());
                     break;
                 case MAP:
@@ -189,6 +182,7 @@ public abstract class Flatten<R extends ConnectRecord<R>> implements Transformat
                 case BOOLEAN:
                 case STRING:
                 case BYTES:
+                case ARRAY:
                     newSchema.field(fieldName, convertFieldSchema(field.schema(), fieldIsOptional, fieldDefaultValue));
                     break;
                 case STRUCT:
@@ -237,6 +231,7 @@ public abstract class Flatten<R extends ConnectRecord<R>> implements Transformat
                 case BOOLEAN:
                 case STRING:
                 case BYTES:
+                case ARRAY:
                     newRecord.put(fieldName, record.get(field));
                     break;
                 case STRUCT:

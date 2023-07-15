@@ -19,13 +19,7 @@ package org.apache.kafka.streams.kstream.internals;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.Bytes;
-import org.apache.kafka.streams.KeyValueTimestamp;
-import org.apache.kafka.streams.StreamsBuilder;
-import org.apache.kafka.streams.TestInputTopic;
-import org.apache.kafka.streams.Topology;
-import org.apache.kafka.streams.TopologyTestDriver;
-import org.apache.kafka.streams.TopologyTestDriverWrapper;
-import org.apache.kafka.streams.TopologyWrapper;
+import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KTable;
 import org.apache.kafka.streams.kstream.Materialized;
@@ -34,7 +28,6 @@ import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
 import org.apache.kafka.test.MockApiProcessor;
 import org.apache.kafka.test.MockApiProcessorSupplier;
-import org.apache.kafka.test.MockProcessorSupplier;
 import org.apache.kafka.test.StreamsTestUtils;
 import org.junit.Test;
 
@@ -45,28 +38,21 @@ import java.util.Properties;
 import static java.util.Arrays.asList;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
+import static org.junit.Assert.*;
 
 @SuppressWarnings("unchecked")
 public class KTableMapValuesTest {
     private final Consumed<String, String> consumed = Consumed.with(Serdes.String(), Serdes.String());
     private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.String(), Serdes.String());
 
-    private void doTestKTable(final StreamsBuilder builder,
-                              final String topic1,
-                              final MockProcessorSupplier<String, Integer> supplier) {
+    private void doTestKTable(final StreamsBuilder builder, final String topic1, final MockApiProcessorSupplier<String, Integer, Void, Void> supplier) {
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-			final TestInputTopic<String, String> inputTopic1 =
-					driver.createInputTopic(topic1, new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
-			inputTopic1.pipeInput("A", "1", 5L);
-			inputTopic1.pipeInput("B", "2", 25L);
-			inputTopic1.pipeInput("C", "3", 20L);
-			inputTopic1.pipeInput("D", "4", 10L);
-			assertEquals(asList(new KeyValueTimestamp<>("A", 1, 5),
-					new KeyValueTimestamp<>("B", 2, 25),
-					new KeyValueTimestamp<>("C", 3, 20),
+            final TestInputTopic<String, String> inputTopic1 = driver.createInputTopic(topic1, new StringSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+            inputTopic1.pipeInput("A", "1", 5L);
+            inputTopic1.pipeInput("B", "2", 25L);
+            inputTopic1.pipeInput("C", "3", 20L);
+            inputTopic1.pipeInput("D", "4", 10L);
+            assertEquals(asList(new KeyValueTimestamp<>("A", 1, 5), new KeyValueTimestamp<>("B", 2, 25), new KeyValueTimestamp<>("C", 3, 20),
 					new KeyValueTimestamp<>("D", 4, 10)), supplier.theCapturedProcessor().processed());
 		}
     }
@@ -79,7 +65,7 @@ public class KTableMapValuesTest {
         final KTable<String, String> table1 = builder.table(topic1, consumed);
         final KTable<String, Integer> table2 = table1.mapValues(value -> value.charAt(0) - 48);
 
-        final MockProcessorSupplier<String, Integer> supplier = new MockProcessorSupplier<>();
+        final MockApiProcessorSupplier<String, Integer, Void, Void> supplier = new MockApiProcessorSupplier<>();
         table2.toStream().process(supplier);
 
         doTestKTable(builder, topic1, supplier);
@@ -97,7 +83,7 @@ public class KTableMapValuesTest {
                 Materialized.<String, Integer, KeyValueStore<Bytes, byte[]>>as("anyName")
                     .withValueSerde(Serdes.Integer()));
 
-        final MockProcessorSupplier<String, Integer> supplier = new MockProcessorSupplier<>();
+        final MockApiProcessorSupplier<String, Integer, Void, Void> supplier = new MockApiProcessorSupplier<>();
         table2.toStream().process(supplier);
 
         doTestKTable(builder, topic1, supplier);

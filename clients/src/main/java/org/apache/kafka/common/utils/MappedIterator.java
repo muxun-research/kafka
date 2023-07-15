@@ -23,22 +23,22 @@ import java.util.function.Function;
  * An iterator that maps another iterator's elements from type `F` to type `T`.
  */
 public final class MappedIterator<F, T> implements Iterator<T> {
-	private final Iterator<? extends F> underlyingIterator;
-	private final Function<F, T> mapper;
+    private final Iterator<? extends F> underlyingIterator;
+    private final Function<F, T> mapper;
 
-	public MappedIterator(Iterator<? extends F> underlyingIterator, Function<F, T> mapper) {
-		this.underlyingIterator = underlyingIterator;
-		this.mapper = mapper;
-	}
+    public MappedIterator(Iterator<? extends F> underlyingIterator, Function<F, T> mapper) {
+        this.underlyingIterator = underlyingIterator;
+        this.mapper = mapper;
+    }
 
-	@Override
-	public final boolean hasNext() {
-		return underlyingIterator.hasNext();
-	}
+    @Override
+    public boolean hasNext() {
+        return underlyingIterator.hasNext();
+    }
 
-	@Override
-	public final T next() {
-		return mapper.apply(underlyingIterator.next());
-	}
+    @Override
+    public T next() {
+        return mapper.apply(underlyingIterator.next());
+    }
 
 }

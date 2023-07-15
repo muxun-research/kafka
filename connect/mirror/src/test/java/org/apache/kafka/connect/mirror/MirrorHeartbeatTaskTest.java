@@ -26,15 +26,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class MirrorHeartbeatTaskTest {
 
-	@Test
-	public void testPollCreatesRecords() throws InterruptedException {
-		MirrorHeartbeatTask heartbeatTask = new MirrorHeartbeatTask();
-		heartbeatTask.start(TestUtils.makeProps("source.cluster.alias", "testSource",
-				"target.cluster.alias", "testTarget"));
-		List<SourceRecord> records = heartbeatTask.poll();
-		assertEquals(1, records.size());
-		Map<String, ?> sourcePartition = records.iterator().next().sourcePartition();
-		assertEquals(sourcePartition.get(Heartbeat.SOURCE_CLUSTER_ALIAS_KEY), "testSource");
-		assertEquals(sourcePartition.get(Heartbeat.TARGET_CLUSTER_ALIAS_KEY), "testTarget");
-	}
+    @Test
+    public void testPollCreatesRecords() throws InterruptedException {
+        MirrorHeartbeatTask heartbeatTask = new MirrorHeartbeatTask();
+        heartbeatTask.start(TestUtils.makeProps("source.cluster.alias", "testSource", "target.cluster.alias", "testTarget"));
+        List<SourceRecord> records = heartbeatTask.poll();
+        assertEquals(1, records.size());
+        Map<String, ?> sourcePartition = records.iterator().next().sourcePartition();
+        assertEquals(sourcePartition.get(Heartbeat.SOURCE_CLUSTER_ALIAS_KEY), "testSource", "sourcePartition's " + Heartbeat.SOURCE_CLUSTER_ALIAS_KEY + " record was not created");
+        assertEquals(sourcePartition.get(Heartbeat.TARGET_CLUSTER_ALIAS_KEY), "testTarget", "sourcePartition's " + Heartbeat.TARGET_CLUSTER_ALIAS_KEY + " record was not created");
+    }
 }

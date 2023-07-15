@@ -39,7 +39,7 @@ public class PlainSaslServerTest {
 
     private PlainSaslServer saslServer;
 
-	@BeforeEach
+    @BeforeEach
     public void setUp() {
         TestJaasConfig jaasConfig = new TestJaasConfig();
         Map<String, Object> options = new HashMap<>();
@@ -53,38 +53,34 @@ public class PlainSaslServerTest {
     }
 
     @Test
-    public void noAuthorizationIdSpecified() throws Exception {
-		byte[] nextChallenge = saslServer.evaluateResponse(saslMessage("", USER_A, PASSWORD_A));
-		assertEquals(0, nextChallenge.length);
-	}
+    public void noAuthorizationIdSpecified() {
+        byte[] nextChallenge = saslServer.evaluateResponse(saslMessage("", USER_A, PASSWORD_A));
+        assertEquals(0, nextChallenge.length);
+    }
 
-	@Test
-	public void authorizatonIdEqualsAuthenticationId() throws Exception {
-		byte[] nextChallenge = saslServer.evaluateResponse(saslMessage(USER_A, USER_A, PASSWORD_A));
-		assertEquals(0, nextChallenge.length);
-	}
+    @Test
+    public void authorizationIdEqualsAuthenticationId() {
+        byte[] nextChallenge = saslServer.evaluateResponse(saslMessage(USER_A, USER_A, PASSWORD_A));
+        assertEquals(0, nextChallenge.length);
+    }
 
-	@Test
-	public void authorizatonIdNotEqualsAuthenticationId() {
-		assertThrows(SaslAuthenticationException.class, () -> saslServer.evaluateResponse(saslMessage(USER_B, USER_A, PASSWORD_A)));
-	}
+    @Test
+    public void authorizationIdNotEqualsAuthenticationId() {
+        assertThrows(SaslAuthenticationException.class, () -> saslServer.evaluateResponse(saslMessage(USER_B, USER_A, PASSWORD_A)));
+    }
 
-	@Test
-	public void emptyTokens() {
-		Exception e = assertThrows(SaslAuthenticationException.class, () ->
-				saslServer.evaluateResponse(saslMessage("", "", "")));
-		assertEquals("Authentication failed: username not specified", e.getMessage());
-
-		e = assertThrows(SaslAuthenticationException.class, () ->
-				saslServer.evaluateResponse(saslMessage("", "", "p")));
+    @Test
+    public void emptyTokens() {
+        Exception e = assertThrows(SaslAuthenticationException.class, () -> saslServer.evaluateResponse(saslMessage("", "", "")));
         assertEquals("Authentication failed: username not specified", e.getMessage());
 
-        e = assertThrows(SaslAuthenticationException.class, () ->
-            saslServer.evaluateResponse(saslMessage("", "u", "")));
+        e = assertThrows(SaslAuthenticationException.class, () -> saslServer.evaluateResponse(saslMessage("", "", "p")));
+        assertEquals("Authentication failed: username not specified", e.getMessage());
+
+        e = assertThrows(SaslAuthenticationException.class, () -> saslServer.evaluateResponse(saslMessage("", "u", "")));
         assertEquals("Authentication failed: password not specified", e.getMessage());
 
-        e = assertThrows(SaslAuthenticationException.class, () ->
-            saslServer.evaluateResponse(saslMessage("a", "", "")));
+        e = assertThrows(SaslAuthenticationException.class, () -> saslServer.evaluateResponse(saslMessage("a", "", "")));
         assertEquals("Authentication failed: username not specified", e.getMessage());
 
         e = assertThrows(SaslAuthenticationException.class, () ->

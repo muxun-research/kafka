@@ -29,100 +29,93 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class DescribeClientQuotasRequest extends AbstractRequest {
-	// These values must not change.
-	private static final byte MATCH_TYPE_EXACT = 0;
-	private static final byte MATCH_TYPE_DEFAULT = 1;
-	private static final byte MATCH_TYPE_SPECIFIED = 2;
+    // These values must not change.
+    public static final byte MATCH_TYPE_EXACT = 0;
+    public static final byte MATCH_TYPE_DEFAULT = 1;
+    public static final byte MATCH_TYPE_SPECIFIED = 2;
 
-	public static class Builder extends AbstractRequest.Builder<DescribeClientQuotasRequest> {
+    public static class Builder extends AbstractRequest.Builder<DescribeClientQuotasRequest> {
 
-		private final DescribeClientQuotasRequestData data;
+        private final DescribeClientQuotasRequestData data;
 
-		public Builder(ClientQuotaFilter filter) {
-			super(ApiKeys.DESCRIBE_CLIENT_QUOTAS);
+        public Builder(ClientQuotaFilter filter) {
+            super(ApiKeys.DESCRIBE_CLIENT_QUOTAS);
 
-			List<ComponentData> componentData = new ArrayList<>(filter.components().size());
-			for (ClientQuotaFilterComponent component : filter.components()) {
-				ComponentData fd = new ComponentData().setEntityType(component.entityType());
-				if (component.match() == null) {
-					fd.setMatchType(MATCH_TYPE_SPECIFIED);
-					fd.setMatch(null);
-				} else if (component.match().isPresent()) {
-					fd.setMatchType(MATCH_TYPE_EXACT);
-					fd.setMatch(component.match().get());
-				} else {
-					fd.setMatchType(MATCH_TYPE_DEFAULT);
-					fd.setMatch(null);
-				}
-				componentData.add(fd);
-			}
-			this.data = new DescribeClientQuotasRequestData()
-					.setComponents(componentData)
-					.setStrict(filter.strict());
-		}
+            List<ComponentData> componentData = new ArrayList<>(filter.components().size());
+            for (ClientQuotaFilterComponent component : filter.components()) {
+                ComponentData fd = new ComponentData().setEntityType(component.entityType());
+                if (component.match() == null) {
+                    fd.setMatchType(MATCH_TYPE_SPECIFIED);
+                    fd.setMatch(null);
+                } else if (component.match().isPresent()) {
+                    fd.setMatchType(MATCH_TYPE_EXACT);
+                    fd.setMatch(component.match().get());
+                } else {
+                    fd.setMatchType(MATCH_TYPE_DEFAULT);
+                    fd.setMatch(null);
+                }
+                componentData.add(fd);
+            }
+            this.data = new DescribeClientQuotasRequestData().setComponents(componentData).setStrict(filter.strict());
+        }
 
-		@Override
-		public DescribeClientQuotasRequest build(short version) {
-			return new DescribeClientQuotasRequest(data, version);
-		}
+        @Override
+        public DescribeClientQuotasRequest build(short version) {
+            return new DescribeClientQuotasRequest(data, version);
+        }
 
-		@Override
-		public String toString() {
-			return data.toString();
-		}
-	}
+        @Override
+        public String toString() {
+            return data.toString();
+        }
+    }
 
-	private final DescribeClientQuotasRequestData data;
+    private final DescribeClientQuotasRequestData data;
 
-	public DescribeClientQuotasRequest(DescribeClientQuotasRequestData data, short version) {
-		super(ApiKeys.DESCRIBE_CLIENT_QUOTAS, version);
-		this.data = data;
-	}
+    public DescribeClientQuotasRequest(DescribeClientQuotasRequestData data, short version) {
+        super(ApiKeys.DESCRIBE_CLIENT_QUOTAS, version);
+        this.data = data;
+    }
 
-	public ClientQuotaFilter filter() {
-		List<ClientQuotaFilterComponent> components = new ArrayList<>(data.components().size());
-		for (ComponentData componentData : data.components()) {
-			ClientQuotaFilterComponent component;
-			switch (componentData.matchType()) {
-				case MATCH_TYPE_EXACT:
-					component = ClientQuotaFilterComponent.ofEntity(componentData.entityType(), componentData.match());
-					break;
-				case MATCH_TYPE_DEFAULT:
-					component = ClientQuotaFilterComponent.ofDefaultEntity(componentData.entityType());
-					break;
-				case MATCH_TYPE_SPECIFIED:
-					component = ClientQuotaFilterComponent.ofEntityType(componentData.entityType());
-					break;
-				default:
-					throw new IllegalArgumentException("Unexpected match type: " + componentData.matchType());
-			}
-			components.add(component);
-		}
-		if (data.strict()) {
-			return ClientQuotaFilter.containsOnly(components);
-		} else {
-			return ClientQuotaFilter.contains(components);
-		}
-	}
+    public ClientQuotaFilter filter() {
+        List<ClientQuotaFilterComponent> components = new ArrayList<>(data.components().size());
+        for (ComponentData componentData : data.components()) {
+            ClientQuotaFilterComponent component;
+            switch (componentData.matchType()) {
+                case MATCH_TYPE_EXACT:
+                    component = ClientQuotaFilterComponent.ofEntity(componentData.entityType(), componentData.match());
+                    break;
+                case MATCH_TYPE_DEFAULT:
+                    component = ClientQuotaFilterComponent.ofDefaultEntity(componentData.entityType());
+                    break;
+                case MATCH_TYPE_SPECIFIED:
+                    component = ClientQuotaFilterComponent.ofEntityType(componentData.entityType());
+                    break;
+                default:
+                    throw new IllegalArgumentException("Unexpected match type: " + componentData.matchType());
+            }
+            components.add(component);
+        }
+        if (data.strict()) {
+            return ClientQuotaFilter.containsOnly(components);
+        } else {
+            return ClientQuotaFilter.contains(components);
+        }
+    }
 
-	@Override
-	public DescribeClientQuotasRequestData data() {
-		return data;
-	}
+    @Override
+    public DescribeClientQuotasRequestData data() {
+        return data;
+    }
 
-	@Override
-	public DescribeClientQuotasResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-		ApiError error = ApiError.fromThrowable(e);
-		return new DescribeClientQuotasResponse(new DescribeClientQuotasResponseData()
-				.setThrottleTimeMs(throttleTimeMs)
-				.setErrorCode(error.error().code())
-				.setErrorMessage(error.message())
-				.setEntries(null));
-	}
+    @Override
+    public DescribeClientQuotasResponse getErrorResponse(int throttleTimeMs, Throwable e) {
+        ApiError error = ApiError.fromThrowable(e);
+        return new DescribeClientQuotasResponse(new DescribeClientQuotasResponseData().setThrottleTimeMs(throttleTimeMs).setErrorCode(error.error().code()).setErrorMessage(error.message()).setEntries(null));
+    }
 
-	public static DescribeClientQuotasRequest parse(ByteBuffer buffer, short version) {
-		return new DescribeClientQuotasRequest(new DescribeClientQuotasRequestData(new ByteBufferAccessor(buffer), version),
-				version);
-	}
+    public static DescribeClientQuotasRequest parse(ByteBuffer buffer, short version) {
+        return new DescribeClientQuotasRequest(new DescribeClientQuotasRequestData(new ByteBufferAccessor(buffer), version), version);
+    }
 
 }

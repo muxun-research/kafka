@@ -17,18 +17,15 @@
 package org.apache.kafka.streams.state.internals;
 
 import org.apache.kafka.common.serialization.Serde;
+import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.StateStoreContext;
-import org.apache.kafka.streams.state.KeyValueBytesStoreSupplier;
-import org.apache.kafka.streams.state.KeyValueIterator;
-import org.apache.kafka.streams.state.KeyValueStore;
-import org.apache.kafka.streams.state.TimestampedBytesStore;
-import org.apache.kafka.streams.state.TimestampedKeyValueStore;
-import org.apache.kafka.streams.state.ValueAndTimestamp;
+import org.apache.kafka.streams.query.*;
+import org.apache.kafka.streams.state.*;
 
 import java.util.List;
 import java.util.Objects;
@@ -42,15 +39,11 @@ public class TimestampedKeyValueStoreBuilder<K, V>
                                            final Serde<K> keySerde,
                                            final Serde<V> valueSerde,
                                            final Time time) {
-		super(
-				storeSupplier.name(),
-				keySerde,
-				valueSerde == null ? null : new ValueAndTimestampSerde<>(valueSerde),
-				time);
-		Objects.requireNonNull(storeSupplier, "storeSupplier can't be null");
-		Objects.requireNonNull(storeSupplier.metricsScope(), "storeSupplier's metricsScope can't be null");
-		this.storeSupplier = storeSupplier;
-	}
+        super(storeSupplier.name(), keySerde, valueSerde == null ? null : new ValueAndTimestampSerde<>(valueSerde), time);
+        Objects.requireNonNull(storeSupplier, "storeSupplier can't be null");
+        Objects.requireNonNull(storeSupplier.metricsScope(), "storeSupplier's metricsScope can't be null");
+        this.storeSupplier = storeSupplier;
+    }
 
     @Override
     public TimestampedKeyValueStore<K, V> build() {
@@ -74,7 +67,7 @@ public class TimestampedKeyValueStoreBuilder<K, V>
         if (!enableCaching) {
             return inner;
         }
-        return new CachingKeyValueStore(inner);
+        return new CachingKeyValueStore(inner, true);
     }
 
     private KeyValueStore<Bytes, byte[]> maybeWrapLogging(final KeyValueStore<Bytes, byte[]> inner) {
@@ -92,31 +85,28 @@ public class TimestampedKeyValueStoreBuilder<K, V>
         private InMemoryTimestampedKeyValueStoreMarker(final KeyValueStore<Bytes, byte[]> wrapped) {
             if (wrapped.persistent()) {
                 throw new IllegalArgumentException("Provided store must not be a persistent store, but it is.");
-			}
-			this.wrapped = wrapped;
-		}
+            }
+            this.wrapped = wrapped;
+        }
 
-		@Deprecated
-		@Override
-		public void init(final ProcessorContext context,
-						 final StateStore root) {
-			wrapped.init(context, root);
-		}
+        @Deprecated
+        @Override
+        public void init(final ProcessorContext context, final StateStore root) {
+            wrapped.init(context, root);
+        }
 
-		@Override
-		public void init(final StateStoreContext context, final StateStore root) {
-			wrapped.init(context, root);
-		}
+        @Override
+        public void init(final StateStoreContext context, final StateStore root) {
+            wrapped.init(context, root);
+        }
 
-		@Override
-		public void put(final Bytes key,
-						final byte[] value) {
-			wrapped.put(key, value);
-		}
+        @Override
+        public void put(final Bytes key, final byte[] value) {
+            wrapped.put(key, value);
+        }
 
-		@Override
-		public byte[] putIfAbsent(final Bytes key,
-								  final byte[] value) {
+        @Override
+        public byte[] putIfAbsent(final Bytes key, final byte[] value) {
             return wrapped.putIfAbsent(key, value);
         }
 
@@ -131,41 +121,44 @@ public class TimestampedKeyValueStoreBuilder<K, V>
         }
 
         @Override
-		public byte[] get(final Bytes key) {
-			return wrapped.get(key);
-		}
+        public byte[] get(final Bytes key) {
+            return wrapped.get(key);
+        }
 
-		@Override
-		public KeyValueIterator<Bytes, byte[]> range(final Bytes from,
-													 final Bytes to) {
-			return wrapped.range(from, to);
-		}
+        @Override
+        public KeyValueIterator<Bytes, byte[]> range(final Bytes from, final Bytes to) {
+            return wrapped.range(from, to);
+        }
 
-		@Override
-		public KeyValueIterator<Bytes, byte[]> reverseRange(final Bytes from,
-															final Bytes to) {
-			return wrapped.reverseRange(from, to);
-		}
+        @Override
+        public KeyValueIterator<Bytes, byte[]> reverseRange(final Bytes from, final Bytes to) {
+            return wrapped.reverseRange(from, to);
+        }
 
-		@Override
-		public KeyValueIterator<Bytes, byte[]> all() {
-			return wrapped.all();
-		}
+        @Override
+        public KeyValueIterator<Bytes, byte[]> all() {
+            return wrapped.all();
+        }
 
-		@Override
-		public KeyValueIterator<Bytes, byte[]> reverseAll() {
-			return wrapped.reverseAll();
-		}
+        @Override
+        public KeyValueIterator<Bytes, byte[]> reverseAll() {
+            return wrapped.reverseAll();
+        }
 
-		@Override
-		public long approximateNumEntries() {
-			return wrapped.approximateNumEntries();
-		}
+        @Override
+        public <PS extends Serializer<P>, P> KeyValueIterator<Bytes, byte[]> prefixScan(final P prefix, final PS prefixKeySerializer) {
+            return wrapped.prefixScan(prefix, prefixKeySerializer);
+        }
 
-		@Override
-		public void flush() {
-			wrapped.flush();
-		}
+        @Override
+        public long approximateNumEntries() {
+            return wrapped.approximateNumEntries();
+        }
+
+        @Override
+        public void flush() {
+            wrapped.flush();
+        }
 
         @Override
         public void close() {
@@ -175,6 +168,23 @@ public class TimestampedKeyValueStoreBuilder<K, V>
         @Override
         public boolean isOpen() {
             return wrapped.isOpen();
+        }
+
+        @Override
+        public <R> QueryResult<R> query(final Query<R> query, final PositionBound positionBound, final QueryConfig config) {
+
+            final long start = config.isCollectExecutionInfo() ? System.nanoTime() : -1L;
+            final QueryResult<R> result = wrapped.query(query, positionBound, config);
+            if (config.isCollectExecutionInfo()) {
+                final long end = System.nanoTime();
+                result.addExecutionInfo("Handled in " + getClass() + " in " + (end - start) + "ns");
+            }
+            return result;
+        }
+
+        @Override
+        public Position getPosition() {
+            return wrapped.getPosition();
         }
 
         @Override

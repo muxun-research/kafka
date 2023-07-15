@@ -16,20 +16,19 @@
 */
 package kafka.zk
 
-import java.util.Properties
-
 import kafka.admin.{AdminOperationException, AdminUtils, BrokerMetadata, RackAwareMode}
 import kafka.common.TopicAlreadyMarkedForDeletionException
 import kafka.controller.ReplicaAssignment
-import kafka.log.LogConfig
 import kafka.server.{ConfigEntityName, ConfigType, DynamicConfig}
-import kafka.utils._
 import kafka.utils.Implicits._
-import org.apache.kafka.common.{TopicPartition, Uuid}
+import kafka.utils._
 import org.apache.kafka.common.errors._
 import org.apache.kafka.common.internals.Topic
+import org.apache.kafka.common.{TopicPartition, Uuid}
+import org.apache.kafka.storage.internals.log.LogConfig
 import org.apache.zookeeper.KeeperException.NodeExistsException
 
+import java.util.Properties
 import scala.collection.{Map, Seq}
 
 /**
@@ -42,11 +41,12 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
 
   /**
    * Creates the topic with given configuration
+   *
    * @param topic             topic name to create
    * @param partitions        Number of partitions to be set
    * @param replicationFactor Replication factor
    * @param topicConfig       topic configs
-   * @param rackAwareMode
+   * @param rackAwareMode     rack aware mode for replica assignment
    * @param usesTopicId       Boolean indicating whether the topic ID will be created
    */
   def createTopic(topic: String,
@@ -62,9 +62,10 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
 
   /**
    * Gets broker metadata list
-   * @param rackAwareMode
-   * @param brokerList
-   * @return
+   *
+   * @param rackAwareMode rack aware mode for replica assignment
+   * @param brokerList    The brokers to gather metadata about.
+   * @return The metadata for each broker that was found.
    */
   def getBrokerMetadatas(rackAwareMode: RackAwareMode = RackAwareMode.Enforced,
                          brokerList: Option[Seq[Int]] = None): Seq[BrokerMetadata] = {
@@ -87,6 +88,7 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
   /**
    * Create topic and optionally validate its parameters. Note that this method is used by the
    * TopicCommand as well.
+   *
    * @param topic                      The name of the topic
    * @param config                     The config of the topic
    * @param partitionReplicaAssignment The assignments of the topic
@@ -115,6 +117,7 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
   /**
    * Validate topic creation parameters. Note that this method is indirectly used by the
    * TopicCommand via the `createTopicWithAssignment` method.
+   *
    * @param topic                      The name of the topic
    * @param partitionReplicaAssignment The assignments of the topic
    * @param config                     The config of the topic
@@ -123,7 +126,9 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
                           partitionReplicaAssignment: Map[Int, Seq[Int]],
                           config: Properties): Unit = {
     Topic.validate(topic)
-
+    if (zkClient.isTopicMarkedForDeletion(topic)) {
+      throw new TopicExistsException(s"Topic '$topic' is marked for deletion.")
+    }
     if (zkClient.topicExists(topic))
       throw new TopicExistsException(s"Topic '$topic' already exists.")
     else if (Topic.hasCollisionChars(topic)) {
@@ -176,7 +181,8 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
 
   /**
    * Creates a delete path for a given topic
-   * @param topic
+   *
+   * @param topic Topic name to delete
    */
   def deleteTopic(topic: String): Unit = {
     if (zkClient.topicExists(topic)) {
@@ -195,6 +201,7 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
   /**
    * Add partitions to existing topic with optional replica assignment. Note that this
    * method is used by the TopicCommand.
+   *
    * @param topic              Topic for adding partitions to
    * @param existingAssignment A map from partition id to its assignment
    * @param allBrokers         All brokers in the cluster
@@ -230,6 +237,7 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
   /**
    * Create assignment to add the given number of partitions while validating the
    * provided arguments.
+   *
    * @param topic              Topic for adding partitions to
    * @param existingAssignment A map from partition id to its assignment
    * @param allBrokers         All brokers in the cluster
@@ -273,6 +281,7 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
   /**
    * Add partitions to the existing topic with the provided assignment. This method does
    * not validate the provided assignments. Validation must be done beforehand.
+   *
    * @param topic                  Topic for adding partitions to
    * @param existingAssignment     A map from partition id to its assignment
    * @param newPartitionAssignment The assignments to add
@@ -324,6 +333,12 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
     }
   }
 
+  /**
+   * Parse broker from entity name to integer id
+   *
+   * @param broker The broker entity name to parse
+   * @return Integer brokerId after successfully parsed or default None
+   */
   def parseBroker(broker: String): Option[Int] = {
     broker match {
       case ConfigEntityName.Default => None
@@ -338,16 +353,18 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
 
   /**
    * Change the configs for a given entityType and entityName
-   * @param entityType
-   * @param entityName
-   * @param configs
+   *
+   * @param entityType     The entityType of the configs that will be changed
+   * @param entityName     The entityName of the entityType
+   * @param configs        The config of the entityName
+   * @param isUserClientId If true, this entity is user and clientId entity
    */
-  def changeConfigs(entityType: String, entityName: String, configs: Properties): Unit = {
+  def changeConfigs(entityType: String, entityName: String, configs: Properties, isUserClientId: Boolean = false): Unit = {
 
     entityType match {
       case ConfigType.Topic => changeTopicConfig(entityName, configs)
       case ConfigType.Client => changeClientIdConfig(entityName, configs)
-      case ConfigType.User => changeUserOrUserClientIdConfig(entityName, configs)
+      case ConfigType.User => changeUserOrUserClientIdConfig(entityName, configs, isUserClientId)
       case ConfigType.Broker => changeBrokerConfig(parseBroker(entityName), configs)
       case ConfigType.Ip => changeIpConfig(entityName, configs)
       case _ => throw new IllegalArgumentException(s"$entityType is not a known entityType. Should be one of ${ConfigType.all}")
@@ -355,12 +372,53 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
   }
 
   /**
+   * Try to clean quota nodes in zk, if the configs of the node are empty and there are no children left,
+   * to avoid infinite growth of quota nodes
+   *
+   * @param entityType     The entityType of the node we are trying to clean
+   * @param entityName     The entityName of the entityType
+   * @param isUserClientId If true, this entity is user and clientId entity
+   * @return True, if the node is deleted
+   */
+  private def tryCleanQuotaNodes(entityType: String, entityName: String, isUserClientId: Boolean): Boolean = {
+    val currPath = ConfigEntityZNode.path(entityType, entityName)
+    if (zkClient.getChildren(currPath).isEmpty) {
+      var pathToDelete = currPath
+      // If the entity is user and clientId, we need to do some further check if the parent user node is also empty
+      // after current userClientId node deleted. If so, we also need to try cleaning the corresponding user node.
+      if (isUserClientId) {
+        val user = entityName.substring(0, entityName.indexOf("/"))
+        val clientId = entityName.substring(entityName.lastIndexOf("/") + 1)
+        val clientsPath = ConfigEntityZNode.path(ConfigType.User, user + "/" + ConfigType.Client)
+        val clientsChildren = zkClient.getChildren(clientsPath)
+        // If current client is the only child of clients, the node of clients can also be deleted.
+        if (clientsChildren == Seq(clientId)) {
+          pathToDelete = clientsPath
+          val userData = fetchEntityConfig(ConfigType.User, user)
+          val userPath = ConfigEntityZNode.path(ConfigType.User, user)
+          val userChildren = zkClient.getChildren(userPath)
+          // If the configs of the user are empty and the clients node is the only child of the user,
+          // the node of user can also be deleted.
+          if (userData.isEmpty && userChildren == Seq(ConfigType.Client)) {
+            pathToDelete = userPath
+          }
+        }
+      }
+      info(s"Deleting zk node $pathToDelete since node of entityType $entityType and entityName $entityName is empty.")
+      zkClient.deletePath(pathToDelete)
+      true
+    } else
+      false
+  }
+
+  /**
    * Update the config for a client and create a change notification so the change will propagate to other brokers.
    * If clientId is <default>, default clientId config is updated. ClientId configs are used only if <user, clientId>
    * and <user> configs are not specified.
-   * @param sanitizedClientId: The sanitized clientId for which configs are being changed
-   * @param configs: The final set of configs that will be applied to the topic. If any new configs need to be added or
-   *                 existing configs need to be deleted, it should be done prior to invoking this API
+   *
+   * @param sanitizedClientId : The sanitized clientId for which configs are being changed
+   * @param configs           : The final set of configs that will be applied to the topic. If any new configs need to be added or
+   *                          existing configs need to be deleted, it should be done prior to invoking this API
    *
    */
   def changeClientIdConfig(sanitizedClientId: String, configs: Properties): Unit = {
@@ -373,21 +431,23 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
    * User and/or clientId components of the path may be <default>, indicating that the configuration is the default
    * value to be applied if a more specific override is not configured.
    *
-   * @param sanitizedEntityName: <sanitizedUserPrincipal> or <sanitizedUserPrincipal>/clients/<clientId>
-   * @param configs: The final set of configs that will be applied to the topic. If any new configs need to be added or
-   *                 existing configs need to be deleted, it should be done prior to invoking this API
+   * @param sanitizedEntityName : <sanitizedUserPrincipal> or <sanitizedUserPrincipal>/clients/<clientId>
+   * @param configs             : The final set of configs that will be applied to the topic. If any new configs need to be added or
+   *                            existing configs need to be deleted, it should be done prior to invoking this API
+   * @param isUserClientId      If true, this entity is user and clientId entity
    *
    */
-  def changeUserOrUserClientIdConfig(sanitizedEntityName: String, configs: Properties): Unit = {
+  def changeUserOrUserClientIdConfig(sanitizedEntityName: String, configs: Properties, isUserClientId: Boolean = false): Unit = {
     if (sanitizedEntityName == ConfigEntityName.Default || sanitizedEntityName.contains("/clients"))
       DynamicConfig.Client.validate(configs)
     else
       DynamicConfig.User.validate(configs)
-    changeEntityConfig(ConfigType.User, sanitizedEntityName, configs)
+    changeEntityConfig(ConfigType.User, sanitizedEntityName, configs, isUserClientId)
   }
 
   /**
    * Validates the IP configs.
+   *
    * @param ip      ip for which configs are being validated
    * @param configs properties to validate for the IP
    */
@@ -400,6 +460,7 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
   /**
    * Update the config for an IP. These overrides will be persisted between sessions, and will override any default
    * IP properties.
+   *
    * @param ip      ip for which configs are being updated
    * @param configs properties to update for the IP
    */
@@ -410,8 +471,9 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
 
   /**
    * validates the topic configs
-   * @param topic
-   * @param configs
+   *
+   * @param topic   topic for which configs are being validated
+   * @param configs properties to validate for the topic
    */
   def validateTopicConfig(topic: String, configs: Properties): Unit = {
     Topic.validate(topic)
@@ -469,9 +531,19 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
     DynamicConfig.Broker.validate(configs)
   }
 
-  private def changeEntityConfig(rootEntityType: String, fullSanitizedEntityName: String, configs: Properties): Unit = {
+  private def changeEntityConfig(rootEntityType: String, fullSanitizedEntityName: String, configs: Properties, isUserClientId: Boolean = false): Unit = {
     val sanitizedEntityPath = rootEntityType + '/' + fullSanitizedEntityName
-    zkClient.setOrCreateEntityConfigs(rootEntityType, fullSanitizedEntityName, configs)
+    var needUpdateConfigs = true
+    // If the entityType is quota and node is empty, which means if the configs are empty and no children left,
+    // we should try to clean up to avoid continuous increment of zk nodes.
+    if ((ConfigType.Client.equals(rootEntityType) || ConfigType.User.equals(rootEntityType) || ConfigType.Ip.equals(rootEntityType)) && configs.isEmpty) {
+      if (tryCleanQuotaNodes(rootEntityType, fullSanitizedEntityName, isUserClientId)) {
+        needUpdateConfigs = false
+      }
+    }
+    if (needUpdateConfigs) {
+      zkClient.setOrCreateEntityConfigs(rootEntityType, fullSanitizedEntityName, configs)
+    }
 
     // create the change notification
     zkClient.createConfigChangeNotification(sanitizedEntityPath)
@@ -480,9 +552,10 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
   /**
    * Read the entity (topic, broker, client, user, <user, client> or <ip>) config (if any) from zk
    * sanitizedEntityName is <topic>, <broker>, <client-id>, <user>, <user>/clients/<client-id> or <ip>.
-   * @param rootEntityType
-   * @param sanitizedEntityName
-   * @return
+   *
+   * @param rootEntityType      entityType for which configs are being fetched
+   * @param sanitizedEntityName entityName of the entityType
+   * @return The successfully gathered configs
    */
   def fetchEntityConfig(rootEntityType: String, sanitizedEntityName: String): Properties = {
     zkClient.getEntityConfigs(rootEntityType, sanitizedEntityName)
@@ -490,24 +563,27 @@ class AdminZkClient(zkClient: KafkaZkClient) extends Logging {
 
   /**
    * Gets all topic configs
-   * @return
+   *
+   * @return The successfully gathered configs of all topics
    */
   def getAllTopicConfigs(): Map[String, Properties] =
     zkClient.getAllTopicsInCluster().map(topic => (topic, fetchEntityConfig(ConfigType.Topic, topic))).toMap
 
   /**
    * Gets all the entity configs for a given entityType
-   * @param entityType
-   * @return
+   *
+   * @param entityType entityType for which configs are being fetched
+   * @return The successfully gathered configs of the entityType
    */
   def fetchAllEntityConfigs(entityType: String): Map[String, Properties] =
     zkClient.getAllEntitiesWithConfig(entityType).map(entity => (entity, fetchEntityConfig(entityType, entity))).toMap
 
   /**
    * Gets all the entity configs for a given childEntityType
-   * @param rootEntityType
-   * @param childEntityType
-   * @return
+   *
+   * @param rootEntityType  rootEntityType for which configs are being fetched
+   * @param childEntityType childEntityType of the rootEntityType
+   * @return The successfully gathered configs of the childEntityType
    */
   def fetchAllChildEntityConfigs(rootEntityType: String, childEntityType: String): Map[String, Properties] = {
     def entityPaths(rootPath: Option[String]): Seq[String] = {

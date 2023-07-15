@@ -33,12 +33,10 @@ import org.apache.kafka.streams.kstream.KTable;
 import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.test.IntegrationTest;
 import org.apache.kafka.test.TestUtils;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.*;
 import org.junit.experimental.categories.Category;
 import org.junit.rules.TemporaryFolder;
+import org.junit.rules.Timeout;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
@@ -52,12 +50,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.util.Arrays.asList;
 import static java.util.Collections.singletonList;
-import static org.apache.kafka.common.utils.Utils.mkEntry;
-import static org.apache.kafka.common.utils.Utils.mkMap;
-import static org.apache.kafka.common.utils.Utils.mkProperties;
+import static org.apache.kafka.common.utils.Utils.*;
 import static org.apache.kafka.streams.integration.utils.IntegrationTestUtils.cleanStateBeforeTest;
 import static org.apache.kafka.streams.integration.utils.IntegrationTestUtils.quietlyCleanStateAfterTest;
-import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 
 /**
@@ -66,108 +62,97 @@ import static org.junit.Assert.assertFalse;
 @RunWith(Parameterized.class)
 @Category(IntegrationTest.class)
 public class EOSUncleanShutdownIntegrationTest {
+    @Rule
+    public Timeout globalTimeout = Timeout.seconds(600);
 
-	@Parameterized.Parameters(name = "{0}")
-	public static Collection<String[]> data() {
-		return Arrays.asList(new String[][]{
-				{StreamsConfig.EXACTLY_ONCE},
-				{StreamsConfig.EXACTLY_ONCE_BETA}
-		});
-	}
+    @SuppressWarnings("deprecation")
+    @Parameterized.Parameters(name = "{0}")
+    public static Collection<String[]> data() {
+        return Arrays.asList(new String[][]{{StreamsConfig.EXACTLY_ONCE}, {StreamsConfig.EXACTLY_ONCE_V2}});
+    }
 
-	@Parameterized.Parameter
-	public String eosConfig;
+    @Parameterized.Parameter
+    public String eosConfig;
 
-	public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(3);
+    public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(3);
 
-	@BeforeClass
-	public static void startCluster() throws IOException {
-		CLUSTER.start();
-		STREAMS_CONFIG.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-		STREAMS_CONFIG.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, CLUSTER.bootstrapServers());
-		STREAMS_CONFIG.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
-		STREAMS_CONFIG.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
-		STREAMS_CONFIG.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, COMMIT_INTERVAL);
-		STREAMS_CONFIG.put(StreamsConfig.STATE_DIR_CONFIG, TEST_FOLDER.getRoot().getPath());
-	}
+    @BeforeClass
+    public static void startCluster() throws IOException {
+        CLUSTER.start();
+        STREAMS_CONFIG.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        STREAMS_CONFIG.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, CLUSTER.bootstrapServers());
+        STREAMS_CONFIG.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
+        STREAMS_CONFIG.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
+        STREAMS_CONFIG.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, COMMIT_INTERVAL);
+        STREAMS_CONFIG.put(StreamsConfig.STATE_DIR_CONFIG, TEST_FOLDER.getRoot().getPath());
+    }
 
-	@AfterClass
-	public static void closeCluster() {
-		CLUSTER.stop();
-	}
+    @AfterClass
+    public static void closeCluster() {
+        CLUSTER.stop();
+    }
 
-	@ClassRule
-	public static final TemporaryFolder TEST_FOLDER = new TemporaryFolder(TestUtils.tempDirectory());
+    @ClassRule
+    public static final TemporaryFolder TEST_FOLDER = new TemporaryFolder(TestUtils.tempDirectory());
 
-	private static final Properties STREAMS_CONFIG = new Properties();
-	private static final StringSerializer STRING_SERIALIZER = new StringSerializer();
-	private static final Long COMMIT_INTERVAL = 100L;
+    private static final Properties STREAMS_CONFIG = new Properties();
+    private static final StringSerializer STRING_SERIALIZER = new StringSerializer();
+    private static final Long COMMIT_INTERVAL = 100L;
 
-	private static final int RECORD_TOTAL = 3;
+    private static final int RECORD_TOTAL = 3;
 
-	@Test
-	public void shouldWorkWithUncleanShutdownWipeOutStateStore() throws InterruptedException {
-		final String appId = "shouldWorkWithUncleanShutdownWipeOutStateStore";
-		STREAMS_CONFIG.put(StreamsConfig.APPLICATION_ID_CONFIG, appId);
-		STREAMS_CONFIG.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, eosConfig);
+    @Test
+    public void shouldWorkWithUncleanShutdownWipeOutStateStore() throws InterruptedException {
+        final String appId = "shouldWorkWithUncleanShutdownWipeOutStateStore";
+        STREAMS_CONFIG.put(StreamsConfig.APPLICATION_ID_CONFIG, appId);
+        STREAMS_CONFIG.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, eosConfig);
 
-		final String input = "input-topic";
-		cleanStateBeforeTest(CLUSTER, input);
+        final String input = "input-topic";
+        cleanStateBeforeTest(CLUSTER, input);
 
-		final StreamsBuilder builder = new StreamsBuilder();
+        final StreamsBuilder builder = new StreamsBuilder();
 
-		final KStream<String, String> inputStream = builder.stream(input);
+        final KStream<String, String> inputStream = builder.stream(input);
 
-		final AtomicInteger recordCount = new AtomicInteger(0);
+        final AtomicInteger recordCount = new AtomicInteger(0);
 
-		final KTable<String, String> valueCounts = inputStream
-				.groupByKey()
-				.aggregate(
-						() -> "()",
-						(key, value, aggregate) -> aggregate + ",(" + key + ": " + value + ")",
-						Materialized.as("aggregated_value"));
+        final KTable<String, String> valueCounts = inputStream.groupByKey().aggregate(() -> "()", (key, value, aggregate) -> aggregate + ",(" + key + ": " + value + ")", Materialized.as("aggregated_value"));
 
-		valueCounts.toStream().peek((key, value) -> {
-			if (recordCount.incrementAndGet() >= RECORD_TOTAL) {
-				throw new IllegalStateException("Crash on the " + RECORD_TOTAL + " record");
-			}
-		});
+        valueCounts.toStream().peek((key, value) -> {
+            if (recordCount.incrementAndGet() >= RECORD_TOTAL) {
+                throw new IllegalStateException("Crash on the " + RECORD_TOTAL + " record");
+            }
+        });
 
-		final Properties producerConfig = mkProperties(mkMap(
-				mkEntry(ProducerConfig.CLIENT_ID_CONFIG, "anything"),
-				mkEntry(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ((Serializer<String>) STRING_SERIALIZER).getClass().getName()),
-				mkEntry(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ((Serializer<String>) STRING_SERIALIZER).getClass().getName()),
-				mkEntry(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, CLUSTER.bootstrapServers())
-		));
-		final KafkaStreams driver = new KafkaStreams(builder.build(), STREAMS_CONFIG);
-		driver.cleanUp();
-		driver.start();
+        final Properties producerConfig = mkProperties(mkMap(mkEntry(ProducerConfig.CLIENT_ID_CONFIG, "anything"), mkEntry(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ((Serializer<String>) STRING_SERIALIZER).getClass().getName()), mkEntry(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ((Serializer<String>) STRING_SERIALIZER).getClass().getName()), mkEntry(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, CLUSTER.bootstrapServers())));
+        final KafkaStreams driver = new KafkaStreams(builder.build(), STREAMS_CONFIG);
+        driver.cleanUp();
+        driver.start();
 
-		final File stateDir = new File(String.join("/", TEST_FOLDER.getRoot().getPath(), appId, "0_0"));
+        // Task's StateDir
+        final File taskStateDir = new File(String.join("/", TEST_FOLDER.getRoot().getPath(), appId, "0_0"));
+        final File taskCheckpointFile = new File(taskStateDir, ".checkpoint");
 
-		try {
-			IntegrationTestUtils.produceSynchronously(producerConfig, false, input, Optional.empty(),
-					singletonList(new KeyValueTimestamp<>("k1", "v1", 0L)));
+        try {
+            IntegrationTestUtils.produceSynchronously(producerConfig, false, input, Optional.empty(), singletonList(new KeyValueTimestamp<>("k1", "v1", 0L)));
 
-			TestUtils.waitForCondition(stateDir::exists,
-					"Failed awaiting CreateTopics first request failure");
+            // wait until the first request is processed and some files are created in it
+            TestUtils.waitForCondition(() -> taskStateDir.exists() && taskStateDir.isDirectory() && taskStateDir.list().length > 0, "Failed awaiting CreateTopics first request failure");
+            IntegrationTestUtils.produceSynchronously(producerConfig, false, input, Optional.empty(), asList(new KeyValueTimestamp<>("k2", "v2", 1L), new KeyValueTimestamp<>("k3", "v3", 2L)));
 
-			IntegrationTestUtils.produceSynchronously(producerConfig, false, input, Optional.empty(),
-					asList(new KeyValueTimestamp<>("k2", "v2", 1L),
-							new KeyValueTimestamp<>("k3", "v3", 2L)));
+            TestUtils.waitForCondition(() -> recordCount.get() == RECORD_TOTAL, "Expected " + RECORD_TOTAL + " records processed but only got " + recordCount.get());
+        } finally {
+            TestUtils.waitForCondition(() -> driver.state().equals(State.ERROR), "Expected ERROR state but driver is on " + driver.state());
 
-			TestUtils.waitForCondition(() -> recordCount.get() == RECORD_TOTAL,
-					"Expected " + RECORD_TOTAL + " records processed but only got " + recordCount.get());
-		} finally {
-			TestUtils.waitForCondition(() -> driver.state().equals(State.ERROR),
-					"Expected ERROR state but driver is on " + driver.state());
+            driver.close();
 
-			driver.close();
+            // Although there is an uncaught exception,
+            // case 1: the state directory is cleaned up without any problems.
+            // case 2: The state directory is not cleaned up, for it does not include any checkpoint file.
+            // case 3: The state directory is not cleaned up, for it includes a checkpoint file but it is empty.
+            assertTrue(!taskStateDir.exists() || (taskStateDir.exists() && taskStateDir.list().length > 0 && !taskCheckpointFile.exists()) || (taskCheckpointFile.exists() && taskCheckpointFile.length() == 0L));
 
-			// the state directory should still exist with the empty checkpoint file
-			assertFalse(stateDir.exists());
-
-			quietlyCleanStateAfterTest(CLUSTER, driver);
-		}
-	}
+            quietlyCleanStateAfterTest(CLUSTER, driver);
+        }
+    }
 }

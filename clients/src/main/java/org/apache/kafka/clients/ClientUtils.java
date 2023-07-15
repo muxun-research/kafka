@@ -33,6 +33,7 @@ import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.apache.kafka.common.utils.Utils.getHost;
 import static org.apache.kafka.common.utils.Utils.getPort;
@@ -89,42 +90,44 @@ public final class ClientUtils {
         return addresses;
     }
 
-	/**
-	 * Create a new channel builder from the provided configuration.
-	 * @param config     client configs
-	 * @param time       the time implementation
-	 * @param logContext the logging context
-	 * @return configured ChannelBuilder based on the configs.
-	 */
-	public static ChannelBuilder createChannelBuilder(AbstractConfig config, Time time, LogContext logContext) {
-		SecurityProtocol securityProtocol = SecurityProtocol.forName(config.getString(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
-		String clientSaslMechanism = config.getString(SaslConfigs.SASL_MECHANISM);
-		return ChannelBuilders.clientChannelBuilder(securityProtocol, JaasContext.Type.CLIENT, config, null,
-				clientSaslMechanism, time, true, logContext);
-	}
+    /**
+     * Create a new channel builder from the provided configuration.
+     * @param config     client configs
+     * @param time       the time implementation
+     * @param logContext the logging context
+     * @return configured ChannelBuilder based on the configs.
+     */
+    public static ChannelBuilder createChannelBuilder(AbstractConfig config, Time time, LogContext logContext) {
+        SecurityProtocol securityProtocol = SecurityProtocol.forName(config.getString(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
+        String clientSaslMechanism = config.getString(SaslConfigs.SASL_MECHANISM);
+        return ChannelBuilders.clientChannelBuilder(securityProtocol, JaasContext.Type.CLIENT, config, null, clientSaslMechanism, time, true, logContext);
+    }
 
-	static List<InetAddress> resolve(String host, HostResolver hostResolver) throws UnknownHostException {
-		InetAddress[] addresses = hostResolver.resolve(host);
-		return filterPreferredAddresses(addresses);
-	}
+    static List<InetAddress> resolve(String host, HostResolver hostResolver) throws UnknownHostException {
+        InetAddress[] addresses = hostResolver.resolve(host);
+        List<InetAddress> result = filterPreferredAddresses(addresses);
+        if (log.isDebugEnabled())
+            log.debug("Resolved host {} as {}", host, result.stream().map(i -> i.getHostAddress()).collect(Collectors.joining(",")));
+        return result;
+    }
 
-	/**
-	 * Return a list containing the first address in `allAddresses` and subsequent addresses
-	 * that are a subtype of the first address.
-	 * <p>
-	 * The outcome is that all returned addresses are either IPv4 or IPv6 (InetAddress has two
-	 * subclasses: Inet4Address and Inet6Address).
-	 */
-	static List<InetAddress> filterPreferredAddresses(InetAddress[] allAddresses) {
-		List<InetAddress> preferredAddresses = new ArrayList<>();
-		Class<? extends InetAddress> clazz = null;
-		for (InetAddress address : allAddresses) {
-			if (clazz == null) {
-				clazz = address.getClass();
-			}
-			if (clazz.isInstance(address)) {
-				preferredAddresses.add(address);
-			}
+    /**
+     * Return a list containing the first address in `allAddresses` and subsequent addresses
+     * that are a subtype of the first address.
+     * <p>
+     * The outcome is that all returned addresses are either IPv4 or IPv6 (InetAddress has two
+     * subclasses: Inet4Address and Inet6Address).
+     */
+    static List<InetAddress> filterPreferredAddresses(InetAddress[] allAddresses) {
+        List<InetAddress> preferredAddresses = new ArrayList<>();
+        Class<? extends InetAddress> clazz = null;
+        for (InetAddress address : allAddresses) {
+            if (clazz == null) {
+                clazz = address.getClass();
+            }
+            if (clazz.isInstance(address)) {
+                preferredAddresses.add(address);
+            }
         }
         return preferredAddresses;
     }

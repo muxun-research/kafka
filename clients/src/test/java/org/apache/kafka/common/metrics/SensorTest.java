@@ -17,37 +17,17 @@
 package org.apache.kafka.common.metrics;
 
 import org.apache.kafka.common.MetricName;
-import org.apache.kafka.common.metrics.stats.Avg;
-import org.apache.kafka.common.metrics.stats.CumulativeCount;
-import org.apache.kafka.common.metrics.stats.Meter;
-import org.apache.kafka.common.metrics.stats.Rate;
-import org.apache.kafka.common.metrics.stats.TokenBucket;
-import org.apache.kafka.common.metrics.stats.WindowedSum;
+import org.apache.kafka.common.metrics.stats.*;
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.common.utils.SystemTime;
 import org.apache.kafka.common.utils.Time;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class SensorTest {
 
@@ -197,19 +177,16 @@ public class SensorTest {
         try {
             for (int i = 0; i != threadCount; ++i) {
                 final int index = i;
-                workers.add(service.submit(new Callable<Throwable>() {
-                    @Override
-                    public Throwable call() {
-                        try {
-                            assertTrue(latch.await(5, TimeUnit.SECONDS));
-                            for (int j = 0; j != 20; ++j) {
-                                sensor.record(j * index, System.currentTimeMillis() + j, false);
-                                sensor.checkQuotas();
-                            }
-                            return null;
-                        } catch (Throwable e) {
-                            return e;
+                workers.add(service.submit(() -> {
+                    try {
+                        assertTrue(latch.await(5, TimeUnit.SECONDS));
+                        for (int j = 0; j != 20; ++j) {
+                            sensor.record(j * index, System.currentTimeMillis() + j, false);
+                            sensor.checkQuotas();
                         }
+                        return null;
+                    } catch (Throwable e) {
+                        return e;
                     }
                 }));
             }

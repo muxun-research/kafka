@@ -39,179 +39,148 @@ import java.util.stream.Collectors;
 
 public class StopReplicaRequest extends AbstractControlRequest {
 
-	public static class Builder extends AbstractControlRequest.Builder<StopReplicaRequest> {
-		private final boolean deletePartitions;
-		private final List<StopReplicaTopicState> topicStates;
+    public static class Builder extends AbstractControlRequest.Builder<StopReplicaRequest> {
+        private final boolean deletePartitions;
+        private final List<StopReplicaTopicState> topicStates;
 
-		public Builder(short version, int controllerId, int controllerEpoch, long brokerEpoch,
-					   boolean deletePartitions, List<StopReplicaTopicState> topicStates) {
-			super(ApiKeys.STOP_REPLICA, version, controllerId, controllerEpoch, brokerEpoch);
-			this.deletePartitions = deletePartitions;
-			this.topicStates = topicStates;
-		}
+        public Builder(short version, int controllerId, int controllerEpoch, long brokerEpoch, boolean deletePartitions, List<StopReplicaTopicState> topicStates) {
+            this(version, controllerId, controllerEpoch, brokerEpoch, deletePartitions, topicStates, false);
+        }
 
-		public StopReplicaRequest build(short version) {
-			StopReplicaRequestData data = new StopReplicaRequestData()
-					.setControllerId(controllerId)
-					.setControllerEpoch(controllerEpoch)
-					.setBrokerEpoch(brokerEpoch);
+        public Builder(short version, int controllerId, int controllerEpoch, long brokerEpoch, boolean deletePartitions, List<StopReplicaTopicState> topicStates, boolean kraftController) {
+            super(ApiKeys.STOP_REPLICA, version, controllerId, controllerEpoch, brokerEpoch, kraftController);
+            this.deletePartitions = deletePartitions;
+            this.topicStates = topicStates;
+        }
 
-			if (version >= 3) {
-				data.setTopicStates(topicStates);
-			} else if (version >= 1) {
-				data.setDeletePartitions(deletePartitions);
-				List<StopReplicaTopicV1> topics = topicStates.stream().map(topic ->
-						new StopReplicaTopicV1()
-								.setName(topic.topicName())
-								.setPartitionIndexes(topic.partitionStates().stream()
-										.map(StopReplicaPartitionState::partitionIndex)
-										.collect(Collectors.toList())))
-						.collect(Collectors.toList());
-				data.setTopics(topics);
-			} else {
-				data.setDeletePartitions(deletePartitions);
-				List<StopReplicaPartitionV0> partitions = topicStates.stream().flatMap(topic ->
-						topic.partitionStates().stream().map(partition ->
-								new StopReplicaPartitionV0()
-										.setTopicName(topic.topicName())
-										.setPartitionIndex(partition.partitionIndex())))
-						.collect(Collectors.toList());
-				data.setUngroupedPartitions(partitions);
-			}
+        public StopReplicaRequest build(short version) {
+            StopReplicaRequestData data = new StopReplicaRequestData().setControllerId(controllerId).setControllerEpoch(controllerEpoch).setBrokerEpoch(brokerEpoch);
 
-			return new StopReplicaRequest(data, version);
-		}
+            if (version >= 4) {
+                data.setIsKRaftController(kraftController);
+            }
 
-		@Override
-		public String toString() {
-			StringBuilder bld = new StringBuilder();
-			bld.append("(type=StopReplicaRequest").
-					append(", controllerId=").append(controllerId).
-					append(", controllerEpoch=").append(controllerEpoch).
-					append(", brokerEpoch=").append(brokerEpoch).
-					append(", deletePartitions=").append(deletePartitions).
-					append(", topicStates=").append(Utils.join(topicStates, ",")).
-					append(")");
-			return bld.toString();
-		}
-	}
+            if (version >= 3) {
+                data.setTopicStates(topicStates);
+            } else if (version >= 1) {
+                data.setDeletePartitions(deletePartitions);
+                List<StopReplicaTopicV1> topics = topicStates.stream().map(topic -> new StopReplicaTopicV1().setName(topic.topicName()).setPartitionIndexes(topic.partitionStates().stream().map(StopReplicaPartitionState::partitionIndex).collect(Collectors.toList()))).collect(Collectors.toList());
+                data.setTopics(topics);
+            } else {
+                data.setDeletePartitions(deletePartitions);
+                List<StopReplicaPartitionV0> partitions = topicStates.stream().flatMap(topic -> topic.partitionStates().stream().map(partition -> new StopReplicaPartitionV0().setTopicName(topic.topicName()).setPartitionIndex(partition.partitionIndex()))).collect(Collectors.toList());
+                data.setUngroupedPartitions(partitions);
+            }
 
-	private final StopReplicaRequestData data;
+            return new StopReplicaRequest(data, version);
+        }
 
-	private StopReplicaRequest(StopReplicaRequestData data, short version) {
-		super(ApiKeys.STOP_REPLICA, version);
-		this.data = data;
-	}
+        @Override
+        public String toString() {
+            StringBuilder bld = new StringBuilder();
+            bld.append("(type=StopReplicaRequest").append(", controllerId=").append(controllerId).append(", controllerEpoch=").append(controllerEpoch).append(", brokerEpoch=").append(brokerEpoch).append(", deletePartitions=").append(deletePartitions).append(", topicStates=").append(Utils.join(topicStates, ",")).append(")");
+            return bld.toString();
+        }
+    }
 
-	@Override
-	public StopReplicaResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-		Errors error = Errors.forException(e);
+    private final StopReplicaRequestData data;
 
-		StopReplicaResponseData data = new StopReplicaResponseData();
-		data.setErrorCode(error.code());
+    private StopReplicaRequest(StopReplicaRequestData data, short version) {
+        super(ApiKeys.STOP_REPLICA, version);
+        this.data = data;
+    }
 
-		List<StopReplicaPartitionError> partitions = new ArrayList<>();
-		for (StopReplicaTopicState topic : topicStates()) {
-			for (StopReplicaPartitionState partition : topic.partitionStates()) {
-				partitions.add(new StopReplicaPartitionError()
-						.setTopicName(topic.topicName())
-						.setPartitionIndex(partition.partitionIndex())
-						.setErrorCode(error.code()));
-			}
-		}
-		data.setPartitionErrors(partitions);
+    @Override
+    public StopReplicaResponse getErrorResponse(int throttleTimeMs, Throwable e) {
+        Errors error = Errors.forException(e);
 
-		return new StopReplicaResponse(data);
-	}
+        StopReplicaResponseData data = new StopReplicaResponseData();
+        data.setErrorCode(error.code());
 
-	/**
-	 * Note that this method has allocation overhead per iterated element, so callers should copy the result into
-	 * another collection if they need to iterate more than once.
-	 * <p>
-	 * Implementation note: we should strive to avoid allocation overhead per element, see
-	 * `UpdateMetadataRequest.partitionStates()` for the preferred approach. That's not possible in this case and
-	 * StopReplicaRequest should be relatively rare in comparison to other request types.
-	 */
-	public Iterable<StopReplicaTopicState> topicStates() {
-		if (version() < 1) {
-			Map<String, StopReplicaTopicState> topicStates = new HashMap<>();
-			for (StopReplicaPartitionV0 partition : data.ungroupedPartitions()) {
-				StopReplicaTopicState topicState = topicStates.computeIfAbsent(partition.topicName(),
-						topic -> new StopReplicaTopicState().setTopicName(topic));
-				topicState.partitionStates().add(new StopReplicaPartitionState()
-						.setPartitionIndex(partition.partitionIndex())
-						.setDeletePartition(data.deletePartitions()));
-			}
-			return topicStates.values();
-		} else if (version() < 3) {
-			return () -> new MappedIterator<>(data.topics().iterator(), topic ->
-					new StopReplicaTopicState()
-							.setTopicName(topic.name())
-							.setPartitionStates(topic.partitionIndexes().stream()
-									.map(partition -> new StopReplicaPartitionState()
-											.setPartitionIndex(partition)
-											.setDeletePartition(data.deletePartitions()))
-									.collect(Collectors.toList())));
-		} else {
-			return data.topicStates();
-		}
-	}
+        List<StopReplicaPartitionError> partitions = new ArrayList<>();
+        for (StopReplicaTopicState topic : topicStates()) {
+            for (StopReplicaPartitionState partition : topic.partitionStates()) {
+                partitions.add(new StopReplicaPartitionError().setTopicName(topic.topicName()).setPartitionIndex(partition.partitionIndex()).setErrorCode(error.code()));
+            }
+        }
+        data.setPartitionErrors(partitions);
 
-	public Map<TopicPartition, StopReplicaPartitionState> partitionStates() {
-		Map<TopicPartition, StopReplicaPartitionState> partitionStates = new HashMap<>();
+        return new StopReplicaResponse(data);
+    }
 
-		if (version() < 1) {
-			for (StopReplicaPartitionV0 partition : data.ungroupedPartitions()) {
-				partitionStates.put(
-						new TopicPartition(partition.topicName(), partition.partitionIndex()),
-						new StopReplicaPartitionState()
-								.setPartitionIndex(partition.partitionIndex())
-								.setDeletePartition(data.deletePartitions()));
-			}
-		} else if (version() < 3) {
-			for (StopReplicaTopicV1 topic : data.topics()) {
-				for (Integer partitionIndex : topic.partitionIndexes()) {
-					partitionStates.put(
-							new TopicPartition(topic.name(), partitionIndex),
-							new StopReplicaPartitionState()
-									.setPartitionIndex(partitionIndex)
-									.setDeletePartition(data.deletePartitions()));
-				}
-			}
-		} else {
-			for (StopReplicaTopicState topicState : data.topicStates()) {
-				for (StopReplicaPartitionState partitionState : topicState.partitionStates()) {
-					partitionStates.put(
-							new TopicPartition(topicState.topicName(), partitionState.partitionIndex()),
-							partitionState);
-				}
-			}
-		}
+    /**
+     * Note that this method has allocation overhead per iterated element, so callers should copy the result into
+     * another collection if they need to iterate more than once.
+     * <p>
+     * Implementation note: we should strive to avoid allocation overhead per element, see
+     * `UpdateMetadataRequest.partitionStates()` for the preferred approach. That's not possible in this case and
+     * StopReplicaRequest should be relatively rare in comparison to other request types.
+     */
+    public Iterable<StopReplicaTopicState> topicStates() {
+        if (version() < 1) {
+            Map<String, StopReplicaTopicState> topicStates = new HashMap<>();
+            for (StopReplicaPartitionV0 partition : data.ungroupedPartitions()) {
+                StopReplicaTopicState topicState = topicStates.computeIfAbsent(partition.topicName(), topic -> new StopReplicaTopicState().setTopicName(topic));
+                topicState.partitionStates().add(new StopReplicaPartitionState().setPartitionIndex(partition.partitionIndex()).setDeletePartition(data.deletePartitions()));
+            }
+            return topicStates.values();
+        } else if (version() < 3) {
+            return () -> new MappedIterator<>(data.topics().iterator(), topic -> new StopReplicaTopicState().setTopicName(topic.name()).setPartitionStates(topic.partitionIndexes().stream().map(partition -> new StopReplicaPartitionState().setPartitionIndex(partition).setDeletePartition(data.deletePartitions())).collect(Collectors.toList())));
+        } else {
+            return data.topicStates();
+        }
+    }
 
-		return partitionStates;
-	}
+    public Map<TopicPartition, StopReplicaPartitionState> partitionStates() {
+        Map<TopicPartition, StopReplicaPartitionState> partitionStates = new HashMap<>();
 
-	@Override
-	public int controllerId() {
-		return data.controllerId();
-	}
+        if (version() < 1) {
+            for (StopReplicaPartitionV0 partition : data.ungroupedPartitions()) {
+                partitionStates.put(new TopicPartition(partition.topicName(), partition.partitionIndex()), new StopReplicaPartitionState().setPartitionIndex(partition.partitionIndex()).setDeletePartition(data.deletePartitions()));
+            }
+        } else if (version() < 3) {
+            for (StopReplicaTopicV1 topic : data.topics()) {
+                for (Integer partitionIndex : topic.partitionIndexes()) {
+                    partitionStates.put(new TopicPartition(topic.name(), partitionIndex), new StopReplicaPartitionState().setPartitionIndex(partitionIndex).setDeletePartition(data.deletePartitions()));
+                }
+            }
+        } else {
+            for (StopReplicaTopicState topicState : data.topicStates()) {
+                for (StopReplicaPartitionState partitionState : topicState.partitionStates()) {
+                    partitionStates.put(new TopicPartition(topicState.topicName(), partitionState.partitionIndex()), partitionState);
+                }
+            }
+        }
 
-	@Override
-	public int controllerEpoch() {
-		return data.controllerEpoch();
-	}
+        return partitionStates;
+    }
 
-	@Override
-	public long brokerEpoch() {
-		return data.brokerEpoch();
-	}
+    @Override
+    public int controllerId() {
+        return data.controllerId();
+    }
 
-	public static StopReplicaRequest parse(ByteBuffer buffer, short version) {
-		return new StopReplicaRequest(new StopReplicaRequestData(new ByteBufferAccessor(buffer), version), version);
-	}
+    @Override
+    public boolean isKRaftController() {
+        return data.isKRaftController();
+    }
 
-	@Override
-	public StopReplicaRequestData data() {
-		return data;
-	}
+    @Override
+    public int controllerEpoch() {
+        return data.controllerEpoch();
+    }
+
+    @Override
+    public long brokerEpoch() {
+        return data.brokerEpoch();
+    }
+
+    public static StopReplicaRequest parse(ByteBuffer buffer, short version) {
+        return new StopReplicaRequest(new StopReplicaRequestData(new ByteBufferAccessor(buffer), version), version);
+    }
+
+    @Override
+    public StopReplicaRequestData data() {
+        return data;
+    }
 }

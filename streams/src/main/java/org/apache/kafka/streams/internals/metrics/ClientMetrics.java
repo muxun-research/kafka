@@ -31,118 +31,76 @@ import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetric
 import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.addSumMetricToSensor;
 
 public class ClientMetrics {
-	private ClientMetrics() {
-	}
+    private ClientMetrics() {
+    }
 
-	private static final Logger log = LoggerFactory.getLogger(ClientMetrics.class);
-	private static final String VERSION = "version";
-	private static final String COMMIT_ID = "commit-id";
-	private static final String APPLICATION_ID = "application-id";
-	private static final String TOPOLOGY_DESCRIPTION = "topology-description";
-	private static final String STATE = "state";
-	private static final String ALIVE_STREAM_THREADS = "alive-stream-threads";
-	private static final String VERSION_FROM_FILE;
-	private static final String COMMIT_ID_FROM_FILE;
-	private static final String DEFAULT_VALUE = "unknown";
-	private static final String FAILED_STREAM_THREADS = "failed-stream-threads";
+    private static final Logger log = LoggerFactory.getLogger(ClientMetrics.class);
+    private static final String VERSION = "version";
+    private static final String COMMIT_ID = "commit-id";
+    private static final String APPLICATION_ID = "application-id";
+    private static final String TOPOLOGY_DESCRIPTION = "topology-description";
+    private static final String STATE = "state";
+    private static final String ALIVE_STREAM_THREADS = "alive-stream-threads";
+    private static final String VERSION_FROM_FILE;
+    private static final String COMMIT_ID_FROM_FILE;
+    private static final String DEFAULT_VALUE = "unknown";
+    private static final String FAILED_STREAM_THREADS = "failed-stream-threads";
 
-	static {
-		final Properties props = new Properties();
-		try (InputStream resourceStream = ClientMetrics.class.getResourceAsStream(
-				"/kafka/kafka-streams-version.properties")) {
+    static {
+        final Properties props = new Properties();
+        try (InputStream resourceStream = ClientMetrics.class.getResourceAsStream("/kafka/kafka-streams-version.properties")) {
 
-			props.load(resourceStream);
-		} catch (final Exception exception) {
-			log.warn("Error while loading kafka-streams-version.properties", exception);
-		}
-		VERSION_FROM_FILE = props.getProperty("version", DEFAULT_VALUE).trim();
-		COMMIT_ID_FROM_FILE = props.getProperty("commitId", DEFAULT_VALUE).trim();
-	}
+            props.load(resourceStream);
+        } catch (final Exception exception) {
+            log.warn("Error while loading kafka-streams-version.properties", exception);
+        }
+        VERSION_FROM_FILE = props.getProperty("version", DEFAULT_VALUE).trim();
+        COMMIT_ID_FROM_FILE = props.getProperty("commitId", DEFAULT_VALUE).trim();
+    }
 
-	private static final String VERSION_DESCRIPTION = "The version of the Kafka Streams client";
-	private static final String COMMIT_ID_DESCRIPTION = "The version control commit ID of the Kafka Streams client";
-	private static final String APPLICATION_ID_DESCRIPTION = "The application ID of the Kafka Streams client";
-	private static final String TOPOLOGY_DESCRIPTION_DESCRIPTION =
-			"The description of the topology executed in the Kafka Streams client";
-	private static final String STATE_DESCRIPTION = "The state of the Kafka Streams client";
-	private static final String ALIVE_STREAM_THREADS_DESCRIPTION = "The current number of alive stream threads that are running or participating in rebalance";
-	private static final String FAILED_STREAM_THREADS_DESCRIPTION = "The number of failed stream threads since the start of the Kafka Streams client";
+    private static final String VERSION_DESCRIPTION = "The version of the Kafka Streams client";
+    private static final String COMMIT_ID_DESCRIPTION = "The version control commit ID of the Kafka Streams client";
+    private static final String APPLICATION_ID_DESCRIPTION = "The application ID of the Kafka Streams client";
+    private static final String TOPOLOGY_DESCRIPTION_DESCRIPTION = "The description of the topology executed in the Kafka Streams client";
+    private static final String STATE_DESCRIPTION = "The state of the Kafka Streams client";
+    private static final String ALIVE_STREAM_THREADS_DESCRIPTION = "The current number of alive stream threads that are running or participating in rebalance";
+    private static final String FAILED_STREAM_THREADS_DESCRIPTION = "The number of failed stream threads since the start of the Kafka Streams client";
 
-	public static String version() {
-		return VERSION_FROM_FILE;
-	}
+    public static String version() {
+        return VERSION_FROM_FILE;
+    }
 
-	public static String commitId() {
-		return COMMIT_ID_FROM_FILE;
-	}
+    public static String commitId() {
+        return COMMIT_ID_FROM_FILE;
+    }
 
-	public static void addVersionMetric(final StreamsMetricsImpl streamsMetrics) {
-		streamsMetrics.addClientLevelImmutableMetric(
-				VERSION,
-				VERSION_DESCRIPTION,
-				RecordingLevel.INFO,
-				VERSION_FROM_FILE
-		);
-	}
+    public static void addVersionMetric(final StreamsMetricsImpl streamsMetrics) {
+        streamsMetrics.addClientLevelImmutableMetric(VERSION, VERSION_DESCRIPTION, RecordingLevel.INFO, VERSION_FROM_FILE);
+    }
 
-	public static void addCommitIdMetric(final StreamsMetricsImpl streamsMetrics) {
-		streamsMetrics.addClientLevelImmutableMetric(
-				COMMIT_ID,
-				COMMIT_ID_DESCRIPTION,
-				RecordingLevel.INFO,
-				COMMIT_ID_FROM_FILE
-		);
-	}
+    public static void addCommitIdMetric(final StreamsMetricsImpl streamsMetrics) {
+        streamsMetrics.addClientLevelImmutableMetric(COMMIT_ID, COMMIT_ID_DESCRIPTION, RecordingLevel.INFO, COMMIT_ID_FROM_FILE);
+    }
 
-	public static void addApplicationIdMetric(final StreamsMetricsImpl streamsMetrics, final String applicationId) {
-		streamsMetrics.addClientLevelImmutableMetric(
-				APPLICATION_ID,
-				APPLICATION_ID_DESCRIPTION,
-				RecordingLevel.INFO,
-				applicationId
-		);
-	}
+    public static void addApplicationIdMetric(final StreamsMetricsImpl streamsMetrics, final String applicationId) {
+        streamsMetrics.addClientLevelImmutableMetric(APPLICATION_ID, APPLICATION_ID_DESCRIPTION, RecordingLevel.INFO, applicationId);
+    }
 
-	public static void addTopologyDescriptionMetric(final StreamsMetricsImpl streamsMetrics,
-													final String topologyDescription) {
-		streamsMetrics.addClientLevelImmutableMetric(
-				TOPOLOGY_DESCRIPTION,
-				TOPOLOGY_DESCRIPTION_DESCRIPTION,
-				RecordingLevel.INFO,
-				topologyDescription
-		);
-	}
+    public static void addTopologyDescriptionMetric(final StreamsMetricsImpl streamsMetrics, final Gauge<String> topologyDescription) {
+        streamsMetrics.addClientLevelMutableMetric(TOPOLOGY_DESCRIPTION, TOPOLOGY_DESCRIPTION_DESCRIPTION, RecordingLevel.INFO, topologyDescription);
+    }
 
-	public static void addStateMetric(final StreamsMetricsImpl streamsMetrics,
-									  final Gauge<State> stateProvider) {
-		streamsMetrics.addClientLevelMutableMetric(
-				STATE,
-				STATE_DESCRIPTION,
-				RecordingLevel.INFO,
-				stateProvider
-		);
-	}
+    public static void addStateMetric(final StreamsMetricsImpl streamsMetrics, final Gauge<State> stateProvider) {
+        streamsMetrics.addClientLevelMutableMetric(STATE, STATE_DESCRIPTION, RecordingLevel.INFO, stateProvider);
+    }
 
-	public static void addNumAliveStreamThreadMetric(final StreamsMetricsImpl streamsMetrics,
-													 final Gauge<Integer> stateProvider) {
-		streamsMetrics.addClientLevelMutableMetric(
-				ALIVE_STREAM_THREADS,
-				ALIVE_STREAM_THREADS_DESCRIPTION,
-				RecordingLevel.INFO,
-				stateProvider
-		);
-	}
+    public static void addNumAliveStreamThreadMetric(final StreamsMetricsImpl streamsMetrics, final Gauge<Integer> stateProvider) {
+        streamsMetrics.addClientLevelMutableMetric(ALIVE_STREAM_THREADS, ALIVE_STREAM_THREADS_DESCRIPTION, RecordingLevel.INFO, stateProvider);
+    }
 
-	public static Sensor failedStreamThreadSensor(final StreamsMetricsImpl streamsMetrics) {
-		final Sensor sensor = streamsMetrics.clientLevelSensor(FAILED_STREAM_THREADS, RecordingLevel.INFO);
-		addSumMetricToSensor(
-				sensor,
-				CLIENT_LEVEL_GROUP,
-				streamsMetrics.clientLevelTagMap(),
-				FAILED_STREAM_THREADS,
-				false,
-				FAILED_STREAM_THREADS_DESCRIPTION
-		);
-		return sensor;
-	}
+    public static Sensor failedStreamThreadSensor(final StreamsMetricsImpl streamsMetrics) {
+        final Sensor sensor = streamsMetrics.clientLevelSensor(FAILED_STREAM_THREADS, RecordingLevel.INFO);
+        addSumMetricToSensor(sensor, CLIENT_LEVEL_GROUP, streamsMetrics.clientLevelTagMap(), FAILED_STREAM_THREADS, false, FAILED_STREAM_THREADS_DESCRIPTION);
+        return sensor;
+    }
 }

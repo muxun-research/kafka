@@ -18,14 +18,8 @@
 package org.apache.kafka.connect.transforms;
 
 import org.apache.kafka.common.config.ConfigException;
-import org.apache.kafka.connect.data.Decimal;
-import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.*;
 import org.apache.kafka.connect.data.Schema.Type;
-import org.apache.kafka.connect.data.SchemaBuilder;
-import org.apache.kafka.connect.data.Struct;
-import org.apache.kafka.connect.data.Time;
-import org.apache.kafka.connect.data.Timestamp;
-import org.apache.kafka.connect.data.Values;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.junit.jupiter.api.AfterEach;
@@ -33,18 +27,11 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class CastTest {
 	private final Cast<SourceRecord> xformKey = new Cast.Key<>();
@@ -78,21 +65,52 @@ public class CastTest {
 		assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:bytes")));
     }
 
-	@Test
+    @Test
     public void testConfigInvalidMap() {
-		assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int8:extra")));
+        assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int8:extra")));
     }
 
-	@Test
+    @Test
     public void testConfigMixWholeAndFieldTransformation() {
-		assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int8,int32")));
+        assertThrows(ConfigException.class, () -> xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int8,int32")));
+    }
+
+    @Test
+    public void castNullValueRecordWithSchema() {
+        xformValue.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int64"));
+        SourceRecord original = new SourceRecord(null, null, "topic", 0, Schema.STRING_SCHEMA, "key", Schema.STRING_SCHEMA, null);
+        SourceRecord transformed = xformValue.apply(original);
+        assertEquals(original, transformed);
+    }
+
+    @Test
+    public void castNullValueRecordSchemaless() {
+        xformValue.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int64"));
+        SourceRecord original = new SourceRecord(null, null, "topic", 0, Schema.STRING_SCHEMA, "key", null, null);
+        SourceRecord transformed = xformValue.apply(original);
+        assertEquals(original, transformed);
+    }
+
+    @Test
+    public void castNullKeyRecordWithSchema() {
+        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int64"));
+        SourceRecord original = new SourceRecord(null, null, "topic", 0, Schema.STRING_SCHEMA, null, Schema.STRING_SCHEMA, "value");
+        SourceRecord transformed = xformKey.apply(original);
+        assertEquals(original, transformed);
+    }
+
+    @Test
+    public void castNullKeyRecordSchemaless() {
+        xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "foo:int64"));
+        SourceRecord original = new SourceRecord(null, null, "topic", 0, null, null, Schema.STRING_SCHEMA, "value");
+        SourceRecord transformed = xformKey.apply(original);
+        assertEquals(original, transformed);
     }
 
     @Test
     public void castWholeRecordKeyWithSchema() {
         xformKey.configure(Collections.singletonMap(Cast.SPEC_CONFIG, "int8"));
-        SourceRecord transformed = xformKey.apply(new SourceRecord(null, null, "topic", 0,
-                Schema.INT32_SCHEMA, 42, Schema.STRING_SCHEMA, "bogus"));
+        SourceRecord transformed = xformKey.apply(new SourceRecord(null, null, "topic", 0, Schema.INT32_SCHEMA, 42, Schema.STRING_SCHEMA, "bogus"));
 
         assertEquals(Schema.Type.INT8, transformed.keySchema().type());
         assertEquals((byte) 42, transformed.key());

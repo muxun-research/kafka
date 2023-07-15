@@ -22,11 +22,7 @@ import org.apache.kafka.common.Node;
 import org.apache.kafka.common.acl.AclOperation;
 import org.apache.kafka.common.utils.Utils;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 
 /**
  * A detailed description of a single consumer group in the cluster.
@@ -40,26 +36,14 @@ public class ConsumerGroupDescription {
     private final Node coordinator;
     private final Set<AclOperation> authorizedOperations;
 
-    public ConsumerGroupDescription(String groupId,
-                                    boolean isSimpleConsumerGroup,
-                                    Collection<MemberDescription> members,
-                                    String partitionAssignor,
-                                    ConsumerGroupState state,
-                                    Node coordinator) {
+    public ConsumerGroupDescription(String groupId, boolean isSimpleConsumerGroup, Collection<MemberDescription> members, String partitionAssignor, ConsumerGroupState state, Node coordinator) {
         this(groupId, isSimpleConsumerGroup, members, partitionAssignor, state, coordinator, Collections.emptySet());
     }
 
-    ConsumerGroupDescription(String groupId,
-                             boolean isSimpleConsumerGroup,
-                             Collection<MemberDescription> members,
-                             String partitionAssignor,
-                             ConsumerGroupState state,
-                             Node coordinator,
-                             Set<AclOperation> authorizedOperations) {
+    public ConsumerGroupDescription(String groupId, boolean isSimpleConsumerGroup, Collection<MemberDescription> members, String partitionAssignor, ConsumerGroupState state, Node coordinator, Set<AclOperation> authorizedOperations) {
         this.groupId = groupId == null ? "" : groupId;
         this.isSimpleConsumerGroup = isSimpleConsumerGroup;
-        this.members = members == null ? Collections.emptyList() :
-            Collections.unmodifiableList(new ArrayList<>(members));
+        this.members = members == null ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(members));
         this.partitionAssignor = partitionAssignor == null ? "" : partitionAssignor;
         this.state = state;
         this.coordinator = coordinator;

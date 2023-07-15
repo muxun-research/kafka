@@ -18,19 +18,13 @@ package org.apache.kafka.streams.scala
 package kstream
 
 import org.apache.kafka.common.utils.Bytes
-import org.apache.kafka.streams.kstream.{ValueJoiner, ValueTransformerWithKeySupplier, KTable => KTableJ}
-import org.apache.kafka.streams.scala.FunctionsCompatConversions.{
-  FunctionFromFunction,
-  KeyValueMapperFromFunction,
-  MapperFromFunction,
-  PredicateFromFunction,
-  ValueMapperFromFunction,
-  ValueMapperWithKeyFromFunction
-}
+import org.apache.kafka.streams.kstream.{TableJoined, ValueJoiner, ValueTransformerWithKeySupplier, KTable => KTableJ}
+import org.apache.kafka.streams.scala.FunctionsCompatConversions.{FunctionFromFunction, KeyValueMapperFromFunction, MapperFromFunction, PredicateFromFunction, ValueMapperFromFunction, ValueMapperWithKeyFromFunction}
 import org.apache.kafka.streams.state.KeyValueStore
 
 /**
- * Wraps the Java class [[org.apache.kafka.streams.kstream.KTable]] and delegates method calls to the underlying Java object.
+ * Wraps the Java class `org.apache.kafka.streams.kstream.KTable` and delegates method calls to the underlying Java object.
+ *
  * @tparam K Type of keys
  * @tparam V Type of values
  * @param inner The underlying Java abstraction for KTable
@@ -41,6 +35,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
   /**
    * Create a new [[KTable]] that consists all records of this [[KTable]] which satisfies the given
    * predicate
+   *
    * @param predicate a filter that is applied to each record
    * @return a [[KTable]] that contains only those records that satisfy the given predicate
    * @see `org.apache.kafka.streams.kstream.KTable#filter`
@@ -51,6 +46,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
   /**
    * Create a new [[KTable]] that consists all records of this [[KTable]] which satisfies the given
    * predicate
+   *
    * @param predicate a filter that is applied to each record
    * @param named     a [[Named]] config used to name the processor in the topology
    * @return a [[KTable]] that contains only those records that satisfy the given predicate
@@ -62,6 +58,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
   /**
    * Create a new [[KTable]] that consists all records of this [[KTable]] which satisfies the given
    * predicate
+   *
    * @param predicate    a filter that is applied to each record
    * @param materialized a `Materialized` that describes how the `StateStore` for the resulting [[KTable]]
    *                     should be materialized.
@@ -74,6 +71,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
   /**
    * Create a new [[KTable]] that consists all records of this [[KTable]] which satisfies the given
    * predicate
+   *
    * @param predicate    a filter that is applied to each record
    * @param named        a [[Named]] config used to name the processor in the topology
    * @param materialized a `Materialized` that describes how the `StateStore` for the resulting [[KTable]]
@@ -81,14 +79,17 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * @return a [[KTable]] that contains only those records that satisfy the given predicate
    * @see `org.apache.kafka.streams.kstream.KTable#filter`
    */
-  def filter(predicate: (K, V) => Boolean,
-             named: Named,
-             materialized: Materialized[K, V, ByteArrayKeyValueStore]): KTable[K, V] =
+  def filter(
+              predicate: (K, V) => Boolean,
+              named: Named,
+              materialized: Materialized[K, V, ByteArrayKeyValueStore]
+            ): KTable[K, V] =
     new KTable(inner.filter(predicate.asPredicate, named, materialized))
 
   /**
    * Create a new [[KTable]] that consists all records of this [[KTable]] which do <em>not</em> satisfy the given
    * predicate
+   *
    * @param predicate a filter that is applied to each record
    * @return a [[KTable]] that contains only those records that do <em>not</em> satisfy the given predicate
    * @see `org.apache.kafka.streams.kstream.KTable#filterNot`
@@ -99,6 +100,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
   /**
    * Create a new [[KTable]] that consists all records of this [[KTable]] which do <em>not</em> satisfy the given
    * predicate
+   *
    * @param predicate a filter that is applied to each record
    * @param named     a [[Named]] config used to name the processor in the topology
    * @return a [[KTable]] that contains only those records that do <em>not</em> satisfy the given predicate
@@ -110,6 +112,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
   /**
    * Create a new [[KTable]] that consists all records of this [[KTable]] which do <em>not</em> satisfy the given
    * predicate
+   *
    * @param predicate    a filter that is applied to each record
    * @param materialized a `Materialized` that describes how the `StateStore` for the resulting [[KTable]]
    *                     should be materialized.
@@ -122,6 +125,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
   /**
    * Create a new [[KTable]] that consists all records of this [[KTable]] which do <em>not</em> satisfy the given
    * predicate
+   *
    * @param predicate    a filter that is applied to each record
    * @param named        a [[Named]] config used to name the processor in the topology
    * @param materialized a `Materialized` that describes how the `StateStore` for the resulting [[KTable]]
@@ -129,9 +133,11 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * @return a [[KTable]] that contains only those records that do <em>not</em> satisfy the given predicate
    * @see `org.apache.kafka.streams.kstream.KTable#filterNot`
    */
-  def filterNot(predicate: (K, V) => Boolean,
-                named: Named,
-                materialized: Materialized[K, V, ByteArrayKeyValueStore]): KTable[K, V] =
+  def filterNot(
+                 predicate: (K, V) => Boolean,
+                 named: Named,
+                 materialized: Materialized[K, V, ByteArrayKeyValueStore]
+               ): KTable[K, V] =
     new KTable(inner.filterNot(predicate.asPredicate, named, materialized))
 
   /**
@@ -139,6 +145,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * (with possible new type) in the new [[KTable]].
    * <p>
    * The provided `mapper`, a function `V => VR` is applied to each input record value and computes a new value for it
+   *
    * @param mapper , a function `V => VR` that computes a new output value
    * @return a [[KTable]] that contains records with unmodified key and new values (possibly of different type)
    * @see `org.apache.kafka.streams.kstream.KTable#mapValues`
@@ -151,6 +158,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * (with possible new type) in the new [[KTable]].
    * <p>
    * The provided `mapper`, a function `V => VR` is applied to each input record value and computes a new value for it
+   *
    * @param mapper , a function `V => VR` that computes a new output value
    * @param named  a [[Named]] config used to name the processor in the topology
    * @return a [[KTable]] that contains records with unmodified key and new values (possibly of different type)
@@ -164,6 +172,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * (with possible new type) in the new [[KTable]].
    * <p>
    * The provided `mapper`, a function `V => VR` is applied to each input record value and computes a new value for it
+   *
    * @param mapper       , a function `V => VR` that computes a new output value
    * @param materialized a `Materialized` that describes how the `StateStore` for the resulting [[KTable]]
    *                     should be materialized.
@@ -178,6 +187,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * (with possible new type) in the new [[KTable]].
    * <p>
    * The provided `mapper`, a function `V => VR` is applied to each input record value and computes a new value for it
+   *
    * @param mapper       , a function `V => VR` that computes a new output value
    * @param named        a [[Named]] config used to name the processor in the topology
    * @param materialized a `Materialized` that describes how the `StateStore` for the resulting [[KTable]]
@@ -185,9 +195,11 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * @return a [[KTable]] that contains records with unmodified key and new values (possibly of different type)
    * @see `org.apache.kafka.streams.kstream.KTable#mapValues`
    */
-  def mapValues[VR](mapper: V => VR,
-                    named: Named,
-                    materialized: Materialized[K, VR, ByteArrayKeyValueStore]): KTable[K, VR] =
+  def mapValues[VR](
+                     mapper: V => VR,
+                     named: Named,
+                     materialized: Materialized[K, VR, ByteArrayKeyValueStore]
+                   ): KTable[K, VR] =
     new KTable(inner.mapValues[VR](mapper.asValueMapper, named, materialized))
 
   /**
@@ -195,6 +207,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * (with possible new type) in the new [[KTable]].
    * <p>
    * The provided `mapper`, a function `(K, V) => VR` is applied to each input record value and computes a new value for it
+   *
    * @param mapper , a function `(K, V) => VR` that computes a new output value
    * @return a [[KTable]] that contains records with unmodified key and new values (possibly of different type)
    * @see `org.apache.kafka.streams.kstream.KTable#mapValues`
@@ -207,6 +220,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * (with possible new type) in the new [[KTable]].
    * <p>
    * The provided `mapper`, a function `(K, V) => VR` is applied to each input record value and computes a new value for it
+   *
    * @param mapper , a function `(K, V) => VR` that computes a new output value
    * @param named  a [[Named]] config used to name the processor in the topology
    * @return a [[KTable]] that contains records with unmodified key and new values (possibly of different type)
@@ -220,6 +234,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * (with possible new type) in the new [[KTable]].
    * <p>
    * The provided `mapper`, a function `(K, V) => VR` is applied to each input record value and computes a new value for it
+   *
    * @param mapper       , a function `(K, V) => VR` that computes a new output value
    * @param materialized a `Materialized` that describes how the `StateStore` for the resulting [[KTable]]
    *                     should be materialized.
@@ -227,13 +242,14 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * @see `org.apache.kafka.streams.kstream.KTable#mapValues`
    */
   def mapValues[VR](mapper: (K, V) => VR, materialized: Materialized[K, VR, ByteArrayKeyValueStore]): KTable[K, VR] =
-    new KTable(inner.mapValues[VR](mapper.asValueMapperWithKey))
+    new KTable(inner.mapValues[VR](mapper.asValueMapperWithKey, materialized))
 
   /**
    * Create a new [[KTable]] by transforming the value of each record in this [[KTable]] into a new value
    * (with possible new type) in the new [[KTable]].
    * <p>
    * The provided `mapper`, a function `(K, V) => VR` is applied to each input record value and computes a new value for it
+   *
    * @param mapper       , a function `(K, V) => VR` that computes a new output value
    * @param named        a [[Named]] config used to name the processor in the topology
    * @param materialized a `Materialized` that describes how the `StateStore` for the resulting [[KTable]]
@@ -241,13 +257,16 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * @return a [[KTable]] that contains records with unmodified key and new values (possibly of different type)
    * @see `org.apache.kafka.streams.kstream.KTable#mapValues`
    */
-  def mapValues[VR](mapper: (K, V) => VR,
-                    named: Named,
-                    materialized: Materialized[K, VR, ByteArrayKeyValueStore]): KTable[K, VR] =
+  def mapValues[VR](
+                     mapper: (K, V) => VR,
+                     named: Named,
+                     materialized: Materialized[K, VR, ByteArrayKeyValueStore]
+                   ): KTable[K, VR] =
     new KTable(inner.mapValues[VR](mapper.asValueMapperWithKey, named, materialized))
 
   /**
    * Convert this changelog stream to a [[KStream]].
+   *
    * @return a [[KStream]] that contains the same records as this [[KTable]]
    * @see `org.apache.kafka.streams.kstream.KTable#toStream`
    */
@@ -256,6 +275,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Convert this changelog stream to a [[KStream]].
+   *
    * @param named a [[Named]] config used to name the processor in the topology
    * @return a [[KStream]] that contains the same records as this [[KTable]]
    * @see `org.apache.kafka.streams.kstream.KTable#toStream`
@@ -265,6 +285,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Convert this changelog stream to a [[KStream]] using the given key/value mapper to select the new key
+   *
    * @param mapper a function that computes a new key for each record
    * @return a [[KStream]] that contains the same records as this [[KTable]]
    * @see `org.apache.kafka.streams.kstream.KTable#toStream`
@@ -274,6 +295,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Convert this changelog stream to a [[KStream]] using the given key/value mapper to select the new key
+   *
    * @param mapper a function that computes a new key for each record
    * @param named  a [[Named]] config used to name the processor in the topology
    * @return a [[KStream]] that contains the same records as this [[KTable]]
@@ -283,9 +305,10 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
     new KStream(inner.toStream[KR](mapper.asKeyValueMapper, named))
 
   /**
-   * Suppress some updates from this changelog stream, determined by the supplied [[Suppressed]] configuration.
+   * Suppress some updates from this changelog stream, determined by the supplied `org.apache.kafka.streams.kstream.Suppressed` configuration.
    *
    * This controls what updates downstream table and stream operations will receive.
+   *
    * @param suppressed Configuration object determining what, if any, updates to suppress.
    * @return A new KTable with the desired suppression characteristics.
    * @see `org.apache.kafka.streams.kstream.KTable#suppress`
@@ -307,6 +330,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * such concerns are handled for you.
    * In order to assign a state, the state must be created and registered
    * beforehand via stores added via `addStateStore` or `addGlobalStore` before they can be connected to the `Transformer`
+   *
    * @param valueTransformerWithKeySupplier a instance of `ValueTransformerWithKeySupplier` that generates a `ValueTransformerWithKey`.
    *                                        At least one transformer instance will be created per streaming task.
    *                                        Transformer implementations doe not need to be thread-safe.
@@ -314,8 +338,10 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * @return a [[KStream]] that contains records with unmodified key and new values (possibly of different type)
    * @see `org.apache.kafka.streams.kstream.KStream#transformValues`
    */
-  def transformValues[VR](valueTransformerWithKeySupplier: ValueTransformerWithKeySupplier[K, V, VR],
-                          stateStoreNames: String*): KTable[K, VR] =
+  def transformValues[VR](
+                           valueTransformerWithKeySupplier: ValueTransformerWithKeySupplier[K, V, VR],
+                           stateStoreNames: String*
+                         ): KTable[K, VR] =
     new KTable(inner.transformValues[VR](valueTransformerWithKeySupplier, stateStoreNames: _*))
 
   /**
@@ -332,6 +358,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * such concerns are handled for you.
    * In order to assign a state, the state must be created and registered
    * beforehand via stores added via `addStateStore` or `addGlobalStore` before they can be connected to the `Transformer`
+   *
    * @param valueTransformerWithKeySupplier a instance of `ValueTransformerWithKeySupplier` that generates a `ValueTransformerWithKey`.
    *                                        At least one transformer instance will be created per streaming task.
    *                                        Transformer implementations doe not need to be thread-safe.
@@ -340,9 +367,11 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * @return a [[KStream]] that contains records with unmodified key and new values (possibly of different type)
    * @see `org.apache.kafka.streams.kstream.KStream#transformValues`
    */
-  def transformValues[VR](valueTransformerWithKeySupplier: ValueTransformerWithKeySupplier[K, V, VR],
-                          named: Named,
-                          stateStoreNames: String*): KTable[K, VR] =
+  def transformValues[VR](
+                           valueTransformerWithKeySupplier: ValueTransformerWithKeySupplier[K, V, VR],
+                           named: Named,
+                           stateStoreNames: String*
+                         ): KTable[K, VR] =
     new KTable(inner.transformValues[VR](valueTransformerWithKeySupplier, named, stateStoreNames: _*))
 
   /**
@@ -355,6 +384,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * beforehand via stores added via `addStateStore` or `addGlobalStore` before they can be connected to the `Transformer`
    * The resulting `KTable` is materialized into another state store (additional to the provided state store names)
    * as specified by the user via `Materialized` parameter, and is queryable through its given name.
+   *
    * @param valueTransformerWithKeySupplier a instance of `ValueTransformerWithKeySupplier` that generates a `ValueTransformerWithKey`
    *                                        At least one transformer instance will be created per streaming task.
    *                                        Transformer implementations doe not need to be thread-safe.
@@ -364,9 +394,11 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * @return a [[KStream]] that contains records with unmodified key and new values (possibly of different type)
    * @see `org.apache.kafka.streams.kstream.KStream#transformValues`
    */
-  def transformValues[VR](valueTransformerWithKeySupplier: ValueTransformerWithKeySupplier[K, V, VR],
-                          materialized: Materialized[K, VR, KeyValueStore[Bytes, Array[Byte]]],
-                          stateStoreNames: String*): KTable[K, VR] =
+  def transformValues[VR](
+                           valueTransformerWithKeySupplier: ValueTransformerWithKeySupplier[K, V, VR],
+                           materialized: Materialized[K, VR, KeyValueStore[Bytes, Array[Byte]]],
+                           stateStoreNames: String*
+                         ): KTable[K, VR] =
     new KTable(inner.transformValues[VR](valueTransformerWithKeySupplier, materialized, stateStoreNames: _*))
 
   /**
@@ -379,6 +411,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * beforehand via stores added via `addStateStore` or `addGlobalStore` before they can be connected to the `Transformer`
    * The resulting `KTable` is materialized into another state store (additional to the provided state store names)
    * as specified by the user via `Materialized` parameter, and is queryable through its given name.
+   *
    * @param valueTransformerWithKeySupplier a instance of `ValueTransformerWithKeySupplier` that generates a `ValueTransformerWithKey`
    *                                        At least one transformer instance will be created per streaming task.
    *                                        Transformer implementations doe not need to be thread-safe.
@@ -389,15 +422,18 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * @return a [[KStream]] that contains records with unmodified key and new values (possibly of different type)
    * @see `org.apache.kafka.streams.kstream.KStream#transformValues`
    */
-  def transformValues[VR](valueTransformerWithKeySupplier: ValueTransformerWithKeySupplier[K, V, VR],
-                          materialized: Materialized[K, VR, KeyValueStore[Bytes, Array[Byte]]],
-                          named: Named,
-                          stateStoreNames: String*): KTable[K, VR] =
+  def transformValues[VR](
+                           valueTransformerWithKeySupplier: ValueTransformerWithKeySupplier[K, V, VR],
+                           materialized: Materialized[K, VR, KeyValueStore[Bytes, Array[Byte]]],
+                           named: Named,
+                           stateStoreNames: String*
+                         ): KTable[K, VR] =
     new KTable(inner.transformValues[VR](valueTransformerWithKeySupplier, materialized, named, stateStoreNames: _*))
 
   /**
    * Re-groups the records of this [[KTable]] using the provided key/value mapper
    * and `Serde`s as specified by `Grouped`.
+   *
    * @param selector a function that computes a new grouping key and value to be aggregated
    * @param grouped  the `Grouped` instance used to specify `Serdes`
    * @return a [[KGroupedTable]] that contains the re-grouped records of the original [[KTable]]
@@ -408,6 +444,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed inner equi join.
+   *
    * @param other  the other [[KTable]] to be joined with this [[KTable]]
    * @param joiner a function that computes the join result for a pair of matching records
    * @return a [[KTable]] that contains join-records for each key and values computed by the given joiner,
@@ -419,6 +456,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed inner equi join.
+   *
    * @param other  the other [[KTable]] to be joined with this [[KTable]]
    * @param named  a [[Named]] config used to name the processor in the topology
    * @param joiner a function that computes the join result for a pair of matching records
@@ -431,6 +469,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed inner equi join.
+   *
    * @param other        the other [[KTable]] to be joined with this [[KTable]]
    * @param joiner       a function that computes the join result for a pair of matching records
    * @param materialized a `Materialized` that describes how the `StateStore` for the resulting [[KTable]]
@@ -446,6 +485,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed inner equi join.
+   *
    * @param other        the other [[KTable]] to be joined with this [[KTable]]
    * @param joiner       a function that computes the join result for a pair of matching records
    * @param named        a [[Named]] config used to name the processor in the topology
@@ -462,6 +502,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed left equi join.
+   *
    * @param other  the other [[KTable]] to be joined with this [[KTable]]
    * @param joiner a function that computes the join result for a pair of matching records
    * @return a [[KTable]] that contains join-records for each key and values computed by the given joiner,
@@ -473,6 +514,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed left equi join.
+   *
    * @param other  the other [[KTable]] to be joined with this [[KTable]]
    * @param named  a [[Named]] config used to name the processor in the topology
    * @param joiner a function that computes the join result for a pair of matching records
@@ -485,6 +527,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed left equi join.
+   *
    * @param other        the other [[KTable]] to be joined with this [[KTable]]
    * @param joiner       a function that computes the join result for a pair of matching records
    * @param materialized a `Materialized` that describes how the `StateStore` for the resulting [[KTable]]
@@ -500,6 +543,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed left equi join.
+   *
    * @param other        the other [[KTable]] to be joined with this [[KTable]]
    * @param named        a [[Named]] config used to name the processor in the topology
    * @param joiner       a function that computes the join result for a pair of matching records
@@ -516,6 +560,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed outer equi join.
+   *
    * @param other  the other [[KTable]] to be joined with this [[KTable]]
    * @param joiner a function that computes the join result for a pair of matching records
    * @return a [[KTable]] that contains join-records for each key and values computed by the given joiner,
@@ -527,6 +572,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed outer equi join.
+   *
    * @param other  the other [[KTable]] to be joined with this [[KTable]]
    * @param named  a [[Named]] config used to name the processor in the topology
    * @param joiner a function that computes the join result for a pair of matching records
@@ -539,6 +585,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed outer equi join.
+   *
    * @param other        the other [[KTable]] to be joined with this [[KTable]]
    * @param joiner       a function that computes the join result for a pair of matching records
    * @param materialized a `Materialized` that describes how the `StateStore` for the resulting [[KTable]]
@@ -554,6 +601,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed outer equi join.
+   *
    * @param other        the other [[KTable]] to be joined with this [[KTable]]
    * @param named        a [[Named]] config used to name the processor in the topology
    * @param joiner       a function that computes the join result for a pair of matching records
@@ -571,6 +619,7 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed inner join. Records from this
    * table are joined according to the result of keyExtractor on the other KTable.
+   *
    * @param other        the other [[KTable]] to be joined with this [[KTable]], keyed on the value obtained from keyExtractor
    * @param keyExtractor a function that extracts the foreign key from this table's value
    * @param joiner       a function that computes the join result for a pair of matching records
@@ -579,15 +628,18 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * @return a [[KTable]] that contains join-records for each key and values computed by the given joiner,
    *         one for each matched record-pair with the same key
    */
-  def join[VR, KO, VO](other: KTable[KO, VO],
-                       keyExtractor: Function[V, KO],
-                       joiner: ValueJoiner[V, VO, VR],
-                       materialized: Materialized[K, VR, KeyValueStore[Bytes, Array[Byte]]]): KTable[K, VR] =
+  def join[VR, KO, VO](
+                        other: KTable[KO, VO],
+                        keyExtractor: Function[V, KO],
+                        joiner: ValueJoiner[V, VO, VR],
+                        materialized: Materialized[K, VR, KeyValueStore[Bytes, Array[Byte]]]
+                      ): KTable[K, VR] =
     new KTable(inner.join(other.inner, keyExtractor.asJavaFunction, joiner, materialized))
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed inner join. Records from this
    * table are joined according to the result of keyExtractor on the other KTable.
+   *
    * @param other        the other [[KTable]] to be joined with this [[KTable]], keyed on the value obtained from keyExtractor
    * @param keyExtractor a function that extracts the foreign key from this table's value
    * @param joiner       a function that computes the join result for a pair of matching records
@@ -597,16 +649,43 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * @return a [[KTable]] that contains join-records for each key and values computed by the given joiner,
    *         one for each matched record-pair with the same key
    */
-  def join[VR, KO, VO](other: KTable[KO, VO],
-                       keyExtractor: Function[V, KO],
-                       joiner: ValueJoiner[V, VO, VR],
-                       named: Named,
-                       materialized: Materialized[K, VR, KeyValueStore[Bytes, Array[Byte]]]): KTable[K, VR] =
+  @deprecated("Use join(KTable, Function, ValueJoiner, TableJoined, Materialized) instead", since = "3.1")
+  def join[VR, KO, VO](
+                        other: KTable[KO, VO],
+                        keyExtractor: Function[V, KO],
+                        joiner: ValueJoiner[V, VO, VR],
+                        named: Named,
+                        materialized: Materialized[K, VR, KeyValueStore[Bytes, Array[Byte]]]
+                      ): KTable[K, VR] =
     new KTable(inner.join(other.inner, keyExtractor.asJavaFunction, joiner, named, materialized))
+
+  /**
+   * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed inner join. Records from this
+   * table are joined according to the result of keyExtractor on the other KTable.
+   *
+   * @param other        the other [[KTable]] to be joined with this [[KTable]], keyed on the value obtained from keyExtractor
+   * @param keyExtractor a function that extracts the foreign key from this table's value
+   * @param joiner       a function that computes the join result for a pair of matching records
+   * @param tableJoined  a `org.apache.kafka.streams.kstream.TableJoined` used to configure
+   *                     partitioners and names of internal topics and stores
+   * @param materialized a `Materialized` that describes how the `StateStore` for the resulting [[KTable]]
+   *                     should be materialized.
+   * @return a [[KTable]] that contains join-records for each key and values computed by the given joiner,
+   *         one for each matched record-pair with the same key
+   */
+  def join[VR, KO, VO](
+                        other: KTable[KO, VO],
+                        keyExtractor: Function[V, KO],
+                        joiner: ValueJoiner[V, VO, VR],
+                        tableJoined: TableJoined[K, KO],
+                        materialized: Materialized[K, VR, KeyValueStore[Bytes, Array[Byte]]]
+                      ): KTable[K, VR] =
+    new KTable(inner.join(other.inner, keyExtractor.asJavaFunction, joiner, tableJoined, materialized))
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed left join. Records from this
    * table are joined according to the result of keyExtractor on the other KTable.
+   *
    * @param other        the other [[KTable]] to be joined with this [[KTable]], keyed on the value obtained from keyExtractor
    * @param keyExtractor a function that extracts the foreign key from this table's value
    * @param joiner       a function that computes the join result for a pair of matching records
@@ -615,15 +694,18 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * @return a [[KTable]] that contains join-records for each key and values computed by the given joiner,
    *         one for each matched record-pair with the same key
    */
-  def leftJoin[VR, KO, VO](other: KTable[KO, VO],
-                           keyExtractor: Function[V, KO],
-                           joiner: ValueJoiner[V, VO, VR],
-                           materialized: Materialized[K, VR, KeyValueStore[Bytes, Array[Byte]]]): KTable[K, VR] =
+  def leftJoin[VR, KO, VO](
+                            other: KTable[KO, VO],
+                            keyExtractor: Function[V, KO],
+                            joiner: ValueJoiner[V, VO, VR],
+                            materialized: Materialized[K, VR, KeyValueStore[Bytes, Array[Byte]]]
+                          ): KTable[K, VR] =
     new KTable(inner.leftJoin(other.inner, keyExtractor.asJavaFunction, joiner, materialized))
 
   /**
    * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed left join. Records from this
    * table are joined according to the result of keyExtractor on the other KTable.
+   *
    * @param other        the other [[KTable]] to be joined with this [[KTable]], keyed on the value obtained from keyExtractor
    * @param keyExtractor a function that extracts the foreign key from this table's value
    * @param joiner       a function that computes the join result for a pair of matching records
@@ -633,15 +715,42 @@ class KTable[K, V](val inner: KTableJ[K, V]) {
    * @return a [[KTable]] that contains join-records for each key and values computed by the given joiner,
    *         one for each matched record-pair with the same key
    */
-  def leftJoin[VR, KO, VO](other: KTable[KO, VO],
-                           keyExtractor: Function[V, KO],
-                           joiner: ValueJoiner[V, VO, VR],
-                           named: Named,
-                           materialized: Materialized[K, VR, KeyValueStore[Bytes, Array[Byte]]]): KTable[K, VR] =
+  @deprecated("Use leftJoin(KTable, Function, ValueJoiner, TableJoined, Materialized) instead", since = "3.1")
+  def leftJoin[VR, KO, VO](
+                            other: KTable[KO, VO],
+                            keyExtractor: Function[V, KO],
+                            joiner: ValueJoiner[V, VO, VR],
+                            named: Named,
+                            materialized: Materialized[K, VR, KeyValueStore[Bytes, Array[Byte]]]
+                          ): KTable[K, VR] =
     new KTable(inner.leftJoin(other.inner, keyExtractor.asJavaFunction, joiner, named, materialized))
 
   /**
+   * Join records of this [[KTable]] with another [[KTable]]'s records using non-windowed left join. Records from this
+   * table are joined according to the result of keyExtractor on the other KTable.
+   *
+   * @param other        the other [[KTable]] to be joined with this [[KTable]], keyed on the value obtained from keyExtractor
+   * @param keyExtractor a function that extracts the foreign key from this table's value
+   * @param joiner       a function that computes the join result for a pair of matching records
+   * @param tableJoined  a `org.apache.kafka.streams.kstream.TableJoined` used to configure
+   *                     partitioners and names of internal topics and stores
+   * @param materialized a `Materialized` that describes how the `StateStore` for the resulting [[KTable]]
+   *                     should be materialized.
+   * @return a [[KTable]] that contains join-records for each key and values computed by the given joiner,
+   *         one for each matched record-pair with the same key
+   */
+  def leftJoin[VR, KO, VO](
+                            other: KTable[KO, VO],
+                            keyExtractor: Function[V, KO],
+                            joiner: ValueJoiner[V, VO, VR],
+                            tableJoined: TableJoined[K, KO],
+                            materialized: Materialized[K, VR, KeyValueStore[Bytes, Array[Byte]]]
+                          ): KTable[K, VR] =
+    new KTable(inner.leftJoin(other.inner, keyExtractor.asJavaFunction, joiner, tableJoined, materialized))
+
+  /**
    * Get the name of the local state store used that can be used to query this [[KTable]].
+   *
    * @return the underlying state store name, or `null` if this [[KTable]] cannot be queried.
    */
   def queryableStoreName: String =

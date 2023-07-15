@@ -18,20 +18,9 @@ package org.apache.kafka.streams.scala
 package kstream
 
 import org.apache.kafka.streams.kstream.internals.KTableImpl
+import org.apache.kafka.streams.kstream.{SessionWindows, SlidingWindows, Window, Windows, KGroupedStream => KGroupedStreamJ, KTable => KTableJ}
+import org.apache.kafka.streams.scala.FunctionsCompatConversions.{AggregatorFromFunction, InitializerFromFunction, ReducerFromFunction, ValueMapperFromFunction}
 import org.apache.kafka.streams.scala.serialization.Serdes
-import org.apache.kafka.streams.kstream.{
-  SessionWindows,
-  Window,
-  Windows,
-  KGroupedStream => KGroupedStreamJ,
-  KTable => KTableJ
-}
-import org.apache.kafka.streams.scala.FunctionsCompatConversions.{
-  AggregatorFromFunction,
-  InitializerFromFunction,
-  ReducerFromFunction,
-  ValueMapperFromFunction
-}
 
 /**
  * Wraps the Java class KGroupedStream and delegates method calls to the underlying Java object.
@@ -99,6 +88,7 @@ class KGroupedStream[K, V](val inner: KGroupedStreamJ[K, V]) {
 
   /**
    * Combine the values of records in this stream by the grouped key.
+   *
    * @param reducer      a function `(V, V) => V` that computes a new aggregate result.
    * @param named        a [[Named]] config used to name the processor in the topology
    * @param materialized an instance of `Materialized` used to materialize a state store.
@@ -106,12 +96,14 @@ class KGroupedStream[K, V](val inner: KGroupedStreamJ[K, V]) {
    *         latest (rolling) aggregate for each key
    * @see `org.apache.kafka.streams.kstream.KGroupedStream#reduce`
    */
-  def reduce(reducer: (V, V) => V,
-             named: Named)(implicit materialized: Materialized[K, V, ByteArrayKeyValueStore]): KTable[K, V] =
+  def reduce(reducer: (V, V) => V, named: Named)(implicit
+                                                 materialized: Materialized[K, V, ByteArrayKeyValueStore]
+  ): KTable[K, V] =
     new KTable(inner.reduce(reducer.asReducer, materialized))
 
   /**
    * Aggregate the values of records in this stream by the grouped key.
+   *
    * @param initializer  an `Initializer` that computes an initial intermediate aggregation result
    * @param aggregator   an `Aggregator` that computes a new aggregate result
    * @param materialized an instance of `Materialized` used to materialize a state store.
@@ -119,13 +111,14 @@ class KGroupedStream[K, V](val inner: KGroupedStreamJ[K, V]) {
    *         latest (rolling) aggregate for each key
    * @see `org.apache.kafka.streams.kstream.KGroupedStream#aggregate`
    */
-  def aggregate[VR](initializer: => VR)(aggregator: (K, V, VR) => VR)(
-    implicit materialized: Materialized[K, VR, ByteArrayKeyValueStore]
+  def aggregate[VR](initializer: => VR)(aggregator: (K, V, VR) => VR)(implicit
+                                                                      materialized: Materialized[K, VR, ByteArrayKeyValueStore]
   ): KTable[K, VR] =
     new KTable(inner.aggregate((() => initializer).asInitializer, aggregator.asAggregator, materialized))
 
   /**
    * Aggregate the values of records in this stream by the grouped key.
+   *
    * @param initializer  an `Initializer` that computes an initial intermediate aggregation result
    * @param aggregator   an `Aggregator` that computes a new aggregate result
    * @param named        a [[Named]] config used to name the processor in the topology
@@ -134,13 +127,14 @@ class KGroupedStream[K, V](val inner: KGroupedStreamJ[K, V]) {
    *         latest (rolling) aggregate for each key
    * @see `org.apache.kafka.streams.kstream.KGroupedStream#aggregate`
    */
-  def aggregate[VR](initializer: => VR, named: Named)(aggregator: (K, V, VR) => VR)(
-    implicit materialized: Materialized[K, VR, ByteArrayKeyValueStore]
+  def aggregate[VR](initializer: => VR, named: Named)(aggregator: (K, V, VR) => VR)(implicit
+                                                                                    materialized: Materialized[K, VR, ByteArrayKeyValueStore]
   ): KTable[K, VR] =
     new KTable(inner.aggregate((() => initializer).asInitializer, aggregator.asAggregator, named, materialized))
 
   /**
    * Create a new [[TimeWindowedKStream]] instance that can be used to perform windowed aggregations.
+   *
    * @param windows the specification of the aggregation `Windows`
    * @return an instance of [[TimeWindowedKStream]]
    * @see `org.apache.kafka.streams.kstream.KGroupedStream#windowedBy`
@@ -149,7 +143,18 @@ class KGroupedStream[K, V](val inner: KGroupedStreamJ[K, V]) {
     new TimeWindowedKStream(inner.windowedBy(windows))
 
   /**
+   * Create a new [[TimeWindowedKStream]] instance that can be used to perform sliding windowed aggregations.
+   *
+   * @param windows the specification of the aggregation `SlidingWindows`
+   * @return an instance of [[TimeWindowedKStream]]
+   * @see `org.apache.kafka.streams.kstream.KGroupedStream#windowedBy`
+   */
+  def windowedBy(windows: SlidingWindows): TimeWindowedKStream[K, V] =
+    new TimeWindowedKStream(inner.windowedBy(windows))
+
+  /**
    * Create a new [[SessionWindowedKStream]] instance that can be used to perform session windowed aggregations.
+   *
    * @param windows the specification of the aggregation `SessionWindows`
    * @return an instance of [[SessionWindowedKStream]]
    * @see `org.apache.kafka.streams.kstream.KGroupedStream#windowedBy`

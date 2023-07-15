@@ -29,24 +29,29 @@ import java.util.Collection;
 @InterfaceStability.Evolving
 public interface AuthorizerServerInfo {
 
-	/**
-	 * Returns cluster metadata for the broker running this authorizer including cluster id.
-	 */
-	ClusterResource clusterResource();
+    /**
+     * Returns cluster metadata for the broker running this authorizer including cluster id.
+     */
+    ClusterResource clusterResource();
 
-	/**
-	 * Returns broker id. This may be a generated broker id if `broker.id` was not configured.
-	 */
-	int brokerId();
+    /**
+     * Returns broker id. This may be a generated broker id if `broker.id` was not configured.
+     */
+    int brokerId();
 
-	/**
-	 * Returns endpoints for all listeners including the advertised host and port to which
-	 * the listener is bound.
-	 */
-	Collection<Endpoint> endpoints();
+    /**
+     * Returns endpoints for all listeners including the advertised host and port to which
+     * the listener is bound.
+     */
+    Collection<Endpoint> endpoints();
 
-	/**
-	 * Returns the inter-broker endpoint. This is one of the endpoints returned by {@link #endpoints()}.
-	 */
-	Endpoint interBrokerEndpoint();
+    /**
+     * Returns the inter-broker endpoint. This is one of the endpoints returned by {@link #endpoints()}.
+     */
+    Endpoint interBrokerEndpoint();
+
+    /**
+     * Returns the configured early start listeners.
+     */
+    Collection<String> earlyStartListeners();
 }

@@ -41,36 +41,36 @@ public class MultiRecordsSend implements Send {
     private long totalWritten = 0;
     private Send current;
 
-	/**
-	 * Construct a MultiRecordsSend from a queue of Send objects. The queue will be consumed as the MultiRecordsSend
-	 * progresses (on completion, it will be empty).
-	 */
-	public MultiRecordsSend(Queue<Send> sends) {
-		this.sendQueue = sends;
+    /**
+     * Construct a MultiRecordsSend from a queue of Send objects. The queue will be consumed as the MultiRecordsSend
+     * progresses (on completion, it will be empty).
+     */
+    public MultiRecordsSend(Queue<Send> sends) {
+        this.sendQueue = sends;
 
-		long size = 0;
-		for (Send send : sends)
-			size += send.size();
-		this.size = size;
+        long size = 0;
+        for (Send send : sends)
+            size += send.size();
+        this.size = size;
 
-		this.current = sendQueue.poll();
-	}
+        this.current = sendQueue.poll();
+    }
 
-	public MultiRecordsSend(Queue<Send> sends, long size) {
-		this.sendQueue = sends;
-		this.size = size;
-		this.current = sendQueue.poll();
-	}
+    public MultiRecordsSend(Queue<Send> sends, long size) {
+        this.sendQueue = sends;
+        this.size = size;
+        this.current = sendQueue.poll();
+    }
 
-	@Override
-	public long size() {
-		return size;
-	}
+    @Override
+    public long size() {
+        return size;
+    }
 
-	@Override
-	public boolean completed() {
-		return current == null;
-	}
+    @Override
+    public boolean completed() {
+        return current == null;
+    }
 
     // Visible for testing
     int numResidentSends() {
@@ -81,18 +81,18 @@ public class MultiRecordsSend implements Send {
         return count;
     }
 
-	@Override
-	public long writeTo(TransferableChannel channel) throws IOException {
-		if (completed())
-			throw new KafkaException("This operation cannot be invoked on a complete request.");
+    @Override
+    public long writeTo(TransferableChannel channel) throws IOException {
+        if (completed())
+            throw new KafkaException("This operation cannot be invoked on a complete request.");
 
-		int totalWrittenPerCall = 0;
-		boolean sendComplete;
-		do {
-			long written = current.writeTo(channel);
-			totalWrittenPerCall += written;
-			sendComplete = current.completed();
-			if (sendComplete) {
+        long totalWrittenPerCall = 0;
+        boolean sendComplete;
+        do {
+            long written = current.writeTo(channel);
+            totalWrittenPerCall += written;
+            sendComplete = current.completed();
+            if (sendComplete) {
                 updateRecordConversionStats(current);
                 current = sendQueue.poll();
             }
@@ -103,37 +103,33 @@ public class MultiRecordsSend implements Send {
         if (completed() && totalWritten != size)
             log.error("mismatch in sending bytes over socket; expected: {} actual: {}", size, totalWritten);
 
-        log.trace("Bytes written as part of multi-send call: {}, total bytes written so far: {}, expected bytes to write: {}",
-                totalWrittenPerCall, totalWritten, size);
+        log.trace("Bytes written as part of multi-send call: {}, total bytes written so far: {}, expected bytes to write: {}", totalWrittenPerCall, totalWritten, size);
 
         return totalWrittenPerCall;
-	}
+    }
 
-	/**
-	 * Get any statistics that were recorded as part of executing this {@link MultiRecordsSend}.
-	 * @return Records processing statistics (could be null if no statistics were collected)
-	 */
-	public Map<TopicPartition, RecordConversionStats> recordConversionStats() {
-		return recordConversionStats;
-	}
+    /**
+     * Get any statistics that were recorded as part of executing this {@link MultiRecordsSend}.
+     * @return Records processing statistics (could be null if no statistics were collected)
+     */
+    public Map<TopicPartition, RecordConversionStats> recordConversionStats() {
+        return recordConversionStats;
+    }
 
-	@Override
-	public String toString() {
-		return "MultiRecordsSend(" +
-				"size=" + size +
-				", totalWritten=" + totalWritten +
-				')';
-	}
+    @Override
+    public String toString() {
+        return "MultiRecordsSend(" + "size=" + size + ", totalWritten=" + totalWritten + ')';
+    }
 
-	private void updateRecordConversionStats(Send completedSend) {
-		// The underlying send might have accumulated statistics that need to be recorded. For example,
-		// LazyDownConversionRecordsSend accumulates statistics related to the number of bytes down-converted, the amount
-		// of temporary memory used for down-conversion, etc. Pull out any such statistics from the underlying send
-		// and fold it up appropriately.
-		if (completedSend instanceof LazyDownConversionRecordsSend) {
-			if (recordConversionStats == null)
-				recordConversionStats = new HashMap<>();
-			LazyDownConversionRecordsSend lazyRecordsSend = (LazyDownConversionRecordsSend) completedSend;
+    private void updateRecordConversionStats(Send completedSend) {
+        // The underlying send might have accumulated statistics that need to be recorded. For example,
+        // LazyDownConversionRecordsSend accumulates statistics related to the number of bytes down-converted, the amount
+        // of temporary memory used for down-conversion, etc. Pull out any such statistics from the underlying send
+        // and fold it up appropriately.
+        if (completedSend instanceof LazyDownConversionRecordsSend) {
+            if (recordConversionStats == null)
+                recordConversionStats = new HashMap<>();
+            LazyDownConversionRecordsSend lazyRecordsSend = (LazyDownConversionRecordsSend) completedSend;
             recordConversionStats.put(lazyRecordsSend.topicPartition(), lazyRecordsSend.recordConversionStats());
         }
     }

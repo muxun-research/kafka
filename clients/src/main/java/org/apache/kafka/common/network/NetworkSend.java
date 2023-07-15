@@ -19,31 +19,35 @@ package org.apache.kafka.common.network;
 import java.io.IOException;
 
 public class NetworkSend implements Send {
-	private final String destinationId;
-	private final Send send;
+    private final String destinationId;
+    private final Send send;
 
-	public NetworkSend(String destinationId, Send send) {
-		this.destinationId = destinationId;
-		this.send = send;
-	}
+    public NetworkSend(String destinationId, Send send) {
+        this.destinationId = destinationId;
+        this.send = send;
+    }
 
-	public String destinationId() {
-		return destinationId;
-	}
+    public String destinationId() {
+        return destinationId;
+    }
 
-	@Override
-	public boolean completed() {
-		return send.completed();
-	}
+    public Send send() {
+        return send;
+    }
 
-	@Override
-	public long writeTo(TransferableChannel channel) throws IOException {
-		return send.writeTo(channel);
-	}
+    @Override
+    public boolean completed() {
+        return send.completed();
+    }
 
-	@Override
-	public long size() {
-		return send.size();
-	}
+    @Override
+    public long writeTo(TransferableChannel channel) throws IOException {
+        return send.writeTo(channel);
+    }
+
+    @Override
+    public long size() {
+        return send.size();
+    }
 
 }

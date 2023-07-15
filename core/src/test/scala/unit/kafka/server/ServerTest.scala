@@ -16,13 +16,12 @@
  */
 package kafka.server
 
-import java.util.Properties
-
 import org.apache.kafka.common.Uuid
 import org.apache.kafka.common.metrics.MetricsContext
 import org.junit.jupiter.api.Assertions._
 import org.junit.jupiter.api.Test
 
+import java.util.Properties
 import scala.jdk.CollectionConverters._
 
 class ServerTest {
@@ -35,6 +34,8 @@ class ServerTest {
     val props = new Properties()
     props.put(KafkaConfig.ProcessRolesProp, "broker")
     props.put(KafkaConfig.NodeIdProp, nodeId.toString)
+    props.put(KafkaConfig.QuorumVotersProp, s"${(nodeId + 1)}@localhost:9093")
+    props.put(KafkaConfig.ControllerListenerNamesProp, "SSL")
     val config = KafkaConfig.fromProps(props)
 
     val context = Server.createKafkaMetricsContext(config, clusterId)

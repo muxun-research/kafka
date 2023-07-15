@@ -40,40 +40,43 @@ import static org.apache.kafka.common.record.RecordBatch.NO_PARTITION_LEADER_EPO
  * - {@link Errors#UNKNOWN_SERVER_ERROR} For any unexpected errors
  */
 public class OffsetsForLeaderEpochResponse extends AbstractResponse {
-	public static final long UNDEFINED_EPOCH_OFFSET = NO_PARTITION_LEADER_EPOCH;
-	public static final int UNDEFINED_EPOCH = NO_PARTITION_LEADER_EPOCH;
+    public static final long UNDEFINED_EPOCH_OFFSET = NO_PARTITION_LEADER_EPOCH;
+    public static final int UNDEFINED_EPOCH = NO_PARTITION_LEADER_EPOCH;
 
-	private final OffsetForLeaderEpochResponseData data;
+    private final OffsetForLeaderEpochResponseData data;
 
-	public OffsetsForLeaderEpochResponse(OffsetForLeaderEpochResponseData data) {
-		super(ApiKeys.OFFSET_FOR_LEADER_EPOCH);
-		this.data = data;
-	}
+    public OffsetsForLeaderEpochResponse(OffsetForLeaderEpochResponseData data) {
+        super(ApiKeys.OFFSET_FOR_LEADER_EPOCH);
+        this.data = data;
+    }
 
-	@Override
-	public OffsetForLeaderEpochResponseData data() {
-		return data;
-	}
+    @Override
+    public OffsetForLeaderEpochResponseData data() {
+        return data;
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> errorCounts = new HashMap<>();
-		data.topics().forEach(topic ->
-				topic.partitions().forEach(partition ->
-						updateErrorCounts(errorCounts, Errors.forCode(partition.errorCode()))));
-		return errorCounts;
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        Map<Errors, Integer> errorCounts = new HashMap<>();
+        data.topics().forEach(topic -> topic.partitions().forEach(partition -> updateErrorCounts(errorCounts, Errors.forCode(partition.errorCode()))));
+        return errorCounts;
+    }
 
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
 
-	public static OffsetsForLeaderEpochResponse parse(ByteBuffer buffer, short version) {
-		return new OffsetsForLeaderEpochResponse(new OffsetForLeaderEpochResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	@Override
-	public String toString() {
-		return data.toString();
-	}
+    public static OffsetsForLeaderEpochResponse parse(ByteBuffer buffer, short version) {
+        return new OffsetsForLeaderEpochResponse(new OffsetForLeaderEpochResponseData(new ByteBufferAccessor(buffer), version));
+    }
+
+    @Override
+    public String toString() {
+        return data.toString();
+    }
 }

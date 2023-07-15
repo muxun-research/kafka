@@ -29,27 +29,31 @@ import org.slf4j.LoggerFactory;
 import java.nio.ByteBuffer;
 import java.util.List;
 
+import static org.apache.kafka.streams.state.StateSerdes.TIMESTAMP_SIZE;
+
 public class WindowKeySchema implements RocksDBSegmentedBytesStore.KeySchema {
 
     private static final Logger LOG = LoggerFactory.getLogger(WindowKeySchema.class);
 
     private static final int SEQNUM_SIZE = 4;
-    private static final int TIMESTAMP_SIZE = 8;
     private static final int SUFFIX_SIZE = TIMESTAMP_SIZE + SEQNUM_SIZE;
     private static final byte[] MIN_SUFFIX = new byte[SUFFIX_SIZE];
 
     @Override
     public Bytes upperRange(final Bytes key, final long to) {
-        final byte[] maxSuffix = ByteBuffer.allocate(SUFFIX_SIZE)
-            .putLong(to)
-            .putInt(Integer.MAX_VALUE)
-            .array();
+        if (key == null) {
+            return null;
+        }
+        final byte[] maxSuffix = ByteBuffer.allocate(SUFFIX_SIZE).putLong(to).putInt(Integer.MAX_VALUE).array();
 
         return OrderedBytes.upperRange(key, maxSuffix);
     }
 
     @Override
     public Bytes lowerRange(final Bytes key, final long from) {
+        if (key == null) {
+            return null;
+        }
         return OrderedBytes.lowerRange(key, MIN_SUFFIX);
     }
 
@@ -69,19 +73,13 @@ public class WindowKeySchema implements RocksDBSegmentedBytesStore.KeySchema {
     }
 
     @Override
-    public HasNextCondition hasNextCondition(final Bytes binaryKeyFrom,
-                                             final Bytes binaryKeyTo,
-                                             final long from,
-                                             final long to) {
+    public HasNextCondition hasNextCondition(final Bytes binaryKeyFrom, final Bytes binaryKeyTo, final long from, final long to, final boolean forward) {
         return iterator -> {
             while (iterator.hasNext()) {
                 final Bytes bytes = iterator.peekNextKey();
                 final Bytes keyBytes = Bytes.wrap(WindowKeySchema.extractStoreKeyBytes(bytes.get()));
                 final long time = WindowKeySchema.extractStoreTimestamp(bytes.get());
-                if ((binaryKeyFrom == null || keyBytes.compareTo(binaryKeyFrom) >= 0)
-                    && (binaryKeyTo == null || keyBytes.compareTo(binaryKeyTo) <= 0)
-                    && time >= from
-                    && time <= to) {
+                if ((binaryKeyFrom == null || keyBytes.compareTo(binaryKeyFrom) >= 0) && (binaryKeyTo == null || keyBytes.compareTo(binaryKeyTo) <= 0) && time >= from && time <= to) {
                     return true;
                 }
                 iterator.next();

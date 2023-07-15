@@ -40,25 +40,29 @@ public class EndTxnResponse extends AbstractResponse {
 
 	private final EndTxnResponseData data;
 
-	public EndTxnResponse(EndTxnResponseData data) {
-		super(ApiKeys.END_TXN);
-		this.data = data;
-	}
+    public EndTxnResponse(EndTxnResponseData data) {
+        super(ApiKeys.END_TXN);
+        this.data = data;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
 
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	public Errors error() {
-		return Errors.forCode(data.errorCode());
+    public Errors error() {
+        return Errors.forCode(data.errorCode());
     }
 
     @Override
     public Map<Errors, Integer> errorCounts() {
         return errorCounts(error());
-	}
+    }
 
 	@Override
 	public EndTxnResponseData data() {

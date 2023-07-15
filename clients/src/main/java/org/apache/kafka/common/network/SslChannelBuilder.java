@@ -46,36 +46,33 @@ public class SslChannelBuilder implements ChannelBuilder, ListenerReconfigurable
     private SslFactory sslFactory;
     private Mode mode;
     private Map<String, ?> configs;
-	private SslPrincipalMapper sslPrincipalMapper;
-	private final Logger log;
+    private SslPrincipalMapper sslPrincipalMapper;
+    private final Logger log;
 
-	/**
-	 * Constructs an SSL channel builder. ListenerName is provided only
-	 * for server channel builder and will be null for client channel builder.
-	 */
-	public SslChannelBuilder(Mode mode,
-							 ListenerName listenerName,
-							 boolean isInterBrokerListener,
-							 LogContext logContext) {
-		this.mode = mode;
-		this.listenerName = listenerName;
-		this.isInterBrokerListener = isInterBrokerListener;
-		this.log = logContext.logger(getClass());
-	}
+    /**
+     * Constructs an SSL channel builder. ListenerName is provided only
+     * for server channel builder and will be null for client channel builder.
+     */
+    public SslChannelBuilder(Mode mode, ListenerName listenerName, boolean isInterBrokerListener, LogContext logContext) {
+        this.mode = mode;
+        this.listenerName = listenerName;
+        this.isInterBrokerListener = isInterBrokerListener;
+        this.log = logContext.logger(getClass());
+    }
 
     public void configure(Map<String, ?> configs) throws KafkaException {
-		try {
-			this.configs = configs;
-			String sslPrincipalMappingRules = (String) configs.get(BrokerSecurityConfigs.SSL_PRINCIPAL_MAPPING_RULES_CONFIG);
-			if (sslPrincipalMappingRules != null)
-				sslPrincipalMapper = SslPrincipalMapper.fromRules(sslPrincipalMappingRules);
-			this.sslFactory = new SslFactory(mode, null, isInterBrokerListener);
-			this.sslFactory.configure(this.configs);
-		} catch (KafkaException e) {
-			throw e;
-		} catch (Exception e) {
-			throw new KafkaException(e);
-		}
+        try {
+            this.configs = configs;
+            String sslPrincipalMappingRules = (String) configs.get(BrokerSecurityConfigs.SSL_PRINCIPAL_MAPPING_RULES_CONFIG);
+            if (sslPrincipalMappingRules != null)
+                sslPrincipalMapper = SslPrincipalMapper.fromRules(sslPrincipalMappingRules);
+            this.sslFactory = new SslFactory(mode, null, isInterBrokerListener);
+            this.sslFactory.configure(this.configs);
+        } catch (KafkaException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new KafkaException(e);
+        }
     }
 
     @Override
@@ -98,31 +95,27 @@ public class SslChannelBuilder implements ChannelBuilder, ListenerReconfigurable
         return listenerName;
     }
 
-	@Override
-	public KafkaChannel buildChannel(String id, SelectionKey key, int maxReceiveSize,
-									 MemoryPool memoryPool, ChannelMetadataRegistry metadataRegistry) throws KafkaException {
-		try {
-			SslTransportLayer transportLayer = buildTransportLayer(sslFactory, id, key, metadataRegistry);
-			Supplier<Authenticator> authenticatorCreator = () ->
-					new SslAuthenticator(configs, transportLayer, listenerName, sslPrincipalMapper);
-			return new KafkaChannel(id, transportLayer, authenticatorCreator, maxReceiveSize,
-					memoryPool != null ? memoryPool : MemoryPool.NONE, metadataRegistry);
-		} catch (Exception e) {
-			log.info("Failed to create channel due to ", e);
-			throw new KafkaException(e);
-		}
+    @Override
+    public KafkaChannel buildChannel(String id, SelectionKey key, int maxReceiveSize, MemoryPool memoryPool, ChannelMetadataRegistry metadataRegistry) throws KafkaException {
+        try {
+            SslTransportLayer transportLayer = buildTransportLayer(sslFactory, id, key, metadataRegistry);
+            Supplier<Authenticator> authenticatorCreator = () -> new SslAuthenticator(configs, transportLayer, listenerName, sslPrincipalMapper);
+            return new KafkaChannel(id, transportLayer, authenticatorCreator, maxReceiveSize, memoryPool != null ? memoryPool : MemoryPool.NONE, metadataRegistry);
+        } catch (Exception e) {
+            throw new KafkaException(e);
+        }
     }
 
-	@Override
-	public void close() {
-		if (sslFactory != null) sslFactory.close();
-	}
+    @Override
+    public void close() {
+        if (sslFactory != null)
+            sslFactory.close();
+    }
 
-	protected SslTransportLayer buildTransportLayer(SslFactory sslFactory, String id, SelectionKey key, ChannelMetadataRegistry metadataRegistry) throws IOException {
-		SocketChannel socketChannel = (SocketChannel) key.channel();
-		return SslTransportLayer.create(id, key, sslFactory.createSslEngine(socketChannel.socket()),
-				metadataRegistry);
-	}
+    protected SslTransportLayer buildTransportLayer(SslFactory sslFactory, String id, SelectionKey key, ChannelMetadataRegistry metadataRegistry) throws IOException {
+        SocketChannel socketChannel = (SocketChannel) key.channel();
+        return SslTransportLayer.create(id, key, sslFactory.createSslEngine(socketChannel.socket()), metadataRegistry);
+    }
 
     /**
      * Note that client SSL authentication is handled in {@link SslTransportLayer}. This class is only used
@@ -134,9 +127,9 @@ public class SslChannelBuilder implements ChannelBuilder, ListenerReconfigurable
         private final ListenerName listenerName;
 
         private SslAuthenticator(Map<String, ?> configs, SslTransportLayer transportLayer, ListenerName listenerName, SslPrincipalMapper sslPrincipalMapper) {
-			this.transportLayer = transportLayer;
-			this.principalBuilder = ChannelBuilders.createPrincipalBuilder(configs, null, sslPrincipalMapper);
-			this.listenerName = listenerName;
+            this.transportLayer = transportLayer;
+            this.principalBuilder = ChannelBuilders.createPrincipalBuilder(configs, null, sslPrincipalMapper);
+            this.listenerName = listenerName;
         }
         /**
          * No-Op for plaintext authenticator
@@ -151,30 +144,27 @@ public class SslChannelBuilder implements ChannelBuilder, ListenerReconfigurable
         @Override
         public KafkaPrincipal principal() {
             InetAddress clientAddress = transportLayer.socketChannel().socket().getInetAddress();
-			// listenerName should only be null in Client mode where principal() should not be called
-			if (listenerName == null)
-				throw new IllegalStateException("Unexpected call to principal() when listenerName is null");
-			SslAuthenticationContext context = new SslAuthenticationContext(
-					transportLayer.sslSession(),
-					clientAddress,
-					listenerName.value());
-			return principalBuilder.build(context);
-		}
+            // listenerName should only be null in Client mode where principal() should not be called
+            if (listenerName == null)
+                throw new IllegalStateException("Unexpected call to principal() when listenerName is null");
+            SslAuthenticationContext context = new SslAuthenticationContext(transportLayer.sslSession(), clientAddress, listenerName.value());
+            return principalBuilder.build(context);
+        }
 
-		@Override
-		public Optional<KafkaPrincipalSerde> principalSerde() {
-			return principalBuilder instanceof KafkaPrincipalSerde ? Optional.of((KafkaPrincipalSerde) principalBuilder) : Optional.empty();
-		}
+        @Override
+        public Optional<KafkaPrincipalSerde> principalSerde() {
+            return principalBuilder instanceof KafkaPrincipalSerde ? Optional.of((KafkaPrincipalSerde) principalBuilder) : Optional.empty();
+        }
 
-		@Override
-		public void close() throws IOException {
-			if (principalBuilder instanceof Closeable)
-				Utils.closeQuietly((Closeable) principalBuilder, "principal builder");
-		}
+        @Override
+        public void close() throws IOException {
+            if (principalBuilder instanceof Closeable)
+                Utils.closeQuietly((Closeable) principalBuilder, "principal builder");
+        }
 
-		/**
-		 * SslAuthenticator doesn't implement any additional authentication mechanism.
-		 * @return true
+        /**
+         * SslAuthenticator doesn't implement any additional authentication mechanism.
+         * @return true
          */
         @Override
         public boolean complete() {

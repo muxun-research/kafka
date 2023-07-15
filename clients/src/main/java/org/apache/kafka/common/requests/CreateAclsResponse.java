@@ -26,35 +26,40 @@ import java.util.List;
 import java.util.Map;
 
 public class CreateAclsResponse extends AbstractResponse {
-	private final CreateAclsResponseData data;
+    private final CreateAclsResponseData data;
 
-	public CreateAclsResponse(CreateAclsResponseData data) {
-		super(ApiKeys.CREATE_ACLS);
-		this.data = data;
-	}
+    public CreateAclsResponse(CreateAclsResponseData data) {
+        super(ApiKeys.CREATE_ACLS);
+        this.data = data;
+    }
 
-	@Override
-	public CreateAclsResponseData data() {
-		return data;
-	}
+    @Override
+    public CreateAclsResponseData data() {
+        return data;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
 
-	public List<CreateAclsResponseData.AclCreationResult> results() {
-		return data.results();
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		return errorCounts(results().stream().map(r -> Errors.forCode(r.errorCode())));
-	}
+    public List<CreateAclsResponseData.AclCreationResult> results() {
+        return data.results();
+    }
 
-	public static CreateAclsResponse parse(ByteBuffer buffer, short version) {
-		return new CreateAclsResponse(new CreateAclsResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        return errorCounts(results().stream().map(r -> Errors.forCode(r.errorCode())));
+    }
+
+    public static CreateAclsResponse parse(ByteBuffer buffer, short version) {
+        return new CreateAclsResponse(new CreateAclsResponseData(new ByteBufferAccessor(buffer), version));
+    }
 
     @Override
     public boolean shouldClientThrottle(short version) {

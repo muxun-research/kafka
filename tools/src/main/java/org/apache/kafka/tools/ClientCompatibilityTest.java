@@ -20,26 +20,13 @@ import net.sourceforge.argparse4j.ArgumentParsers;
 import net.sourceforge.argparse4j.inf.ArgumentParser;
 import net.sourceforge.argparse4j.inf.ArgumentParserException;
 import net.sourceforge.argparse4j.inf.Namespace;
-import org.apache.kafka.clients.admin.Admin;
-import org.apache.kafka.clients.admin.AdminClientConfig;
-import org.apache.kafka.clients.admin.Config;
-import org.apache.kafka.clients.admin.NewTopic;
-import org.apache.kafka.clients.admin.TopicListing;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.clients.consumer.OffsetAndTimestamp;
+import org.apache.kafka.clients.admin.*;
+import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
-import org.apache.kafka.common.ClusterResource;
-import org.apache.kafka.common.ClusterResourceListener;
-import org.apache.kafka.common.KafkaException;
-import org.apache.kafka.common.Node;
-import org.apache.kafka.common.PartitionInfo;
-import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.*;
 import org.apache.kafka.common.acl.AclBindingFilter;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.errors.RecordTooLargeException;
@@ -55,16 +42,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.time.Duration;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.NoSuchElementException;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
@@ -86,8 +64,9 @@ public class ClientCompatibilityTest {
         final boolean expectRecordTooLargeException;
         final int numClusterNodes;
         final boolean createTopicsSupported;
-		final boolean describeAclsSupported;
-		final boolean describeConfigsSupported;
+        final boolean describeAclsSupported;
+        final boolean describeConfigsSupported;
+        final boolean idempotentProducerSupported;
 
         TestConfig(Namespace res) {
             this.bootstrapServer = res.getString("bootstrapServer");
@@ -97,8 +76,9 @@ public class ClientCompatibilityTest {
             this.expectRecordTooLargeException = res.getBoolean("expectRecordTooLargeException");
             this.numClusterNodes = res.getInt("numClusterNodes");
             this.createTopicsSupported = res.getBoolean("createTopicsSupported");
-			this.describeAclsSupported = res.getBoolean("describeAclsSupported");
-			this.describeConfigsSupported = res.getBoolean("describeConfigsSupported");
+            this.describeAclsSupported = res.getBoolean("describeAclsSupported");
+            this.describeConfigsSupported = res.getBoolean("describeConfigsSupported");
+            this.idempotentProducerSupported = res.get("idempotentProducerSupported");
         }
     }
 
@@ -144,44 +124,21 @@ public class ClientCompatibilityTest {
             .help("True if we should expect a RecordTooLargeException when trying to read from a topic " +
                   "that contains a message that is bigger than " + ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG +
                   ".  This is pre-KIP-74 behavior.");
-        parser.addArgument("--num-cluster-nodes")
-            .action(store())
-            .required(true)
-            .type(Integer.class)
-            .dest("numClusterNodes")
-            .metavar("NUM_CLUSTER_NODES")
-            .help("The number of cluster nodes we should expect to see from the AdminClient.");
-        parser.addArgument("--create-topics-supported")
-            .action(store())
-            .required(true)
-            .type(Boolean.class)
-				.dest("createTopicsSupported")
-				.metavar("CREATE_TOPICS_SUPPORTED")
-				.help("Whether we should be able to create topics via the AdminClient.");
-		parser.addArgument("--describe-acls-supported")
-				.action(store())
-				.required(true)
-				.type(Boolean.class)
-				.dest("describeAclsSupported")
-				.metavar("DESCRIBE_ACLS_SUPPORTED")
-				.help("Whether describeAcls is supported in the AdminClient.");
-		parser.addArgument("--describe-configs-supported")
-				.action(store())
-				.required(true)
-				.type(Boolean.class)
-				.dest("describeConfigsSupported")
-				.metavar("DESCRIBE_CONFIGS_SUPPORTED")
-				.help("Whether describeConfigs is supported in the AdminClient.");
+        parser.addArgument("--num-cluster-nodes").action(store()).required(true).type(Integer.class).dest("numClusterNodes").metavar("NUM_CLUSTER_NODES").help("The number of cluster nodes we should expect to see from the AdminClient.");
+        parser.addArgument("--create-topics-supported").action(store()).required(true).type(Boolean.class).dest("createTopicsSupported").metavar("CREATE_TOPICS_SUPPORTED").help("Whether we should be able to create topics via the AdminClient.");
+        parser.addArgument("--describe-acls-supported").action(store()).required(true).type(Boolean.class).dest("describeAclsSupported").metavar("DESCRIBE_ACLS_SUPPORTED").help("Whether describeAcls is supported in the AdminClient.");
+        parser.addArgument("--describe-configs-supported").action(store()).required(true).type(Boolean.class).dest("describeConfigsSupported").metavar("DESCRIBE_CONFIGS_SUPPORTED").help("Whether describeConfigs is supported in the AdminClient.");
+        parser.addArgument("--idempotent-producer-supported").action(store()).required(true).type(Boolean.class).dest("idempotentProducerSupported").metavar("IDEMPOTENT_PRODUCER_SUPPORTED").help("Whether the producer supports idempotency.");
 
-		Namespace res = null;
-		try {
-			res = parser.parseArgs(args);
-		} catch (ArgumentParserException e) {
-			if (args.length == 0) {
-				parser.printHelp();
-				Exit.exit(0);
-			} else {
-				parser.handleError(e);
+        Namespace res = null;
+        try {
+            res = parser.parseArgs(args);
+        } catch (ArgumentParserException e) {
+            if (args.length == 0) {
+                parser.printHelp();
+                Exit.exit(0);
+            } else {
+                parser.handleError(e);
                 Exit.exit(1);
             }
         }
@@ -243,6 +200,9 @@ public class ClientCompatibilityTest {
     public void testProduce() throws Exception {
         Properties producerProps = new Properties();
         producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, testConfig.bootstrapServer);
+        if (!testConfig.idempotentProducerSupported) {
+            producerProps.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "false");
+        }
         ByteArraySerializer serializer = new ByteArraySerializer();
         KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(producerProps, serializer, serializer);
         ProducerRecord<byte[], byte[]> record1 = new ProducerRecord<>(testConfig.topic, message1);
@@ -261,30 +221,24 @@ public class ClientCompatibilityTest {
         try (final Admin client = Admin.create(adminProps)) {
             while (true) {
                 Collection<Node> nodes = client.describeCluster().nodes().get();
-				if (nodes.size() == testConfig.numClusterNodes) {
-					break;
-				} else if (nodes.size() > testConfig.numClusterNodes) {
-					throw new KafkaException("Expected to see " + testConfig.numClusterNodes +
-							" nodes, but saw " + nodes.size());
-				}
-				Thread.sleep(1);
-				log.info("Saw only {} cluster nodes.  Waiting to see {}.",
-						nodes.size(), testConfig.numClusterNodes);
-			}
+                if (nodes.size() == testConfig.numClusterNodes) {
+                    break;
+                } else if (nodes.size() > testConfig.numClusterNodes) {
+                    throw new KafkaException("Expected to see " + testConfig.numClusterNodes + " nodes, but saw " + nodes.size());
+                }
+                Thread.sleep(1);
+                log.info("Saw only {} cluster nodes.  Waiting to see {}.", nodes.size(), testConfig.numClusterNodes);
+            }
 
-			testDescribeConfigsMethod(client);
+            testDescribeConfigsMethod(client);
 
-			tryFeature("createTopics", testConfig.createTopicsSupported,
-					() -> {
-						try {
-							client.createTopics(Collections.singleton(
-									new NewTopic("newtopic", 1, (short) 1))).all().get();
-						} catch (ExecutionException e) {
-							throw e.getCause();
-						}
-					},
-                () ->  createTopicsResultTest(client, Collections.singleton("newtopic"))
-            );
+            tryFeature("createTopics", testConfig.createTopicsSupported, () -> {
+                try {
+                    client.createTopics(Collections.singleton(new NewTopic("newtopic", 1, (short) 1))).all().get();
+                } catch (ExecutionException e) {
+                    throw e.getCause();
+                }
+            }, () -> createTopicsResultTest(client, Collections.singleton("newtopic")));
 
             while (true) {
                 Collection<TopicListing> listings = client.listTopics().listings().get();
@@ -298,51 +252,44 @@ public class ClientCompatibilityTest {
                 log.info("Did not see newtopic.  Retrying listTopics...");
             }
 
-            tryFeature("describeAclsSupported", testConfig.describeAclsSupported,
-                () -> {
-					try {
-						client.describeAcls(AclBindingFilter.ANY).values().get();
-					} catch (ExecutionException e) {
-						if (e.getCause() instanceof SecurityDisabledException)
-							return;
-						throw e.getCause();
-					}
-				});
-		}
-	}
+            tryFeature("describeAclsSupported", testConfig.describeAclsSupported, () -> {
+                try {
+                    client.describeAcls(AclBindingFilter.ANY).values().get();
+                } catch (ExecutionException e) {
+                    if (e.getCause() instanceof SecurityDisabledException)
+                        return;
+                    throw e.getCause();
+                }
+            });
+        }
+    }
 
-	private void testDescribeConfigsMethod(final Admin client) throws Throwable {
-		tryFeature("describeConfigsSupported", testConfig.describeConfigsSupported,
-				() -> {
-					try {
-						Collection<Node> nodes = client.describeCluster().nodes().get();
+    private void testDescribeConfigsMethod(final Admin client) throws Throwable {
+        tryFeature("describeConfigsSupported", testConfig.describeConfigsSupported, () -> {
+            try {
+                Collection<Node> nodes = client.describeCluster().nodes().get();
 
-						final ConfigResource configResource = new ConfigResource(
-								ConfigResource.Type.BROKER,
-								nodes.iterator().next().idString()
-						);
+                final ConfigResource configResource = new ConfigResource(ConfigResource.Type.BROKER, nodes.iterator().next().idString());
 
-						Map<ConfigResource, Config> brokerConfig =
-								client.describeConfigs(Collections.singleton(configResource)).all().get();
+                Map<ConfigResource, Config> brokerConfig = client.describeConfigs(Collections.singleton(configResource)).all().get();
 
-						if (brokerConfig.get(configResource).entries().isEmpty()) {
-							throw new KafkaException("Expected to see config entries, but got zero entries");
-						}
-					} catch (ExecutionException e) {
-						throw e.getCause();
-					}
-				});
-	}
+                if (brokerConfig.get(configResource).entries().isEmpty()) {
+                    throw new KafkaException("Expected to see config entries, but got zero entries");
+                }
+            } catch (ExecutionException e) {
+                throw e.getCause();
+            }
+        });
+    }
 
-	private void createTopicsResultTest(Admin client, Collection<String> topics)
-			throws InterruptedException, ExecutionException {
-		while (true) {
-			try {
-				client.describeTopics(topics).all().get();
-				break;
-			} catch (ExecutionException e) {
-				if (e.getCause() instanceof UnknownTopicOrPartitionException)
-					continue;
+    private void createTopicsResultTest(Admin client, Collection<String> topics) throws InterruptedException, ExecutionException {
+        while (true) {
+            try {
+                client.describeTopics(topics).allTopicNames().get();
+                break;
+            } catch (ExecutionException e) {
+                if (e.getCause() instanceof UnknownTopicOrPartitionException)
+                    continue;
                 throw e;
             }
         }

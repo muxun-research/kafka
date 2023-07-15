@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.streams.state.internals;
 
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.TimestampedKeyValueStore;
@@ -26,9 +27,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import static org.easymock.EasyMock.expect;
-import static org.easymock.EasyMock.replay;
-import static org.easymock.EasyMock.verify;
+import static org.easymock.EasyMock.*;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertNull;
@@ -63,8 +62,7 @@ public class ReadOnlyKeyValueStoreFacadeTest {
     @Test
     public void shouldReturnPlainKeyValuePairsForRangeIterator() {
         expect(mockedKeyValueTimestampIterator.next())
-            .andReturn(KeyValue.pair("key1", ValueAndTimestamp.make("value1", 21L)))
-            .andReturn(KeyValue.pair("key2", ValueAndTimestamp.make("value2", 42L)));
+            .andReturn(KeyValue.pair("key1", ValueAndTimestamp.make("value1", 21L))).andReturn(KeyValue.pair("key2", ValueAndTimestamp.make("value2", 42L)));
         expect(mockedKeyValueTimestampStore.range("key1", "key2")).andReturn(mockedKeyValueTimestampIterator);
         replay(mockedKeyValueTimestampIterator, mockedKeyValueTimestampStore);
 
@@ -75,10 +73,21 @@ public class ReadOnlyKeyValueStoreFacadeTest {
     }
 
     @Test
+    public void shouldReturnPlainKeyValuePairsForPrefixScan() {
+        final StringSerializer stringSerializer = new StringSerializer();
+        expect(mockedKeyValueTimestampIterator.next()).andReturn(KeyValue.pair("key1", ValueAndTimestamp.make("value1", 21L))).andReturn(KeyValue.pair("key2", ValueAndTimestamp.make("value2", 42L)));
+        expect(mockedKeyValueTimestampStore.prefixScan("key", stringSerializer)).andReturn(mockedKeyValueTimestampIterator);
+        replay(mockedKeyValueTimestampIterator, mockedKeyValueTimestampStore);
+
+        final KeyValueIterator<String, String> iterator = readOnlyKeyValueStoreFacade.prefixScan("key", stringSerializer);
+        assertThat(iterator.next(), is(KeyValue.pair("key1", "value1")));
+        assertThat(iterator.next(), is(KeyValue.pair("key2", "value2")));
+        verify(mockedKeyValueTimestampIterator, mockedKeyValueTimestampStore);
+    }
+
+    @Test
     public void shouldReturnPlainKeyValuePairsForAllIterator() {
-        expect(mockedKeyValueTimestampIterator.next())
-            .andReturn(KeyValue.pair("key1", ValueAndTimestamp.make("value1", 21L)))
-            .andReturn(KeyValue.pair("key2", ValueAndTimestamp.make("value2", 42L)));
+        expect(mockedKeyValueTimestampIterator.next()).andReturn(KeyValue.pair("key1", ValueAndTimestamp.make("value1", 21L))).andReturn(KeyValue.pair("key2", ValueAndTimestamp.make("value2", 42L)));
         expect(mockedKeyValueTimestampStore.all()).andReturn(mockedKeyValueTimestampIterator);
         replay(mockedKeyValueTimestampIterator, mockedKeyValueTimestampStore);
 

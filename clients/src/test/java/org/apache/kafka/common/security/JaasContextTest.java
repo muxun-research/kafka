@@ -19,6 +19,7 @@ package org.apache.kafka.common.security;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.config.types.Password;
 import org.apache.kafka.common.network.ListenerName;
+import org.apache.kafka.test.TestUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,16 +31,10 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.apache.kafka.common.security.JaasUtils.DISALLOWED_LOGIN_MODULES_CONFIG;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests parsing of {@link SaslConfigs#SASL_JAAS_CONFIG} property and verifies that the format
@@ -49,22 +44,22 @@ public class JaasContextTest {
 
     private File jaasConfigFile;
 
-	@BeforeEach
+    @BeforeEach
     public void setUp() throws IOException {
-        jaasConfigFile = File.createTempFile("jaas", ".conf");
-        jaasConfigFile.deleteOnExit();
+        jaasConfigFile = TestUtils.tempFile("jaas", ".conf");
         System.setProperty(JaasUtils.JAVA_LOGIN_CONFIG_PARAM, jaasConfigFile.toString());
         Configuration.setConfiguration(null);
     }
 
-	@AfterEach
+    @AfterEach
     public void tearDown() throws Exception {
         Files.delete(jaasConfigFile.toPath());
+        System.clearProperty(DISALLOWED_LOGIN_MODULES_CONFIG);
     }
 
     @Test
     public void testConfigNoOptions() throws Exception {
-        checkConfiguration("test.testConfigNoOptions", LoginModuleControlFlag.REQUIRED, new HashMap<String, Object>());
+        checkConfiguration("test.testConfigNoOptions", LoginModuleControlFlag.REQUIRED, new HashMap<>());
     }
 
     @Test
@@ -180,6 +175,39 @@ public class JaasContextTest {
     }
 
     @Test
+    public void testDisallowedLoginModulesSystemProperty() throws Exception {
+        //test JndiLoginModule is not allowed by default
+        String jaasConfigProp1 = "com.sun.security.auth.module.JndiLoginModule required;";
+        assertThrows(IllegalArgumentException.class, () -> configurationEntry(JaasContext.Type.CLIENT, jaasConfigProp1));
+
+        //test ListenerName Override
+        writeConfiguration(Arrays.asList("KafkaServer { test.LoginModuleDefault required; };", "plaintext.KafkaServer { com.sun.security.auth.module.JndiLoginModule requisite; };"));
+        assertThrows(IllegalArgumentException.class, () -> JaasContext.loadServerContext(new ListenerName("plaintext"), "SOME-MECHANISM", Collections.emptyMap()));
+
+        //test org.apache.kafka.disallowed.login.modules system property with multiple modules
+        System.setProperty(DISALLOWED_LOGIN_MODULES_CONFIG, " com.ibm.security.auth.module.LdapLoginModule , com.ibm.security.auth.module.Krb5LoginModule ");
+
+        String jaasConfigProp2 = "com.ibm.security.auth.module.LdapLoginModule required;";
+        assertThrows(IllegalArgumentException.class, () -> configurationEntry(JaasContext.Type.CLIENT, jaasConfigProp2));
+
+        //test ListenerName Override
+        writeConfiguration(Arrays.asList("KafkaServer { test.LoginModuleDefault required; };", "plaintext.KafkaServer { com.ibm.security.auth.module.Krb5LoginModule requisite; };"));
+        assertThrows(IllegalArgumentException.class, () -> JaasContext.loadServerContext(new ListenerName("plaintext"), "SOME-MECHANISM", Collections.emptyMap()));
+
+
+        //Remove default value for org.apache.kafka.disallowed.login.modules
+        System.setProperty(DISALLOWED_LOGIN_MODULES_CONFIG, "");
+
+        checkConfiguration("com.sun.security.auth.module.JndiLoginModule", LoginModuleControlFlag.REQUIRED, new HashMap<>());
+
+        //test ListenerName Override
+        writeConfiguration(Arrays.asList("KafkaServer { com.ibm.security.auth.module.LdapLoginModule required; };", "plaintext.KafkaServer { com.sun.security.auth.module.JndiLoginModule requisite; };"));
+        JaasContext context = JaasContext.loadServerContext(new ListenerName("plaintext"), "SOME-MECHANISM", Collections.emptyMap());
+        assertEquals(1, context.configurationEntries().size());
+        checkEntry(context.configurationEntries().get(0), "com.sun.security.auth.module.JndiLoginModule", LoginModuleControlFlag.REQUISITE, Collections.emptyMap());
+    }
+
+    @Test
     public void testNumericOptionWithQuotes() throws Exception {
         Map<String, Object> options = new HashMap<>();
         options.put("option1", "3");
@@ -217,12 +245,11 @@ public class JaasContextTest {
             Collections.emptyMap());
     }
 
-	@Test
+    @Test
     public void testLoadForServerWithWrongListenerName() throws IOException {
-		writeConfiguration("Server", "test.LoginModule required;");
-		assertThrows(IllegalArgumentException.class, () -> JaasContext.loadServerContext(new ListenerName("plaintext"),
-				"SOME-MECHANISM", Collections.emptyMap()));
-	}
+        writeConfiguration("Server", "test.LoginModule required;");
+        assertThrows(IllegalArgumentException.class, () -> JaasContext.loadServerContext(new ListenerName("plaintext"), "SOME-MECHANISM", Collections.emptyMap()));
+    }
 
     private AppConfigurationEntry configurationEntry(JaasContext.Type contextType, String jaasConfigProp) {
         Password saslJaasConfig = jaasConfigProp == null ? null : new Password(jaasConfigProp);
@@ -276,8 +303,8 @@ public class JaasContextTest {
 
     private void checkConfiguration(String jaasConfigProp, String loginModule, LoginModuleControlFlag controlFlag, Map<String, Object> options) throws Exception {
         AppConfigurationEntry dynamicEntry = configurationEntry(JaasContext.Type.CLIENT, jaasConfigProp);
-		checkEntry(dynamicEntry, loginModule, controlFlag, options);
-		assertNull(Configuration.getConfiguration().getAppConfigurationEntry(JaasContext.Type.CLIENT.name()), "Static configuration updated");
+        checkEntry(dynamicEntry, loginModule, controlFlag, options);
+        assertNull(Configuration.getConfiguration().getAppConfigurationEntry(JaasContext.Type.CLIENT.name()), "Static configuration updated");
 
         writeConfiguration(JaasContext.Type.SERVER.name(), jaasConfigProp);
         AppConfigurationEntry staticEntry = configurationEntry(JaasContext.Type.SERVER, null);

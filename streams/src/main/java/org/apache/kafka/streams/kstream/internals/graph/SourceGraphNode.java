@@ -16,60 +16,53 @@
  */
 package org.apache.kafka.streams.kstream.internals.graph;
 
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.regex.Pattern;
-
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.streams.kstream.internals.ConsumedInternal;
 
+import java.util.*;
+import java.util.regex.Pattern;
+
 abstract public class SourceGraphNode<K, V> extends GraphNode {
 
-	private final Set<String> topicNames;
-	private final Pattern topicPattern;
-	private final ConsumedInternal<K, V> consumedInternal;
+    private final Set<String> topicNames;
+    private final Pattern topicPattern;
+    private final ConsumedInternal<K, V> consumedInternal;
 
-	public SourceGraphNode(final String nodeName,
-						   final Collection<String> topicNames,
-						   final ConsumedInternal<K, V> consumedInternal) {
-		super(nodeName);
+    public SourceGraphNode(final String nodeName, final Collection<String> topicNames, final ConsumedInternal<K, V> consumedInternal) {
+        super(nodeName);
 
-		this.topicNames = new HashSet<>(topicNames);
-		this.topicPattern = null;
-		this.consumedInternal = consumedInternal;
-	}
+        this.topicNames = new HashSet<>(topicNames);
+        this.topicPattern = null;
+        this.consumedInternal = consumedInternal;
+    }
 
-	public SourceGraphNode(final String nodeName,
-						   final Pattern topicPattern,
-						   final ConsumedInternal<K, V> consumedInternal) {
+    public SourceGraphNode(final String nodeName, final Pattern topicPattern, final ConsumedInternal<K, V> consumedInternal) {
 
-		super(nodeName);
+        super(nodeName);
 
-		this.topicNames = null;
-		this.topicPattern = topicPattern;
-		this.consumedInternal = consumedInternal;
-	}
+        this.topicNames = null;
+        this.topicPattern = topicPattern;
+        this.consumedInternal = consumedInternal;
+    }
 
-	public Set<String> topicNames() {
-		return Collections.unmodifiableSet(topicNames);
-	}
+    public Optional<Set<String>> topicNames() {
+        return topicNames == null ? Optional.empty() : Optional.of(Collections.unmodifiableSet(topicNames));
+    }
 
-	public Pattern topicPattern() {
-		return topicPattern;
-	}
+    public Optional<Pattern> topicPattern() {
+        return Optional.ofNullable(topicPattern);
+    }
 
-	public ConsumedInternal<K, V> consumedInternal() {
-		return consumedInternal;
-	}
+    public ConsumedInternal<K, V> consumedInternal() {
+        return consumedInternal;
+    }
 
-	public Serde<K> keySerde() {
-		return consumedInternal.keySerde();
-	}
+    public Serde<K> keySerde() {
+        return consumedInternal.keySerde();
+    }
 
-	public Serde<V> valueSerde() {
-		return consumedInternal.valueSerde();
-	}
+    public Serde<V> valueSerde() {
+        return consumedInternal.valueSerde();
+    }
 
 }

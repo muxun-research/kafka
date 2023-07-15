@@ -18,16 +18,14 @@ package org.apache.kafka.common.config.provider;
 
 import org.apache.kafka.common.config.ConfigData;
 import org.apache.kafka.common.config.ConfigException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
+import java.util.*;
 
 /**
  * An implementation of {@link ConfigProvider} that represents a Properties file.
@@ -35,12 +33,13 @@ import java.util.Set;
  */
 public class FileConfigProvider implements ConfigProvider {
 
+    private static final Logger log = LoggerFactory.getLogger(FileConfigProvider.class);
+
     public void configure(Map<String, ?> configs) {
     }
 
     /**
      * Retrieves the data at the given Properties file.
-     *
      * @param path the file where the data resides
      * @return the configuration data
      */
@@ -62,6 +61,7 @@ public class FileConfigProvider implements ConfigProvider {
             }
             return new ConfigData(data);
         } catch (IOException e) {
+            log.error("Could not read properties from file {}", path, e);
             throw new ConfigException("Could not read properties from file " + path);
         }
     }
@@ -89,6 +89,7 @@ public class FileConfigProvider implements ConfigProvider {
             }
             return new ConfigData(data);
         } catch (IOException e) {
+            log.error("Could not read properties from file {}", path, e);
             throw new ConfigException("Could not read properties from file " + path);
         }
     }

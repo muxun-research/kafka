@@ -27,7 +27,9 @@ import org.apache.kafka.common.protocol.Errors;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 /**
  * Possible error codes:
@@ -40,6 +42,7 @@ import java.util.Map;
  * - {@link Errors#GROUP_AUTHORIZATION_FAILED}
  * - {@link Errors#INVALID_COMMIT_OFFSET_SIZE}
  * - {@link Errors#TRANSACTIONAL_ID_AUTHORIZATION_FAILED}
+ * - {@link Errors#UNSUPPORTED_FOR_MESSAGE_FORMAT}
  * - {@link Errors#REQUEST_TIMED_OUT}
  * - {@link Errors#UNKNOWN_MEMBER_ID}
  * - {@link Errors#FENCED_INSTANCE_ID}
@@ -47,75 +50,132 @@ import java.util.Map;
  */
 public class TxnOffsetCommitResponse extends AbstractResponse {
 
-	private final TxnOffsetCommitResponseData data;
+    public static class Builder {
+        TxnOffsetCommitResponseData data = new TxnOffsetCommitResponseData();
+        HashMap<String, TxnOffsetCommitResponseTopic> byTopicName = new HashMap<>();
 
-	public TxnOffsetCommitResponse(TxnOffsetCommitResponseData data) {
-		super(ApiKeys.TXN_OFFSET_COMMIT);
-		this.data = data;
-	}
+        private TxnOffsetCommitResponseTopic getOrCreateTopic(String topicName) {
+            TxnOffsetCommitResponseTopic topic = byTopicName.get(topicName);
+            if (topic == null) {
+                topic = new TxnOffsetCommitResponseTopic().setName(topicName);
+                data.topics().add(topic);
+                byTopicName.put(topicName, topic);
+            }
+            return topic;
+        }
 
-	public TxnOffsetCommitResponse(int requestThrottleMs, Map<TopicPartition, Errors> responseData) {
-		super(ApiKeys.TXN_OFFSET_COMMIT);
-		Map<String, TxnOffsetCommitResponseTopic> responseTopicDataMap = new HashMap<>();
+        public Builder addPartition(String topicName, int partitionIndex, Errors error) {
+            final TxnOffsetCommitResponseTopic topicResponse = getOrCreateTopic(topicName);
 
-		for (Map.Entry<TopicPartition, Errors> entry : responseData.entrySet()) {
-			TopicPartition topicPartition = entry.getKey();
-			String topicName = topicPartition.topic();
+            topicResponse.partitions().add(new TxnOffsetCommitResponsePartition().setPartitionIndex(partitionIndex).setErrorCode(error.code()));
 
-			TxnOffsetCommitResponseTopic topic = responseTopicDataMap.getOrDefault(
-					topicName, new TxnOffsetCommitResponseTopic().setName(topicName));
+            return this;
+        }
 
-			topic.partitions().add(new TxnOffsetCommitResponsePartition()
-					.setErrorCode(entry.getValue().code())
-					.setPartitionIndex(topicPartition.partition())
-			);
-			responseTopicDataMap.put(topicName, topic);
-		}
+        public <P> Builder addPartitions(String topicName, List<P> partitions, Function<P, Integer> partitionIndex, Errors error) {
+            final TxnOffsetCommitResponseTopic topicResponse = getOrCreateTopic(topicName);
 
-		data = new TxnOffsetCommitResponseData()
-				.setTopics(new ArrayList<>(responseTopicDataMap.values()))
-				.setThrottleTimeMs(requestThrottleMs);
-	}
+            partitions.forEach(partition -> {
+                topicResponse.partitions().add(new TxnOffsetCommitResponsePartition().setPartitionIndex(partitionIndex.apply(partition)).setErrorCode(error.code()));
+            });
+
+            return this;
+        }
+
+        public Builder merge(TxnOffsetCommitResponseData newData) {
+            if (data.topics().isEmpty()) {
+                // If the current data is empty, we can discard it and use the new data.
+                data = newData;
+            } else {
+                // Otherwise, we have to merge them together.
+                newData.topics().forEach(newTopic -> {
+                    TxnOffsetCommitResponseTopic existingTopic = byTopicName.get(newTopic.name());
+                    if (existingTopic == null) {
+                        // If no topic exists, we can directly copy the new topic data.
+                        data.topics().add(newTopic);
+                        byTopicName.put(newTopic.name(), newTopic);
+                    } else {
+                        // Otherwise, we add the partitions to the existing one. Note we
+                        // expect non-overlapping partitions here as we don't verify
+                        // if the partition is already in the list before adding it.
+                        existingTopic.partitions().addAll(newTopic.partitions());
+                    }
+                });
+            }
+
+            return this;
+        }
+
+        public TxnOffsetCommitResponse build() {
+            return new TxnOffsetCommitResponse(data);
+        }
+    }
+
+    private final TxnOffsetCommitResponseData data;
+
+    public TxnOffsetCommitResponse(TxnOffsetCommitResponseData data) {
+        super(ApiKeys.TXN_OFFSET_COMMIT);
+        this.data = data;
+    }
+
+    public TxnOffsetCommitResponse(int requestThrottleMs, Map<TopicPartition, Errors> responseData) {
+        super(ApiKeys.TXN_OFFSET_COMMIT);
+        Map<String, TxnOffsetCommitResponseTopic> responseTopicDataMap = new HashMap<>();
+
+        for (Map.Entry<TopicPartition, Errors> entry : responseData.entrySet()) {
+            TopicPartition topicPartition = entry.getKey();
+            String topicName = topicPartition.topic();
+
+            TxnOffsetCommitResponseTopic topic = responseTopicDataMap.getOrDefault(topicName, new TxnOffsetCommitResponseTopic().setName(topicName));
+
+            topic.partitions().add(new TxnOffsetCommitResponsePartition().setErrorCode(entry.getValue().code()).setPartitionIndex(topicPartition.partition()));
+            responseTopicDataMap.put(topicName, topic);
+        }
+
+        data = new TxnOffsetCommitResponseData().setTopics(new ArrayList<>(responseTopicDataMap.values())).setThrottleTimeMs(requestThrottleMs);
+    }
 
     @Override
     public TxnOffsetCommitResponseData data() {
-		return data;
-	}
+        return data;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		return errorCounts(data.topics().stream().flatMap(topic ->
-				topic.partitions().stream().map(partition ->
-						Errors.forCode(partition.errorCode()))));
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	public Map<TopicPartition, Errors> errors() {
-		Map<TopicPartition, Errors> errorMap = new HashMap<>();
-		for (TxnOffsetCommitResponseTopic topic : data.topics()) {
-			for (TxnOffsetCommitResponsePartition partition : topic.partitions()) {
-				errorMap.put(new TopicPartition(topic.name(), partition.partitionIndex()),
-						Errors.forCode(partition.errorCode()));
-			}
-		}
-		return errorMap;
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        return errorCounts(data.topics().stream().flatMap(topic -> topic.partitions().stream().map(partition -> Errors.forCode(partition.errorCode()))));
+    }
 
-	public static TxnOffsetCommitResponse parse(ByteBuffer buffer, short version) {
-		return new TxnOffsetCommitResponse(new TxnOffsetCommitResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    public Map<TopicPartition, Errors> errors() {
+        Map<TopicPartition, Errors> errorMap = new HashMap<>();
+        for (TxnOffsetCommitResponseTopic topic : data.topics()) {
+            for (TxnOffsetCommitResponsePartition partition : topic.partitions()) {
+                errorMap.put(new TopicPartition(topic.name(), partition.partitionIndex()), Errors.forCode(partition.errorCode()));
+            }
+        }
+        return errorMap;
+    }
 
-	@Override
-	public String toString() {
-		return data.toString();
-	}
+    public static TxnOffsetCommitResponse parse(ByteBuffer buffer, short version) {
+        return new TxnOffsetCommitResponse(new TxnOffsetCommitResponseData(new ByteBufferAccessor(buffer), version));
+    }
 
-	@Override
-	public boolean shouldClientThrottle(short version) {
+    @Override
+    public String toString() {
+        return data.toString();
+    }
+
+    @Override
+    public boolean shouldClientThrottle(short version) {
         return version >= 1;
     }
 }

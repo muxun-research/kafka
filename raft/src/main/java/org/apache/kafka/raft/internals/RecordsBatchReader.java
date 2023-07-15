@@ -16,195 +16,101 @@
  */
 package org.apache.kafka.raft.internals;
 
-import org.apache.kafka.common.protocol.DataInputStreamReadable;
-import org.apache.kafka.common.protocol.Readable;
-import org.apache.kafka.common.utils.BufferSupplier;
-import org.apache.kafka.common.record.DefaultRecordBatch;
-import org.apache.kafka.common.record.FileRecords;
-import org.apache.kafka.common.record.MemoryRecords;
-import org.apache.kafka.common.record.MutableRecordBatch;
 import org.apache.kafka.common.record.Records;
+import org.apache.kafka.common.utils.BufferSupplier;
+import org.apache.kafka.raft.Batch;
 import org.apache.kafka.raft.BatchReader;
-import org.apache.kafka.raft.RecordSerde;
+import org.apache.kafka.server.common.serialization.RecordSerde;
 
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.OptionalLong;
 
-public class RecordsBatchReader<T> implements BatchReader<T> {
-	private final long baseOffset;
-	private final Records records;
-	private final RecordSerde<T> serde;
-	private final BufferSupplier bufferSupplier;
-	private final CloseListener<BatchReader<T>> closeListener;
+public final class RecordsBatchReader<T> implements BatchReader<T> {
+    private final long baseOffset;
+    private final RecordsIterator<T> iterator;
+    private final CloseListener<BatchReader<T>> closeListener;
 
-	private Iterator<MutableRecordBatch> batchIterator;
-	private long lastReturnedOffset;
-	private Batch<T> nextBatch;
-	private boolean isClosed = false;
-	private ByteBuffer allocatedBuffer = null;
+    private long lastReturnedOffset;
 
-	public RecordsBatchReader(
-			long baseOffset,
-			Records records,
-			RecordSerde<T> serde,
-			BufferSupplier bufferSupplier,
-			CloseListener<BatchReader<T>> closeListener
-	) {
-		this.baseOffset = baseOffset;
-		this.records = records;
-		this.serde = serde;
-		this.bufferSupplier = bufferSupplier;
-		this.closeListener = closeListener;
-		this.lastReturnedOffset = baseOffset;
-	}
+    private Optional<Batch<T>> nextBatch = Optional.empty();
+    private boolean isClosed = false;
 
-	private void materializeIterator() throws IOException {
-		if (records instanceof MemoryRecords) {
-			batchIterator = ((MemoryRecords) records).batchIterator();
-		} else if (records instanceof FileRecords) {
-			this.allocatedBuffer = bufferSupplier.get(records.sizeInBytes());
-			((FileRecords) records).readInto(allocatedBuffer, 0);
-			MemoryRecords memRecords = MemoryRecords.readableRecords(allocatedBuffer);
-			batchIterator = memRecords.batchIterator();
-		} else {
-			throw new IllegalStateException("Unexpected Records type " + records.getClass());
-		}
-	}
+    private RecordsBatchReader(long baseOffset, RecordsIterator<T> iterator, CloseListener<BatchReader<T>> closeListener) {
+        this.baseOffset = baseOffset;
+        this.iterator = iterator;
+        this.closeListener = closeListener;
+        this.lastReturnedOffset = baseOffset;
+    }
 
-	private void findNextDataBatch() {
-		if (batchIterator == null) {
-			try {
-				materializeIterator();
-			} catch (IOException e) {
-				throw new RuntimeException("Failed to read records into memory", e);
-			}
-		}
+    @Override
+    public boolean hasNext() {
+        ensureOpen();
 
-		while (batchIterator.hasNext()) {
-			MutableRecordBatch nextBatch = batchIterator.next();
-			if (!(nextBatch instanceof DefaultRecordBatch)) {
-				throw new IllegalStateException();
-			}
+        if (!nextBatch.isPresent()) {
+            nextBatch = nextBatch();
+        }
 
-			DefaultRecordBatch batch = (DefaultRecordBatch) nextBatch;
-			if (!batch.isControlBatch()) {
-				this.nextBatch = readBatch(batch);
-				return;
-			} else {
-				this.lastReturnedOffset = batch.lastOffset();
-			}
-		}
-	}
+        return nextBatch.isPresent();
+    }
 
-	private Batch<T> readBatch(DefaultRecordBatch batch) {
-		Integer numRecords = batch.countOrNull();
-		if (numRecords == null) {
-			throw new IllegalStateException();
-		}
+    @Override
+    public Batch<T> next() {
+        if (!hasNext()) {
+            throw new NoSuchElementException("Records batch reader doesn't have any more elements");
+        }
 
-		List<T> records = new ArrayList<>(numRecords);
-		try (DataInputStreamReadable input = new DataInputStreamReadable(
-				batch.recordInputStream(bufferSupplier))) {
-			for (int i = 0; i < numRecords; i++) {
-				T record = readRecord(input);
-				records.add(record);
-			}
-			return new Batch<>(
-					batch.baseOffset(),
-					batch.partitionLeaderEpoch(),
-					records
-			);
-		}
-	}
+        Batch<T> batch = nextBatch.get();
+        nextBatch = Optional.empty();
 
-	@Override
-	public boolean hasNext() {
-		if (nextBatch != null) {
-			return true;
-		} else {
-			findNextDataBatch();
-			return nextBatch != null;
-		}
-	}
+        lastReturnedOffset = batch.lastOffset();
+        return batch;
+    }
 
-	@Override
-	public Batch<T> next() {
-		if (nextBatch != null) {
-			Batch<T> res = nextBatch;
-			nextBatch = null;
-			lastReturnedOffset = res.lastOffset();
-			return res;
-		} else {
-			findNextDataBatch();
-			if (nextBatch == null) {
-				throw new NoSuchElementException();
-			}
-			return next();
-		}
-	}
+    @Override
+    public long baseOffset() {
+        return baseOffset;
+    }
 
-	@Override
-	public long baseOffset() {
-		return baseOffset;
-	}
+    public OptionalLong lastOffset() {
+        if (isClosed) {
+            return OptionalLong.of(lastReturnedOffset);
+        } else {
+            return OptionalLong.empty();
+        }
+    }
 
-	public OptionalLong lastOffset() {
-		if (isClosed) {
-			return OptionalLong.of(lastReturnedOffset);
-		} else {
-			return OptionalLong.empty();
-		}
-	}
+    @Override
+    public void close() {
+        if (!isClosed) {
+            isClosed = true;
 
-	@Override
-	public void close() {
-		isClosed = true;
+            iterator.close();
+            closeListener.onClose(this);
+        }
+    }
 
-		if (allocatedBuffer != null) {
-			bufferSupplier.release(allocatedBuffer);
-		}
+    public static <T> RecordsBatchReader<T> of(long baseOffset, Records records, RecordSerde<T> serde, BufferSupplier bufferSupplier, int maxBatchSize, CloseListener<BatchReader<T>> closeListener, boolean doCrcValidation) {
+        return new RecordsBatchReader<>(baseOffset, new RecordsIterator<>(records, serde, bufferSupplier, maxBatchSize, doCrcValidation), closeListener);
+    }
 
-		closeListener.onClose(this);
-	}
+    private void ensureOpen() {
+        if (isClosed) {
+            throw new IllegalStateException("Records batch reader was closed");
+        }
+    }
 
-	public T readRecord(Readable input) {
-		// Read size of body in bytes
-		input.readVarint();
+    private Optional<Batch<T>> nextBatch() {
+        while (iterator.hasNext()) {
+            Batch<T> batch = iterator.next();
 
-		// Read unused attributes
-		input.readByte();
+            if (batch.records().isEmpty()) {
+                lastReturnedOffset = batch.lastOffset();
+            } else {
+                return Optional.of(batch);
+            }
+        }
 
-		long timestampDelta = input.readVarlong();
-		if (timestampDelta != 0) {
-			throw new IllegalArgumentException();
-		}
-
-		// Read offset delta
-		input.readVarint();
-
-		int keySize = input.readVarint();
-		if (keySize != -1) {
-			throw new IllegalArgumentException("Unexpected key size " + keySize);
-		}
-
-		int valueSize = input.readVarint();
-		if (valueSize < 0) {
-			throw new IllegalArgumentException();
-		}
-
-		T record = serde.read(input, valueSize);
-
-		int numHeaders = input.readVarint();
-		if (numHeaders != 0) {
-			throw new IllegalArgumentException();
-		}
-
-		return record;
-	}
-
+        return Optional.empty();
+    }
 }

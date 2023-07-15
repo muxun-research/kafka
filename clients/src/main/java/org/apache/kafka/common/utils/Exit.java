@@ -17,88 +17,77 @@
 package org.apache.kafka.common.utils;
 
 /**
- * Internal class that should be used instead of `Exit.exit()` and `Runtime.getRuntime().halt()` so that tests can
+ * Internal class that should be used instead of `System.exit()` and `Runtime.getRuntime().halt()` so that tests can
  * easily change the behaviour.
  */
 public class Exit {
 
-	public interface Procedure {
-		void execute(int statusCode, String message);
-	}
+    @FunctionalInterface
+    public interface Procedure {
+        void execute(int statusCode, String message);
+    }
 
-	public interface ShutdownHookAdder {
-		void addShutdownHook(String name, Runnable runnable);
-	}
+    @FunctionalInterface
+    public interface ShutdownHookAdder {
+        void addShutdownHook(String name, Runnable runnable);
+    }
 
-	private static final Procedure DEFAULT_HALT_PROCEDURE = new Procedure() {
-		@Override
-		public void execute(int statusCode, String message) {
-			Runtime.getRuntime().halt(statusCode);
-		}
-	};
+    private static final Procedure DEFAULT_HALT_PROCEDURE = (statusCode, message) -> Runtime.getRuntime().halt(statusCode);
 
-	private static final Procedure DEFAULT_EXIT_PROCEDURE = new Procedure() {
-		@Override
-		public void execute(int statusCode, String message) {
-			System.exit(statusCode);
-		}
-	};
+    private static final Procedure DEFAULT_EXIT_PROCEDURE = (statusCode, message) -> System.exit(statusCode);
 
-	private static final ShutdownHookAdder DEFAULT_SHUTDOWN_HOOK_ADDER = new ShutdownHookAdder() {
-		@Override
-		public void addShutdownHook(String name, Runnable runnable) {
-			if (name != null)
-				Runtime.getRuntime().addShutdownHook(KafkaThread.nonDaemon(name, runnable));
-			else
-				Runtime.getRuntime().addShutdownHook(new Thread(runnable));
-		}
-	};
+    private static final ShutdownHookAdder DEFAULT_SHUTDOWN_HOOK_ADDER = (name, runnable) -> {
+        if (name != null)
+            Runtime.getRuntime().addShutdownHook(KafkaThread.nonDaemon(name, runnable));
+        else
+            Runtime.getRuntime().addShutdownHook(new Thread(runnable));
+    };
 
-	private volatile static Procedure exitProcedure = DEFAULT_EXIT_PROCEDURE;
-	private volatile static Procedure haltProcedure = DEFAULT_HALT_PROCEDURE;
-	private volatile static ShutdownHookAdder shutdownHookAdder = DEFAULT_SHUTDOWN_HOOK_ADDER;
+    private volatile static Procedure exitProcedure = DEFAULT_EXIT_PROCEDURE;
+    private volatile static Procedure haltProcedure = DEFAULT_HALT_PROCEDURE;
+    private volatile static ShutdownHookAdder shutdownHookAdder = DEFAULT_SHUTDOWN_HOOK_ADDER;
 
-	public static void exit(int statusCode) {
-		exit(statusCode, null);
-	}
+    public static void exit(int statusCode) {
+        exit(statusCode, null);
+    }
 
-	public static void exit(int statusCode, String message) {
+    public static void exit(int statusCode, String message) {
         exitProcedure.execute(statusCode, message);
-	}
+    }
 
-	public static void halt(int statusCode) {
-		halt(statusCode, null);
-	}
+    public static void halt(int statusCode) {
+        halt(statusCode, null);
+    }
 
-	public static void halt(int statusCode, String message) {
-		haltProcedure.execute(statusCode, message);
-	}
+    public static void halt(int statusCode, String message) {
+        haltProcedure.execute(statusCode, message);
+    }
 
-	public static void addShutdownHook(String name, Runnable runnable) {
-		shutdownHookAdder.addShutdownHook(name, runnable);
-	}
+    public static void addShutdownHook(String name, Runnable runnable) {
+        shutdownHookAdder.addShutdownHook(name, runnable);
+    }
 
-	public static void setExitProcedure(Procedure procedure) {
-		exitProcedure = procedure;
-	}
+    public static void setExitProcedure(Procedure procedure) {
+        exitProcedure = procedure;
+    }
 
-	public static void setHaltProcedure(Procedure procedure) {
-		haltProcedure = procedure;
-	}
+    public static void setHaltProcedure(Procedure procedure) {
+        haltProcedure = procedure;
+    }
 
-	public static void setShutdownHookAdder(ShutdownHookAdder shutdownHookAdder) {
-		Exit.shutdownHookAdder = shutdownHookAdder;
-	}
+    public static void setShutdownHookAdder(ShutdownHookAdder shutdownHookAdder) {
+        Exit.shutdownHookAdder = shutdownHookAdder;
+    }
 
-	public static void resetExitProcedure() {
-		exitProcedure = DEFAULT_EXIT_PROCEDURE;
-	}
+    public static void resetExitProcedure() {
+        exitProcedure = DEFAULT_EXIT_PROCEDURE;
+    }
 
-	public static void resetHaltProcedure() {
-		haltProcedure = DEFAULT_HALT_PROCEDURE;
-	}
+    public static void resetHaltProcedure() {
+        haltProcedure = DEFAULT_HALT_PROCEDURE;
+    }
 
-	public static void resetShutdownHookAdder() {
-		shutdownHookAdder = DEFAULT_SHUTDOWN_HOOK_ADDER;
-	}
+    public static void resetShutdownHookAdder() {
+        shutdownHookAdder = DEFAULT_SHUTDOWN_HOOK_ADDER;
+    }
 }

@@ -18,14 +18,12 @@ package org.apache.kafka.streams.kstream.internals;
 
 import org.junit.Test;
 
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThrows;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 public class SessionWindowTest {
 
-    private long start = 50;
-    private long end = 100;
+    private final long start = 50;
+    private final long end = 100;
     private final SessionWindow window = new SessionWindow(start, end);
     private final TimeWindow timeWindow = new TimeWindow(start, end);
 

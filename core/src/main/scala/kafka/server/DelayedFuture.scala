@@ -17,13 +17,11 @@
 
 package kafka.server
 
-import java.util.concurrent._
-import java.util.function.BiConsumer
-
 import org.apache.kafka.common.errors.TimeoutException
 import org.apache.kafka.common.utils.KafkaThread
 
-import scala.collection.Seq
+import java.util.concurrent._
+import java.util.function.BiConsumer
 
 /**
  * A delayed operation using CompletionFutures that can be created by KafkaApis and watched
@@ -97,4 +95,6 @@ class DelayedFuturePurgatory(purgatoryName: String, brokerId: Int) {
     executor.awaitTermination(60, TimeUnit.SECONDS)
     purgatory.shutdown()
   }
+
+  def isShutdown: Boolean = executor.isShutdown
 }

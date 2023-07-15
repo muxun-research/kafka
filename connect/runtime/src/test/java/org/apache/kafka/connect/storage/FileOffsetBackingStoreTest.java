@@ -16,113 +16,154 @@
  */
 package org.apache.kafka.connect.storage;
 
+import org.apache.kafka.connect.data.SchemaAndValue;
+import org.apache.kafka.connect.json.JsonConverter;
+import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.apache.kafka.connect.runtime.standalone.StandaloneConfig;
 import org.apache.kafka.connect.util.Callback;
-import org.easymock.EasyMock;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.api.easymock.PowerMock;
-import org.powermock.modules.junit4.PowerMockRunner;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
+import java.nio.file.Files;
+import java.util.*;
 import java.util.concurrent.ThreadPoolExecutor;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.*;
 
-@RunWith(PowerMockRunner.class)
 public class FileOffsetBackingStoreTest {
 
-	FileOffsetBackingStore store;
-	Map<String, String> props;
-	StandaloneConfig config;
-	File tempFile;
+    private FileOffsetBackingStore store;
+    private StandaloneConfig config;
+    private File tempFile;
+    private Converter converter;
 
-	private static Map<ByteBuffer, ByteBuffer> firstSet = new HashMap<>();
-	private static final Runnable EMPTY_RUNNABLE = () -> {
-	};
 
-	static {
-		firstSet.put(buffer("key"), buffer("value"));
-		firstSet.put(null, null);
-	}
+    private static Map<ByteBuffer, ByteBuffer> firstSet = new HashMap<>();
+    private static final Runnable EMPTY_RUNNABLE = () -> {
+    };
 
-	@SuppressWarnings("deprecation")
-	@Before
-	public void setup() throws IOException {
-		store = new FileOffsetBackingStore();
-		tempFile = File.createTempFile("fileoffsetbackingstore", null);
-		props = new HashMap<>();
-		props.put(StandaloneConfig.OFFSET_STORAGE_FILE_FILENAME_CONFIG, tempFile.getAbsolutePath());
-		props.put(StandaloneConfig.KEY_CONVERTER_CLASS_CONFIG, "org.apache.kafka.connect.json.JsonConverter");
-		props.put(StandaloneConfig.VALUE_CONVERTER_CLASS_CONFIG, "org.apache.kafka.connect.json.JsonConverter");
-		props.put(StandaloneConfig.INTERNAL_KEY_CONVERTER_CLASS_CONFIG, "org.apache.kafka.connect.json.JsonConverter");
-		props.put(StandaloneConfig.INTERNAL_VALUE_CONVERTER_CLASS_CONFIG, "org.apache.kafka.connect.json.JsonConverter");
-		config = new StandaloneConfig(props);
-		store.configure(config);
-		store.start();
-	}
+    static {
+        firstSet.put(buffer("key"), buffer("value"));
+        firstSet.put(null, null);
+    }
 
-	@After
-	public void teardown() {
-		tempFile.delete();
-	}
+    @Before
+    public void setup() throws IOException {
+        converter = mock(Converter.class);
+        // This is only needed for storing deserialized connector partitions, which we don't test in most of the cases here
+        when(converter.toConnectData(anyString(), any(byte[].class))).thenReturn(new SchemaAndValue(null, Arrays.asList("connector", Collections.singletonMap("partitionKey", "dummy"))));
+        store = new FileOffsetBackingStore(converter);
+        tempFile = File.createTempFile("fileoffsetbackingstore", null);
+        Map<String, String> props = new HashMap<>();
+        props.put(StandaloneConfig.OFFSET_STORAGE_FILE_FILENAME_CONFIG, tempFile.getAbsolutePath());
+        props.put(StandaloneConfig.KEY_CONVERTER_CLASS_CONFIG, "org.apache.kafka.connect.json.JsonConverter");
+        props.put(StandaloneConfig.VALUE_CONVERTER_CLASS_CONFIG, "org.apache.kafka.connect.json.JsonConverter");
+        config = new StandaloneConfig(props);
+        store.configure(config);
+        store.start();
+    }
 
-	@Test
-	public void testGetSet() throws Exception {
-		Callback<Void> setCallback = expectSuccessfulSetCallback();
-		PowerMock.replayAll();
+    @After
+    public void teardown() throws IOException {
+        Files.deleteIfExists(tempFile.toPath());
+    }
 
-		store.set(firstSet, setCallback).get();
+    @Test
+    public void testGetSet() throws Exception {
+        @SuppressWarnings("unchecked") Callback<Void> setCallback = mock(Callback.class);
 
-		Map<ByteBuffer, ByteBuffer> values = store.get(Arrays.asList(buffer("key"), buffer("bad"))).get();
-		assertEquals(buffer("value"), values.get(buffer("key")));
-		assertNull(values.get(buffer("bad")));
+        store.set(firstSet, setCallback).get();
 
-		PowerMock.verifyAll();
-	}
+        Map<ByteBuffer, ByteBuffer> values = store.get(Arrays.asList(buffer("key"), buffer("bad"))).get();
+        assertEquals(buffer("value"), values.get(buffer("key")));
+        assertNull(values.get(buffer("bad")));
+        verify(setCallback).onCompletion(isNull(), isNull());
+    }
 
-	@Test
-	public void testSaveRestore() throws Exception {
-		Callback<Void> setCallback = expectSuccessfulSetCallback();
-		PowerMock.replayAll();
+    @Test
+    public void testSaveRestore() throws Exception {
+        @SuppressWarnings("unchecked") Callback<Void> setCallback = mock(Callback.class);
 
-		store.set(firstSet, setCallback).get();
-		store.stop();
+        store.set(firstSet, setCallback).get();
+        store.stop();
 
-		// Restore into a new store to ensure correct reload from scratch
-		FileOffsetBackingStore restore = new FileOffsetBackingStore();
-		restore.configure(config);
-		restore.start();
-		Map<ByteBuffer, ByteBuffer> values = restore.get(Arrays.asList(buffer("key"))).get();
-		assertEquals(buffer("value"), values.get(buffer("key")));
+        // Restore into a new store to ensure correct reload from scratch
+        FileOffsetBackingStore restore = new FileOffsetBackingStore(converter);
+        restore.configure(config);
+        restore.start();
+        Map<ByteBuffer, ByteBuffer> values = restore.get(Collections.singletonList(buffer("key"))).get();
+        assertEquals(buffer("value"), values.get(buffer("key")));
+        verify(setCallback).onCompletion(isNull(), isNull());
+    }
 
-		PowerMock.verifyAll();
-	}
+    @Test
+    public void testThreadName() {
+        assertTrue(((ThreadPoolExecutor) store.executor).getThreadFactory().newThread(EMPTY_RUNNABLE).getName().startsWith(FileOffsetBackingStore.class.getSimpleName()));
+    }
 
-	@Test
-	public void testThreadName() {
-		assertTrue(((ThreadPoolExecutor) store.executor).getThreadFactory()
-				.newThread(EMPTY_RUNNABLE).getName().startsWith(FileOffsetBackingStore.class.getSimpleName()));
-	}
+    @Test
+    public void testConnectorPartitions() throws Exception {
+        @SuppressWarnings("unchecked") Callback<Void> setCallback = mock(Callback.class);
 
-	private static ByteBuffer buffer(String v) {
-		return ByteBuffer.wrap(v.getBytes());
-	}
+        // This test actually requires the offset store to track deserialized source partitions, so we can't use the member variable mock converter
+        JsonConverter jsonConverter = new JsonConverter();
+        jsonConverter.configure(Collections.singletonMap(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, "false"), true);
 
-	private Callback<Void> expectSuccessfulSetCallback() {
-		@SuppressWarnings("unchecked")
-		Callback<Void> setCallback = PowerMock.createMock(Callback.class);
-		setCallback.onCompletion(EasyMock.isNull(Throwable.class), EasyMock.isNull(Void.class));
-		PowerMock.expectLastCall();
-		return setCallback;
-	}
+        Map<ByteBuffer, ByteBuffer> serializedPartitionOffsets = new HashMap<>();
+        serializedPartitionOffsets.put(serializeKey(jsonConverter, "connector1", Collections.singletonMap("partitionKey", "partitionValue1")), serialize(jsonConverter, Collections.singletonMap("offsetKey", "offsetValue")));
+        store.set(serializedPartitionOffsets, setCallback).get();
+
+        serializedPartitionOffsets.put(serializeKey(jsonConverter, "connector1", Collections.singletonMap("partitionKey", "partitionValue1")), serialize(jsonConverter, Collections.singletonMap("offsetKey", "offsetValue2")));
+        serializedPartitionOffsets.put(serializeKey(jsonConverter, "connector1", Collections.singletonMap("partitionKey", "partitionValue2")), serialize(jsonConverter, Collections.singletonMap("offsetKey", "offsetValue")));
+        serializedPartitionOffsets.put(serializeKey(jsonConverter, "connector2", Collections.singletonMap("partitionKey", "partitionValue")), serialize(jsonConverter, Collections.singletonMap("offsetKey", "offsetValue")));
+
+        store.set(serializedPartitionOffsets, setCallback).get();
+        store.stop();
+
+        // Restore into a new store to ensure correct reload from scratch
+        FileOffsetBackingStore restore = new FileOffsetBackingStore(jsonConverter);
+        restore.configure(config);
+        restore.start();
+
+        Set<Map<String, Object>> connectorPartitions1 = restore.connectorPartitions("connector1");
+        Set<Map<String, Object>> expectedConnectorPartition1 = new HashSet<>();
+        expectedConnectorPartition1.add(Collections.singletonMap("partitionKey", "partitionValue1"));
+        expectedConnectorPartition1.add(Collections.singletonMap("partitionKey", "partitionValue2"));
+        assertEquals(expectedConnectorPartition1, connectorPartitions1);
+
+        Set<Map<String, Object>> connectorPartitions2 = restore.connectorPartitions("connector2");
+        Set<Map<String, Object>> expectedConnectorPartition2 = Collections.singleton(Collections.singletonMap("partitionKey", "partitionValue"));
+        assertEquals(expectedConnectorPartition2, connectorPartitions2);
+
+        serializedPartitionOffsets.clear();
+        // Null valued offset for a partition key should remove that partition for the connector
+        serializedPartitionOffsets.put(serializeKey(jsonConverter, "connector1", Collections.singletonMap("partitionKey", "partitionValue1")), null);
+        restore.set(serializedPartitionOffsets, setCallback).get();
+        connectorPartitions1 = restore.connectorPartitions("connector1");
+        assertEquals(Collections.singleton(Collections.singletonMap("partitionKey", "partitionValue2")), connectorPartitions1);
+
+        verify(setCallback, times(3)).onCompletion(isNull(), isNull());
+    }
+
+    private static ByteBuffer buffer(String v) {
+        return ByteBuffer.wrap(v.getBytes());
+    }
+
+    private static ByteBuffer serializeKey(Converter converter, String connectorName, Map<String, Object> sourcePartition) {
+        List<Object> nameAndPartition = Arrays.asList(connectorName, sourcePartition);
+        return serialize(converter, nameAndPartition);
+    }
+
+    private static ByteBuffer serialize(Converter converter, Object value) {
+        byte[] serialized = converter.fromConnectData("", null, value);
+        return ByteBuffer.wrap(serialized);
+    }
+
 }

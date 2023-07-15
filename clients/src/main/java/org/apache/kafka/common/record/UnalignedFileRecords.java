@@ -26,25 +26,26 @@ import java.nio.channels.FileChannel;
  */
 public class UnalignedFileRecords implements UnalignedRecords {
 
-	private final FileChannel channel;
-	private final long position;
-	private final int size;
+    private final FileChannel channel;
+    private final long position;
+    private final int size;
 
-	public UnalignedFileRecords(FileChannel channel, long position, int size) {
-		this.channel = channel;
-		this.position = position;
-		this.size = size;
-	}
+    public UnalignedFileRecords(FileChannel channel, long position, int size) {
+        this.channel = channel;
+        this.position = position;
+        this.size = size;
+    }
 
-	@Override
-	public int sizeInBytes() {
-		return size;
-	}
+    @Override
+    public int sizeInBytes() {
+        return size;
+    }
 
-	@Override
-	public long writeTo(TransferableChannel destChannel, long previouslyWritten, int remaining) throws IOException {
-		long position = this.position + previouslyWritten;
-		long count = Math.min(remaining, sizeInBytes() - previouslyWritten);
-		return destChannel.transferFrom(channel, position, count);
-	}
+    @Override
+    public int writeTo(TransferableChannel destChannel, int previouslyWritten, int remaining) throws IOException {
+        long position = this.position + previouslyWritten;
+        int count = Math.min(remaining, sizeInBytes() - previouslyWritten);
+        // safe to cast to int since `count` is an int
+        return (int) destChannel.transferFrom(channel, position, count);
+    }
 }

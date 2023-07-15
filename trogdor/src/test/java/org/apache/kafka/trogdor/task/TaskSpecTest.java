@@ -29,20 +29,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @Timeout(value = 120000, unit = MILLISECONDS)
 public class TaskSpecTest {
 
-	@Test
-	public void testTaskSpecSerialization() throws Exception {
-		assertThrows(InvalidTypeIdException.class, () ->
-				JsonUtil.JSON_SERDE.readValue(
-						"{\"startMs\":123,\"durationMs\":456,\"exitMs\":1000,\"error\":\"foo\"}",
-						SampleTaskSpec.class), "Missing type id should cause exception to be thrown");
-		String inputJson = "{\"class\":\"org.apache.kafka.trogdor.task.SampleTaskSpec\"," +
-				"\"startMs\":123,\"durationMs\":456,\"nodeToExitMs\":{\"node01\":1000},\"error\":\"foo\"}";
-		SampleTaskSpec spec = JsonUtil.JSON_SERDE.readValue(inputJson, SampleTaskSpec.class);
-		assertEquals(123, spec.startMs());
-		assertEquals(456, spec.durationMs());
-		assertEquals(Long.valueOf(1000), spec.nodeToExitMs().get("node01"));
-		assertEquals("foo", spec.error());
-		String outputJson = JsonUtil.toJsonString(spec);
-		assertEquals(inputJson, outputJson);
-	}
-};
+    @Test
+    public void testTaskSpecSerialization() throws Exception {
+        assertThrows(InvalidTypeIdException.class, () -> JsonUtil.JSON_SERDE.readValue("{\"startMs\":123,\"durationMs\":456,\"exitMs\":1000,\"error\":\"foo\"}", SampleTaskSpec.class), "Missing type id should cause exception to be thrown");
+        String inputJson = "{\"class\":\"org.apache.kafka.trogdor.task.SampleTaskSpec\"," + "\"startMs\":123,\"durationMs\":456,\"nodeToExitMs\":{\"node01\":1000},\"error\":\"foo\"}";
+        SampleTaskSpec spec = JsonUtil.JSON_SERDE.readValue(inputJson, SampleTaskSpec.class);
+        assertEquals(123, spec.startMs());
+        assertEquals(456, spec.durationMs());
+        assertEquals(Long.valueOf(1000), spec.nodeToExitMs().get("node01"));
+        assertEquals("foo", spec.error());
+        String outputJson = JsonUtil.toJsonString(spec);
+        assertEquals(inputJson, outputJson);
+    }
+}

@@ -37,35 +37,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class WordCountProcessorTest {
     @Test
     public void test() {
-		final MockProcessorContext<String, String> context = new MockProcessorContext<String, String>();
+        final MockProcessorContext<String, String> context = new MockProcessorContext<String, String>();
 
         // Create, initialize, and register the state store.
-        final KeyValueStore<String, Integer> store =
-            Stores.keyValueStoreBuilder(Stores.inMemoryKeyValueStore("Counts"), Serdes.String(), Serdes.Integer())
-                .withLoggingDisabled() // Changelog is not supported by MockProcessorContext.
-					// Caching is disabled by default, but FYI: caching is also not supported by MockProcessorContext.
+        final KeyValueStore<String, Integer> store = Stores.keyValueStoreBuilder(Stores.inMemoryKeyValueStore("Counts"), Serdes.String(), Serdes.Integer()).withLoggingDisabled() // Changelog is not supported by MockProcessorContext.
+                // Caching is disabled by default, but FYI: caching is also not supported by MockProcessorContext.
                 .build();
-		store.init(context.getStateStoreContext(), store);
+        store.init(context.getStateStoreContext(), store);
 
         // Create and initialize the processor under test
-		final Processor<String, String, String, String> processor = new WordCountProcessorDemo.MyProcessorSupplier().get();
+        final Processor<String, String, String, String> processor = new WordCountProcessorDemo.WordCountProcessor();
         processor.init(context);
 
-		// send a record to the processor
-		processor.process(new Record<>("key", "alpha beta\tgamma\n\talpha", 0L));
+        // send a record to the processor
+        processor.process(new Record<>("key", "alpha beta\tgamma\n\talpha", 0L));
 
-		// note that the processor does not forward during process()
-		assertTrue(context.forwarded().isEmpty());
+        // note that the processor does not forward during process()
+        assertTrue(context.forwarded().isEmpty());
 
-		// now, we trigger the punctuator, which iterates over the state store and forwards the contents.
-		context.scheduledPunctuators().get(0).getPunctuator().punctuate(0L);
+        // now, we trigger the punctuator, which iterates over the state store and forwards the contents.
+        context.scheduledPunctuators().get(0).getPunctuator().punctuate(0L);
 
-		// finally, we can verify the output.
-		final List<MockProcessorContext.CapturedForward<String, String>> expected = Arrays.asList(
-				new MockProcessorContext.CapturedForward<>(new Record<>("alpha", "2", 0L)),
-				new MockProcessorContext.CapturedForward<>(new Record<>("beta", "1", 0L)),
-				new MockProcessorContext.CapturedForward<>(new Record<>("gamma", "1", 0L))
-		);
-		assertThat(context.forwarded(), is(expected));
-	}
+        // finally, we can verify the output.
+        final List<MockProcessorContext.CapturedForward<String, String>> expected = Arrays.asList(new MockProcessorContext.CapturedForward<>(new Record<>("alpha", "2", 0L)), new MockProcessorContext.CapturedForward<>(new Record<>("beta", "1", 0L)), new MockProcessorContext.CapturedForward<>(new Record<>("gamma", "1", 0L)));
+        assertThat(context.forwarded(), is(expected));
+    }
 }

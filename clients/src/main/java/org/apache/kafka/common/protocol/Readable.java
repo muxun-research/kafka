@@ -27,60 +27,64 @@ import java.util.ArrayList;
 import java.util.List;
 
 public interface Readable {
-	byte readByte();
+    byte readByte();
 
-	short readShort();
+    short readShort();
 
-	int readInt();
+    int readInt();
 
-	long readLong();
+    long readLong();
 
-	double readDouble();
+    double readDouble();
 
-	void readArray(byte[] arr);
+    byte[] readArray(int length);
 
-	int readUnsignedVarint();
+    int readUnsignedVarint();
 
-	ByteBuffer readByteBuffer(int length);
+    ByteBuffer readByteBuffer(int length);
 
-	int readVarint();
+    int readVarint();
 
-	long readVarlong();
+    long readVarlong();
 
-	default String readString(int length) {
-		byte[] arr = new byte[length];
-		readArray(arr);
-		return new String(arr, StandardCharsets.UTF_8);
-	}
+    int remaining();
 
-	default List<RawTaggedField> readUnknownTaggedField(List<RawTaggedField> unknowns, int tag, int size) {
-		if (unknowns == null) {
-			unknowns = new ArrayList<>();
-		}
-		byte[] data = new byte[size];
-		readArray(data);
-		unknowns.add(new RawTaggedField(tag, data));
-		return unknowns;
-	}
+    default String readString(int length) {
+        byte[] arr = readArray(length);
+        return new String(arr, StandardCharsets.UTF_8);
+    }
 
-	default MemoryRecords readRecords(int length) {
-		if (length < 0) {
-			// no records
-			return null;
-		} else {
-			ByteBuffer recordsBuffer = readByteBuffer(length);
-			return MemoryRecords.readableRecords(recordsBuffer);
-		}
-	}
+    default List<RawTaggedField> readUnknownTaggedField(List<RawTaggedField> unknowns, int tag, int size) {
+        if (unknowns == null) {
+            unknowns = new ArrayList<>();
+        }
+        byte[] data = readArray(size);
+        unknowns.add(new RawTaggedField(tag, data));
+        return unknowns;
+    }
 
-	/**
-	 * Read a UUID with the most significant digits first.
-	 */
-	default Uuid readUuid() {
-		return new Uuid(readLong(), readLong());
-	}
+    default MemoryRecords readRecords(int length) {
+        if (length < 0) {
+            // no records
+            return null;
+        } else {
+            ByteBuffer recordsBuffer = readByteBuffer(length);
+            return MemoryRecords.readableRecords(recordsBuffer);
+        }
+    }
 
-	default int readUnsignedShort() {
-		return Short.toUnsignedInt(readShort());
-	}
+    /**
+     * Read a UUID with the most significant digits first.
+     */
+    default Uuid readUuid() {
+        return new Uuid(readLong(), readLong());
+    }
+
+    default int readUnsignedShort() {
+        return Short.toUnsignedInt(readShort());
+    }
+
+    default long readUnsignedInt() {
+        return Integer.toUnsignedLong(readInt());
+    }
 }

@@ -24,16 +24,13 @@ import org.apache.kafka.common.security.scram.internals.ScramMessages.ServerFirs
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.security.auth.callback.Callback;
-import javax.security.auth.callback.CallbackHandler;
-import javax.security.auth.callback.NameCallback;
-import javax.security.auth.callback.PasswordCallback;
-import javax.security.auth.callback.UnsupportedCallbackException;
+import javax.security.auth.callback.*;
 import javax.security.sasl.SaslClient;
 import javax.security.sasl.SaslClientFactory;
 import javax.security.sasl.SaslException;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Collection;
@@ -103,16 +100,15 @@ public class ScramSaslClient implements SaslClient {
                         try {
                             callbackHandler.handle(new Callback[]{extensionsCallback});
                         } catch (UnsupportedCallbackException e) {
-                            log.debug("Extensions callback is not supported by client callback handler {}, no extensions will be added",
-                                    callbackHandler);
+                            log.debug("Extensions callback is not supported by client callback handler {}, no extensions will be added", callbackHandler);
                         }
                     } catch (Throwable e) {
                         throw new SaslException("User name or extensions could not be obtained", e);
                     }
 
-					String username = nameCallback.getName();
-					String saslName = ScramFormatter.saslName(username);
-					Map<String, String> extensions = extensionsCallback.extensions();
+                    String username = nameCallback.getName();
+                    String saslName = ScramFormatter.saslName(username);
+                    Map<String, String> extensions = extensionsCallback.extensions();
                     this.clientFirstMessage = new ScramMessages.ClientFirstMessage(saslName, clientNonce, extensions);
                     setState(State.RECEIVE_SERVER_FIRST_MESSAGE);
                     return clientFirstMessage.toBytes();
@@ -122,7 +118,7 @@ public class ScramSaslClient implements SaslClient {
                     if (!serverFirstMessage.nonce().startsWith(clientNonce))
                         throw new SaslException("Invalid server nonce: does not start with client nonce");
                     if (serverFirstMessage.iterations() < mechanism.minIterations())
-                        throw new SaslException("Requested iterations " + serverFirstMessage.iterations() +  " is less than the minimum " + mechanism.minIterations() + " for " + mechanism);
+                        throw new SaslException("Requested iterations " + serverFirstMessage.iterations() + " is less than the minimum " + mechanism.minIterations() + " for " + mechanism);
                     PasswordCallback passwordCallback = new PasswordCallback("Password:", false);
                     try {
                         callbackHandler.handle(new Callback[]{passwordCallback});
@@ -187,7 +183,7 @@ public class ScramSaslClient implements SaslClient {
 
     private ClientFinalMessage handleServerFirstMessage(char[] password) throws SaslException {
         try {
-			byte[] passwordBytes = ScramFormatter.normalize(new String(password));
+            byte[] passwordBytes = ScramFormatter.normalize(new String(password));
             this.saltedPassword = formatter.hi(passwordBytes, serverFirstMessage.salt(), serverFirstMessage.iterations());
 
             ClientFinalMessage clientFinalMessage = new ClientFinalMessage("n,,".getBytes(StandardCharsets.UTF_8), serverFirstMessage.nonce());
@@ -203,7 +199,7 @@ public class ScramSaslClient implements SaslClient {
         try {
             byte[] serverKey = formatter.serverKey(saltedPassword);
             byte[] serverSignature = formatter.serverSignature(serverKey, clientFirstMessage, serverFirstMessage, clientFinalMessage);
-            if (!Arrays.equals(signature, serverSignature))
+            if (!MessageDigest.isEqual(signature, serverSignature))
                 throw new SaslException("Invalid server signature in server final message");
         } catch (InvalidKeyException e) {
             throw new SaslException("Sasl server signature verification failed", e);
@@ -240,7 +236,7 @@ public class ScramSaslClient implements SaslClient {
         @Override
         public String[] getMechanismNames(Map<String, ?> props) {
             Collection<String> mechanisms = ScramMechanism.mechanismNames();
-			return mechanisms.toArray(new String[0]);
+            return mechanisms.toArray(new String[0]);
         }
     }
 }

@@ -19,13 +19,7 @@ package org.apache.kafka.streams.kstream;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.processor.StateStore;
-import org.apache.kafka.streams.state.KeyValueBytesStoreSupplier;
-import org.apache.kafka.streams.state.KeyValueStore;
-import org.apache.kafka.streams.state.SessionBytesStoreSupplier;
-import org.apache.kafka.streams.state.SessionStore;
-import org.apache.kafka.streams.state.StoreSupplier;
-import org.apache.kafka.streams.state.WindowBytesStoreSupplier;
-import org.apache.kafka.streams.state.WindowStore;
+import org.apache.kafka.streams.state.*;
 
 import java.time.Duration;
 import java.util.HashMap;
@@ -64,6 +58,12 @@ public class Materialized<K, V, S extends StateStore> {
     protected boolean cachingEnabled = true;
     protected Map<String, String> topicConfig = new HashMap<>();
     protected Duration retention;
+    public StoreType storeType;
+
+    // the built-in state store types
+    public enum StoreType {
+        ROCKS_DB, IN_MEMORY
+    }
 
     private Materialized(final StoreSupplier<S> storeSupplier) {
         this.storeSupplier = storeSupplier;
@@ -73,9 +73,13 @@ public class Materialized<K, V, S extends StateStore> {
         this.storeName = storeName;
     }
 
+    private Materialized(final StoreType storeType) {
+        this.storeType = storeType;
+    }
+
     /**
      * Copy constructor.
-     * @param materialized  the {@link Materialized} instance to copy.
+     * @param materialized the {@link Materialized} instance to copy.
      */
     protected Materialized(final Materialized<K, V, S> materialized) {
         this.storeSupplier = materialized.storeSupplier;
@@ -86,6 +90,20 @@ public class Materialized<K, V, S extends StateStore> {
         this.cachingEnabled = materialized.cachingEnabled;
         this.topicConfig = materialized.topicConfig;
         this.retention = materialized.retention;
+        this.storeType = materialized.storeType;
+    }
+
+    /**
+     * Materialize a {@link StateStore} with the given {@link StoreType}.
+     * @param storeType the type of the state store
+     * @param <K>       key type of the store
+     * @param <V>       value type of the store
+     * @param <S>       type of the {@link StateStore}
+     * @return a new {@link Materialized} instance with the given storeName
+     */
+    public static <K, V, S extends StateStore> Materialized<K, V, S> as(final StoreType storeType) {
+        Objects.requireNonNull(storeType, "store type can't be null");
+        return new Materialized<>(storeType);
     }
 
     /**
@@ -164,8 +182,7 @@ public class Materialized<K, V, S extends StateStore> {
      * @param <S>           store type
      * @return a new {@link Materialized} instance with the given key and value serdes
      */
-    public static <K, V, S extends StateStore> Materialized<K, V, S> with(final Serde<K> keySerde,
-                                                                          final Serde<V> valueSerde) {
+    public static <K, V, S extends StateStore> Materialized<K, V, S> with(final Serde<K> keySerde, final Serde<V> valueSerde) {
         return new Materialized<K, V, S>((String) null).withKeySerde(keySerde).withValueSerde(valueSerde);
     }
 
@@ -235,27 +252,42 @@ public class Materialized<K, V, S extends StateStore> {
         return this;
     }
 
-	/**
-	 * Configure retention period for window and session stores. Ignored for key/value stores.
-	 * <p>
-	 * Overridden by pre-configured store suppliers
-	 * ({@link Materialized#as(SessionBytesStoreSupplier)} or {@link Materialized#as(WindowBytesStoreSupplier)}).
-	 * <p>
-	 * Note that the retention period must be at least long enough to contain the windowed data's entire life cycle,
-	 * from window-start through window-end, and for the entire grace period. If not specified, the retention
-	 * period would be set as the window length (from window-start through window-end) plus the grace period.
-	 * @param retention the retention time
-	 * @return itself
-	 * @throws IllegalArgumentException if retention is negative or can't be represented as {@code long milliseconds}
-	 */
+    /**
+     * Configure retention period for window and session stores. Ignored for key/value stores.
+     * <p>
+     * Overridden by pre-configured store suppliers
+     * ({@link Materialized#as(SessionBytesStoreSupplier)} or {@link Materialized#as(WindowBytesStoreSupplier)}).
+     * <p>
+     * Note that the retention period must be at least long enough to contain the windowed data's entire life cycle,
+     * from window-start through window-end, and for the entire grace period. If not specified, the retention
+     * period would be set as the window length (from window-start through window-end) plus the grace period.
+     * @param retention the retention time
+     * @return itself
+     * @throws IllegalArgumentException if retention is negative or can't be represented as {@code long milliseconds}
+     */
     public Materialized<K, V, S> withRetention(final Duration retention) throws IllegalArgumentException {
-		final String msgPrefix = prepareMillisCheckFailMsgPrefix(retention, "retention");
-		final long retenationMs = validateMillisecondDuration(retention, msgPrefix);
+        final String msgPrefix = prepareMillisCheckFailMsgPrefix(retention, "retention");
+        final long retentionMs = validateMillisecondDuration(retention, msgPrefix);
 
-        if (retenationMs < 0) {
+        if (retentionMs < 0) {
             throw new IllegalArgumentException("Retention must not be negative.");
         }
         this.retention = retention;
+        return this;
+    }
+
+    /**
+     * Set the type of the materialized {@link StateStore}.
+     * @param storeType the store type {@link StoreType} to use.
+     * @return itself
+     * @throws IllegalArgumentException if store supplier is also pre-configured
+     */
+    public Materialized<K, V, S> withStoreType(final StoreType storeType) throws IllegalArgumentException {
+        Objects.requireNonNull(storeType, "store type can't be null");
+        if (storeSupplier != null) {
+            throw new IllegalArgumentException("Cannot set store type when store supplier is pre-configured.");
+        }
+        this.storeType = storeType;
         return this;
     }
 }

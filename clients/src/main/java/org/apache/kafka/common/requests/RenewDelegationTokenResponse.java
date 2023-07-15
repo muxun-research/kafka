@@ -43,14 +43,19 @@ public class RenewDelegationTokenResponse extends AbstractResponse {
 		return errorCounts(error());
     }
 
-	@Override
-	public RenewDelegationTokenResponseData data() {
-		return data;
-	}
+    @Override
+    public RenewDelegationTokenResponseData data() {
+        return data;
+    }
 
     @Override
     public int throttleTimeMs() {
         return data.throttleTimeMs();
+    }
+
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
     }
 
     public Errors error() {

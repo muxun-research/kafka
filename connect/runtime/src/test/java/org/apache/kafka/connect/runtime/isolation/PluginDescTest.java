@@ -22,21 +22,20 @@ import org.apache.kafka.connect.sink.SinkConnector;
 import org.apache.kafka.connect.source.SourceConnector;
 import org.apache.kafka.connect.storage.Converter;
 import org.apache.kafka.connect.transforms.Transformation;
+import org.apache.kafka.connect.transforms.predicates.Predicate;
 import org.junit.Before;
 import org.junit.Test;
 
 import java.net.URL;
 import java.nio.file.Paths;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 public class PluginDescTest {
     private final ClassLoader systemLoader = ClassLoader.getSystemClassLoader();
     private final String regularVersion = "1.0.0";
     private final String newerVersion = "1.0.1";
-    private final String snaphotVersion = "1.0.0-SNAPSHOT";
+    private final String snapshotVersion = "1.0.0-SNAPSHOT";
     private final String noVersion = "undefined";
     private PluginClassLoader pluginLoader;
 
@@ -48,57 +47,35 @@ public class PluginDescTest {
         pluginLoader = new PluginClassLoader(location, new URL[0], systemLoader);
     }
 
+    @SuppressWarnings("rawtypes")
     @Test
     public void testRegularPluginDesc() {
-        PluginDesc<Connector> connectorDesc = new PluginDesc<>(
-                Connector.class,
-                regularVersion,
-                pluginLoader
-        );
+        PluginDesc<Connector> connectorDesc = new PluginDesc<>(Connector.class, regularVersion, pluginLoader);
 
         assertPluginDesc(connectorDesc, Connector.class, regularVersion, pluginLoader.location());
 
-        PluginDesc<Converter> converterDesc = new PluginDesc<>(
-                Converter.class,
-                snaphotVersion,
-                pluginLoader
-        );
+        PluginDesc<Converter> converterDesc = new PluginDesc<>(Converter.class, snapshotVersion, pluginLoader);
 
-        assertPluginDesc(converterDesc, Converter.class, snaphotVersion, pluginLoader.location());
+        assertPluginDesc(converterDesc, Converter.class, snapshotVersion, pluginLoader.location());
 
-        PluginDesc<Transformation> transformDesc = new PluginDesc<>(
-                Transformation.class,
-                noVersion,
-                pluginLoader
-        );
+        PluginDesc<Transformation> transformDesc = new PluginDesc<>(Transformation.class, noVersion, pluginLoader);
 
         assertPluginDesc(transformDesc, Transformation.class, noVersion, pluginLoader.location());
     }
 
+    @SuppressWarnings("rawtypes")
     @Test
     public void testPluginDescWithSystemClassLoader() {
         String location = "classpath";
-        PluginDesc<SinkConnector> connectorDesc = new PluginDesc<>(
-                SinkConnector.class,
-                regularVersion,
-                systemLoader
-        );
+        PluginDesc<SinkConnector> connectorDesc = new PluginDesc<>(SinkConnector.class, regularVersion, systemLoader);
 
         assertPluginDesc(connectorDesc, SinkConnector.class, regularVersion, location);
 
-        PluginDesc<Converter> converterDesc = new PluginDesc<>(
-                Converter.class,
-                snaphotVersion,
-                systemLoader
-        );
+        PluginDesc<Converter> converterDesc = new PluginDesc<>(Converter.class, snapshotVersion, systemLoader);
 
-        assertPluginDesc(converterDesc, Converter.class, snaphotVersion, location);
+        assertPluginDesc(converterDesc, Converter.class, snapshotVersion, location);
 
-        PluginDesc<Transformation> transformDesc = new PluginDesc<>(
-                Transformation.class,
-                noVersion,
-                systemLoader
-        );
+        PluginDesc<Transformation> transformDesc = new PluginDesc<>(Transformation.class, noVersion, systemLoader);
 
         assertPluginDesc(transformDesc, Transformation.class, noVersion, location);
     }
@@ -129,96 +106,56 @@ public class PluginDescTest {
         assertPluginDesc(converterDesc, Converter.class, nullVersion, location);
     }
 
+    @SuppressWarnings("rawtypes")
     @Test
     public void testPluginDescEquality() {
-        PluginDesc<Connector> connectorDescPluginPath = new PluginDesc<>(
-                Connector.class,
-                snaphotVersion,
-                pluginLoader
-        );
+        PluginDesc<Connector> connectorDescPluginPath = new PluginDesc<>(Connector.class, snapshotVersion, pluginLoader);
 
-        PluginDesc<Connector> connectorDescClasspath = new PluginDesc<>(
-                Connector.class,
-                snaphotVersion,
-                systemLoader
-        );
+        PluginDesc<Connector> connectorDescClasspath = new PluginDesc<>(Connector.class, snapshotVersion, systemLoader);
 
         assertEquals(connectorDescPluginPath, connectorDescClasspath);
         assertEquals(connectorDescPluginPath.hashCode(), connectorDescClasspath.hashCode());
 
-        PluginDesc<Converter> converterDescPluginPath = new PluginDesc<>(
-                Converter.class,
-                noVersion,
-                pluginLoader
-        );
+        PluginDesc<Converter> converterDescPluginPath = new PluginDesc<>(Converter.class, noVersion, pluginLoader);
 
-        PluginDesc<Converter> converterDescClasspath = new PluginDesc<>(
-                Converter.class,
-                noVersion,
-                systemLoader
-        );
+        PluginDesc<Converter> converterDescClasspath = new PluginDesc<>(Converter.class, noVersion, systemLoader);
 
         assertEquals(converterDescPluginPath, converterDescClasspath);
         assertEquals(converterDescPluginPath.hashCode(), converterDescClasspath.hashCode());
 
-        PluginDesc<Transformation> transformDescPluginPath = new PluginDesc<>(
-                Transformation.class,
-                null,
-                pluginLoader
-        );
+        PluginDesc<Transformation> transformDescPluginPath = new PluginDesc<>(Transformation.class, null, pluginLoader);
 
-        PluginDesc<Transformation> transformDescClasspath = new PluginDesc<>(
-                Transformation.class,
-                noVersion,
-                pluginLoader
-        );
+        PluginDesc<Transformation> transformDescClasspath = new PluginDesc<>(Transformation.class, noVersion, pluginLoader);
 
         assertNotEquals(transformDescPluginPath, transformDescClasspath);
     }
 
+    @SuppressWarnings("rawtypes")
     @Test
     public void testPluginDescComparison() {
-        PluginDesc<Connector> connectorDescPluginPath = new PluginDesc<>(
-                Connector.class,
-                regularVersion,
-                pluginLoader
-        );
+        PluginDesc<Connector> connectorDescPluginPath = new PluginDesc<>(Connector.class, regularVersion, pluginLoader);
 
-        PluginDesc<Connector> connectorDescClasspath = new PluginDesc<>(
-                Connector.class,
-                newerVersion,
-                systemLoader
-        );
+        PluginDesc<Connector> connectorDescClasspath = new PluginDesc<>(Connector.class, newerVersion, systemLoader);
 
         assertNewer(connectorDescPluginPath, connectorDescClasspath);
 
-        PluginDesc<Converter> converterDescPluginPath = new PluginDesc<>(
-                Converter.class,
-                noVersion,
-                pluginLoader
-        );
+        PluginDesc<Converter> converterDescPluginPath = new PluginDesc<>(Converter.class, noVersion, pluginLoader);
 
-        PluginDesc<Converter> converterDescClasspath = new PluginDesc<>(
-                Converter.class,
-                snaphotVersion,
-                systemLoader
-        );
+        PluginDesc<Converter> converterDescClasspath = new PluginDesc<>(Converter.class, snapshotVersion, systemLoader);
 
         assertNewer(converterDescPluginPath, converterDescClasspath);
 
-        PluginDesc<Transformation> transformDescPluginPath = new PluginDesc<>(
-                Transformation.class,
-                null,
-                pluginLoader
-        );
+        PluginDesc<Transformation> transformDescPluginPath = new PluginDesc<>(Transformation.class, null, pluginLoader);
 
-        PluginDesc<Transformation> transformDescClasspath = new PluginDesc<>(
-                Transformation.class,
-                regularVersion,
-                systemLoader
-        );
+        PluginDesc<Transformation> transformDescClasspath = new PluginDesc<>(Transformation.class, regularVersion, systemLoader);
 
         assertNewer(transformDescPluginPath, transformDescClasspath);
+
+        PluginDesc<Predicate> predicateDescPluginPath = new PluginDesc<>(Predicate.class, regularVersion, pluginLoader);
+
+        PluginDesc<Predicate> predicateDescClasspath = new PluginDesc<>(Predicate.class, regularVersion, systemLoader);
+
+        assertNewer(predicateDescPluginPath, predicateDescClasspath);
     }
 
     private static <T> void assertPluginDesc(

@@ -33,37 +33,34 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class EnvelopeRequestTest {
 
-	@Test
-	public void testGetPrincipal() {
-		KafkaPrincipal kafkaPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, "principal", true);
-		DefaultKafkaPrincipalBuilder kafkaPrincipalBuilder = new DefaultKafkaPrincipalBuilder(null, null);
+    @Test
+    public void testGetPrincipal() {
+        KafkaPrincipal kafkaPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, "principal", true);
+        DefaultKafkaPrincipalBuilder kafkaPrincipalBuilder = new DefaultKafkaPrincipalBuilder(null, null);
 
-		EnvelopeRequest.Builder requestBuilder = new EnvelopeRequest.Builder(ByteBuffer.allocate(0),
-				kafkaPrincipalBuilder.serialize(kafkaPrincipal), "client-address".getBytes());
-		EnvelopeRequest request = requestBuilder.build(EnvelopeRequestData.HIGHEST_SUPPORTED_VERSION);
-		assertEquals(kafkaPrincipal, kafkaPrincipalBuilder.deserialize(request.requestPrincipal()));
-	}
+        EnvelopeRequest.Builder requestBuilder = new EnvelopeRequest.Builder(ByteBuffer.allocate(0), kafkaPrincipalBuilder.serialize(kafkaPrincipal), "client-address".getBytes());
+        EnvelopeRequest request = requestBuilder.build(EnvelopeRequestData.HIGHEST_SUPPORTED_VERSION);
+        assertEquals(kafkaPrincipal, kafkaPrincipalBuilder.deserialize(request.requestPrincipal()));
+    }
 
-	@Test
-	public void testToSend() throws IOException {
-		for (short version : ApiKeys.ENVELOPE.allVersions()) {
-			ByteBuffer requestData = ByteBuffer.wrap("foobar".getBytes());
-			RequestHeader header = new RequestHeader(ApiKeys.ENVELOPE, version, "clientId", 15);
-			EnvelopeRequest request = new EnvelopeRequest.Builder(
-					requestData,
-					"principal".getBytes(),
-					InetAddress.getLocalHost().getAddress()
-			).build(version);
+    @Test
+    public void testToSend() throws IOException {
+        for (short version : ApiKeys.ENVELOPE.allVersions()) {
+            ByteBuffer requestData = ByteBuffer.wrap("foobar".getBytes());
+            RequestHeader header = new RequestHeader(ApiKeys.ENVELOPE, version, "clientId", 15);
+            EnvelopeRequest request = new EnvelopeRequest.Builder(requestData, "principal".getBytes(), InetAddress.getLocalHost().getAddress()).build(version);
 
-			Send send = request.toSend(header);
-			ByteBuffer buffer = TestUtils.toBuffer(send);
-			assertEquals(send.size() - 4, buffer.getInt());
-			assertEquals(header, RequestHeader.parse(buffer));
+            Send send = request.toSend(header);
+            ByteBuffer buffer = TestUtils.toBuffer(send);
+            assertEquals(send.size() - 4, buffer.getInt());
+            RequestHeader parsedHeader = RequestHeader.parse(buffer);
+            assertEquals(header.size(), parsedHeader.size());
+            assertEquals(header, parsedHeader);
 
-			EnvelopeRequestData parsedRequestData = new EnvelopeRequestData();
-			parsedRequestData.read(new ByteBufferAccessor(buffer), version);
-			assertEquals(request.data(), parsedRequestData);
-		}
-	}
+            EnvelopeRequestData parsedRequestData = new EnvelopeRequestData();
+            parsedRequestData.read(new ByteBufferAccessor(buffer), version);
+            assertEquals(request.data(), parsedRequestData);
+        }
+    }
 
 }

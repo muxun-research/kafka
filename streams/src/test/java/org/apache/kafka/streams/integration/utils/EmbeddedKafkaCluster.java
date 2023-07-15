@@ -17,27 +17,20 @@
 package org.apache.kafka.streams.integration.utils;
 
 import kafka.server.ConfigType;
-import kafka.server.KafkaConfig$;
+import kafka.server.KafkaConfig;
 import kafka.server.KafkaServer;
-import kafka.utils.MockTime;
 import kafka.zk.EmbeddedZookeeper;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
+import org.apache.kafka.server.util.MockTime;
 import org.apache.kafka.test.TestCondition;
 import org.apache.kafka.test.TestUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ExecutionException;
 
 /**
@@ -45,22 +38,21 @@ import java.util.concurrent.ExecutionException;
  */
 public class EmbeddedKafkaCluster {
 
-	private static final Logger log = LoggerFactory.getLogger(EmbeddedKafkaCluster.class);
-	private static final int DEFAULT_BROKER_PORT = 0; // 0 results in a random port being selected
-	private static final int TOPIC_CREATION_TIMEOUT = 30000;
-	private static final int TOPIC_DELETION_TIMEOUT = 30000;
-	private EmbeddedZookeeper zookeeper = null;
-	private final KafkaEmbedded[] brokers;
+    private static final Logger log = LoggerFactory.getLogger(EmbeddedKafkaCluster.class);
+    private static final int DEFAULT_BROKER_PORT = 0; // 0 results in a random port being selected
+    private static final int TOPIC_CREATION_TIMEOUT = 30000;
+    private static final int TOPIC_DELETION_TIMEOUT = 30000;
+    private EmbeddedZookeeper zookeeper = null;
+    private final KafkaEmbedded[] brokers;
 
-	private final Properties brokerConfig;
-	public final MockTime time;
+    private final Properties brokerConfig;
+    public final MockTime time;
 
     public EmbeddedKafkaCluster(final int numBrokers) {
         this(numBrokers, new Properties());
     }
 
-    public EmbeddedKafkaCluster(final int numBrokers,
-                                final Properties brokerConfig) {
+    public EmbeddedKafkaCluster(final int numBrokers, final Properties brokerConfig) {
         this(numBrokers, brokerConfig, System.currentTimeMillis());
     }
 
@@ -70,43 +62,39 @@ public class EmbeddedKafkaCluster {
         this(numBrokers, brokerConfig, mockTimeMillisStart, System.nanoTime());
     }
 
-    public EmbeddedKafkaCluster(final int numBrokers,
-                                final Properties brokerConfig,
-                                final long mockTimeMillisStart,
-                                final long mockTimeNanoStart) {
+    public EmbeddedKafkaCluster(final int numBrokers, final Properties brokerConfig, final long mockTimeMillisStart, final long mockTimeNanoStart) {
         brokers = new KafkaEmbedded[numBrokers];
         this.brokerConfig = brokerConfig;
         time = new MockTime(mockTimeMillisStart, mockTimeNanoStart);
     }
 
-	/**
-	 * Creates and starts a Kafka cluster.
-	 */
-	public void start() throws IOException {
-		log.debug("Initiating embedded Kafka cluster startup");
-		log.debug("Starting a ZooKeeper instance");
-		zookeeper = new EmbeddedZookeeper();
-		log.debug("ZooKeeper instance is running at {}", zKConnectString());
+    /**
+     * Creates and starts a Kafka cluster.
+     */
+    public void start() throws IOException {
+        log.debug("Initiating embedded Kafka cluster startup");
+        log.debug("Starting a ZooKeeper instance");
+        zookeeper = new EmbeddedZookeeper();
+        log.debug("ZooKeeper instance is running at {}", zKConnectString());
 
-		brokerConfig.put(KafkaConfig$.MODULE$.ZkConnectProp(), zKConnectString());
-		brokerConfig.put(KafkaConfig$.MODULE$.PortProp(), DEFAULT_BROKER_PORT);
-		putIfAbsent(brokerConfig, KafkaConfig$.MODULE$.DeleteTopicEnableProp(), true);
-		putIfAbsent(brokerConfig, KafkaConfig$.MODULE$.LogCleanerDedupeBufferSizeProp(), 2 * 1024 * 1024L);
-		putIfAbsent(brokerConfig, KafkaConfig$.MODULE$.GroupMinSessionTimeoutMsProp(), 0);
-		putIfAbsent(brokerConfig, KafkaConfig$.MODULE$.GroupInitialRebalanceDelayMsProp(), 0);
-		putIfAbsent(brokerConfig, KafkaConfig$.MODULE$.OffsetsTopicReplicationFactorProp(), (short) 1);
-		putIfAbsent(brokerConfig, KafkaConfig$.MODULE$.OffsetsTopicPartitionsProp(), 5);
-		putIfAbsent(brokerConfig, KafkaConfig$.MODULE$.TransactionsTopicPartitionsProp(), 5);
-		putIfAbsent(brokerConfig, KafkaConfig$.MODULE$.AutoCreateTopicsEnableProp(), true);
+        brokerConfig.put(KafkaConfig.ZkConnectProp(), zKConnectString());
+        putIfAbsent(brokerConfig, KafkaConfig.ListenersProp(), "PLAINTEXT://localhost:" + DEFAULT_BROKER_PORT);
+        putIfAbsent(brokerConfig, KafkaConfig.DeleteTopicEnableProp(), true);
+        putIfAbsent(brokerConfig, KafkaConfig.LogCleanerDedupeBufferSizeProp(), 2 * 1024 * 1024L);
+        putIfAbsent(brokerConfig, KafkaConfig.GroupMinSessionTimeoutMsProp(), 0);
+        putIfAbsent(brokerConfig, KafkaConfig.GroupInitialRebalanceDelayMsProp(), 0);
+        putIfAbsent(brokerConfig, KafkaConfig.OffsetsTopicReplicationFactorProp(), (short) 1);
+        putIfAbsent(brokerConfig, KafkaConfig.OffsetsTopicPartitionsProp(), 5);
+        putIfAbsent(brokerConfig, KafkaConfig.TransactionsTopicPartitionsProp(), 5);
+        putIfAbsent(brokerConfig, KafkaConfig.AutoCreateTopicsEnableProp(), true);
 
-		for (int i = 0; i < brokers.length; i++) {
-			brokerConfig.put(KafkaConfig$.MODULE$.BrokerIdProp(), i);
-			log.debug("Starting a Kafka instance on port {} ...", brokerConfig.get(KafkaConfig$.MODULE$.PortProp()));
-			brokers[i] = new KafkaEmbedded(brokerConfig, time);
+        for (int i = 0; i < brokers.length; i++) {
+            brokerConfig.put(KafkaConfig.BrokerIdProp(), i);
+            log.debug("Starting a Kafka instance on {} ...", brokerConfig.get(KafkaConfig.ListenersProp()));
+            brokers[i] = new KafkaEmbedded(brokerConfig, time);
 
-			log.debug("Kafka instance is running at {}, connected to ZooKeeper at {}",
-					brokers[i].brokerList(), brokers[i].zookeeperConnect());
-		}
+            log.debug("Kafka instance is running at {}, connected to ZooKeeper at {}", brokers[i].brokerList(), brokers[i].zookeeperConnect());
+        }
     }
 
     private void putIfAbsent(final Properties props, final String propertyKey, final Object propertyValue) {
@@ -115,32 +103,32 @@ public class EmbeddedKafkaCluster {
         }
     }
 
-	/**
-	 * Stop the Kafka cluster.
-	 */
-	public void stop() {
-		if (brokers.length > 1) {
-			// delete the topics first to avoid cascading leader elections while shutting down the brokers
-			final Set<String> topics = getAllTopicsInCluster();
-			if (!topics.isEmpty()) {
-				try (final Admin adminClient = brokers[0].createAdminClient()) {
-					adminClient.deleteTopics(topics).all().get();
-				} catch (final InterruptedException e) {
-					log.warn("Got interrupted while deleting topics in preparation for stopping embedded brokers", e);
-					throw new RuntimeException(e);
-				} catch (final ExecutionException | RuntimeException e) {
-					log.warn("Couldn't delete all topics before stopping brokers", e);
-				}
-			}
-		}
-		for (final KafkaEmbedded broker : brokers) {
-			broker.stopAsync();
-		}
-		for (final KafkaEmbedded broker : brokers) {
-			broker.awaitStoppedAndPurge();
-		}
-		zookeeper.shutdown();
-	}
+    /**
+     * Stop the Kafka cluster.
+     */
+    public void stop() {
+        if (brokers.length > 1) {
+            // delete the topics first to avoid cascading leader elections while shutting down the brokers
+            final Set<String> topics = getAllTopicsInCluster();
+            if (!topics.isEmpty()) {
+                try (final Admin adminClient = brokers[0].createAdminClient()) {
+                    adminClient.deleteTopics(topics).all().get();
+                } catch (final InterruptedException e) {
+                    log.warn("Got interrupted while deleting topics in preparation for stopping embedded brokers", e);
+                    throw new RuntimeException(e);
+                } catch (final ExecutionException | RuntimeException e) {
+                    log.warn("Couldn't delete all topics before stopping brokers", e);
+                }
+            }
+        }
+        for (final KafkaEmbedded broker : brokers) {
+            broker.stopAsync();
+        }
+        for (final KafkaEmbedded broker : brokers) {
+            broker.awaitStoppedAndPurge();
+        }
+        zookeeper.shutdown();
+    }
 
     /**
      * The ZooKeeper connection string aka `zookeeper.connect` in `hostnameOrIp:port` format.
@@ -256,10 +244,10 @@ public class EmbeddedKafkaCluster {
      */
     public void deleteTopicsAndWait(final long timeoutMs, final String... topics) throws InterruptedException {
         for (final String topic : topics) {
-			try {
-				brokers[0].deleteTopic(topic);
-			} catch (final UnknownTopicOrPartitionException ignored) {
-			}
+            try {
+                brokers[0].deleteTopic(topic);
+            } catch (final UnknownTopicOrPartitionException ignored) {
+            }
         }
 
         if (timeoutMs > 0) {
@@ -273,12 +261,12 @@ public class EmbeddedKafkaCluster {
      * @param timeoutMs the max time to wait for the topics to be deleted (does not block if {@code <= 0})
      */
     public void deleteAllTopicsAndWait(final long timeoutMs) throws InterruptedException {
-		final Set<String> topics = getAllTopicsInCluster();
+        final Set<String> topics = getAllTopicsInCluster();
         for (final String topic : topics) {
-			try {
-				brokers[0].deleteTopic(topic);
-			} catch (final UnknownTopicOrPartitionException ignored) {
-			}
+            try {
+                brokers[0].deleteTopic(topic);
+            } catch (final UnknownTopicOrPartitionException ignored) {
+            }
         }
 
         if (timeoutMs > 0) {
@@ -303,7 +291,7 @@ public class EmbeddedKafkaCluster {
 
         @Override
         public boolean conditionMet() {
-			final Set<String> allTopics = getAllTopicsInCluster();
+            final Set<String> allTopics = getAllTopicsInCluster();
             return !allTopics.removeAll(deletedTopics);
         }
     }
@@ -317,29 +305,29 @@ public class EmbeddedKafkaCluster {
 
         @Override
         public boolean conditionMet() {
-			final Set<String> allTopics = getAllTopicsInCluster();
+            final Set<String> allTopics = getAllTopicsInCluster();
             return allTopics.equals(remainingTopics);
-		}
-	}
+        }
+    }
 
-	private List<KafkaServer> brokers() {
-		final List<KafkaServer> servers = new ArrayList<>();
-		for (final KafkaEmbedded broker : brokers) {
-			servers.add(broker.kafkaServer());
-		}
-		return servers;
-	}
+    private List<KafkaServer> brokers() {
+        final List<KafkaServer> servers = new ArrayList<>();
+        for (final KafkaEmbedded broker : brokers) {
+            servers.add(broker.kafkaServer());
+        }
+        return servers;
+    }
 
-	public Properties getLogConfig(final String topic) {
-		return brokers[0].kafkaServer().zkClient().getEntityConfigs(ConfigType.Topic(), topic);
-	}
+    public Properties getLogConfig(final String topic) {
+        return brokers[0].kafkaServer().zkClient().getEntityConfigs(ConfigType.Topic(), topic);
+    }
 
-	public Set<String> getAllTopicsInCluster() {
-		final scala.collection.Iterator<String> topicsIterator = brokers[0].kafkaServer().zkClient().getAllTopicsInCluster(false).iterator();
-		final Set<String> topics = new HashSet<>();
-		while (topicsIterator.hasNext()) {
-			topics.add(topicsIterator.next());
-		}
-		return topics;
-	}
+    public Set<String> getAllTopicsInCluster() {
+        final scala.collection.Iterator<String> topicsIterator = brokers[0].kafkaServer().zkClient().getAllTopicsInCluster(false).iterator();
+        final Set<String> topics = new HashSet<>();
+        while (topicsIterator.hasNext()) {
+            topics.add(topicsIterator.next());
+        }
+        return topics;
+    }
 }

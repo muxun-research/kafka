@@ -29,8 +29,11 @@
   // Version 4 adds the offline replica list.
   //
   // Version 5 adds the broker epoch field and normalizes partitions by topic.
+  //
   // Version 7 adds topicId
-  "validVersions": "0-7",
+  //
+  // Version 8 adds KRaft Controller ID field as part of KIP-866
+  "validVersions": "0-8",
   "flexibleVersions": "6+",
   "fields": [
     {
@@ -39,6 +42,13 @@
       "versions": "0+",
       "entityType": "brokerId",
       "about": "The controller id."
+    },
+    {
+      "name": "isKRaftController",
+      "type": "bool",
+      "versions": "8+",
+      "default": "false",
+      "about": "If KRaft controller id is used during migration. See KIP-866"
     },
     {
       "name": "ControllerEpoch",
@@ -150,9 +160,15 @@
             }
           ]
         },
-        { "name": "Rack", "type": "string", "versions": "2+", "nullableVersions": "0+", "ignorable": true,
-          "about": "The rack which this broker belongs to." }
-    ]}
+        {
+          "name": "Rack",
+          "type": "string",
+          "versions": "2+",
+          "nullableVersions": "0+",
+          "ignorable": true,
+          "about": "The rack which this broker belongs to."
+        }
+      ]}
   ],
   "commonStructs": [
     { "name": "UpdateMetadataPartitionState", "versions": "0+", "fields": [
@@ -164,20 +180,51 @@
         "ignorable": true,
         "about": "In older versions of this RPC, the topic name."
       },
-      { "name": "PartitionIndex", "type": "int32", "versions": "0+",
-        "about": "The partition index." },
-      { "name": "ControllerEpoch", "type": "int32", "versions": "0+",
-        "about": "The controller epoch." },
-      { "name": "Leader", "type": "int32", "versions": "0+", "entityType": "brokerId",
-        "about": "The ID of the broker which is the current partition leader." },
-      { "name": "LeaderEpoch", "type": "int32", "versions": "0+",
-        "about": "The leader epoch of this partition." },
-      { "name": "Isr", "type": "[]int32", "versions": "0+", "entityType": "brokerId",
-        "about": "The brokers which are in the ISR for this partition." },
-      { "name": "ZkVersion", "type": "int32", "versions": "0+",
-        "about": "The Zookeeper version." },
-      { "name": "Replicas", "type": "[]int32", "versions": "0+", "entityType": "brokerId",
-        "about": "All the replicas of this partition." },
+      {
+        "name": "PartitionIndex",
+        "type": "int32",
+        "versions": "0+",
+        "about": "The partition index."
+      },
+      {
+        "name": "ControllerEpoch",
+        "type": "int32",
+        "versions": "0+",
+        "about": "The controller epoch."
+      },
+      {
+        "name": "Leader",
+        "type": "int32",
+        "versions": "0+",
+        "entityType": "brokerId",
+        "about": "The ID of the broker which is the current partition leader."
+      },
+      {
+        "name": "LeaderEpoch",
+        "type": "int32",
+        "versions": "0+",
+        "about": "The leader epoch of this partition."
+      },
+      {
+        "name": "Isr",
+        "type": "[]int32",
+        "versions": "0+",
+        "entityType": "brokerId",
+        "about": "The brokers which are in the ISR for this partition."
+      },
+      {
+        "name": "ZkVersion",
+        "type": "int32",
+        "versions": "0+",
+        "about": "The Zookeeper version."
+      },
+      {
+        "name": "Replicas",
+        "type": "[]int32",
+        "versions": "0+",
+        "entityType": "brokerId",
+        "about": "All the replicas of this partition."
+      },
       {
         "name": "OfflineReplicas",
         "type": "[]int32",

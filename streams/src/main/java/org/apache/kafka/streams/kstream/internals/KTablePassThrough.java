@@ -16,74 +16,89 @@
  */
 package org.apache.kafka.streams.kstream.internals;
 
-import org.apache.kafka.streams.processor.AbstractProcessor;
-import org.apache.kafka.streams.processor.Processor;
-import org.apache.kafka.streams.processor.ProcessorContext;
-import org.apache.kafka.streams.state.TimestampedKeyValueStore;
+import org.apache.kafka.streams.processor.api.Processor;
+import org.apache.kafka.streams.processor.api.ProcessorContext;
+import org.apache.kafka.streams.processor.api.Record;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
+import org.apache.kafka.streams.state.internals.KeyValueStoreWrapper;
 
 import java.util.Collection;
 
-public class KTablePassThrough<K, V> implements KTableProcessorSupplier<K, V, V> {
-	private final Collection<KStreamAggProcessorSupplier> parents;
-	private final String storeName;
+public class KTablePassThrough<KIn, VIn> implements KTableProcessorSupplier<KIn, VIn, KIn, VIn> {
+    private final Collection<KStreamAggProcessorSupplier> parents;
+    private final String storeName;
 
 
-	KTablePassThrough(final Collection<KStreamAggProcessorSupplier> parents, final String storeName) {
-		this.parents = parents;
-		this.storeName = storeName;
-	}
+    KTablePassThrough(final Collection<KStreamAggProcessorSupplier> parents, final String storeName) {
+        this.parents = parents;
+        this.storeName = storeName;
+    }
 
-	@Override
-	public Processor<K, Change<V>> get() {
-		return new KTablePassThroughProcessor();
-	}
+    @Override
+    public Processor<KIn, Change<VIn>, KIn, Change<VIn>> get() {
+        return new KTablePassThroughProcessor();
+    }
 
-	@Override
-	public boolean enableSendingOldValues(final boolean forceMaterialization) {
-		// Aggregation requires materialization so we will always enable sending old values
-		for (final KStreamAggProcessorSupplier parent : parents) {
-			parent.enableSendingOldValues();
-		}
-		return true;
-	}
+    @Override
+    public boolean enableSendingOldValues(final boolean forceMaterialization) {
+        // Aggregation requires materialization so we will always enable sending old values
+        for (final KStreamAggProcessorSupplier parent : parents) {
+            parent.enableSendingOldValues();
+        }
+        return true;
+    }
 
-	@Override
-	public KTableValueGetterSupplier<K, V> view() {
+    @Override
+    public KTableValueGetterSupplier<KIn, VIn> view() {
 
-		return new KTableValueGetterSupplier<K, V>() {
+        return new KTableValueGetterSupplier<KIn, VIn>() {
 
-			public KTableValueGetter<K, V> get() {
-				return new KTablePassThroughValueGetter();
-			}
+            public KTableValueGetter<KIn, VIn> get() {
+                return new KTablePassThroughValueGetter();
+            }
 
-			@Override
-			public String[] storeNames() {
-				return new String[]{storeName};
-			}
-		};
-	}
+            @Override
+            public String[] storeNames() {
+                return new String[]{storeName};
+            }
+        };
+    }
 
-	private class KTablePassThroughProcessor extends AbstractProcessor<K, Change<V>> {
-		@Override
-		public void process(final K key, final Change<V> value) {
-			context().forward(key, value);
-		}
-	}
+    private class KTablePassThroughProcessor implements Processor<KIn, Change<VIn>, KIn, Change<VIn>> {
+        private ProcessorContext<KIn, Change<VIn>> context;
 
-	private class KTablePassThroughValueGetter implements KTableValueGetter<K, V> {
-		private TimestampedKeyValueStore<K, V> store;
+        @Override
+        public void init(final ProcessorContext<KIn, Change<VIn>> context) {
+            this.context = context;
+        }
 
-		@SuppressWarnings("unchecked")
-		@Override
-		public void init(final ProcessorContext context) {
-			store = (TimestampedKeyValueStore<K, V>) context.getStateStore(storeName);
-		}
+        @Override
+        public void process(final Record<KIn, Change<VIn>> record) {
+            context.forward(record);
+        }
+    }
 
-		@Override
-		public ValueAndTimestamp<V> get(final K key) {
-			return store.get(key);
-		}
+    private class KTablePassThroughValueGetter implements KTableValueGetter<KIn, VIn> {
+        private KeyValueStoreWrapper<KIn, VIn> store;
 
-	}
+        @Override
+        public void init(final ProcessorContext<?, ?> context) {
+            store = new KeyValueStoreWrapper<>(context, storeName);
+        }
+
+        @Override
+        public ValueAndTimestamp<VIn> get(final KIn key) {
+            return store.get(key);
+        }
+
+        @Override
+        public ValueAndTimestamp<VIn> get(final KIn key, final long asOfTimestamp) {
+            return store.get(key, asOfTimestamp);
+        }
+
+        @Override
+        public boolean isVersioned() {
+            return store.isVersionedStore();
+        }
+    }
 }

@@ -20,7 +20,9 @@ import org.apache.kafka.streams.errors.InvalidStateStoreException;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.StateStoreContext;
+import org.apache.kafka.streams.query.*;
 import org.apache.kafka.streams.state.TimestampedBytesStore;
+import org.apache.kafka.streams.state.VersionedBytesStore;
 
 /**
  * A storage engine wrapper for utilities like logging, caching, and metering.
@@ -37,50 +39,66 @@ public abstract class WrappedStateStore<S extends StateStore, K, V> implements S
         }
     }
 
+    public static boolean isVersioned(final StateStore stateStore) {
+        if (stateStore instanceof VersionedBytesStore) {
+            return true;
+        } else if (stateStore instanceof WrappedStateStore) {
+            return isVersioned(((WrappedStateStore) stateStore).wrapped());
+        } else {
+            return false;
+        }
+    }
+
     private final S wrapped;
 
-	public WrappedStateStore(final S wrapped) {
-		this.wrapped = wrapped;
-	}
+    public WrappedStateStore(final S wrapped) {
+        this.wrapped = wrapped;
+    }
 
-	@Deprecated
-	@Override
-	public void init(final ProcessorContext context,
-					 final StateStore root) {
-		wrapped.init(context, root);
-	}
+    @Deprecated
+    @Override
+    public void init(final ProcessorContext context, final StateStore root) {
+        wrapped.init(context, root);
+    }
 
-	@Override
-	public void init(final StateStoreContext context, final StateStore root) {
-		wrapped.init(context, root);
-	}
+    @Override
+    public void init(final StateStoreContext context, final StateStore root) {
+        wrapped.init(context, root);
+    }
 
-	@SuppressWarnings("unchecked")
-	@Override
-	public boolean setFlushListener(final CacheFlushListener<K, V> listener,
-									final boolean sendOldValues) {
-		if (wrapped instanceof CachedStateStore) {
-			return ((CachedStateStore<K, V>) wrapped).setFlushListener(listener, sendOldValues);
-		}
-		return false;
-	}
+    @SuppressWarnings("unchecked")
+    @Override
+    public boolean setFlushListener(final CacheFlushListener<K, V> listener, final boolean sendOldValues) {
+        if (wrapped instanceof CachedStateStore) {
+            return ((CachedStateStore<K, V>) wrapped).setFlushListener(listener, sendOldValues);
+        }
+        return false;
+    }
 
-	@Override
-	public void flushCache() {
-		if (wrapped instanceof CachedStateStore) {
-			((CachedStateStore) wrapped).flushCache();
-		}
-	}
+    @Override
+    public void flushCache() {
+        if (wrapped instanceof CachedStateStore) {
+            ((CachedStateStore) wrapped).flushCache();
+        }
+    }
 
-	@Override
-	public String name() {
-		return wrapped.name();
-	}
+    @Override
+    public void clearCache() {
+        if (wrapped instanceof CachedStateStore) {
+            ((CachedStateStore) wrapped).clearCache();
+        }
+    }
 
-	@Override
-	public boolean persistent() {
-		return wrapped.persistent();
-	}
+
+    @Override
+    public String name() {
+        return wrapped.name();
+    }
+
+    @Override
+    public boolean persistent() {
+        return wrapped.persistent();
+    }
 
     @Override
     public boolean isOpen() {
@@ -101,6 +119,23 @@ public abstract class WrappedStateStore<S extends StateStore, K, V> implements S
     @Override
     public void close() {
         wrapped.close();
+    }
+
+    @Override
+    public <R> QueryResult<R> query(final Query<R> query, final PositionBound positionBound, final QueryConfig config) {
+
+        final long start = config.isCollectExecutionInfo() ? System.nanoTime() : -1L;
+        final QueryResult<R> result = wrapped().query(query, positionBound, config);
+        if (config.isCollectExecutionInfo()) {
+            final long end = System.nanoTime();
+            result.addExecutionInfo("Handled in " + getClass() + " via WrappedStateStore" + " in " + (end - start) + "ns");
+        }
+        return result;
+    }
+
+    @Override
+    public Position getPosition() {
+        return wrapped.getPosition();
     }
 
     public S wrapped() {

@@ -87,16 +87,22 @@ public class LeaveGroupRequest extends AbstractRequest {
         this.data = data;
     }
 
-	@Override
-	public LeaveGroupRequestData data() {
-		return data;
-	}
+    @Override
+    public LeaveGroupRequestData data() {
+        return data;
+    }
+
+    public LeaveGroupRequestData normalizedData() {
+        if (version() >= 3) {
+            return data;
+        } else {
+            return new LeaveGroupRequestData().setGroupId(data.groupId()).setMembers(Collections.singletonList(new MemberIdentity().setMemberId(data.memberId())));
+        }
+    }
 
     public List<MemberIdentity> members() {
         // Before version 3, leave group request is still in single mode
-		return version() <= 2 ? Collections.singletonList(
-				new MemberIdentity()
-						.setMemberId(data.memberId())) : data.members();
+        return version() <= 2 ? Collections.singletonList(new MemberIdentity().setMemberId(data.memberId())) : data.members();
     }
 
     @Override

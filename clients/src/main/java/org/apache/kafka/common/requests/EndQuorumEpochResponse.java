@@ -30,11 +30,11 @@ import java.util.Map;
 
 /**
  * Possible error codes.
- * <p>
+ *
  * Top level errors:
  * - {@link Errors#CLUSTER_AUTHORIZATION_FAILED}
  * - {@link Errors#BROKER_NOT_AVAILABLE}
- * <p>
+ *
  * Partition level errors:
  * - {@link Errors#FENCED_LEADER_EPOCH}
  * - {@link Errors#INVALID_REQUEST}
@@ -42,59 +42,47 @@ import java.util.Map;
  * - {@link Errors#UNKNOWN_TOPIC_OR_PARTITION}
  */
 public class EndQuorumEpochResponse extends AbstractResponse {
-	private final EndQuorumEpochResponseData data;
+    private final EndQuorumEpochResponseData data;
 
-	public EndQuorumEpochResponse(EndQuorumEpochResponseData data) {
-		super(ApiKeys.END_QUORUM_EPOCH);
-		this.data = data;
-	}
+    public EndQuorumEpochResponse(EndQuorumEpochResponseData data) {
+        super(ApiKeys.END_QUORUM_EPOCH);
+        this.data = data;
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> errors = new HashMap<>();
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        Map<Errors, Integer> errors = new HashMap<>();
 
-		errors.put(Errors.forCode(data.errorCode()), 1);
+        errors.put(Errors.forCode(data.errorCode()), 1);
 
-		for (EndQuorumEpochResponseData.TopicData topicResponse : data.topics()) {
-			for (EndQuorumEpochResponseData.PartitionData partitionResponse : topicResponse.partitions()) {
-				updateErrorCounts(errors, Errors.forCode(partitionResponse.errorCode()));
-			}
-		}
-		return errors;
-	}
+        for (EndQuorumEpochResponseData.TopicData topicResponse : data.topics()) {
+            for (EndQuorumEpochResponseData.PartitionData partitionResponse : topicResponse.partitions()) {
+                updateErrorCounts(errors, Errors.forCode(partitionResponse.errorCode()));
+            }
+        }
+        return errors;
+    }
 
-	@Override
-	public EndQuorumEpochResponseData data() {
-		return data;
-	}
+    @Override
+    public EndQuorumEpochResponseData data() {
+        return data;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return DEFAULT_THROTTLE_TIME;
-	}
+    @Override
+    public int throttleTimeMs() {
+        return DEFAULT_THROTTLE_TIME;
+    }
 
-	public static EndQuorumEpochResponseData singletonResponse(
-			Errors topLevelError,
-			TopicPartition topicPartition,
-			Errors partitionLevelError,
-			int leaderEpoch,
-			int leaderId
-	) {
-		return new EndQuorumEpochResponseData()
-				.setErrorCode(topLevelError.code())
-				.setTopics(Collections.singletonList(
-						new EndQuorumEpochResponseData.TopicData()
-								.setTopicName(topicPartition.topic())
-								.setPartitions(Collections.singletonList(
-										new EndQuorumEpochResponseData.PartitionData()
-												.setErrorCode(partitionLevelError.code())
-												.setLeaderId(leaderId)
-												.setLeaderEpoch(leaderEpoch)
-								)))
-				);
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        // Not supported by the response schema
+    }
 
-	public static EndQuorumEpochResponse parse(ByteBuffer buffer, short version) {
-		return new EndQuorumEpochResponse(new EndQuorumEpochResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    public static EndQuorumEpochResponseData singletonResponse(Errors topLevelError, TopicPartition topicPartition, Errors partitionLevelError, int leaderEpoch, int leaderId) {
+        return new EndQuorumEpochResponseData().setErrorCode(topLevelError.code()).setTopics(Collections.singletonList(new EndQuorumEpochResponseData.TopicData().setTopicName(topicPartition.topic()).setPartitions(Collections.singletonList(new EndQuorumEpochResponseData.PartitionData().setErrorCode(partitionLevelError.code()).setLeaderId(leaderId).setLeaderEpoch(leaderEpoch)))));
+    }
+
+    public static EndQuorumEpochResponse parse(ByteBuffer buffer, short version) {
+        return new EndQuorumEpochResponse(new EndQuorumEpochResponseData(new ByteBufferAccessor(buffer), version));
+    }
 }

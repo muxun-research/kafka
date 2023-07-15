@@ -21,12 +21,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.utils.CircularIterator;
 import org.apache.kafka.common.utils.Utils;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.SortedSet;
-import java.util.TreeSet;
+import java.util.*;
 
 /**
  * <p>The round robin assignor lays out all the available partitions and all the available consumers. It
@@ -60,7 +55,7 @@ import java.util.TreeSet;
  * <li><code>C1: [t1p0]</code>
  * <li><code>C2: [t1p1, t2p0, t2p1, t2p2]</code>
  * </ul>
- * <p>
+ *
  * Since the introduction of static membership, we could leverage <code>group.instance.id</code> to make the assignment behavior more sticky.
  * For example, we have three consumers with assigned <code>member.id</code> <code>C0</code>, <code>C1</code>, <code>C2</code>,
  * two topics <code>t0</code> and <code>t1</code>, and each topic has 3 partitions, resulting in partitions <code>t0p0</code>,
@@ -73,7 +68,7 @@ import java.util.TreeSet;
  * <li><code>C1: [t0p1, t1p1]</code>
  * <li><code>C2: [t0p2, t1p2]</code>
  * </ul>
- * <p>
+ *
  * After one rolling bounce, group coordinator will attempt to assign new <code>member.id</code> towards consumers,
  * for example <code>C0</code> -&gt; <code>C5</code> <code>C1</code> -&gt; <code>C3</code>, <code>C2</code> -&gt; <code>C4</code>.
  *
@@ -83,7 +78,7 @@ import java.util.TreeSet;
  * <li><code>C4 (was C2): [t0p1, t1p1] (before was [t0p2, t1p2])</code>
  * <li><code>C5 (was C0): [t0p2, t1p2] (before was [t0p0, t1p0])</code>
  * </ul>
- * <p>
+ *
  * This issue could be mitigated by the introduction of static membership. Consumers will have individual instance ids
  * <code>I1</code>, <code>I2</code>, <code>I3</code>. As long as
  * 1. Number of members remain the same across generation
@@ -98,66 +93,45 @@ import java.util.TreeSet;
  * </ul>
  */
 public class RoundRobinAssignor extends AbstractPartitionAssignor {
+    public static final String ROUNDROBIN_ASSIGNOR_NAME = "roundrobin";
 
-	/**
-	 * Round-Robin partition分配策略
-	 * @param partitionsPerTopic 每个topic的partition数量，没有在metadata中的topic不会包含在内
-	 * @param subscriptions      memberId-订阅信息
-	 * @return memberId-partition集合映射信息
-	 */
-	@Override
-	public Map<String, List<TopicPartition>> assign(Map<String, Integer> partitionsPerTopic,
-													Map<String, Subscription> subscriptions) {
-		Map<String, List<TopicPartition>> assignment = new HashMap<>();
-		List<MemberInfo> memberInfoList = new ArrayList<>();
-		for (Map.Entry<String, Subscription> memberSubscription : subscriptions.entrySet()) {
-			// 以memberId为维度进行构建
-			assignment.put(memberSubscription.getKey(), new ArrayList<>());
-			// 添加消费组成员信息
-			memberInfoList.add(new MemberInfo(memberSubscription.getKey(),
-					memberSubscription.getValue().groupInstanceId()));
-		}
-		// 构建一个循环迭代器
-		CircularIterator<MemberInfo> assigner = new CircularIterator<>(Utils.sorted(memberInfoList));
-		// 遍历构建的所有已排序的partition索引信息
-		for (TopicPartition partition : allPartitionsSorted(partitionsPerTopic, subscriptions)) {
-			final String topic = partition.topic();
-			// 将所有的partition分配member
-			// 由于是循环迭代器，peek()就是上次停下的位置，判断当前member是否关注当前遍历的topic
-			while (!subscriptions.get(assigner.peek().memberId).topics().contains(topic))
-				assigner.next();
-			// 添加memberId和partition信息，完成分配
-			assignment.get(assigner.next().memberId).add(partition);
-		}
-		return assignment;
-	}
+    @Override
+    public Map<String, List<TopicPartition>> assign(Map<String, Integer> partitionsPerTopic, Map<String, Subscription> subscriptions) {
+        Map<String, List<TopicPartition>> assignment = new HashMap<>();
+        List<MemberInfo> memberInfoList = new ArrayList<>();
+        for (Map.Entry<String, Subscription> memberSubscription : subscriptions.entrySet()) {
+            assignment.put(memberSubscription.getKey(), new ArrayList<>());
+            memberInfoList.add(new MemberInfo(memberSubscription.getKey(), memberSubscription.getValue().groupInstanceId()));
+        }
 
-	/**
-	 * 对需要订阅的partition进行排序
-	 * @param partitionsPerTopic 每个topic的partition数量，没有在metadata中的topic不会包含在内
-	 * @param subscriptions      memberId-订阅信息
-	 * @return 所有已构建索引的partition的信息
-	 */
-	private List<TopicPartition> allPartitionsSorted(Map<String, Integer> partitionsPerTopic,
-													 Map<String, Subscription> subscriptions) {
-		SortedSet<String> topics = new TreeSet<>();
-		for (Subscription subscription : subscriptions.values())
-			topics.addAll(subscription.topics());
+        CircularIterator<MemberInfo> assigner = new CircularIterator<>(Utils.sorted(memberInfoList));
 
-		List<TopicPartition> allPartitions = new ArrayList<>();
-		// 根据topic及每个topic的partition数量，设置topic的partition信息
-		// 比如一个topic有10个partition，则每个partition为0~9
-		for (String topic : topics) {
-			Integer numPartitionsForTopic = partitionsPerTopic.get(topic);
-			if (numPartitionsForTopic != null)
-				allPartitions.addAll(AbstractPartitionAssignor.partitions(topic, numPartitionsForTopic));
-		}
-		return allPartitions;
-	}
+        for (TopicPartition partition : allPartitionsSorted(partitionsPerTopic, subscriptions)) {
+            final String topic = partition.topic();
+            while (!subscriptions.get(assigner.peek().memberId).topics().contains(topic))
+                assigner.next();
+            assignment.get(assigner.next().memberId).add(partition);
+        }
+        return assignment;
+    }
 
-	@Override
-	public String name() {
-		return "roundrobin";
-	}
+    private List<TopicPartition> allPartitionsSorted(Map<String, Integer> partitionsPerTopic, Map<String, Subscription> subscriptions) {
+        SortedSet<String> topics = new TreeSet<>();
+        for (Subscription subscription : subscriptions.values())
+            topics.addAll(subscription.topics());
+
+        List<TopicPartition> allPartitions = new ArrayList<>();
+        for (String topic : topics) {
+            Integer numPartitionsForTopic = partitionsPerTopic.get(topic);
+            if (numPartitionsForTopic != null)
+                allPartitions.addAll(AbstractPartitionAssignor.partitions(topic, numPartitionsForTopic));
+        }
+        return allPartitions;
+    }
+
+    @Override
+    public String name() {
+        return ROUNDROBIN_ASSIGNOR_NAME;
+    }
 
 }

@@ -28,21 +28,21 @@ import java.util.Map;
 
 public class DeleteTopicsResponse extends AbstractResponse {
 
-	/**
-	 * Possible error codes:
-	 * <p>
-	 * REQUEST_TIMED_OUT(7)
-	 * INVALID_TOPIC_EXCEPTION(17)
-	 * TOPIC_AUTHORIZATION_FAILED(29)
-	 * NOT_CONTROLLER(41)
-	 * INVALID_REQUEST(42)
-	 * TOPIC_DELETION_DISABLED(73)
-	 */
-	private final DeleteTopicsResponseData data;
+    /**
+     * Possible error codes:
+     * <p>
+     * REQUEST_TIMED_OUT(7)
+     * INVALID_TOPIC_EXCEPTION(17)
+     * TOPIC_AUTHORIZATION_FAILED(29)
+     * NOT_CONTROLLER(41)
+     * INVALID_REQUEST(42)
+     * TOPIC_DELETION_DISABLED(73)
+     */
+    private final DeleteTopicsResponseData data;
 
     public DeleteTopicsResponse(DeleteTopicsResponseData data) {
-		super(ApiKeys.DELETE_TOPICS);
-		this.data = data;
+        super(ApiKeys.DELETE_TOPICS);
+        this.data = data;
     }
 
     @Override
@@ -50,22 +50,25 @@ public class DeleteTopicsResponse extends AbstractResponse {
         return data.throttleTimeMs();
     }
 
-	@Override
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
+
+    @Override
     public DeleteTopicsResponseData data() {
         return data;
     }
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-		HashMap<Errors, Integer> counts = new HashMap<>();
-		data.responses().forEach(result ->
-				updateErrorCounts(counts, Errors.forCode(result.errorCode()))
-		);
-		return counts;
-	}
+        HashMap<Errors, Integer> counts = new HashMap<>();
+        data.responses().forEach(result -> updateErrorCounts(counts, Errors.forCode(result.errorCode())));
+        return counts;
+    }
 
     public static DeleteTopicsResponse parse(ByteBuffer buffer, short version) {
-		return new DeleteTopicsResponse(new DeleteTopicsResponseData(new ByteBufferAccessor(buffer), version));
+        return new DeleteTopicsResponse(new DeleteTopicsResponseData(new ByteBufferAccessor(buffer), version));
     }
 
     @Override

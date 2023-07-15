@@ -19,16 +19,10 @@ package org.apache.kafka.raft.internals;
 import org.apache.kafka.common.protocol.DataOutputStreamWritable;
 import org.apache.kafka.common.protocol.ObjectSerializationCache;
 import org.apache.kafka.common.protocol.Writable;
-import org.apache.kafka.common.record.AbstractRecords;
-import org.apache.kafka.common.record.CompressionType;
-import org.apache.kafka.common.record.DefaultRecord;
-import org.apache.kafka.common.record.DefaultRecordBatch;
-import org.apache.kafka.common.record.MemoryRecords;
-import org.apache.kafka.common.record.RecordBatch;
-import org.apache.kafka.common.record.TimestampType;
+import org.apache.kafka.common.record.*;
 import org.apache.kafka.common.utils.ByteBufferOutputStream;
 import org.apache.kafka.common.utils.ByteUtils;
-import org.apache.kafka.raft.RecordSerde;
+import org.apache.kafka.server.common.serialization.RecordSerde;
 
 import java.io.DataOutputStream;
 import java.nio.ByteBuffer;
@@ -46,300 +40,244 @@ import java.util.OptionalInt;
  * @param <T> record type indicated by {@link RecordSerde} passed in constructor
  */
 public class BatchBuilder<T> {
-	private final ByteBuffer initialBuffer;
-	private final CompressionType compressionType;
-	private final ByteBufferOutputStream batchOutput;
-	private final DataOutputStreamWritable recordOutput;
-	private final long baseOffset;
-	private final long logAppendTime;
-	private final boolean isControlBatch;
-	private final int leaderEpoch;
-	private final int initialPosition;
-	private final int maxBytes;
-	private final RecordSerde<T> serde;
-	private final List<T> records;
+    private final ByteBuffer initialBuffer;
+    private final CompressionType compressionType;
+    private final ByteBufferOutputStream batchOutput;
+    private final DataOutputStreamWritable recordOutput;
+    private final long baseOffset;
+    private final long appendTime;
+    private final boolean isControlBatch;
+    private final int leaderEpoch;
+    private final int initialPosition;
+    private final int maxBytes;
+    private final RecordSerde<T> serde;
+    private final List<T> records;
 
-	private long nextOffset;
-	private int unflushedBytes;
-	private boolean isOpenForAppends = true;
+    private long nextOffset;
+    private int unflushedBytes;
+    private boolean isOpenForAppends = true;
 
-	public BatchBuilder(
-			ByteBuffer buffer,
-			RecordSerde<T> serde,
-			CompressionType compressionType,
-			long baseOffset,
-			long logAppendTime,
-			boolean isControlBatch,
-			int leaderEpoch,
-			int maxBytes
-	) {
-		this.initialBuffer = buffer;
-		this.batchOutput = new ByteBufferOutputStream(buffer);
-		this.serde = serde;
-		this.compressionType = compressionType;
-		this.baseOffset = baseOffset;
-		this.nextOffset = baseOffset;
-		this.logAppendTime = logAppendTime;
-		this.isControlBatch = isControlBatch;
-		this.initialPosition = batchOutput.position();
-		this.leaderEpoch = leaderEpoch;
-		this.maxBytes = maxBytes;
-		this.records = new ArrayList<>();
+    public BatchBuilder(ByteBuffer buffer, RecordSerde<T> serde, CompressionType compressionType, long baseOffset, long appendTime, boolean isControlBatch, int leaderEpoch, int maxBytes) {
+        this.initialBuffer = buffer;
+        this.batchOutput = new ByteBufferOutputStream(buffer);
+        this.serde = serde;
+        this.compressionType = compressionType;
+        this.baseOffset = baseOffset;
+        this.nextOffset = baseOffset;
+        this.appendTime = appendTime;
+        this.isControlBatch = isControlBatch;
+        this.initialPosition = batchOutput.position();
+        this.leaderEpoch = leaderEpoch;
+        this.maxBytes = maxBytes;
+        this.records = new ArrayList<>();
 
-		// field compressionType must be set before calculating the batch header size
-		int batchHeaderSizeInBytes = batchHeaderSizeInBytes();
-		batchOutput.position(initialPosition + batchHeaderSizeInBytes);
+        // field compressionType must be set before calculating the batch header size
+        int batchHeaderSizeInBytes = batchHeaderSizeInBytes();
+        batchOutput.position(initialPosition + batchHeaderSizeInBytes);
 
-		this.recordOutput = new DataOutputStreamWritable(new DataOutputStream(
-				compressionType.wrapForOutput(this.batchOutput, RecordBatch.MAGIC_VALUE_V2)));
-	}
+        this.recordOutput = new DataOutputStreamWritable(new DataOutputStream(compressionType.wrapForOutput(this.batchOutput, RecordBatch.MAGIC_VALUE_V2)));
+    }
 
-	/**
-	 * Append a record to this patch. The caller must first verify there is room for the batch
-	 * using {@link #bytesNeeded(Collection, ObjectSerializationCache)}.
-	 * @param record             the record to append
-	 * @param serializationCache serialization cache for use in {@link RecordSerde#write(Object, ObjectSerializationCache, Writable)}
-	 * @return the offset of the appended batch
-	 */
-	public long appendRecord(T record, ObjectSerializationCache serializationCache) {
-		if (!isOpenForAppends) {
-			throw new IllegalStateException("Cannot append new records after the batch has been built");
-		}
+    /**
+     * Append a record to this batch. The caller must first verify there is room for the batch
+     * using {@link #bytesNeeded(Collection, ObjectSerializationCache)}.
+     *
+     * @param record the record to append
+     * @param serializationCache serialization cache for use in {@link RecordSerde#write(Object, ObjectSerializationCache, Writable)}
+     * @return the offset of the appended batch
+     */
+    public long appendRecord(T record, ObjectSerializationCache serializationCache) {
+        if (!isOpenForAppends) {
+            throw new IllegalStateException("Cannot append new records after the batch has been built");
+        }
 
-		if (nextOffset - baseOffset > Integer.MAX_VALUE) {
-			throw new IllegalArgumentException("Cannot include more than " + Integer.MAX_VALUE +
-					" records in a single batch");
-		}
+        if (nextOffset - baseOffset > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("Cannot include more than " + Integer.MAX_VALUE + " records in a single batch");
+        }
 
-		long offset = nextOffset++;
-		int recordSizeInBytes = writeRecord(
-				offset,
-				record,
-				serializationCache
-		);
-		unflushedBytes += recordSizeInBytes;
-		records.add(record);
-		return offset;
-	}
+        long offset = nextOffset++;
+        int recordSizeInBytes = writeRecord(offset, record, serializationCache);
+        unflushedBytes += recordSizeInBytes;
+        records.add(record);
+        return offset;
+    }
 
-	/**
-	 * Check whether the batch has enough room for all the record values.
-	 * <p>
-	 * Returns an empty {@link OptionalInt} if the batch builder has room for this list of records.
-	 * Otherwise it returns the expected number of bytes needed for a batch to contain these records.
-	 * @param records            the records to use when checking for room
-	 * @param serializationCache serialization cache for computing sizes
-	 * @return empty {@link OptionalInt} if there is room for the records to be appended, otherwise
-	 * returns the number of bytes needed
-	 */
-	public OptionalInt bytesNeeded(Collection<T> records, ObjectSerializationCache serializationCache) {
-		int bytesNeeded = bytesNeededForRecords(
-				records,
-				serializationCache
-		);
+    /**
+     * Check whether the batch has enough room for all the record values.
+     *
+     * Returns an empty {@link OptionalInt} if the batch builder has room for this list of records.
+     * Otherwise it returns the expected number of bytes needed for a batch to contain these records.
+     *
+     * @param records the records to use when checking for room
+     * @param serializationCache serialization cache for computing sizes
+     * @return empty {@link OptionalInt} if there is room for the records to be appended, otherwise
+     *         returns the number of bytes needed
+     */
+    public OptionalInt bytesNeeded(Collection<T> records, ObjectSerializationCache serializationCache) {
+        int bytesNeeded = bytesNeededForRecords(records, serializationCache);
 
-		if (!isOpenForAppends) {
-			return OptionalInt.of(batchHeaderSizeInBytes() + bytesNeeded);
-		}
+        if (!isOpenForAppends) {
+            return OptionalInt.of(Math.addExact(batchHeaderSizeInBytes(), bytesNeeded));
+        }
 
-		int approxUnusedSizeInBytes = maxBytes - approximateSizeInBytes();
-		if (approxUnusedSizeInBytes >= bytesNeeded) {
-			return OptionalInt.empty();
-		} else if (unflushedBytes > 0) {
-			recordOutput.flush();
-			unflushedBytes = 0;
-			int unusedSizeInBytes = maxBytes - flushedSizeInBytes();
-			if (unusedSizeInBytes >= bytesNeeded) {
-				return OptionalInt.empty();
-			}
-		}
+        int approxUnusedSizeInBytes = maxBytes - approximateSizeInBytes();
+        if (approxUnusedSizeInBytes >= bytesNeeded) {
+            return OptionalInt.empty();
+        } else if (unflushedBytes > 0) {
+            recordOutput.flush();
+            unflushedBytes = 0;
+            int unusedSizeInBytes = maxBytes - flushedSizeInBytes();
+            if (unusedSizeInBytes >= bytesNeeded) {
+                return OptionalInt.empty();
+            }
+        }
 
-		return OptionalInt.of(batchHeaderSizeInBytes() + bytesNeeded);
-	}
+        return OptionalInt.of(Math.addExact(batchHeaderSizeInBytes(), bytesNeeded));
+    }
 
-	private int flushedSizeInBytes() {
-		return batchOutput.position() - initialPosition;
-	}
+    private int flushedSizeInBytes() {
+        return batchOutput.position() - initialPosition;
+    }
 
-	/**
-	 * Get an estimate of the current size of the appended data. This estimate
-	 * is precise if no compression is in use.
-	 * @return estimated size in bytes of the appended records
-	 */
-	public int approximateSizeInBytes() {
-		return flushedSizeInBytes() + unflushedBytes;
-	}
+    /**
+     * Get an estimate of the current size of the appended data. This estimate
+     * is precise if no compression is in use.
+     *
+     * @return estimated size in bytes of the appended records
+     */
+    public int approximateSizeInBytes() {
+        return flushedSizeInBytes() + unflushedBytes;
+    }
 
-	/**
-	 * Get the base offset of this batch. This is constant upon constructing
-	 * the builder instance.
-	 * @return the base offset
-	 */
-	public long baseOffset() {
-		return baseOffset;
-	}
+    /**
+     * Get the base offset of this batch. This is constant upon constructing
+     * the builder instance.
+     *
+     * @return the base offset
+     */
+    public long baseOffset() {
+        return baseOffset;
+    }
 
-	/**
-	 * Return the offset of the last appended record. This is updated after
-	 * every append and can be used after the batch has been built to obtain
-	 * the last offset.
-	 * @return the offset of the last appended record
-	 */
-	public long lastOffset() {
-		return nextOffset - 1;
-	}
+    /**
+     * Return the offset of the last appended record. This is updated after
+     * every append and can be used after the batch has been built to obtain
+     * the last offset.
+     *
+     * @return the offset of the last appended record
+     */
+    public long lastOffset() {
+        return nextOffset - 1;
+    }
 
-	/**
-	 * Get the number of records appended to the batch. This is updated after
-	 * each append.
-	 * @return the number of appended records
-	 */
-	public int numRecords() {
-		return (int) (nextOffset - baseOffset);
-	}
+    /**
+     * Get the number of records appended to the batch. This is updated after
+     * each append.
+     *
+     * @return the number of appended records
+     */
+    public int numRecords() {
+        return (int) (nextOffset - baseOffset);
+    }
 
-	/**
-	 * Check whether there has been at least one record appended to the batch.
-	 * @return true if one or more records have been appended
-	 */
-	public boolean nonEmpty() {
-		return numRecords() > 0;
-	}
+    /**
+     * Check whether there has been at least one record appended to the batch.
+     *
+     * @return true if one or more records have been appended
+     */
+    public boolean nonEmpty() {
+        return numRecords() > 0;
+    }
 
-	/**
-	 * Return the reference to the initial buffer passed through the constructor.
-	 * This is used in case the buffer needs to be returned to a pool (e.g.
-	 * in {@link org.apache.kafka.common.memory.MemoryPool#release(ByteBuffer)}.
-	 * @return the initial buffer passed to the constructor
-	 */
-	public ByteBuffer initialBuffer() {
-		return initialBuffer;
-	}
+    /**
+     * Return the reference to the initial buffer passed through the constructor.
+     * This is used in case the buffer needs to be returned to a pool (e.g.
+     * in {@link org.apache.kafka.common.memory.MemoryPool#release(ByteBuffer)}.
+     *
+     * @return the initial buffer passed to the constructor
+     */
+    public ByteBuffer initialBuffer() {
+        return initialBuffer;
+    }
 
-	/**
-	 * Get a list of the records appended to the batch.
-	 * @return a list of records
-	 */
-	public List<T> records() {
-		return records;
-	}
+    /**
+     * Get a list of the records appended to the batch.
+     * @return a list of records
+     */
+    public List<T> records() {
+        return records;
+    }
 
-	private void writeDefaultBatchHeader() {
-		ByteBuffer buffer = batchOutput.buffer();
-		int lastPosition = buffer.position();
+    private void writeDefaultBatchHeader() {
+        ByteBuffer buffer = batchOutput.buffer();
+        int lastPosition = buffer.position();
 
-		buffer.position(initialPosition);
-		int size = lastPosition - initialPosition;
-		int lastOffsetDelta = (int) (lastOffset() - baseOffset);
+        buffer.position(initialPosition);
+        int size = lastPosition - initialPosition;
+        int lastOffsetDelta = (int) (lastOffset() - baseOffset);
 
-		DefaultRecordBatch.writeHeader(
-				buffer,
-				baseOffset,
-				lastOffsetDelta,
-				size,
-				RecordBatch.MAGIC_VALUE_V2,
-				compressionType,
-				TimestampType.CREATE_TIME,
-				logAppendTime,
-				logAppendTime,
-				RecordBatch.NO_PRODUCER_ID,
-				RecordBatch.NO_PRODUCER_EPOCH,
-				RecordBatch.NO_SEQUENCE,
-				false,
-				isControlBatch,
-				leaderEpoch,
-				numRecords()
-		);
+        DefaultRecordBatch.writeHeader(buffer, baseOffset, lastOffsetDelta, size, RecordBatch.MAGIC_VALUE_V2, compressionType, TimestampType.CREATE_TIME, appendTime, appendTime, RecordBatch.NO_PRODUCER_ID, RecordBatch.NO_PRODUCER_EPOCH, RecordBatch.NO_SEQUENCE, false, isControlBatch, false, leaderEpoch, numRecords());
 
-		buffer.position(lastPosition);
-	}
+        buffer.position(lastPosition);
+    }
 
-	public MemoryRecords build() {
-		recordOutput.close();
-		writeDefaultBatchHeader();
-		ByteBuffer buffer = batchOutput.buffer().duplicate();
-		buffer.flip();
-		buffer.position(initialPosition);
-		isOpenForAppends = false;
-		return MemoryRecords.readableRecords(buffer.slice());
-	}
+    public MemoryRecords build() {
+        recordOutput.close();
+        writeDefaultBatchHeader();
+        ByteBuffer buffer = batchOutput.buffer().duplicate();
+        buffer.flip();
+        buffer.position(initialPosition);
+        isOpenForAppends = false;
+        return MemoryRecords.readableRecords(buffer.slice());
+    }
 
-	public int writeRecord(
-			long offset,
-			T payload,
-			ObjectSerializationCache serializationCache
-	) {
-		int offsetDelta = (int) (offset - baseOffset);
-		long timestampDelta = 0;
+    public int writeRecord(long offset, T payload, ObjectSerializationCache serializationCache) {
+        int offsetDelta = (int) (offset - baseOffset);
+        long timestampDelta = 0;
 
-		int payloadSize = serde.recordSize(payload, serializationCache);
-		int sizeInBytes = DefaultRecord.sizeOfBodyInBytes(
-				offsetDelta,
-				timestampDelta,
-				-1,
-				payloadSize,
-				DefaultRecord.EMPTY_HEADERS
-		);
-		recordOutput.writeVarint(sizeInBytes);
+        int payloadSize = serde.recordSize(payload, serializationCache);
+        int sizeInBytes = DefaultRecord.sizeOfBodyInBytes(offsetDelta, timestampDelta, -1, payloadSize, DefaultRecord.EMPTY_HEADERS);
+        recordOutput.writeVarint(sizeInBytes);
 
-		// Write attributes (currently unused)
-		recordOutput.writeByte((byte) 0);
+        // Write attributes (currently unused)
+        recordOutput.writeByte((byte) 0);
 
-		// Write timestamp and offset
-		recordOutput.writeVarlong(timestampDelta);
-		recordOutput.writeVarint(offsetDelta);
+        // Write timestamp and offset
+        recordOutput.writeVarlong(timestampDelta);
+        recordOutput.writeVarint(offsetDelta);
 
-		// Write key, which is always null for controller messages
-		recordOutput.writeVarint(-1);
+        // Write key, which is always null for controller messages
+        recordOutput.writeVarint(-1);
 
-		// Write value
-		recordOutput.writeVarint(payloadSize);
-		serde.write(payload, serializationCache, recordOutput);
+        // Write value
+        recordOutput.writeVarint(payloadSize);
+        serde.write(payload, serializationCache, recordOutput);
 
-		// Write headers (currently unused)
-		recordOutput.writeVarint(0);
-		return ByteUtils.sizeOfVarint(sizeInBytes) + sizeInBytes;
-	}
+        // Write headers (currently unused)
+        recordOutput.writeVarint(0);
+        return ByteUtils.sizeOfVarint(sizeInBytes) + sizeInBytes;
+    }
 
-	private int batchHeaderSizeInBytes() {
-		return AbstractRecords.recordBatchHeaderSizeInBytes(
-				RecordBatch.MAGIC_VALUE_V2,
-				compressionType
-		);
-	}
+    private int batchHeaderSizeInBytes() {
+        return AbstractRecords.recordBatchHeaderSizeInBytes(RecordBatch.MAGIC_VALUE_V2, compressionType);
+    }
 
-	private int bytesNeededForRecords(
-			Collection<T> records,
-			ObjectSerializationCache serializationCache
-	) {
-		long expectedNextOffset = nextOffset;
-		int bytesNeeded = 0;
-		for (T record : records) {
-			if (expectedNextOffset - baseOffset >= Integer.MAX_VALUE) {
-				throw new IllegalArgumentException(
-						String.format(
-								"Adding %s records to a batch with base offset of %s and next offset of %s",
-								records.size(),
-								baseOffset,
-								expectedNextOffset
-						)
-				);
-			}
+    private int bytesNeededForRecords(Collection<T> records, ObjectSerializationCache serializationCache) {
+        long expectedNextOffset = nextOffset;
+        int bytesNeeded = 0;
+        for (T record : records) {
+            if (expectedNextOffset - baseOffset >= Integer.MAX_VALUE) {
+                throw new IllegalArgumentException(String.format("Adding %s records to a batch with base offset of %s and next offset of %s", records.size(), baseOffset, expectedNextOffset));
+            }
 
-			int recordSizeInBytes = DefaultRecord.sizeOfBodyInBytes(
-					(int) (expectedNextOffset - baseOffset),
-					0,
-					-1,
-					serde.recordSize(record, serializationCache),
-					DefaultRecord.EMPTY_HEADERS
-			);
+            int recordSizeInBytes = DefaultRecord.sizeOfBodyInBytes((int) (expectedNextOffset - baseOffset), 0, -1, serde.recordSize(record, serializationCache), DefaultRecord.EMPTY_HEADERS);
 
-			bytesNeeded = Math.addExact(bytesNeeded, ByteUtils.sizeOfVarint(recordSizeInBytes));
-			bytesNeeded = Math.addExact(bytesNeeded, recordSizeInBytes);
+            bytesNeeded = Math.addExact(bytesNeeded, ByteUtils.sizeOfVarint(recordSizeInBytes));
+            bytesNeeded = Math.addExact(bytesNeeded, recordSizeInBytes);
 
-			expectedNextOffset += 1;
-		}
+            expectedNextOffset += 1;
+        }
 
-		return bytesNeeded;
-	}
+        return bytesNeeded;
+    }
 }

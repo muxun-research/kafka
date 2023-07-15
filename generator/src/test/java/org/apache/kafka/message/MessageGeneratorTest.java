@@ -20,51 +20,54 @@ package org.apache.kafka.message;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.*;
 
 @Timeout(120)
 public class MessageGeneratorTest {
 
-	@Test
-	public void testCapitalizeFirst() throws Exception {
-		assertEquals("", MessageGenerator.capitalizeFirst(""));
-		assertEquals("AbC", MessageGenerator.capitalizeFirst("abC"));
-	}
+    @Test
+    public void testCapitalizeFirst() throws Exception {
+        assertEquals("", MessageGenerator.capitalizeFirst(""));
+        assertEquals("AbC", MessageGenerator.capitalizeFirst("abC"));
+    }
 
-	@Test
-	public void testLowerCaseFirst() throws Exception {
-		assertEquals("", MessageGenerator.lowerCaseFirst(""));
-		assertEquals("fORTRAN", MessageGenerator.lowerCaseFirst("FORTRAN"));
-		assertEquals("java", MessageGenerator.lowerCaseFirst("java"));
-	}
+    @Test
+    public void testLowerCaseFirst() throws Exception {
+        assertEquals("", MessageGenerator.lowerCaseFirst(""));
+        assertEquals("fORTRAN", MessageGenerator.lowerCaseFirst("FORTRAN"));
+        assertEquals("java", MessageGenerator.lowerCaseFirst("java"));
+    }
 
-	@Test
-	public void testFirstIsCapitalized() throws Exception {
-		assertFalse(MessageGenerator.firstIsCapitalized(""));
-		assertTrue(MessageGenerator.firstIsCapitalized("FORTRAN"));
-		assertFalse(MessageGenerator.firstIsCapitalized("java"));
-	}
+    @Test
+    public void testFirstIsCapitalized() throws Exception {
+        assertFalse(MessageGenerator.firstIsCapitalized(""));
+        assertTrue(MessageGenerator.firstIsCapitalized("FORTRAN"));
+        assertFalse(MessageGenerator.firstIsCapitalized("java"));
+    }
 
-	@Test
-	public void testToSnakeCase() throws Exception {
-		assertEquals("", MessageGenerator.toSnakeCase(""));
-		assertEquals("foo_bar_baz", MessageGenerator.toSnakeCase("FooBarBaz"));
-		assertEquals("foo_bar_baz", MessageGenerator.toSnakeCase("fooBarBaz"));
-		assertEquals("fortran", MessageGenerator.toSnakeCase("FORTRAN"));
-	}
+    @Test
+    public void testToSnakeCase() throws Exception {
+        assertEquals("", MessageGenerator.toSnakeCase(""));
+        assertEquals("foo_bar_baz", MessageGenerator.toSnakeCase("FooBarBaz"));
+        assertEquals("foo_bar_baz", MessageGenerator.toSnakeCase("fooBarBaz"));
+        assertEquals("fortran", MessageGenerator.toSnakeCase("FORTRAN"));
+    }
 
-	@Test
-	public void stripSuffixTest() throws Exception {
-		assertEquals("FooBa", MessageGenerator.stripSuffix("FooBar", "r"));
-		assertEquals("", MessageGenerator.stripSuffix("FooBar", "FooBar"));
-		assertEquals("Foo", MessageGenerator.stripSuffix("FooBar", "Bar"));
-		try {
-			MessageGenerator.stripSuffix("FooBar", "Baz");
-			fail("expected exception");
-		} catch (RuntimeException e) {
-		}
-	}
+    @Test
+    public void stripSuffixTest() throws Exception {
+        assertEquals("FooBa", MessageGenerator.stripSuffix("FooBar", "r"));
+        assertEquals("", MessageGenerator.stripSuffix("FooBar", "FooBar"));
+        assertEquals("Foo", MessageGenerator.stripSuffix("FooBar", "Bar"));
+        try {
+            MessageGenerator.stripSuffix("FooBar", "Baz");
+            fail("expected exception");
+        } catch (RuntimeException e) {
+        }
+    }
+
+    @Test
+    public void testConstants() {
+        assertEquals(MessageGenerator.UNSIGNED_SHORT_MAX, 0xFFFF);
+        assertEquals(MessageGenerator.UNSIGNED_INT_MAX, 0xFFFFFFFFL);
+    }
 }

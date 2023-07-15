@@ -13,48 +13,29 @@
  * */
 package kafka.server
 
-import java.util.Properties
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.TimeUnit
 import kafka.server.ClientQuotaManager.DefaultTags
 import kafka.utils.TestUtils
 import org.apache.kafka.common.config.internals.QuotaConfigs
 import org.apache.kafka.common.internals.KafkaFutureImpl
-import org.apache.kafka.common.message.CreatePartitionsRequestData
-import org.apache.kafka.common.message.CreatePartitionsRequestData.CreatePartitionsTopic
-import org.apache.kafka.common.message.CreateTopicsRequestData
-import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopic
-import org.apache.kafka.common.message.DeleteTopicsRequestData
 import org.apache.kafka.common.metrics.KafkaMetric
-import org.apache.kafka.common.protocol.ApiKeys
-import org.apache.kafka.common.protocol.Errors
-import org.apache.kafka.common.quota.ClientQuotaAlteration
-import org.apache.kafka.common.quota.ClientQuotaEntity
-import org.apache.kafka.common.requests.AlterClientQuotasRequest
-import org.apache.kafka.common.requests.AlterClientQuotasResponse
-import org.apache.kafka.common.requests.CreatePartitionsRequest
-import org.apache.kafka.common.requests.CreatePartitionsResponse
-import org.apache.kafka.common.requests.CreateTopicsRequest
-import org.apache.kafka.common.requests.CreateTopicsResponse
-import org.apache.kafka.common.requests.DeleteTopicsRequest
-import org.apache.kafka.common.requests.DeleteTopicsResponse
-import org.apache.kafka.common.security.auth.AuthenticationContext
-import org.apache.kafka.common.security.auth.KafkaPrincipal
-import org.apache.kafka.common.security.auth.KafkaPrincipalBuilder
+import org.apache.kafka.common.protocol.{ApiKeys, Errors}
+import org.apache.kafka.common.quota.{ClientQuotaAlteration, ClientQuotaEntity}
+import org.apache.kafka.common.requests._
+import org.apache.kafka.common.security.auth.{AuthenticationContext, KafkaPrincipal}
+import org.apache.kafka.common.security.authenticator.DefaultKafkaPrincipalBuilder
 import org.apache.kafka.test.{TestUtils => JTestUtils}
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Assertions.fail
-import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assertions.{assertEquals, assertTrue, fail}
+import org.junit.jupiter.api.{BeforeEach, Test, TestInfo}
 
+import java.util.Properties
+import java.util.concurrent.{ExecutionException, TimeUnit}
 import scala.jdk.CollectionConverters._
 
 object ControllerMutationQuotaTest {
   // Principal used for all client connections. This is updated by each test.
   var principal = KafkaPrincipal.ANONYMOUS
 
-  class TestPrincipalBuilder extends KafkaPrincipalBuilder {
+  class TestPrincipalBuilder extends DefaultKafkaPrincipalBuilder(null, null) {
     override def build(context: AuthenticationContext): KafkaPrincipal = {
       principal
     }
@@ -91,7 +72,6 @@ object ControllerMutationQuotaTest {
 }
 
 class ControllerMutationQuotaTest extends BaseRequestTest {
-
   import ControllerMutationQuotaTest._
 
   override def brokerCount: Int = 1
@@ -108,8 +88,8 @@ class ControllerMutationQuotaTest extends BaseRequestTest {
   }
 
   @BeforeEach
-  override def setUp(): Unit = {
-    super.setUp()
+  override def setUp(testInfo: TestInfo): Unit = {
+    super.setUp(testInfo)
 
     // Define a quota for ThrottledPrincipal
     defineUserQuota(ThrottledPrincipal.getName, Some(ControllerMutationRate))

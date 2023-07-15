@@ -25,49 +25,50 @@ import java.nio.ByteBuffer;
 
 public class DescribeUserScramCredentialsRequest extends AbstractRequest {
 
-	public static class Builder extends AbstractRequest.Builder<DescribeUserScramCredentialsRequest> {
-		private final DescribeUserScramCredentialsRequestData data;
+    public static class Builder extends AbstractRequest.Builder<DescribeUserScramCredentialsRequest> {
+        private final DescribeUserScramCredentialsRequestData data;
 
-		public Builder(DescribeUserScramCredentialsRequestData data) {
-			super(ApiKeys.DESCRIBE_USER_SCRAM_CREDENTIALS);
-			this.data = data;
-		}
+        public Builder(DescribeUserScramCredentialsRequestData data) {
+            super(ApiKeys.DESCRIBE_USER_SCRAM_CREDENTIALS);
+            this.data = data;
+        }
 
-		@Override
-		public DescribeUserScramCredentialsRequest build(short version) {
-			return new DescribeUserScramCredentialsRequest(data, version);
-		}
+        @Override
+        public DescribeUserScramCredentialsRequest build(short version) {
+            return new DescribeUserScramCredentialsRequest(data, version);
+        }
 
-		@Override
-		public String toString() {
-			return data.toString();
-		}
-	}
+        @Override
+        public String toString() {
+            return data.toString();
+        }
+    }
 
-	private final DescribeUserScramCredentialsRequestData data;
-	private final short version;
+    private final DescribeUserScramCredentialsRequestData data;
+    private final short version;
 
-	private DescribeUserScramCredentialsRequest(DescribeUserScramCredentialsRequestData data, short version) {
-		super(ApiKeys.DESCRIBE_USER_SCRAM_CREDENTIALS, version);
-		this.data = data;
-		this.version = version;
-	}
+    private DescribeUserScramCredentialsRequest(DescribeUserScramCredentialsRequestData data, short version) {
+        super(ApiKeys.DESCRIBE_USER_SCRAM_CREDENTIALS, version);
+        this.data = data;
+        this.version = version;
+    }
 
-	public static DescribeUserScramCredentialsRequest parse(ByteBuffer buffer, short version) {
-		return new DescribeUserScramCredentialsRequest(new DescribeUserScramCredentialsRequestData(
-				new ByteBufferAccessor(buffer), version), version);
-	}
+    public static DescribeUserScramCredentialsRequest parse(ByteBuffer buffer, short version) {
+        return new DescribeUserScramCredentialsRequest(new DescribeUserScramCredentialsRequestData(new ByteBufferAccessor(buffer), version), version);
+    }
 
-	@Override
-	public DescribeUserScramCredentialsRequestData data() {
-		return data;
-	}
+    @Override
+    public DescribeUserScramCredentialsRequestData data() {
+        return data;
+    }
 
-	@Override
-	public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-		ApiError apiError = ApiError.fromThrowable(e);
-		return new DescribeUserScramCredentialsResponse(new DescribeUserScramCredentialsResponseData()
-				.setErrorCode(apiError.error().code())
-				.setErrorMessage(apiError.message()));
-	}
+    @Override
+    public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
+        ApiError apiError = ApiError.fromThrowable(e);
+        DescribeUserScramCredentialsResponseData response = new DescribeUserScramCredentialsResponseData().setThrottleTimeMs(throttleTimeMs).setErrorCode(apiError.error().code()).setErrorMessage(apiError.message());
+        for (DescribeUserScramCredentialsRequestData.UserName user : data.users()) {
+            response.results().add(new DescribeUserScramCredentialsResponseData.DescribeUserScramCredentialsResult().setErrorCode(apiError.error().code()).setErrorMessage(apiError.message()));
+        }
+        return new DescribeUserScramCredentialsResponse(response);
+    }
 }

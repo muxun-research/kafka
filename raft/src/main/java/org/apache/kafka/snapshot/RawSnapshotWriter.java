@@ -21,63 +21,55 @@ import org.apache.kafka.common.record.MemoryRecords;
 import org.apache.kafka.common.record.UnalignedMemoryRecords;
 import org.apache.kafka.raft.OffsetAndEpoch;
 
-import java.io.Closeable;
-import java.io.IOException;
-
 /**
  * Interface for writing snapshot as a sequence of records.
  */
-public interface RawSnapshotWriter extends Closeable {
-	/**
-	 * Returns the end offset and epoch for the snapshot.
-	 */
-	OffsetAndEpoch snapshotId();
+public interface RawSnapshotWriter extends AutoCloseable {
+    /**
+     * Returns the end offset and epoch for the snapshot.
+     */
+    OffsetAndEpoch snapshotId();
 
-	/**
-	 * Returns the number of bytes for the snapshot.
-	 * @throws IOException for any IO error while reading the size
-	 */
-	long sizeInBytes() throws IOException;
+    /**
+     * Returns the number of bytes for the snapshot.
+     */
+    long sizeInBytes();
 
-	/**
-	 * Fully appends the memory record set to the snapshot.
-	 * <p>
-	 * If the method returns without an exception the given record set was fully writing the
-	 * snapshot.
-	 * @param records the region to append
-	 * @throws IOException for any IO error during append
-	 */
-	void append(MemoryRecords records) throws IOException;
+    /**
+     * Fully appends the memory record set to the snapshot.
+     * <p>
+     * If the method returns without an exception the given record set was fully writing the
+     * snapshot.
+     * @param records the region to append
+     */
+    void append(MemoryRecords records);
 
-	/**
-	 * Fully appends the memory record set to the snapshot, the difference with {@link RawSnapshotWriter#append(MemoryRecords)}
-	 * is that the record set are fetched from leader by FetchSnapshotRequest, so the records are unaligned.
-	 * <p>
-	 * If the method returns without an exception the given records was fully writing the
-	 * snapshot.
-	 * @param records the region to append
-	 * @throws IOException for any IO error during append
-	 */
-	void append(UnalignedMemoryRecords records) throws IOException;
+    /**
+     * Fully appends the memory record set to the snapshot, the difference with {@link RawSnapshotWriter#append(MemoryRecords)}
+     * is that the record set are fetched from leader by FetchSnapshotRequest, so the records are unaligned.
+     * <p>
+     * If the method returns without an exception the given records was fully writing the
+     * snapshot.
+     * @param records the region to append
+     */
+    void append(UnalignedMemoryRecords records);
 
-	/**
-	 * Returns true if the snapshot has been frozen, otherwise false is returned.
-	 * <p>
-	 * Modification to the snapshot are not allowed once it is frozen.
-	 */
-	boolean isFrozen();
+    /**
+     * Returns true if the snapshot has been frozen, otherwise false is returned.
+     * <p>
+     * Modification to the snapshot are not allowed once it is frozen.
+     */
+    boolean isFrozen();
 
-	/**
-	 * Freezes the snapshot and marking it as immutable.
-	 * @throws IOException for any IO error during freezing
-	 */
-	void freeze() throws IOException;
+    /**
+     * Freezes the snapshot and marking it as immutable.
+     */
+    void freeze();
 
-	/**
-	 * Closes the snapshot writer.
-	 * <p>
-	 * If close is called without first calling freeze the snapshot is aborted.
-	 * @throws IOException for any IO error during close
-	 */
-	void close() throws IOException;
+    /**
+     * Closes the snapshot writer.
+     * <p>
+     * If close is called without first calling freeze the snapshot is aborted.
+     */
+    void close();
 }

@@ -16,23 +16,22 @@
  */
 package org.apache.kafka.streams.scala
 
-import java.util.Properties
-import java.util.regex.Pattern
-import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api._
-import org.apache.kafka.streams.scala.serialization.{Serdes => NewSerdes}
-import org.apache.kafka.streams.{KafkaStreams, KeyValue, StreamsConfig}
-import org.apache.kafka.streams.scala.kstream._
-import org.apache.kafka.streams.integration.utils.{EmbeddedKafkaCluster, IntegrationTestUtils}
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.clients.producer.ProducerConfig
-import org.apache.kafka.common.utils.{MockTime, Utils}
-import ImplicitConversions._
 import org.apache.kafka.common.serialization.{LongDeserializer, StringDeserializer, StringSerializer}
+import org.apache.kafka.common.utils.{MockTime, Utils}
+import org.apache.kafka.streams.integration.utils.{EmbeddedKafkaCluster, IntegrationTestUtils}
+import org.apache.kafka.streams.scala.ImplicitConversions._
+import org.apache.kafka.streams.scala.kstream._
+import org.apache.kafka.streams.scala.serialization.{Serdes => NewSerdes}
+import org.apache.kafka.streams.{KafkaStreams, KeyValue, StreamsConfig}
 import org.apache.kafka.test.TestUtils
-import org.junit.jupiter.api.Tag
+import org.junit.jupiter.api.Assertions._
+import org.junit.jupiter.api._
 
 import java.io.File
+import java.util.Properties
+import java.util.regex.Pattern
 
 /**
  * Test suite that does a classic word count example.
@@ -135,13 +134,9 @@ class WordCountTest extends WordCountTestData {
   @Test
   def testShouldCountWordsJava(): Unit = {
 
+    import org.apache.kafka.streams.kstream.{KGroupedStream => KGroupedStreamJ, KStream => KStreamJ, KTable => KTableJ, _}
     import org.apache.kafka.streams.{KafkaStreams => KafkaStreamsJ, StreamsBuilder => StreamsBuilderJ}
-    import org.apache.kafka.streams.kstream.{
-      KTable => KTableJ,
-      KStream => KStreamJ,
-      KGroupedStream => KGroupedStreamJ,
-      _
-    }
+
     import scala.jdk.CollectionConverters._
 
     val streamsConfiguration = getStreamsConfiguration()
@@ -154,7 +149,7 @@ class WordCountTest extends WordCountTestData {
     val pattern = Pattern.compile("\\W+", Pattern.UNICODE_CHARACTER_CLASS)
 
     val splits: KStreamJ[String, String] = textLines.flatMapValues { line =>
-      pattern.split(line.toLowerCase).toIterable.asJava
+      pattern.split(line.toLowerCase).toBuffer.asJava
     }
 
     val grouped: KGroupedStreamJ[String, String] = splits.groupBy { (_, v) =>

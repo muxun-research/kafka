@@ -21,11 +21,11 @@ import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.streams.KeyValueTimestamp;
 import org.apache.kafka.streams.StreamsBuilder;
+import org.apache.kafka.streams.TestInputTopic;
 import org.apache.kafka.streams.TopologyTestDriver;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KStream;
-import org.apache.kafka.streams.TestInputTopic;
-import org.apache.kafka.test.MockProcessorSupplier;
+import org.apache.kafka.test.MockApiProcessorSupplier;
 import org.apache.kafka.test.StreamsTestUtils;
 import org.junit.Test;
 
@@ -55,9 +55,8 @@ public class KStreamSelectKeyTest {
             new KeyValueTimestamp<>("THREE", 3, 0)};
         final int[] expectedValues = new int[]{1, 2, 3};
 
-        final KStream<String, Integer>  stream =
-            builder.stream(topicName, Consumed.with(Serdes.String(), Serdes.Integer()));
-        final MockProcessorSupplier<String, Integer> supplier = new MockProcessorSupplier<>();
+        final KStream<String, Integer> stream = builder.stream(topicName, Consumed.with(Serdes.String(), Serdes.Integer()));
+        final MockApiProcessorSupplier<String, Integer, Void, Void> supplier = new MockApiProcessorSupplier<>();
         stream.selectKey((key, value) -> keyMap.get(value)).process(supplier);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
@@ -72,7 +71,6 @@ public class KStreamSelectKeyTest {
         for (int i = 0; i < expected.length; i++) {
 			assertEquals(expected[i], supplier.theCapturedProcessor().processed().get(i));
         }
-
     }
 
     @Test

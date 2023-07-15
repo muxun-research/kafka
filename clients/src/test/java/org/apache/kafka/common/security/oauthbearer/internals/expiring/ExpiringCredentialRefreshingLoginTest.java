@@ -26,27 +26,19 @@ import org.apache.kafka.common.utils.Time;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
+import org.mockito.internal.util.MockUtil;
 
 import javax.security.auth.Subject;
 import javax.security.auth.login.AppConfigurationEntry;
 import javax.security.auth.login.Configuration;
 import javax.security.auth.login.LoginContext;
 import javax.security.auth.login.LoginException;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.inOrder;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 public class ExpiringCredentialRefreshingLoginTest {
 	private static final Configuration EMPTY_WILDCARD_CONFIGURATION;
@@ -188,8 +180,7 @@ public class ExpiringCredentialRefreshingLoginTest {
             super("contextName", null, null, EMPTY_WILDCARD_CONFIGURATION);
             this.testExpiringCredentialRefreshingLogin = Objects.requireNonNull(testExpiringCredentialRefreshingLogin);
             // sanity check to make sure it is likely a mock
-            if (Objects.requireNonNull(mockLoginContext).getClass().equals(LoginContext.class)
-                    || mockLoginContext.getClass().equals(getClass()))
+            if (!MockUtil.isMock(mockLoginContext))
                 throw new IllegalArgumentException();
             this.mockLoginContext = mockLoginContext;
         }
@@ -233,8 +224,7 @@ public class ExpiringCredentialRefreshingLoginTest {
         public void configure(LoginContext mockLoginContext,
                 TestExpiringCredentialRefreshingLogin testExpiringCredentialRefreshingLogin) throws LoginException {
             // sanity check to make sure it is likely a mock
-            if (Objects.requireNonNull(mockLoginContext).getClass().equals(LoginContext.class)
-                    || mockLoginContext.getClass().equals(TestLoginContext.class))
+            if (!MockUtil.isMock(mockLoginContext))
                 throw new IllegalArgumentException();
             this.testLoginContext = new TestLoginContext(Objects.requireNonNull(testExpiringCredentialRefreshingLogin),
                     mockLoginContext);
@@ -754,7 +744,7 @@ public class ExpiringCredentialRefreshingLoginTest {
             int numWaiters) {
         List<KafkaFutureImpl<Long>> retvalWaiters = new ArrayList<>(numWaiters);
         for (int i = 1; i <= numWaiters; ++i) {
-            KafkaFutureImpl<Long> waiter = new KafkaFutureImpl<Long>();
+            KafkaFutureImpl<Long> waiter = new KafkaFutureImpl<>();
             mockScheduler.addWaiter(i * refreshEveryMillis, waiter);
             retvalWaiters.add(waiter);
         }

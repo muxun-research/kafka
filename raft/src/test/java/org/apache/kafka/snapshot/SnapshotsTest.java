@@ -29,98 +29,84 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 final public class SnapshotsTest {
 
-	@Test
-	public void testValidSnapshotFilename() {
-		OffsetAndEpoch snapshotId = new OffsetAndEpoch(
-				TestUtils.RANDOM.nextInt(Integer.MAX_VALUE),
-				TestUtils.RANDOM.nextInt(Integer.MAX_VALUE)
-		);
-		Path path = Snapshots.snapshotPath(TestUtils.tempDirectory().toPath(), snapshotId);
-		SnapshotPath snapshotPath = Snapshots.parse(path).get();
+    @Test
+    public void testValidSnapshotFilename() {
+        OffsetAndEpoch snapshotId = new OffsetAndEpoch(TestUtils.RANDOM.nextInt(Integer.MAX_VALUE), TestUtils.RANDOM.nextInt(Integer.MAX_VALUE));
+        Path path = Snapshots.snapshotPath(TestUtils.tempDirectory().toPath(), snapshotId);
+        SnapshotPath snapshotPath = Snapshots.parse(path).get();
 
-		assertEquals(path, snapshotPath.path);
-		assertEquals(snapshotId, snapshotPath.snapshotId);
-		assertFalse(snapshotPath.partial);
-		assertFalse(snapshotPath.deleted);
-	}
+        assertEquals(path, snapshotPath.path);
+        assertEquals(snapshotId, snapshotPath.snapshotId);
+        assertFalse(snapshotPath.partial);
+        assertFalse(snapshotPath.deleted);
+    }
 
-	@Test
-	public void testValidPartialSnapshotFilename() throws IOException {
-		OffsetAndEpoch snapshotId = new OffsetAndEpoch(
-				TestUtils.RANDOM.nextInt(Integer.MAX_VALUE),
-				TestUtils.RANDOM.nextInt(Integer.MAX_VALUE)
-		);
+    @Test
+    public void testValidPartialSnapshotFilename() throws IOException {
+        OffsetAndEpoch snapshotId = new OffsetAndEpoch(TestUtils.RANDOM.nextInt(Integer.MAX_VALUE), TestUtils.RANDOM.nextInt(Integer.MAX_VALUE));
 
-		Path path = Snapshots.createTempFile(TestUtils.tempDirectory().toPath(), snapshotId);
-		// Delete it as we only need the path for testing
-		Files.delete(path);
+        Path path = Snapshots.createTempFile(TestUtils.tempDirectory().toPath(), snapshotId);
+        // Delete it as we only need the path for testing
+        Files.delete(path);
 
-		SnapshotPath snapshotPath = Snapshots.parse(path).get();
+        SnapshotPath snapshotPath = Snapshots.parse(path).get();
 
-		assertEquals(path, snapshotPath.path);
-		assertEquals(snapshotId, snapshotPath.snapshotId);
-		assertTrue(snapshotPath.partial);
-	}
+        assertEquals(path, snapshotPath.path);
+        assertEquals(snapshotId, snapshotPath.snapshotId);
+        assertTrue(snapshotPath.partial);
+    }
 
-	@Test
-	public void testValidDeletedSnapshotFilename() {
-		OffsetAndEpoch snapshotId = new OffsetAndEpoch(
-				TestUtils.RANDOM.nextInt(Integer.MAX_VALUE),
-				TestUtils.RANDOM.nextInt(Integer.MAX_VALUE)
-		);
-		Path path = Snapshots.snapshotPath(TestUtils.tempDirectory().toPath(), snapshotId);
-		Path deletedPath = Snapshots.deleteRename(path, snapshotId);
-		SnapshotPath snapshotPath = Snapshots.parse(deletedPath).get();
+    @Test
+    public void testValidDeletedSnapshotFilename() {
+        OffsetAndEpoch snapshotId = new OffsetAndEpoch(TestUtils.RANDOM.nextInt(Integer.MAX_VALUE), TestUtils.RANDOM.nextInt(Integer.MAX_VALUE));
+        Path path = Snapshots.snapshotPath(TestUtils.tempDirectory().toPath(), snapshotId);
+        Path deletedPath = Snapshots.deleteRenamePath(path, snapshotId);
+        SnapshotPath snapshotPath = Snapshots.parse(deletedPath).get();
 
-		assertEquals(snapshotId, snapshotPath.snapshotId);
-		assertTrue(snapshotPath.deleted);
-	}
+        assertEquals(snapshotId, snapshotPath.snapshotId);
+        assertTrue(snapshotPath.deleted);
+    }
 
-	@Test
-	public void testInvalidSnapshotFilenames() {
-		Path root = FileSystems.getDefault().getPath("/");
-		// Doesn't parse log files
-		assertEquals(Optional.empty(), Snapshots.parse(root.resolve("00000000000000000000.log")));
-		// Doesn't parse producer snapshots
-		assertEquals(Optional.empty(), Snapshots.parse(root.resolve("00000000000000000000.snapshot")));
-		// Doesn't parse offset indexes
-		assertEquals(Optional.empty(), Snapshots.parse(root.resolve("00000000000000000000.index")));
-		assertEquals(Optional.empty(), Snapshots.parse(root.resolve("00000000000000000000.timeindex")));
-		// Leader epoch checkpoint
-		assertEquals(Optional.empty(), Snapshots.parse(root.resolve("leader-epoch-checkpoint")));
-		// partition metadata
-		assertEquals(Optional.empty(), Snapshots.parse(root.resolve("partition.metadata")));
-	}
+    @Test
+    public void testInvalidSnapshotFilenames() {
+        Path root = FileSystems.getDefault().getPath("/");
+        // Doesn't parse log files
+        assertEquals(Optional.empty(), Snapshots.parse(root.resolve("00000000000000000000.log")));
+        // Doesn't parse producer snapshots
+        assertEquals(Optional.empty(), Snapshots.parse(root.resolve("00000000000000000000.snapshot")));
+        // Doesn't parse offset indexes
+        assertEquals(Optional.empty(), Snapshots.parse(root.resolve("00000000000000000000.index")));
+        assertEquals(Optional.empty(), Snapshots.parse(root.resolve("00000000000000000000.timeindex")));
+        // Leader epoch checkpoint
+        assertEquals(Optional.empty(), Snapshots.parse(root.resolve("leader-epoch-checkpoint")));
+        // partition metadata
+        assertEquals(Optional.empty(), Snapshots.parse(root.resolve("partition.metadata")));
+    }
 
-	@ParameterizedTest
-	@ValueSource(booleans = {true, false})
-	public void testDeleteSnapshot(boolean renameBeforeDeleting) throws IOException {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testDeleteSnapshot(boolean renameBeforeDeleting) throws IOException {
 
-		OffsetAndEpoch snapshotId = new OffsetAndEpoch(
-				TestUtils.RANDOM.nextInt(Integer.MAX_VALUE),
-				TestUtils.RANDOM.nextInt(Integer.MAX_VALUE)
-		);
+        OffsetAndEpoch snapshotId = new OffsetAndEpoch(TestUtils.RANDOM.nextInt(Integer.MAX_VALUE), TestUtils.RANDOM.nextInt(Integer.MAX_VALUE));
 
-		Path logDirPath = TestUtils.tempDirectory().toPath();
-		try (FileRawSnapshotWriter snapshot = FileRawSnapshotWriter.create(logDirPath, snapshotId, Optional.empty())) {
-			snapshot.freeze();
+        Path logDirPath = TestUtils.tempDirectory().toPath();
+        try (FileRawSnapshotWriter snapshot = FileRawSnapshotWriter.create(logDirPath, snapshotId, Optional.empty())) {
+            snapshot.freeze();
 
-			Path snapshotPath = Snapshots.snapshotPath(logDirPath, snapshotId);
-			assertTrue(Files.exists(snapshotPath));
+            Path snapshotPath = Snapshots.snapshotPath(logDirPath, snapshotId);
+            assertTrue(Files.exists(snapshotPath));
 
-			if (renameBeforeDeleting)
-				// rename snapshot before deleting
-				Utils.atomicMoveWithFallback(snapshotPath, Snapshots.deleteRename(snapshotPath, snapshotId), false);
+            if (renameBeforeDeleting)
+                // rename snapshot before deleting
+                Utils.atomicMoveWithFallback(snapshotPath, Snapshots.deleteRenamePath(snapshotPath, snapshotId), false);
 
-			assertTrue(Snapshots.deleteSnapshotIfExists(logDirPath, snapshot.snapshotId()));
-			assertFalse(Files.exists(snapshotPath));
-			assertFalse(Files.exists(Snapshots.deleteRename(snapshotPath, snapshotId)));
-		}
-	}
+            assertTrue(Snapshots.deleteIfExists(logDirPath, snapshot.snapshotId()));
+            assertFalse(Files.exists(snapshotPath));
+            assertFalse(Files.exists(Snapshots.deleteRenamePath(snapshotPath, snapshotId)));
+        }
+    }
 }

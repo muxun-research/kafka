@@ -73,6 +73,7 @@
     {
       "name": "SupportedFeatures",
       "type": "[]SupportedFeatureKey",
+      "ignorable": true,
       "versions": "3+",
       "tag": 0,
       "taggedVersions": "3+",
@@ -112,6 +113,7 @@
     {
       "name": "FinalizedFeatures",
       "type": "[]FinalizedFeatureKey",
+      "ignorable": true,
       "versions": "3+",
       "tag": 2,
       "taggedVersions": "3+",
@@ -137,6 +139,16 @@
           "about": "The cluster-wide finalized min version level for the feature."
         }
       ]
+    },
+    {
+      "name": "ZkMigrationReady",
+      "type": "bool",
+      "versions": "3+",
+      "taggedVersions": "3+",
+      "tag": 3,
+      "ignorable": true,
+      "default": "false",
+      "about": "Set by a KRaft controller if the required configurations for ZK migration are present"
     }
   ]
 }

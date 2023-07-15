@@ -20,80 +20,87 @@ package org.apache.kafka.streams.kstream;
 import org.apache.kafka.streams.errors.TopologyException;
 import org.apache.kafka.streams.state.KeyValueBytesStoreSupplier;
 import org.apache.kafka.streams.state.SessionBytesStoreSupplier;
+import org.apache.kafka.streams.state.Stores;
 import org.apache.kafka.streams.state.WindowBytesStoreSupplier;
 import org.junit.Test;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThrows;
 
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
+
 public class MaterializedTest {
 
-	@Test
-	public void shouldAllowValidTopicNamesAsStoreName() {
-		Materialized.as("valid-name");
-		Materialized.as("valid.name");
-		Materialized.as("valid_name");
-	}
+    @Test
+    public void shouldAllowValidTopicNamesAsStoreName() {
+        Materialized.as("valid-name");
+        Materialized.as("valid.name");
+        Materialized.as("valid_name");
+    }
 
-	@Test
+    @Test
     public void shouldNotAllowInvalidTopicNames() {
-		final String invalidName = "not:valid";
-		final TopologyException e = assertThrows(TopologyException.class,
-				() -> Materialized.as(invalidName));
+        final String invalidName = "not:valid";
+        final TopologyException e = assertThrows(TopologyException.class, () -> Materialized.as(invalidName));
 
-		assertEquals(e.getMessage(), "Invalid topology: Name \"" + invalidName +
-				"\" is illegal, it contains a character other than " + "ASCII alphanumerics, '.', '_' and '-'");
-	}
+        assertEquals(e.getMessage(), "Invalid topology: Name \"" + invalidName + "\" is illegal, it contains a character other than " + "ASCII alphanumerics, '.', '_' and '-'");
+    }
 
-	@Test
+    @Test
     public void shouldThrowNullPointerIfWindowBytesStoreSupplierIsNull() {
-		final NullPointerException e = assertThrows(NullPointerException.class,
-				() -> Materialized.as((WindowBytesStoreSupplier) null));
+        final NullPointerException e = assertThrows(NullPointerException.class, () -> Materialized.as((WindowBytesStoreSupplier) null));
 
-		assertEquals(e.getMessage(), "supplier can't be null");
-	}
+        assertEquals(e.getMessage(), "supplier can't be null");
+    }
 
-	@Test
-	public void shouldThrowNullPointerIfKeyValueBytesStoreSupplierIsNull() {
-		final NullPointerException e = assertThrows(NullPointerException.class,
-				() -> Materialized.as((KeyValueBytesStoreSupplier) null));
+    @Test
+    public void shouldThrowNullPointerIfKeyValueBytesStoreSupplierIsNull() {
+        final NullPointerException e = assertThrows(NullPointerException.class, () -> Materialized.as((KeyValueBytesStoreSupplier) null));
 
-		assertEquals(e.getMessage(), "supplier can't be null");
-	}
+        assertEquals(e.getMessage(), "supplier can't be null");
+    }
 
-	@Test
-	public void shouldThrowNullPointerIfSessionBytesStoreSupplierIsNull() {
-		final NullPointerException e = assertThrows(NullPointerException.class,
-				() -> Materialized.as((SessionBytesStoreSupplier) null));
+    @Test
+    public void shouldThrowNullPointerIfStoreTypeIsNull() {
+        final NullPointerException e = assertThrows(NullPointerException.class, () -> Materialized.as((Materialized.StoreType) null));
 
-		assertEquals(e.getMessage(), "supplier can't be null");
-	}
+        assertEquals(e.getMessage(), "store type can't be null");
+    }
 
-	@Test
-	public void shouldThrowIllegalArgumentExceptionIfRetentionIsNegative() {
-		final IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-				() -> Materialized.as("valid-name").withRetention(Duration.of(-1, ChronoUnit.DAYS)));
+    @Test
+    public void shouldThrowNullPointerIfSessionBytesStoreSupplierIsNull() {
+        final NullPointerException e = assertThrows(NullPointerException.class, () -> Materialized.as((SessionBytesStoreSupplier) null));
 
-		assertEquals(e.getMessage(), "Retention must not be negative.");
-	}
+        assertEquals(e.getMessage(), "supplier can't be null");
+    }
 
-	@Test
-	public void shouldThrowTopologyExceptionIfStoreNameExceedsMaxAllowedLength() {
-		final StringBuffer invalidStoreNameBuffer = new StringBuffer();
-		final int maxNameLength = 249;
+    @Test
+    public void shouldThrowIllegalArgumentExceptionIfRetentionIsNegative() {
+        final IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> Materialized.as("valid-name").withRetention(Duration.of(-1, ChronoUnit.DAYS)));
 
-		for (int i = 0; i < maxNameLength + 1; i++) {
-			invalidStoreNameBuffer.append('a');
-		}
+        assertEquals(e.getMessage(), "Retention must not be negative.");
+    }
 
-		final String invalidStoreName = invalidStoreNameBuffer.toString();
+    @Test
+    public void shouldThrowIllegalArgumentExceptionIfStoreSupplierAndStoreTypeBothSet() {
+        final IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> Materialized.as(Stores.persistentKeyValueStore("test")).withStoreType(Materialized.StoreType.ROCKS_DB));
 
-		final TopologyException e = assertThrows(TopologyException.class,
-				() -> Materialized.as(invalidStoreName));
-		assertEquals(e.getMessage(), "Invalid topology: Name is illegal, it can't be longer than " + maxNameLength +
-				" characters, name: " + invalidStoreName);
-	}
+        assertEquals(e.getMessage(), "Cannot set store type when store supplier is pre-configured.");
+    }
+
+    @Test
+    public void shouldThrowTopologyExceptionIfStoreNameExceedsMaxAllowedLength() {
+        final StringBuffer invalidStoreNameBuffer = new StringBuffer();
+        final int maxNameLength = 249;
+
+        for (int i = 0; i < maxNameLength + 1; i++) {
+            invalidStoreNameBuffer.append('a');
+        }
+
+        final String invalidStoreName = invalidStoreNameBuffer.toString();
+
+        final TopologyException e = assertThrows(TopologyException.class, () -> Materialized.as(invalidStoreName));
+        assertEquals(e.getMessage(), "Invalid topology: Name is illegal, it can't be longer than " + maxNameLength + " characters, name: " + invalidStoreName);
+    }
 }

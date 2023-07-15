@@ -27,42 +27,39 @@ import java.util.Collections;
 import java.util.Set;
 
 /**
- * Serialize Jackson JsonNode tree model objects to UTF-8 JSON. Using the tree model allows handling arbitrarily
+ * Serialize Jackson {@link JsonNode} tree model objects to UTF-8 JSON. Using the tree model allows handling arbitrarily
  * structured data without corresponding Java classes. This serializer also supports Connect schemas.
  */
 public class JsonSerializer implements Serializer<JsonNode> {
-	private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
-	/**
-	 * Default constructor needed by Kafka
-	 */
-	public JsonSerializer() {
-		this(Collections.emptySet(), JsonNodeFactory.withExactBigDecimals(true));
-	}
+    /**
+     * Default constructor needed by Kafka
+     */
+    public JsonSerializer() {
+        this(Collections.emptySet(), JsonNodeFactory.withExactBigDecimals(true));
+    }
 
-	/**
-	 * A constructor that additionally specifies some {@link SerializationFeature}
-	 * for the serializer
-	 * @param serializationFeatures the specified serialization features
-	 * @param jsonNodeFactory       the json node factory to use.
-	 */
-	JsonSerializer(
-			final Set<SerializationFeature> serializationFeatures,
-			final JsonNodeFactory jsonNodeFactory
-	) {
-		serializationFeatures.forEach(objectMapper::enable);
-		objectMapper.setNodeFactory(jsonNodeFactory);
-	}
+    /**
+     * A constructor that additionally specifies some {@link SerializationFeature}s
+     * for the serializer
+     * @param serializationFeatures the specified serialization features
+     * @param jsonNodeFactory       the json node factory to use.
+     */
+    JsonSerializer(final Set<SerializationFeature> serializationFeatures, final JsonNodeFactory jsonNodeFactory) {
+        serializationFeatures.forEach(objectMapper::enable);
+        objectMapper.setNodeFactory(jsonNodeFactory);
+    }
 
-	@Override
-	public byte[] serialize(String topic, JsonNode data) {
-		if (data == null)
-			return null;
+    @Override
+    public byte[] serialize(String topic, JsonNode data) {
+        if (data == null)
+            return null;
 
-		try {
-			return objectMapper.writeValueAsBytes(data);
-		} catch (Exception e) {
-			throw new SerializationException("Error serializing JSON message", e);
-		}
-	}
+        try {
+            return objectMapper.writeValueAsBytes(data);
+        } catch (Exception e) {
+            throw new SerializationException("Error serializing JSON message", e);
+        }
+    }
 }

@@ -21,42 +21,40 @@ import org.apache.kafka.common.requests.FindCoordinatorRequest;
 import java.util.Objects;
 
 public class CoordinatorKey {
-	public final String idValue;
-	public final FindCoordinatorRequest.CoordinatorType type;
+    public final String idValue;
+    public final FindCoordinatorRequest.CoordinatorType type;
 
-	private CoordinatorKey(String idValue, FindCoordinatorRequest.CoordinatorType type) {
-		this.idValue = idValue;
-		this.type = type;
-	}
+    private CoordinatorKey(FindCoordinatorRequest.CoordinatorType type, String idValue) {
+        this.idValue = idValue;
+        this.type = type;
+    }
 
-	@Override
-	public boolean equals(Object o) {
-		if (this == o) return true;
-		if (o == null || getClass() != o.getClass()) return false;
-		CoordinatorKey that = (CoordinatorKey) o;
-		return Objects.equals(idValue, that.idValue) &&
-				type == that.type;
-	}
+    @Override
+    public boolean equals(Object o) {
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
+        CoordinatorKey that = (CoordinatorKey) o;
+        return Objects.equals(idValue, that.idValue) && type == that.type;
+    }
 
-	@Override
-	public int hashCode() {
-		return Objects.hash(idValue, type);
-	}
+    @Override
+    public int hashCode() {
+        return Objects.hash(idValue, type);
+    }
 
-	@Override
-	public String toString() {
-		return "CoordinatorKey(" +
-				"idValue='" + idValue + '\'' +
-				", type=" + type +
-				')';
-	}
+    @Override
+    public String toString() {
+        return "CoordinatorKey(" + "idValue='" + idValue + '\'' + ", type=" + type + ')';
+    }
 
-	public static CoordinatorKey byGroupId(String groupId) {
-		return new CoordinatorKey(groupId, FindCoordinatorRequest.CoordinatorType.GROUP);
-	}
+    public static CoordinatorKey byGroupId(String groupId) {
+        return new CoordinatorKey(FindCoordinatorRequest.CoordinatorType.GROUP, groupId);
+    }
 
-	public static CoordinatorKey byTransactionalId(String transactionalId) {
-		return new CoordinatorKey(transactionalId, FindCoordinatorRequest.CoordinatorType.TRANSACTION);
-	}
+    public static CoordinatorKey byTransactionalId(String transactionalId) {
+        return new CoordinatorKey(FindCoordinatorRequest.CoordinatorType.TRANSACTION, transactionalId);
+    }
 
 }

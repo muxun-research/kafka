@@ -24,19 +24,11 @@ import org.apache.kafka.common.utils.Time;
 import org.junit.jupiter.api.Test;
 
 import javax.security.auth.callback.Callback;
-import javax.security.auth.callback.UnsupportedCallbackException;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.Base64;
+import java.util.*;
 import java.util.Base64.Encoder;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class OAuthBearerUnsecuredValidatorCallbackHandlerTest {
     private static final String UNSECURED_JWT_HEADER_JSON = "{" + claimOrHeaderText("alg", "none") + "}";
@@ -84,18 +76,16 @@ public class OAuthBearerUnsecuredValidatorCallbackHandlerTest {
     }
 
     @Test
-    public void badOrMissingPrincipal() throws IOException, UnsupportedCallbackException {
-        for (boolean exists : new boolean[] {true, false}) {
-            String claimsJson = "{" + EXPIRATION_TIME_CLAIM_TEXT + (exists ? comma(BAD_PRINCIPAL_CLAIM_TEXT) : "")
-                    + "}";
+    public void badOrMissingPrincipal() {
+        for (boolean exists : new boolean[]{true, false}) {
+            String claimsJson = "{" + EXPIRATION_TIME_CLAIM_TEXT + (exists ? comma(BAD_PRINCIPAL_CLAIM_TEXT) : "") + "}";
             confirmFailsValidation(UNSECURED_JWT_HEADER_JSON, claimsJson, MODULE_OPTIONS_MAP_NO_SCOPE_REQUIRED);
         }
     }
 
     @Test
-    public void tooEarlyExpirationTime() throws IOException, UnsupportedCallbackException {
-        String claimsJson = "{" + PRINCIPAL_CLAIM_TEXT + comma(ISSUED_AT_CLAIM_TEXT)
-                + comma(TOO_EARLY_EXPIRATION_TIME_CLAIM_TEXT) + "}";
+    public void tooEarlyExpirationTime() {
+        String claimsJson = "{" + PRINCIPAL_CLAIM_TEXT + comma(ISSUED_AT_CLAIM_TEXT) + comma(TOO_EARLY_EXPIRATION_TIME_CLAIM_TEXT) + "}";
         confirmFailsValidation(UNSECURED_JWT_HEADER_JSON, claimsJson, MODULE_OPTIONS_MAP_NO_SCOPE_REQUIRED);
     }
 
@@ -109,15 +99,12 @@ public class OAuthBearerUnsecuredValidatorCallbackHandlerTest {
     }
 
     @Test
-    public void missingRequiredScope() throws IOException, UnsupportedCallbackException {
+    public void missingRequiredScope() {
         String claimsJson = "{" + SUB_CLAIM_TEXT + comma(EXPIRATION_TIME_CLAIM_TEXT) + comma(SCOPE_CLAIM_TEXT) + "}";
-        confirmFailsValidation(UNSECURED_JWT_HEADER_JSON, claimsJson, MODULE_OPTIONS_MAP_REQUIRE_ADDITIONAL_SCOPE,
-                "[scope1, scope2]");
+        confirmFailsValidation(UNSECURED_JWT_HEADER_JSON, claimsJson, MODULE_OPTIONS_MAP_REQUIRE_ADDITIONAL_SCOPE, "[scope1, scope2]");
     }
 
-    private static void confirmFailsValidation(String headerJson, String claimsJson,
-            Map<String, String> moduleOptionsMap) throws OAuthBearerConfigException, OAuthBearerIllegalTokenException,
-            IOException, UnsupportedCallbackException {
+    private static void confirmFailsValidation(String headerJson, String claimsJson, Map<String, String> moduleOptionsMap) throws OAuthBearerConfigException, OAuthBearerIllegalTokenException {
         confirmFailsValidation(headerJson, claimsJson, moduleOptionsMap, null);
     }
 

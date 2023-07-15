@@ -29,236 +29,276 @@ import org.apache.kafka.raft.OffsetAndEpoch;
 import org.apache.kafka.raft.QuorumState;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import java.io.IOException;
-import java.util.Collections;
-import java.util.OptionalInt;
-import java.util.OptionalLong;
-import java.util.Random;
-import java.util.Set;
+import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class KafkaRaftMetricsTest {
 
-	private final int localId = 0;
-	private final int electionTimeoutMs = 5000;
-	private final int fetchTimeoutMs = 10000;
+    private final int localId = 0;
+    private final int electionTimeoutMs = 5000;
+    private final int fetchTimeoutMs = 10000;
 
-	private final Time time = new MockTime();
-	private final Metrics metrics = new Metrics(time);
-	private final Random random = new Random(1);
-	private KafkaRaftMetrics raftMetrics;
+    private final Time time = new MockTime();
+    private final Metrics metrics = new Metrics(time);
+    private final Random random = new Random(1);
+    private KafkaRaftMetrics raftMetrics;
 
-	@AfterEach
-	public void tearDown() {
-		if (raftMetrics != null) {
-			raftMetrics.close();
-		}
-		metrics.close();
-	}
+    private BatchAccumulator<?> accumulator = Mockito.mock(BatchAccumulator.class);
 
-	private QuorumState buildQuorumState(Set<Integer> voters) {
-		return new QuorumState(
-				OptionalInt.of(localId),
-				voters,
-				electionTimeoutMs,
-				fetchTimeoutMs,
-				new MockQuorumStateStore(),
-				time,
-				new LogContext("kafka-raft-metrics-test"),
-				random
-		);
-	}
+    @AfterEach
+    public void tearDown() {
+        if (raftMetrics != null) {
+            raftMetrics.close();
+        }
+        metrics.close();
+    }
 
-	@Test
-	public void shouldRecordVoterQuorumState() throws IOException {
-		QuorumState state = buildQuorumState(Utils.mkSet(localId, 1, 2));
+    private QuorumState buildQuorumState(Set<Integer> voters) {
+        return new QuorumState(OptionalInt.of(localId), voters, electionTimeoutMs, fetchTimeoutMs, new MockQuorumStateStore(), time, new LogContext("kafka-raft-metrics-test"), random);
+    }
 
-		state.initialize(new OffsetAndEpoch(0L, 0));
-		raftMetrics = new KafkaRaftMetrics(metrics, "raft", state);
+    @Test
+    public void shouldRecordVoterQuorumState() throws IOException {
+        QuorumState state = buildQuorumState(Utils.mkSet(localId, 1, 2));
 
-		assertEquals("unattached", getMetric(metrics, "current-state").metricValue());
-		assertEquals((double) -1L, getMetric(metrics, "current-leader").metricValue());
-		assertEquals((double) -1L, getMetric(metrics, "current-vote").metricValue());
-		assertEquals((double) 0, getMetric(metrics, "current-epoch").metricValue());
-		assertEquals((double) -1L, getMetric(metrics, "high-watermark").metricValue());
+        state.initialize(new OffsetAndEpoch(0L, 0));
+        raftMetrics = new KafkaRaftMetrics(metrics, "raft", state);
 
-		state.transitionToCandidate();
-		assertEquals("candidate", getMetric(metrics, "current-state").metricValue());
-		assertEquals((double) -1L, getMetric(metrics, "current-leader").metricValue());
-		assertEquals((double) localId, getMetric(metrics, "current-vote").metricValue());
-		assertEquals((double) 1, getMetric(metrics, "current-epoch").metricValue());
-		assertEquals((double) -1L, getMetric(metrics, "high-watermark").metricValue());
+        assertEquals("unattached", getMetric(metrics, "current-state").metricValue());
+        assertEquals((double) -1L, getMetric(metrics, "current-leader").metricValue());
+        assertEquals((double) -1L, getMetric(metrics, "current-vote").metricValue());
+        assertEquals((double) 0, getMetric(metrics, "current-epoch").metricValue());
+        assertEquals((double) -1L, getMetric(metrics, "high-watermark").metricValue());
 
-		state.candidateStateOrThrow().recordGrantedVote(1);
-		state.transitionToLeader(2L);
-		assertEquals("leader", getMetric(metrics, "current-state").metricValue());
-		assertEquals((double) localId, getMetric(metrics, "current-leader").metricValue());
-		assertEquals((double) localId, getMetric(metrics, "current-vote").metricValue());
-		assertEquals((double) 1, getMetric(metrics, "current-epoch").metricValue());
-		assertEquals((double) -1L, getMetric(metrics, "high-watermark").metricValue());
+        state.transitionToCandidate();
+        assertEquals("candidate", getMetric(metrics, "current-state").metricValue());
+        assertEquals((double) -1L, getMetric(metrics, "current-leader").metricValue());
+        assertEquals((double) localId, getMetric(metrics, "current-vote").metricValue());
+        assertEquals((double) 1, getMetric(metrics, "current-epoch").metricValue());
+        assertEquals((double) -1L, getMetric(metrics, "high-watermark").metricValue());
 
-		state.leaderStateOrThrow().updateLocalState(0, new LogOffsetMetadata(5L));
-		state.leaderStateOrThrow().updateReplicaState(1, 0, new LogOffsetMetadata(5L));
-		assertEquals((double) 5L, getMetric(metrics, "high-watermark").metricValue());
+        state.candidateStateOrThrow().recordGrantedVote(1);
+        state.transitionToLeader(2L, accumulator);
+        assertEquals("leader", getMetric(metrics, "current-state").metricValue());
+        assertEquals((double) localId, getMetric(metrics, "current-leader").metricValue());
+        assertEquals((double) localId, getMetric(metrics, "current-vote").metricValue());
+        assertEquals((double) 1, getMetric(metrics, "current-epoch").metricValue());
+        assertEquals((double) -1L, getMetric(metrics, "high-watermark").metricValue());
 
-		state.transitionToFollower(2, 1);
-		assertEquals("follower", getMetric(metrics, "current-state").metricValue());
-		assertEquals((double) 1, getMetric(metrics, "current-leader").metricValue());
-		assertEquals((double) -1, getMetric(metrics, "current-vote").metricValue());
-		assertEquals((double) 2, getMetric(metrics, "current-epoch").metricValue());
-		assertEquals((double) 5L, getMetric(metrics, "high-watermark").metricValue());
+        state.leaderStateOrThrow().updateLocalState(new LogOffsetMetadata(5L));
+        state.leaderStateOrThrow().updateReplicaState(1, 0, new LogOffsetMetadata(5L));
+        assertEquals((double) 5L, getMetric(metrics, "high-watermark").metricValue());
 
-		state.followerStateOrThrow().updateHighWatermark(OptionalLong.of(10L));
-		assertEquals((double) 10L, getMetric(metrics, "high-watermark").metricValue());
+        state.transitionToFollower(2, 1);
+        assertEquals("follower", getMetric(metrics, "current-state").metricValue());
+        assertEquals((double) 1, getMetric(metrics, "current-leader").metricValue());
+        assertEquals((double) -1, getMetric(metrics, "current-vote").metricValue());
+        assertEquals((double) 2, getMetric(metrics, "current-epoch").metricValue());
+        assertEquals((double) 5L, getMetric(metrics, "high-watermark").metricValue());
 
-		state.transitionToVoted(3, 2);
-		assertEquals("voted", getMetric(metrics, "current-state").metricValue());
-		assertEquals((double) -1, getMetric(metrics, "current-leader").metricValue());
-		assertEquals((double) 2, getMetric(metrics, "current-vote").metricValue());
-		assertEquals((double) 3, getMetric(metrics, "current-epoch").metricValue());
-		assertEquals((double) 10L, getMetric(metrics, "high-watermark").metricValue());
+        state.followerStateOrThrow().updateHighWatermark(OptionalLong.of(10L));
+        assertEquals((double) 10L, getMetric(metrics, "high-watermark").metricValue());
 
-		state.transitionToUnattached(4);
-		assertEquals("unattached", getMetric(metrics, "current-state").metricValue());
-		assertEquals((double) -1, getMetric(metrics, "current-leader").metricValue());
-		assertEquals((double) -1, getMetric(metrics, "current-vote").metricValue());
-		assertEquals((double) 4, getMetric(metrics, "current-epoch").metricValue());
-		assertEquals((double) 10L, getMetric(metrics, "high-watermark").metricValue());
-	}
+        state.transitionToVoted(3, 2);
+        assertEquals("voted", getMetric(metrics, "current-state").metricValue());
+        assertEquals((double) -1, getMetric(metrics, "current-leader").metricValue());
+        assertEquals((double) 2, getMetric(metrics, "current-vote").metricValue());
+        assertEquals((double) 3, getMetric(metrics, "current-epoch").metricValue());
+        assertEquals((double) 10L, getMetric(metrics, "high-watermark").metricValue());
 
-	@Test
-	public void shouldRecordNonVoterQuorumState() throws IOException {
-		QuorumState state = buildQuorumState(Utils.mkSet(1, 2, 3));
-		state.initialize(new OffsetAndEpoch(0L, 0));
-		raftMetrics = new KafkaRaftMetrics(metrics, "raft", state);
+        state.transitionToUnattached(4);
+        assertEquals("unattached", getMetric(metrics, "current-state").metricValue());
+        assertEquals((double) -1, getMetric(metrics, "current-leader").metricValue());
+        assertEquals((double) -1, getMetric(metrics, "current-vote").metricValue());
+        assertEquals((double) 4, getMetric(metrics, "current-epoch").metricValue());
+        assertEquals((double) 10L, getMetric(metrics, "high-watermark").metricValue());
+    }
 
-		assertEquals("unattached", getMetric(metrics, "current-state").metricValue());
-		assertEquals((double) -1L, getMetric(metrics, "current-leader").metricValue());
-		assertEquals((double) -1L, getMetric(metrics, "current-vote").metricValue());
-		assertEquals((double) 0, getMetric(metrics, "current-epoch").metricValue());
-		assertEquals((double) -1L, getMetric(metrics, "high-watermark").metricValue());
+    @Test
+    public void shouldRecordNonVoterQuorumState() throws IOException {
+        QuorumState state = buildQuorumState(Utils.mkSet(1, 2, 3));
+        state.initialize(new OffsetAndEpoch(0L, 0));
+        raftMetrics = new KafkaRaftMetrics(metrics, "raft", state);
 
-		state.transitionToFollower(2, 1);
-		assertEquals("follower", getMetric(metrics, "current-state").metricValue());
-		assertEquals((double) 1, getMetric(metrics, "current-leader").metricValue());
-		assertEquals((double) -1, getMetric(metrics, "current-vote").metricValue());
-		assertEquals((double) 2, getMetric(metrics, "current-epoch").metricValue());
-		assertEquals((double) -1L, getMetric(metrics, "high-watermark").metricValue());
+        assertEquals("unattached", getMetric(metrics, "current-state").metricValue());
+        assertEquals((double) -1L, getMetric(metrics, "current-leader").metricValue());
+        assertEquals((double) -1L, getMetric(metrics, "current-vote").metricValue());
+        assertEquals((double) 0, getMetric(metrics, "current-epoch").metricValue());
+        assertEquals((double) -1L, getMetric(metrics, "high-watermark").metricValue());
 
-		state.followerStateOrThrow().updateHighWatermark(OptionalLong.of(10L));
-		assertEquals((double) 10L, getMetric(metrics, "high-watermark").metricValue());
+        state.transitionToFollower(2, 1);
+        assertEquals("observer", getMetric(metrics, "current-state").metricValue());
+        assertEquals((double) 1, getMetric(metrics, "current-leader").metricValue());
+        assertEquals((double) -1, getMetric(metrics, "current-vote").metricValue());
+        assertEquals((double) 2, getMetric(metrics, "current-epoch").metricValue());
+        assertEquals((double) -1L, getMetric(metrics, "high-watermark").metricValue());
 
-		state.transitionToUnattached(4);
-		assertEquals("unattached", getMetric(metrics, "current-state").metricValue());
-		assertEquals((double) -1, getMetric(metrics, "current-leader").metricValue());
-		assertEquals((double) -1, getMetric(metrics, "current-vote").metricValue());
-		assertEquals((double) 4, getMetric(metrics, "current-epoch").metricValue());
-		assertEquals((double) 10L, getMetric(metrics, "high-watermark").metricValue());
-	}
+        state.followerStateOrThrow().updateHighWatermark(OptionalLong.of(10L));
+        assertEquals((double) 10L, getMetric(metrics, "high-watermark").metricValue());
 
-	@Test
-	public void shouldRecordLogEnd() throws IOException {
-		QuorumState state = buildQuorumState(Collections.singleton(localId));
-		state.initialize(new OffsetAndEpoch(0L, 0));
-		raftMetrics = new KafkaRaftMetrics(metrics, "raft", state);
+        state.transitionToUnattached(4);
+        assertEquals("unattached", getMetric(metrics, "current-state").metricValue());
+        assertEquals((double) -1, getMetric(metrics, "current-leader").metricValue());
+        assertEquals((double) -1, getMetric(metrics, "current-vote").metricValue());
+        assertEquals((double) 4, getMetric(metrics, "current-epoch").metricValue());
+        assertEquals((double) 10L, getMetric(metrics, "high-watermark").metricValue());
+    }
 
-		assertEquals((double) 0L, getMetric(metrics, "log-end-offset").metricValue());
-		assertEquals((double) 0, getMetric(metrics, "log-end-epoch").metricValue());
+    @Test
+    public void shouldRecordLogEnd() throws IOException {
+        QuorumState state = buildQuorumState(Collections.singleton(localId));
+        state.initialize(new OffsetAndEpoch(0L, 0));
+        raftMetrics = new KafkaRaftMetrics(metrics, "raft", state);
 
-		raftMetrics.updateLogEnd(new OffsetAndEpoch(5L, 1));
+        assertEquals((double) 0L, getMetric(metrics, "log-end-offset").metricValue());
+        assertEquals((double) 0, getMetric(metrics, "log-end-epoch").metricValue());
 
-		assertEquals((double) 5L, getMetric(metrics, "log-end-offset").metricValue());
-		assertEquals((double) 1, getMetric(metrics, "log-end-epoch").metricValue());
-	}
+        raftMetrics.updateLogEnd(new OffsetAndEpoch(5L, 1));
 
-	@Test
-	public void shouldRecordNumUnknownVoterConnections() throws IOException {
-		QuorumState state = buildQuorumState(Collections.singleton(localId));
-		state.initialize(new OffsetAndEpoch(0L, 0));
-		raftMetrics = new KafkaRaftMetrics(metrics, "raft", state);
+        assertEquals((double) 5L, getMetric(metrics, "log-end-offset").metricValue());
+        assertEquals((double) 1, getMetric(metrics, "log-end-epoch").metricValue());
+    }
 
-		assertEquals((double) 0, getMetric(metrics, "number-unknown-voter-connections").metricValue());
+    @Test
+    public void shouldRecordNumUnknownVoterConnections() throws IOException {
+        QuorumState state = buildQuorumState(Collections.singleton(localId));
+        state.initialize(new OffsetAndEpoch(0L, 0));
+        raftMetrics = new KafkaRaftMetrics(metrics, "raft", state);
 
-		raftMetrics.updateNumUnknownVoterConnections(2);
+        assertEquals((double) 0, getMetric(metrics, "number-unknown-voter-connections").metricValue());
 
-		assertEquals((double) 2, getMetric(metrics, "number-unknown-voter-connections").metricValue());
-	}
+        raftMetrics.updateNumUnknownVoterConnections(2);
 
-	@Test
-	public void shouldRecordPollIdleRatio() throws IOException {
-		QuorumState state = buildQuorumState(Collections.singleton(localId));
-		state.initialize(new OffsetAndEpoch(0L, 0));
-		raftMetrics = new KafkaRaftMetrics(metrics, "raft", state);
+        assertEquals((double) 2, getMetric(metrics, "number-unknown-voter-connections").metricValue());
+    }
 
-		raftMetrics.updatePollStart(time.milliseconds());
-		time.sleep(100L);
-		raftMetrics.updatePollEnd(time.milliseconds());
-		time.sleep(900L);
-		raftMetrics.updatePollStart(time.milliseconds());
+    @Test
+    public void shouldRecordPollIdleRatio() {
+        QuorumState state = buildQuorumState(Collections.singleton(localId));
+        state.initialize(new OffsetAndEpoch(0L, 0));
+        raftMetrics = new KafkaRaftMetrics(metrics, "raft", state);
 
-		assertEquals(0.1, getMetric(metrics, "poll-idle-ratio-avg").metricValue());
+        // First recording is discarded (in order to align the interval of measurement)
+        raftMetrics.updatePollStart(time.milliseconds());
+        raftMetrics.updatePollEnd(time.milliseconds());
 
-		time.sleep(100L);
-		raftMetrics.updatePollEnd(time.milliseconds());
-		time.sleep(100L);
-		raftMetrics.updatePollStart(time.milliseconds());
+        // Idle for 100ms
+        raftMetrics.updatePollStart(time.milliseconds());
+        time.sleep(100L);
+        raftMetrics.updatePollEnd(time.milliseconds());
 
-		assertEquals(0.3, getMetric(metrics, "poll-idle-ratio-avg").metricValue());
-	}
+        // Busy for 100ms
+        time.sleep(100L);
 
-	@Test
-	public void shouldRecordLatency() throws IOException {
-		QuorumState state = buildQuorumState(Collections.singleton(localId));
-		state.initialize(new OffsetAndEpoch(0L, 0));
-		raftMetrics = new KafkaRaftMetrics(metrics, "raft", state);
+        // Idle for 200ms
+        raftMetrics.updatePollStart(time.milliseconds());
+        time.sleep(200L);
+        raftMetrics.updatePollEnd(time.milliseconds());
 
-		raftMetrics.updateElectionStartMs(time.milliseconds());
-		time.sleep(1000L);
-		raftMetrics.maybeUpdateElectionLatency(time.milliseconds());
+        assertEquals(0.75, getMetric(metrics, "poll-idle-ratio-avg").metricValue());
 
-		assertEquals((double) 1000, getMetric(metrics, "election-latency-avg").metricValue());
-		assertEquals((double) 1000, getMetric(metrics, "election-latency-max").metricValue());
+        // Busy for 100ms
+        time.sleep(100L);
 
-		raftMetrics.updateElectionStartMs(time.milliseconds());
-		time.sleep(800L);
-		raftMetrics.maybeUpdateElectionLatency(time.milliseconds());
+        // Idle for 75ms
+        raftMetrics.updatePollStart(time.milliseconds());
+        time.sleep(75L);
+        raftMetrics.updatePollEnd(time.milliseconds());
 
-		assertEquals((double) 900, getMetric(metrics, "election-latency-avg").metricValue());
-		assertEquals((double) 1000, getMetric(metrics, "election-latency-max").metricValue());
+        // Idle for 25ms
+        raftMetrics.updatePollStart(time.milliseconds());
+        time.sleep(25L);
+        raftMetrics.updatePollEnd(time.milliseconds());
 
-		raftMetrics.updateCommitLatency(50, time.milliseconds());
+        // Idle for 0ms
+        raftMetrics.updatePollStart(time.milliseconds());
+        raftMetrics.updatePollEnd(time.milliseconds());
 
-		assertEquals(50.0, getMetric(metrics, "commit-latency-avg").metricValue());
-		assertEquals(50.0, getMetric(metrics, "commit-latency-max").metricValue());
+        assertEquals(0.5, getMetric(metrics, "poll-idle-ratio-avg").metricValue());
 
-		raftMetrics.updateCommitLatency(60, time.milliseconds());
+        // Busy for 40ms
+        time.sleep(40);
 
-		assertEquals(55.0, getMetric(metrics, "commit-latency-avg").metricValue());
-		assertEquals(60.0, getMetric(metrics, "commit-latency-max").metricValue());
-	}
+        // Idle for 60ms
+        raftMetrics.updatePollStart(time.milliseconds());
+        time.sleep(60);
+        raftMetrics.updatePollEnd(time.milliseconds());
 
-	@Test
-	public void shouldRecordRate() throws IOException {
-		QuorumState state = buildQuorumState(Collections.singleton(localId));
-		state.initialize(new OffsetAndEpoch(0L, 0));
-		raftMetrics = new KafkaRaftMetrics(metrics, "raft", state);
+        // Busy for 10ms
+        time.sleep(10);
 
-		raftMetrics.updateAppendRecords(12);
-		assertEquals(0.4, getMetric(metrics, "append-records-rate").metricValue());
+        // Begin idle time for 5ms
+        raftMetrics.updatePollStart(time.milliseconds());
+        time.sleep(5);
 
-		raftMetrics.updateAppendRecords(9);
-		assertEquals(0.7, getMetric(metrics, "append-records-rate").metricValue());
+        // Measurement arrives before poll end, so we have 40ms busy time and 60ms idle.
+        // The subsequent interval time is not counted until the next measurement.
+        assertEquals(0.6, getMetric(metrics, "poll-idle-ratio-avg").metricValue());
 
-		raftMetrics.updateFetchedRecords(24);
-		assertEquals(0.8, getMetric(metrics, "fetch-records-rate").metricValue());
+        // More idle time for 5ms
+        time.sleep(5);
+        raftMetrics.updatePollEnd(time.milliseconds());
 
-		raftMetrics.updateFetchedRecords(48);
-		assertEquals(2.4, getMetric(metrics, "fetch-records-rate").metricValue());
-	}
+        // The measurement includes the interval beginning at the last recording.
+        // This counts 10ms of busy time and 5ms + 5ms = 10ms of idle time.
+        assertEquals(0.5, getMetric(metrics, "poll-idle-ratio-avg").metricValue());
+    }
 
-	private KafkaMetric getMetric(final Metrics metrics, final String name) {
-		return metrics.metrics().get(metrics.metricName(name, "raft-metrics"));
-	}
+    @Test
+    public void shouldRecordLatency() throws IOException {
+        QuorumState state = buildQuorumState(Collections.singleton(localId));
+        state.initialize(new OffsetAndEpoch(0L, 0));
+        raftMetrics = new KafkaRaftMetrics(metrics, "raft", state);
+
+        raftMetrics.updateElectionStartMs(time.milliseconds());
+        time.sleep(1000L);
+        raftMetrics.maybeUpdateElectionLatency(time.milliseconds());
+
+        assertEquals((double) 1000, getMetric(metrics, "election-latency-avg").metricValue());
+        assertEquals((double) 1000, getMetric(metrics, "election-latency-max").metricValue());
+
+        raftMetrics.updateElectionStartMs(time.milliseconds());
+        time.sleep(800L);
+        raftMetrics.maybeUpdateElectionLatency(time.milliseconds());
+
+        assertEquals((double) 900, getMetric(metrics, "election-latency-avg").metricValue());
+        assertEquals((double) 1000, getMetric(metrics, "election-latency-max").metricValue());
+
+        raftMetrics.updateCommitLatency(50, time.milliseconds());
+
+        assertEquals(50.0, getMetric(metrics, "commit-latency-avg").metricValue());
+        assertEquals(50.0, getMetric(metrics, "commit-latency-max").metricValue());
+
+        raftMetrics.updateCommitLatency(60, time.milliseconds());
+
+        assertEquals(55.0, getMetric(metrics, "commit-latency-avg").metricValue());
+        assertEquals(60.0, getMetric(metrics, "commit-latency-max").metricValue());
+    }
+
+    @Test
+    public void shouldRecordRate() throws IOException {
+        QuorumState state = buildQuorumState(Collections.singleton(localId));
+        state.initialize(new OffsetAndEpoch(0L, 0));
+        raftMetrics = new KafkaRaftMetrics(metrics, "raft", state);
+
+        raftMetrics.updateAppendRecords(12);
+        assertEquals(0.4, getMetric(metrics, "append-records-rate").metricValue());
+
+        raftMetrics.updateAppendRecords(9);
+        assertEquals(0.7, getMetric(metrics, "append-records-rate").metricValue());
+
+        raftMetrics.updateFetchedRecords(24);
+        assertEquals(0.8, getMetric(metrics, "fetch-records-rate").metricValue());
+
+        raftMetrics.updateFetchedRecords(48);
+        assertEquals(2.4, getMetric(metrics, "fetch-records-rate").metricValue());
+    }
+
+    private KafkaMetric getMetric(final Metrics metrics, final String name) {
+        return metrics.metrics().get(metrics.metricName(name, "raft-metrics"));
+    }
 }

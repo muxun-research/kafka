@@ -51,46 +51,46 @@ public class EosTestClient extends SmokeTestUtil {
     private volatile boolean isRunning = true;
 
     public void start() {
-		Exit.addShutdownHook("streams-shutdown-hook", () -> {
-			isRunning = false;
-			streams.close(Duration.ofSeconds(300));
+        Exit.addShutdownHook("streams-shutdown-hook", () -> {
+            isRunning = false;
+            streams.close(Duration.ofSeconds(300));
 
-			// need to wait for callback to avoid race condition
-			// -> make sure the callback printout to stdout is there as it is expected test output
-			waitForStateTransitionCallback();
+            // need to wait for callback to avoid race condition
+            // -> make sure the callback printout to stdout is there as it is expected test output
+            waitForStateTransitionCallback();
 
-			// do not remove these printouts since they are needed for health scripts
-			if (!uncaughtException) {
-				System.out.println(System.currentTimeMillis());
-				System.out.println("EOS-TEST-CLIENT-CLOSED");
-				System.out.flush();
-			}
-		});
+            // do not remove these printouts since they are needed for health scripts
+            if (!uncaughtException) {
+                System.out.println(System.currentTimeMillis());
+                System.out.println("EOS-TEST-CLIENT-CLOSED");
+                System.out.flush();
+            }
+        });
 
         while (isRunning) {
             if (streams == null) {
-				uncaughtException = false;
+                uncaughtException = false;
 
-				streams = createKafkaStreams(properties);
-				streams.setUncaughtExceptionHandler(e -> {
-					System.out.println(System.currentTimeMillis());
-					System.out.println("EOS-TEST-CLIENT-EXCEPTION");
-					e.printStackTrace();
-					System.out.flush();
-					uncaughtException = true;
-					return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_CLIENT;
-				});
-				streams.setStateListener((newState, oldState) -> {
-					// don't remove this -- it's required test output
-					System.out.println(System.currentTimeMillis());
-					System.out.println("StateChange: " + oldState + " -> " + newState);
-					System.out.flush();
-					if (newState == KafkaStreams.State.NOT_RUNNING) {
-						notRunningCallbackReceived.set(true);
-					}
-				});
-				streams.start();
-			}
+                streams = createKafkaStreams(properties);
+                streams.setUncaughtExceptionHandler(e -> {
+                    System.out.println(System.currentTimeMillis());
+                    System.out.println("EOS-TEST-CLIENT-EXCEPTION");
+                    e.printStackTrace();
+                    System.out.flush();
+                    uncaughtException = true;
+                    return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_CLIENT;
+                });
+                streams.setStateListener((newState, oldState) -> {
+                    // don't remove this -- it's required test output
+                    System.out.println(System.currentTimeMillis());
+                    System.out.println("StateChange: " + oldState + " -> " + newState);
+                    System.out.flush();
+                    if (newState == KafkaStreams.State.NOT_RUNNING) {
+                        notRunningCallbackReceived.set(true);
+                    }
+                });
+                streams.start();
+            }
             if (uncaughtException) {
                 streams.close(Duration.ofSeconds(60_000L));
                 streams = null;
@@ -103,10 +103,12 @@ public class EosTestClient extends SmokeTestUtil {
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, APP_ID);
         props.put(StreamsConfig.NUM_STREAM_THREADS_CONFIG, 1);
         props.put(StreamsConfig.NUM_STANDBY_REPLICAS_CONFIG, 2);
+        props.put(StreamsConfig.PROBING_REBALANCE_INTERVAL_MS_CONFIG, Duration.ofMinutes(1).toMillis());
+        props.put(StreamsConfig.MAX_WARMUP_REPLICAS_CONFIG, Integer.MAX_VALUE);
         props.put(StreamsConfig.REPLICATION_FACTOR_CONFIG, 3);
-		props.put(StreamsConfig.CACHE_MAX_BYTES_BUFFERING_CONFIG, 0);
-		props.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 5000); // increase commit interval to make sure a client is killed having an open transaction
-		props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
+        props.put(StreamsConfig.STATESTORE_CACHE_MAX_BYTES_CONFIG, 0);
+        props.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 5000L); // increase commit interval to make sure a client is killed having an open transaction
+        props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
         props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.Integer().getClass());
 
         final StreamsBuilder builder = new StreamsBuilder();
@@ -118,41 +120,27 @@ public class EosTestClient extends SmokeTestUtil {
         final KGroupedStream<String, Integer> groupedData = data.groupByKey();
         // min
         groupedData
-            .aggregate(
-					() -> Integer.MAX_VALUE,
-					(aggKey, value, aggregate) -> (value < aggregate) ? value : aggregate,
-					Materialized.with(null, intSerde))
+            .aggregate(() -> Integer.MAX_VALUE, (aggKey, value, aggregate) -> (value < aggregate) ? value : aggregate, Materialized.with(null, intSerde))
             .toStream()
             .to("min", Produced.with(stringSerde, intSerde));
 
         // sum
-        groupedData.aggregate(
-				() -> 0L,
-				(aggKey, value, aggregate) -> (long) value + aggregate,
-				Materialized.with(null, longSerde))
+        groupedData.aggregate(() -> 0L, (aggKey, value, aggregate) -> (long) value + aggregate, Materialized.with(null, longSerde))
             .toStream()
             .to("sum", Produced.with(stringSerde, longSerde));
 
         if (withRepartitioning) {
-			data.to("repartition");
-			final KStream<String, Integer> repartitionedData = builder.stream("repartition");
+            data.to("repartition");
+            final KStream<String, Integer> repartitionedData = builder.stream("repartition");
 
-			repartitionedData.process(SmokeTestUtil.printProcessorSupplier("repartition"));
+            repartitionedData.process(SmokeTestUtil.printProcessorSupplier("repartition"));
 
-			final KGroupedStream<String, Integer> groupedDataAfterRepartitioning = repartitionedData.groupByKey();
-			// max
-			groupedDataAfterRepartitioning
-					.aggregate(
-							() -> Integer.MIN_VALUE,
-							(aggKey, value, aggregate) -> (value > aggregate) ? value : aggregate,
-							Materialized.with(null, intSerde))
-                .toStream()
-                .to("max", Produced.with(stringSerde, intSerde));
+            final KGroupedStream<String, Integer> groupedDataAfterRepartitioning = repartitionedData.groupByKey();
+            // max
+            groupedDataAfterRepartitioning.aggregate(() -> Integer.MIN_VALUE, (aggKey, value, aggregate) -> (value > aggregate) ? value : aggregate, Materialized.with(null, intSerde)).toStream().to("max", Produced.with(stringSerde, intSerde));
 
             // count
-            groupedDataAfterRepartitioning.count()
-                .toStream()
-                .to("cnt", Produced.with(stringSerde, longSerde));
+            groupedDataAfterRepartitioning.count().toStream().to("cnt", Produced.with(stringSerde, longSerde));
         }
 
         return new KafkaStreams(builder.build(), props);

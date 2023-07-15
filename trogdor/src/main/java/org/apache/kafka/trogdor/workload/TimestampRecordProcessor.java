@@ -22,9 +22,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.trogdor.common.JsonUtil;
 import org.apache.kafka.common.utils.Time;
-
+import org.apache.kafka.trogdor.common.JsonUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,7 +37,7 @@ import java.nio.ByteOrder;
  * <p>
  * Example spec:
  * {
- * "type": "timestampRandom",
+ * "type": "timestamp",
  * "histogramMaxMs": 10000,
  * "histogramMinMs": 0,
  * "histogramStepMs": 1
@@ -48,115 +47,106 @@ import java.nio.ByteOrder;
  */
 
 public class TimestampRecordProcessor implements RecordProcessor {
-	private final int histogramMaxMs;
-	private final int histogramMinMs;
-	private final int histogramStepMs;
-	private final ByteBuffer buffer;
-	private final Histogram histogram;
+    private final int histogramMaxMs;
+    private final int histogramMinMs;
+    private final int histogramStepMs;
+    private final ByteBuffer buffer;
+    private final Histogram histogram;
 
-	private final Logger log = LoggerFactory.getLogger(TimestampRecordProcessor.class);
+    private final Logger log = LoggerFactory.getLogger(TimestampRecordProcessor.class);
 
-	final static float[] PERCENTILES = {0.5f, 0.95f, 0.99f};
+    final static float[] PERCENTILES = {0.5f, 0.95f, 0.99f};
 
-	@JsonCreator
-	public TimestampRecordProcessor(@JsonProperty("histogramMaxMs") int histogramMaxMs,
-									@JsonProperty("histogramMinMs") int histogramMinMs,
-									@JsonProperty("histogramStepMs") int histogramStepMs) {
-		this.histogramMaxMs = histogramMaxMs;
-		this.histogramMinMs = histogramMinMs;
-		this.histogramStepMs = histogramStepMs;
-		this.histogram = new Histogram((histogramMaxMs - histogramMinMs) / histogramStepMs);
-		buffer = ByteBuffer.allocate(Long.BYTES);
-		buffer.order(ByteOrder.LITTLE_ENDIAN);
-	}
+    @JsonCreator
+    public TimestampRecordProcessor(@JsonProperty("histogramMaxMs") int histogramMaxMs, @JsonProperty("histogramMinMs") int histogramMinMs, @JsonProperty("histogramStepMs") int histogramStepMs) {
+        this.histogramMaxMs = histogramMaxMs;
+        this.histogramMinMs = histogramMinMs;
+        this.histogramStepMs = histogramStepMs;
+        this.histogram = new Histogram((histogramMaxMs - histogramMinMs) / histogramStepMs);
+        buffer = ByteBuffer.allocate(Long.BYTES);
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+    }
 
-	@JsonProperty
-	public int histogramMaxMs() {
-		return histogramMaxMs;
-	}
+    @JsonProperty
+    public int histogramMaxMs() {
+        return histogramMaxMs;
+    }
 
-	@JsonProperty
-	public int histogramMinMs() {
-		return histogramMinMs;
-	}
+    @JsonProperty
+    public int histogramMinMs() {
+        return histogramMinMs;
+    }
 
-	@JsonProperty
-	public int histogramStepMs() {
-		return histogramStepMs;
-	}
+    @JsonProperty
+    public int histogramStepMs() {
+        return histogramStepMs;
+    }
 
-	private void putHistogram(long latency) {
-		histogram.add(Long.max(0L, (latency - histogramMinMs) / histogramStepMs));
-	}
+    private void putHistogram(long latency) {
+        histogram.add(Long.max(0L, (latency - histogramMinMs) / histogramStepMs));
+    }
 
-	@Override
-	public synchronized void processRecords(ConsumerRecords<byte[], byte[]> consumerRecords) {
-		// Save the current time to prevent skew by processing time.
-		long curTime = Time.SYSTEM.milliseconds();
-		for (ConsumerRecord<byte[], byte[]> record : consumerRecords) {
-			try {
-				buffer.clear();
-				buffer.put(record.value(), 0, Long.BYTES);
-				buffer.rewind();
-				putHistogram(curTime - buffer.getLong());
-			} catch (RuntimeException e) {
-				log.error("Error in processRecords:", e);
-			}
-		}
-	}
+    @Override
+    public synchronized void processRecords(ConsumerRecords<byte[], byte[]> consumerRecords) {
+        // Save the current time to prevent skew by processing time.
+        long curTime = Time.SYSTEM.milliseconds();
+        for (ConsumerRecord<byte[], byte[]> record : consumerRecords) {
+            try {
+                buffer.clear();
+                buffer.put(record.value(), 0, Long.BYTES);
+                buffer.rewind();
+                putHistogram(curTime - buffer.getLong());
+            } catch (RuntimeException e) {
+                log.error("Error in processRecords:", e);
+            }
+        }
+    }
 
-	@Override
-	public JsonNode processorStatus() {
-		Histogram.Summary summary = histogram.summarize(PERCENTILES);
-		StatusData statusData = new StatusData(
-				summary.average() * histogramStepMs + histogramMinMs,
-				summary.percentiles().get(0).value() * histogramStepMs + histogramMinMs,
-				summary.percentiles().get(1).value() * histogramStepMs + histogramMinMs,
-				summary.percentiles().get(2).value() * histogramStepMs + histogramMinMs);
-		return JsonUtil.JSON_SERDE.valueToTree(statusData);
-	}
+    @Override
+    public JsonNode processorStatus() {
+        Histogram.Summary summary = histogram.summarize(PERCENTILES);
+        StatusData statusData = new StatusData(summary.average() * histogramStepMs + histogramMinMs, summary.percentiles().get(0).value() * histogramStepMs + histogramMinMs, summary.percentiles().get(1).value() * histogramStepMs + histogramMinMs, summary.percentiles().get(2).value() * histogramStepMs + histogramMinMs);
+        return JsonUtil.JSON_SERDE.valueToTree(statusData);
+    }
 
-	private static class StatusData {
-		private final float averageLatencyMs;
-		private final int p50LatencyMs;
-		private final int p95LatencyMs;
-		private final int p99LatencyMs;
+    private static class StatusData {
+        private final float averageLatencyMs;
+        private final int p50LatencyMs;
+        private final int p95LatencyMs;
+        private final int p99LatencyMs;
 
-		/**
-		 * The percentiles to use when calculating the histogram data.
-		 * These should match up with the p50LatencyMs, p95LatencyMs, etc. fields.
-		 */
-		final static float[] PERCENTILES = {0.5f, 0.95f, 0.99f};
+        /**
+         * The percentiles to use when calculating the histogram data.
+         * These should match up with the p50LatencyMs, p95LatencyMs, etc. fields.
+         */
+        final static float[] PERCENTILES = {0.5f, 0.95f, 0.99f};
 
-		@JsonCreator
-		StatusData(@JsonProperty("averageLatencyMs") float averageLatencyMs,
-				   @JsonProperty("p50LatencyMs") int p50latencyMs,
-				   @JsonProperty("p95LatencyMs") int p95latencyMs,
-				   @JsonProperty("p99LatencyMs") int p99latencyMs) {
-			this.averageLatencyMs = averageLatencyMs;
-			this.p50LatencyMs = p50latencyMs;
-			this.p95LatencyMs = p95latencyMs;
-			this.p99LatencyMs = p99latencyMs;
-		}
+        @JsonCreator
+        StatusData(@JsonProperty("averageLatencyMs") float averageLatencyMs, @JsonProperty("p50LatencyMs") int p50latencyMs, @JsonProperty("p95LatencyMs") int p95latencyMs, @JsonProperty("p99LatencyMs") int p99latencyMs) {
+            this.averageLatencyMs = averageLatencyMs;
+            this.p50LatencyMs = p50latencyMs;
+            this.p95LatencyMs = p95latencyMs;
+            this.p99LatencyMs = p99latencyMs;
+        }
 
-		@JsonProperty
-		public float averageLatencyMs() {
-			return averageLatencyMs;
-		}
+        @JsonProperty
+        public float averageLatencyMs() {
+            return averageLatencyMs;
+        }
 
-		@JsonProperty
-		public int p50LatencyMs() {
-			return p50LatencyMs;
-		}
+        @JsonProperty
+        public int p50LatencyMs() {
+            return p50LatencyMs;
+        }
 
-		@JsonProperty
-		public int p95LatencyMs() {
-			return p95LatencyMs;
-		}
+        @JsonProperty
+        public int p95LatencyMs() {
+            return p95LatencyMs;
+        }
 
-		@JsonProperty
-		public int p99LatencyMs() {
-			return p99LatencyMs;
-		}
-	}
+        @JsonProperty
+        public int p99LatencyMs() {
+            return p99LatencyMs;
+        }
+    }
 }

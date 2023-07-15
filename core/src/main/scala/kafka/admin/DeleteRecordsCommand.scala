@@ -19,15 +19,15 @@ package kafka.admin
 
 import kafka.common.AdminCommandFailedException
 import kafka.utils.json.JsonValue
-import kafka.utils.{CommandDefaultOptions, CommandLineUtils, CoreUtils, Json}
+import kafka.utils.{CoreUtils, Json}
 import org.apache.kafka.clients.CommonClientConfigs
 import org.apache.kafka.clients.admin.{Admin, RecordsToDelete}
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.utils.Utils
+import org.apache.kafka.server.util.{CommandDefaultOptions, CommandLineUtils}
 
 import java.io.PrintStream
 import java.util.Properties
-import scala.collection.Seq
 import scala.jdk.CollectionConverters._
 
 /**
@@ -129,7 +129,7 @@ object DeleteRecordsCommand {
 
     options = parser.parse(args : _*)
 
-    CommandLineUtils.printHelpAndExitIfNeeded(this, "This tool helps to delete records of the given partitions down to the specified offset.")
+    CommandLineUtils.maybePrintHelpOrVersion(this, "This tool helps to delete records of the given partitions down to the specified offset.")
 
     CommandLineUtils.checkRequiredArgs(parser, options, bootstrapServerOpt, offsetJsonFileOpt)
   }

@@ -19,43 +19,14 @@ package org.apache.kafka.common.security.authenticator;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.config.internals.BrokerSecurityConfigs;
-import org.apache.kafka.common.errors.AuthenticationException;
-import org.apache.kafka.common.errors.IllegalSaslStateException;
-import org.apache.kafka.common.errors.InvalidRequestException;
-import org.apache.kafka.common.errors.SaslAuthenticationException;
-import org.apache.kafka.common.errors.UnsupportedSaslMechanismException;
-import org.apache.kafka.common.errors.UnsupportedVersionException;
+import org.apache.kafka.common.errors.*;
 import org.apache.kafka.common.message.SaslAuthenticateResponseData;
 import org.apache.kafka.common.message.SaslHandshakeResponseData;
-import org.apache.kafka.common.network.Authenticator;
-import org.apache.kafka.common.network.ByteBufferSend;
-import org.apache.kafka.common.network.ChannelBuilders;
-import org.apache.kafka.common.network.ChannelMetadataRegistry;
-import org.apache.kafka.common.network.ClientInformation;
-import org.apache.kafka.common.network.ListenerName;
-import org.apache.kafka.common.network.NetworkReceive;
-import org.apache.kafka.common.network.ReauthenticationContext;
-import org.apache.kafka.common.network.Send;
-import org.apache.kafka.common.network.SslTransportLayer;
-import org.apache.kafka.common.network.TransportLayer;
+import org.apache.kafka.common.network.*;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.requests.AbstractResponse;
-import org.apache.kafka.common.requests.ApiVersionsRequest;
-import org.apache.kafka.common.requests.ApiVersionsResponse;
-import org.apache.kafka.common.requests.RequestAndSize;
-import org.apache.kafka.common.requests.RequestContext;
-import org.apache.kafka.common.requests.RequestHeader;
-import org.apache.kafka.common.requests.SaslAuthenticateRequest;
-import org.apache.kafka.common.requests.SaslAuthenticateResponse;
-import org.apache.kafka.common.requests.SaslHandshakeRequest;
-import org.apache.kafka.common.requests.SaslHandshakeResponse;
-import org.apache.kafka.common.security.auth.AuthenticateCallbackHandler;
-import org.apache.kafka.common.security.auth.KafkaPrincipal;
-import org.apache.kafka.common.security.auth.KafkaPrincipalBuilder;
-import org.apache.kafka.common.security.auth.KafkaPrincipalSerde;
-import org.apache.kafka.common.security.auth.SaslAuthenticationContext;
-import org.apache.kafka.common.security.auth.SecurityProtocol;
+import org.apache.kafka.common.requests.*;
+import org.apache.kafka.common.security.auth.*;
 import org.apache.kafka.common.security.kerberos.KerberosError;
 import org.apache.kafka.common.security.kerberos.KerberosName;
 import org.apache.kafka.common.security.kerberos.KerberosShortNamer;
@@ -78,18 +49,10 @@ import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.function.Supplier;
 
 public class SaslServerAuthenticator implements Authenticator {
-    // GSSAPI limits requests to 64K, but we allow a bit extra for custom SASL mechanisms
-    static final int MAX_RECEIVE_SIZE = 524288;
     private static final Logger LOG = LoggerFactory.getLogger(SaslServerAuthenticator.class);
 
     /**
@@ -117,78 +80,70 @@ public class SaslServerAuthenticator implements Authenticator {
 
     private final SecurityProtocol securityProtocol;
     private final ListenerName listenerName;
-	private final String connectionId;
-	private final Map<String, Subject> subjects;
-	private final TransportLayer transportLayer;
-	private final List<String> enabledMechanisms;
-	private final Map<String, ?> configs;
-	private final KafkaPrincipalBuilder principalBuilder;
-	private final Map<String, AuthenticateCallbackHandler> callbackHandlers;
-	private final Map<String, Long> connectionsMaxReauthMsByMechanism;
-	private final Time time;
-	private final ReauthInfo reauthInfo;
-	private final ChannelMetadataRegistry metadataRegistry;
-	private final Supplier<ApiVersionsResponse> apiVersionSupplier;
+    private final String connectionId;
+    private final Map<String, Subject> subjects;
+    private final TransportLayer transportLayer;
+    private final List<String> enabledMechanisms;
+    private final Map<String, ?> configs;
+    private final KafkaPrincipalBuilder principalBuilder;
+    private final Map<String, AuthenticateCallbackHandler> callbackHandlers;
+    private final Map<String, Long> connectionsMaxReauthMsByMechanism;
+    private final Time time;
+    private final ReauthInfo reauthInfo;
+    private final ChannelMetadataRegistry metadataRegistry;
+    private final Supplier<ApiVersionsResponse> apiVersionSupplier;
 
-	// Current SASL state
-	private SaslState saslState = SaslState.INITIAL_REQUEST;
-	// Next SASL state to be set when outgoing writes associated with the current SASL state complete
-	private SaslState pendingSaslState = null;
-	// Exception that will be thrown by `authenticate()` when SaslState is set to FAILED after outbound writes complete
-	private AuthenticationException pendingException = null;
-	private SaslServer saslServer;
-	private String saslMechanism;
+    // Current SASL state
+    private SaslState saslState = SaslState.INITIAL_REQUEST;
+    // Next SASL state to be set when outgoing writes associated with the current SASL state complete
+    private SaslState pendingSaslState = null;
+    // Exception that will be thrown by `authenticate()` when SaslState is set to FAILED after outbound writes complete
+    private AuthenticationException pendingException = null;
+    private SaslServer saslServer;
+    private String saslMechanism;
 
     // buffers used in `authenticate`
+    private Integer saslAuthRequestMaxReceiveSize;
     private NetworkReceive netInBuffer;
     private Send netOutBuffer;
     private Send authenticationFailureSend = null;
     // flag indicating if sasl tokens are sent as Kafka SaslAuthenticate request/responses
     private boolean enableKafkaSaslAuthenticateHeaders;
 
-	public SaslServerAuthenticator(Map<String, ?> configs,
-								   Map<String, AuthenticateCallbackHandler> callbackHandlers,
-								   String connectionId,
-								   Map<String, Subject> subjects,
-								   KerberosShortNamer kerberosNameParser,
-								   ListenerName listenerName,
-								   SecurityProtocol securityProtocol,
-								   TransportLayer transportLayer,
-								   Map<String, Long> connectionsMaxReauthMsByMechanism,
-								   ChannelMetadataRegistry metadataRegistry,
-								   Time time,
-								   Supplier<ApiVersionsResponse> apiVersionSupplier) {
-		this.callbackHandlers = callbackHandlers;
-		this.connectionId = connectionId;
-		this.subjects = subjects;
-		this.listenerName = listenerName;
-		this.securityProtocol = securityProtocol;
-		this.enableKafkaSaslAuthenticateHeaders = false;
-		this.transportLayer = transportLayer;
-		this.connectionsMaxReauthMsByMechanism = connectionsMaxReauthMsByMechanism;
-		this.time = time;
-		this.reauthInfo = new ReauthInfo();
-		this.metadataRegistry = metadataRegistry;
-		this.apiVersionSupplier = apiVersionSupplier;
+    public SaslServerAuthenticator(Map<String, ?> configs, Map<String, AuthenticateCallbackHandler> callbackHandlers, String connectionId, Map<String, Subject> subjects, KerberosShortNamer kerberosNameParser, ListenerName listenerName, SecurityProtocol securityProtocol, TransportLayer transportLayer, Map<String, Long> connectionsMaxReauthMsByMechanism, ChannelMetadataRegistry metadataRegistry, Time time, Supplier<ApiVersionsResponse> apiVersionSupplier) {
+        this.callbackHandlers = callbackHandlers;
+        this.connectionId = connectionId;
+        this.subjects = subjects;
+        this.listenerName = listenerName;
+        this.securityProtocol = securityProtocol;
+        this.enableKafkaSaslAuthenticateHeaders = false;
+        this.transportLayer = transportLayer;
+        this.connectionsMaxReauthMsByMechanism = connectionsMaxReauthMsByMechanism;
+        this.time = time;
+        this.reauthInfo = new ReauthInfo();
+        this.metadataRegistry = metadataRegistry;
+        this.apiVersionSupplier = apiVersionSupplier;
 
-		this.configs = configs;
-		@SuppressWarnings("unchecked")
-		List<String> enabledMechanisms = (List<String>) this.configs.get(BrokerSecurityConfigs.SASL_ENABLED_MECHANISMS_CONFIG);
-		if (enabledMechanisms == null || enabledMechanisms.isEmpty())
-			throw new IllegalArgumentException("No SASL mechanisms are enabled");
-		this.enabledMechanisms = new ArrayList<>(new HashSet<>(enabledMechanisms));
-		for (String mechanism : this.enabledMechanisms) {
-			if (!callbackHandlers.containsKey(mechanism))
-				throw new IllegalArgumentException("Callback handler not specified for SASL mechanism " + mechanism);
+        this.configs = configs;
+        @SuppressWarnings("unchecked") List<String> enabledMechanisms = (List<String>) this.configs.get(BrokerSecurityConfigs.SASL_ENABLED_MECHANISMS_CONFIG);
+        if (enabledMechanisms == null || enabledMechanisms.isEmpty())
+            throw new IllegalArgumentException("No SASL mechanisms are enabled");
+        this.enabledMechanisms = new ArrayList<>(new HashSet<>(enabledMechanisms));
+        for (String mechanism : this.enabledMechanisms) {
+            if (!callbackHandlers.containsKey(mechanism))
+                throw new IllegalArgumentException("Callback handler not specified for SASL mechanism " + mechanism);
             if (!subjects.containsKey(mechanism))
                 throw new IllegalArgumentException("Subject cannot be null for SASL mechanism " + mechanism);
-			LOG.trace("{} for mechanism={}: {}", BrokerSecurityConfigs.CONNECTIONS_MAX_REAUTH_MS, mechanism,
-					connectionsMaxReauthMsByMechanism.get(mechanism));
+            LOG.trace("{} for mechanism={}: {}", BrokerSecurityConfigs.CONNECTIONS_MAX_REAUTH_MS, mechanism, connectionsMaxReauthMsByMechanism.get(mechanism));
         }
 
         // Note that the old principal builder does not support SASL, so we do not need to pass the
         // authenticator or the transport layer
-		this.principalBuilder = ChannelBuilders.createPrincipalBuilder(configs, kerberosNameParser, null);
+        this.principalBuilder = ChannelBuilders.createPrincipalBuilder(configs, kerberosNameParser, null);
+
+        saslAuthRequestMaxReceiveSize = (Integer) configs.get(BrokerSecurityConfigs.SASL_SERVER_MAX_RECEIVE_SIZE_CONFIG);
+        if (saslAuthRequestMaxReceiveSize == null)
+            saslAuthRequestMaxReceiveSize = BrokerSecurityConfigs.DEFAULT_SASL_SERVER_MAX_RECEIVE_SIZE;
     }
 
     private void createSaslServer(String mechanism) throws IOException {
@@ -199,13 +154,12 @@ public class SaslServerAuthenticator implements Authenticator {
             saslServer = createSaslKerberosServer(callbackHandler, configs, subject);
         } else {
             try {
-				saslServer = Subject.doAs(subject, (PrivilegedExceptionAction<SaslServer>) () ->
-						Sasl.createSaslServer(saslMechanism, "kafka", serverAddress().getHostName(), configs, callbackHandler));
-				if (saslServer == null) {
-					throw new SaslException("Kafka Server failed to create a SaslServer to interact with a client during session authentication with server mechanism " + saslMechanism);
-				}
-			} catch (PrivilegedActionException e) {
-				throw new SaslException("Kafka Server failed to create a SaslServer to interact with a client during session authentication with server mechanism " + saslMechanism, e.getCause());
+                saslServer = Subject.doAs(subject, (PrivilegedExceptionAction<SaslServer>) () -> Sasl.createSaslServer(saslMechanism, "kafka", serverAddress().getHostName(), configs, callbackHandler));
+                if (saslServer == null) {
+                    throw new SaslException("Kafka Server failed to create a SaslServer to interact with a client during session authentication with server mechanism " + saslMechanism);
+                }
+            } catch (PrivilegedActionException e) {
+                throw new SaslException("Kafka Server failed to create a SaslServer to interact with a client during session authentication with server mechanism " + saslMechanism, e.getCause());
             }
         }
     }
@@ -252,9 +206,14 @@ public class SaslServerAuthenticator implements Authenticator {
             }
 
             // allocate on heap (as opposed to any socket server memory pool)
-            if (netInBuffer == null) netInBuffer = new NetworkReceive(MAX_RECEIVE_SIZE, connectionId);
+            if (netInBuffer == null)
+                netInBuffer = new NetworkReceive(saslAuthRequestMaxReceiveSize, connectionId);
 
-            netInBuffer.readFrom(transportLayer);
+            try {
+                netInBuffer.readFrom(transportLayer);
+            } catch (InvalidReceiveException e) {
+                throw new SaslAuthenticationException("Failing SASL authentication due to invalid receive size", e);
+            }
             if (!netInBuffer.complete())
                 return;
             netInBuffer.payload().rewind();
@@ -299,31 +258,29 @@ public class SaslServerAuthenticator implements Authenticator {
 
     @Override
     public KafkaPrincipal principal() {
-		Optional<SSLSession> sslSession = transportLayer instanceof SslTransportLayer ?
-				Optional.of(((SslTransportLayer) transportLayer).sslSession()) : Optional.empty();
-		SaslAuthenticationContext context = new SaslAuthenticationContext(saslServer, securityProtocol,
-				clientAddress(), listenerName.value(), sslSession);
-		KafkaPrincipal principal = principalBuilder.build(context);
-		if (ScramMechanism.isScram(saslMechanism) && Boolean.parseBoolean((String) saslServer.getNegotiatedProperty(ScramLoginModule.TOKEN_AUTH_CONFIG))) {
-			principal.tokenAuthenticated(true);
-		}
-		return principal;
-	}
+        Optional<SSLSession> sslSession = transportLayer instanceof SslTransportLayer ? Optional.of(((SslTransportLayer) transportLayer).sslSession()) : Optional.empty();
+        SaslAuthenticationContext context = new SaslAuthenticationContext(saslServer, securityProtocol, clientAddress(), listenerName.value(), sslSession);
+        KafkaPrincipal principal = principalBuilder.build(context);
+        if (ScramMechanism.isScram(saslMechanism) && Boolean.parseBoolean((String) saslServer.getNegotiatedProperty(ScramLoginModule.TOKEN_AUTH_CONFIG))) {
+            principal.tokenAuthenticated(true);
+        }
+        return principal;
+    }
 
-	@Override
-	public Optional<KafkaPrincipalSerde> principalSerde() {
-		return principalBuilder instanceof KafkaPrincipalSerde ? Optional.of((KafkaPrincipalSerde) principalBuilder) : Optional.empty();
-	}
+    @Override
+    public Optional<KafkaPrincipalSerde> principalSerde() {
+        return principalBuilder instanceof KafkaPrincipalSerde ? Optional.of((KafkaPrincipalSerde) principalBuilder) : Optional.empty();
+    }
 
-	@Override
-	public boolean complete() {
-		return saslState == SaslState.COMPLETE;
-	}
+    @Override
+    public boolean complete() {
+        return saslState == SaslState.COMPLETE;
+    }
 
-	@Override
-	public void handleAuthenticationFailure() throws IOException {
-		sendAuthenticationFailureResponse();
-	}
+    @Override
+    public void handleAuthenticationFailure() throws IOException {
+        sendAuthenticationFailureResponse();
+    }
 
     @Override
     public void close() throws IOException {
@@ -410,24 +367,23 @@ public class SaslServerAuthenticator implements Authenticator {
 
     private void handleSaslToken(byte[] clientToken) throws IOException {
         if (!enableKafkaSaslAuthenticateHeaders) {
-			byte[] response = saslServer.evaluateResponse(clientToken);
-			if (saslServer.isComplete()) {
-				reauthInfo.calcCompletionTimesAndReturnSessionLifetimeMs();
-				if (reauthInfo.reauthenticating())
-					reauthInfo.ensurePrincipalUnchanged(principal());
-			}
-			if (response != null) {
-				netOutBuffer = ByteBufferSend.sizePrefixed(ByteBuffer.wrap(response));
-				flushNetOutBufferAndUpdateInterestOps();
-			}
-		} else {
+            byte[] response = saslServer.evaluateResponse(clientToken);
+            if (saslServer.isComplete()) {
+                reauthInfo.calcCompletionTimesAndReturnSessionLifetimeMs();
+                if (reauthInfo.reauthenticating())
+                    reauthInfo.ensurePrincipalUnchanged(principal());
+            }
+            if (response != null) {
+                netOutBuffer = ByteBufferSend.sizePrefixed(ByteBuffer.wrap(response));
+                flushNetOutBufferAndUpdateInterestOps();
+            }
+        } else {
             ByteBuffer requestBuffer = ByteBuffer.wrap(clientToken);
             RequestHeader header = RequestHeader.parse(requestBuffer);
             ApiKeys apiKey = header.apiKey();
-			short version = header.apiVersion();
-			RequestContext requestContext = new RequestContext(header, connectionId, clientAddress(),
-					KafkaPrincipal.ANONYMOUS, listenerName, securityProtocol, ClientInformation.EMPTY, false);
-			RequestAndSize requestAndSize = requestContext.parseRequest(requestBuffer);
+            short version = header.apiVersion();
+            RequestContext requestContext = new RequestContext(header, connectionId, clientAddress(), KafkaPrincipal.ANONYMOUS, listenerName, securityProtocol, ClientInformation.EMPTY, false);
+            RequestAndSize requestAndSize = requestContext.parseRequest(requestBuffer);
             if (apiKey != ApiKeys.SASL_AUTHENTICATE) {
                 IllegalSaslStateException e = new IllegalSaslStateException("Unexpected Kafka request of type " + apiKey + " during SASL authentication.");
                 buildResponseOnAuthenticateFailure(requestContext, requestAndSize.request.getErrorResponse(e));
@@ -476,13 +432,8 @@ public class SaslServerAuthenticator implements Authenticator {
                 } else {
                     // DO NOT include error message from the `SaslException` in the client response since it may
                     // contain sensitive data like the existence of the user.
-                    String errorMessage = "Authentication failed during "
-                            + reauthInfo.authenticationOrReauthenticationText()
-                            + " due to invalid credentials with SASL mechanism " + saslMechanism;
-					buildResponseOnAuthenticateFailure(requestContext, new SaslAuthenticateResponse(
-							new SaslAuthenticateResponseData()
-									.setErrorCode(Errors.SASL_AUTHENTICATION_FAILED.code())
-									.setErrorMessage(errorMessage)));
+                    String errorMessage = "Authentication failed during " + reauthInfo.authenticationOrReauthenticationText() + " due to invalid credentials with SASL mechanism " + saslMechanism;
+                    buildResponseOnAuthenticateFailure(requestContext, new SaslAuthenticateResponse(new SaslAuthenticateResponseData().setErrorCode(Errors.SASL_AUTHENTICATION_FAILED.code()).setErrorMessage(errorMessage)));
                     throw new SaslAuthenticationException(errorMessage, e);
                 }
             }
@@ -511,9 +462,8 @@ public class SaslServerAuthenticator implements Authenticator {
             LOG.debug("Handling Kafka request {} during {}", apiKey, reauthInfo.authenticationOrReauthenticationText());
 
 
-			RequestContext requestContext = new RequestContext(header, connectionId, clientAddress(),
-					KafkaPrincipal.ANONYMOUS, listenerName, securityProtocol, ClientInformation.EMPTY, false);
-			RequestAndSize requestAndSize = requestContext.parseRequest(requestBuffer);
+            RequestContext requestContext = new RequestContext(header, connectionId, clientAddress(), KafkaPrincipal.ANONYMOUS, listenerName, securityProtocol, ClientInformation.EMPTY, false);
+            RequestAndSize requestAndSize = requestContext.parseRequest(requestBuffer);
             if (apiKey == ApiKeys.API_VERSIONS)
                 handleApiVersionsRequest(requestContext, (ApiVersionsRequest) requestAndSize.request);
             else
@@ -575,16 +525,15 @@ public class SaslServerAuthenticator implements Authenticator {
         if (saslState != SaslState.HANDSHAKE_OR_VERSIONS_REQUEST)
             throw new IllegalStateException("Unexpected ApiVersions request received during SASL authentication state " + saslState);
 
-		if (apiVersionsRequest.hasUnsupportedRequestVersion())
-			sendKafkaResponse(context, apiVersionsRequest.getErrorResponse(0, Errors.UNSUPPORTED_VERSION.exception()));
-		else if (!apiVersionsRequest.isValid())
-			sendKafkaResponse(context, apiVersionsRequest.getErrorResponse(0, Errors.INVALID_REQUEST.exception()));
-		else {
-			metadataRegistry.registerClientInformation(new ClientInformation(apiVersionsRequest.data().clientSoftwareName(),
-					apiVersionsRequest.data().clientSoftwareVersion()));
-			sendKafkaResponse(context, apiVersionSupplier.get());
-			setSaslState(SaslState.HANDSHAKE_REQUEST);
-		}
+        if (apiVersionsRequest.hasUnsupportedRequestVersion())
+            sendKafkaResponse(context, apiVersionsRequest.getErrorResponse(0, Errors.UNSUPPORTED_VERSION.exception()));
+        else if (!apiVersionsRequest.isValid())
+            sendKafkaResponse(context, apiVersionsRequest.getErrorResponse(0, Errors.INVALID_REQUEST.exception()));
+        else {
+            metadataRegistry.registerClientInformation(new ClientInformation(apiVersionsRequest.data().clientSoftwareName(), apiVersionsRequest.data().clientSoftwareVersion()));
+            sendKafkaResponse(context, apiVersionSupplier.get());
+            setSaslState(SaslState.HANDSHAKE_REQUEST);
+        }
     }
 
     /**
@@ -592,7 +541,7 @@ public class SaslServerAuthenticator implements Authenticator {
      * {@link #sendAuthenticationFailureResponse()} is called.
      */
     private void buildResponseOnAuthenticateFailure(RequestContext context, AbstractResponse response) {
-		authenticationFailureSend = context.buildResponseSend(response);
+        authenticationFailureSend = context.buildResponseSend(response);
     }
 
     /**
@@ -606,7 +555,7 @@ public class SaslServerAuthenticator implements Authenticator {
     }
 
     private void sendKafkaResponse(RequestContext context, AbstractResponse response) throws IOException {
-		sendKafkaResponse(context.buildResponseSend(response));
+        sendKafkaResponse(context.buildResponseSend(response));
     }
 
     private void sendKafkaResponse(Send send) throws IOException {
@@ -670,33 +619,23 @@ public class SaslServerAuthenticator implements Authenticator {
             long retvalSessionLifetimeMs = 0L;
             long authenticationEndMs = time.milliseconds();
             authenticationEndNanos = time.nanoseconds();
-            Long credentialExpirationMs = (Long) saslServer
-                    .getNegotiatedProperty(SaslInternalConfigs.CREDENTIAL_LIFETIME_MS_SASL_NEGOTIATED_PROPERTY_KEY);
+            Long credentialExpirationMs = (Long) saslServer.getNegotiatedProperty(SaslInternalConfigs.CREDENTIAL_LIFETIME_MS_SASL_NEGOTIATED_PROPERTY_KEY);
             Long connectionsMaxReauthMs = connectionsMaxReauthMsByMechanism.get(saslMechanism);
-            if (credentialExpirationMs != null || connectionsMaxReauthMs != null) {
+            boolean maxReauthSet = connectionsMaxReauthMs != null && connectionsMaxReauthMs > 0;
+
+            if (credentialExpirationMs != null || maxReauthSet) {
                 if (credentialExpirationMs == null)
-					retvalSessionLifetimeMs = zeroIfNegative(connectionsMaxReauthMs);
-                else if (connectionsMaxReauthMs == null)
-					retvalSessionLifetimeMs = zeroIfNegative(credentialExpirationMs - authenticationEndMs);
+                    retvalSessionLifetimeMs = zeroIfNegative(connectionsMaxReauthMs);
+                else if (!maxReauthSet)
+                    retvalSessionLifetimeMs = zeroIfNegative(credentialExpirationMs - authenticationEndMs);
                 else
-					retvalSessionLifetimeMs = zeroIfNegative(
-							Math.min(credentialExpirationMs - authenticationEndMs, connectionsMaxReauthMs));
-                if (retvalSessionLifetimeMs > 0L)
-					sessionExpirationTimeNanos = authenticationEndNanos + 1000 * 1000 * retvalSessionLifetimeMs;
+                    retvalSessionLifetimeMs = zeroIfNegative(Math.min(credentialExpirationMs - authenticationEndMs, connectionsMaxReauthMs));
+
+                sessionExpirationTimeNanos = authenticationEndNanos + 1000 * 1000 * retvalSessionLifetimeMs;
             }
+
             if (credentialExpirationMs != null) {
-                if (sessionExpirationTimeNanos != null)
-                    LOG.debug(
-							"Authentication complete; session max lifetime from broker config={} ms, credential expiration={} ({} ms); session expiration = {} ({} ms), sending {} ms to client",
-							connectionsMaxReauthMs, new Date(credentialExpirationMs),
-							credentialExpirationMs - authenticationEndMs,
-							new Date(authenticationEndMs + retvalSessionLifetimeMs), retvalSessionLifetimeMs,
-							retvalSessionLifetimeMs);
-                else
-					LOG.debug(
-							"Authentication complete; session max lifetime from broker config={} ms, credential expiration={} ({} ms); no session expiration, sending 0 ms to client",
-							connectionsMaxReauthMs, new Date(credentialExpirationMs),
-							credentialExpirationMs - authenticationEndMs);
+                LOG.debug("Authentication complete; session max lifetime from broker config={} ms, credential expiration={} ({} ms); session expiration = {} ({} ms), sending {} ms to client", connectionsMaxReauthMs, new Date(credentialExpirationMs), credentialExpirationMs - authenticationEndMs, new Date(authenticationEndMs + retvalSessionLifetimeMs), retvalSessionLifetimeMs, retvalSessionLifetimeMs);
             } else {
                 if (sessionExpirationTimeNanos != null)
                     LOG.debug(
@@ -716,7 +655,7 @@ public class SaslServerAuthenticator implements Authenticator {
                 return null;
             // record at least 1 ms if there is some latency
             long latencyNanos = authenticationEndNanos - reauthenticationBeginNanos;
-			return latencyNanos == 0L ? 0L : Math.max(1L, Math.round(latencyNanos / 1000.0 / 1000.0));
+            return latencyNanos == 0L ? 0L : Math.max(1L, Math.round(latencyNanos / 1000.0 / 1000.0));
         }
 
         private long zeroIfNegative(long value) {

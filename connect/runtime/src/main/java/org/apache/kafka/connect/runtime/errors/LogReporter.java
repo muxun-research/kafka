@@ -69,8 +69,7 @@ public class LogReporter implements ErrorReporter {
 
 	// Visible for testing
     String message(ProcessingContext context) {
-        return String.format("Error encountered in task %s. %s", String.valueOf(id),
-                context.toString(connConfig.includeRecordDetailsInErrorLog()));
+        return String.format("Error encountered in task %s. %s", id, context.toString(connConfig.includeRecordDetailsInErrorLog()));
     }
 
 }

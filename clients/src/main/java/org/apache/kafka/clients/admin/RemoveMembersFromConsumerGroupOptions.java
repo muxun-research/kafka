@@ -32,24 +32,36 @@ import java.util.Set;
 @InterfaceStability.Evolving
 public class RemoveMembersFromConsumerGroupOptions extends AbstractOptions<RemoveMembersFromConsumerGroupOptions> {
 
-	private Set<MemberToRemove> members;
+    private Set<MemberToRemove> members;
+    private String reason;
 
-	public RemoveMembersFromConsumerGroupOptions(Collection<MemberToRemove> members) {
-		if (members.isEmpty()) {
-			throw new IllegalArgumentException("Invalid empty members has been provided");
-		}
-		this.members = new HashSet<>(members);
-	}
+    public RemoveMembersFromConsumerGroupOptions(Collection<MemberToRemove> members) {
+        if (members.isEmpty()) {
+            throw new IllegalArgumentException("Invalid empty members has been provided");
+        }
+        this.members = new HashSet<>(members);
+    }
 
-	public RemoveMembersFromConsumerGroupOptions() {
-		this.members = Collections.emptySet();
-	}
+    public RemoveMembersFromConsumerGroupOptions() {
+        this.members = Collections.emptySet();
+    }
 
-	public Set<MemberToRemove> members() {
-		return members;
-	}
+    /**
+     * Sets an optional reason.
+     */
+    public void reason(final String reason) {
+        this.reason = reason;
+    }
 
-	public boolean removeAll() {
-		return members.isEmpty();
-	}
+    public Set<MemberToRemove> members() {
+        return members;
+    }
+
+    public String reason() {
+        return reason;
+    }
+
+    public boolean removeAll() {
+        return members.isEmpty();
+    }
 }

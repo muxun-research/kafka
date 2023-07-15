@@ -18,7 +18,7 @@
 package kafka.admin
 
 import kafka.utils.Implicits._
-import kafka.utils.{CommandDefaultOptions, CommandLineUtils, Logging}
+import kafka.utils.Logging
 import org.apache.kafka.clients.consumer.internals.{ConsumerNetworkClient, RequestFuture}
 import org.apache.kafka.clients._
 import org.apache.kafka.common.Node
@@ -31,7 +31,9 @@ import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.network.Selector
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.requests._
+import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.utils.{KafkaThread, LogContext, Time, Utils}
+import org.apache.kafka.server.util.{CommandDefaultOptions, CommandLineUtils}
 
 import java.io.{IOException, PrintStream}
 import java.util.Properties
@@ -88,7 +90,7 @@ object BrokerApiVersionsCommand {
     checkArgs()
 
     def checkArgs(): Unit = {
-      CommandLineUtils.printHelpAndExitIfNeeded(this, "This tool helps to retrieve broker version information.")
+      CommandLineUtils.maybePrintHelpOrVersion(this, "This tool helps to retrieve broker version information.")
       // check required args
       CommandLineUtils.checkRequiredArgs(parser, options, bootstrapServerOpt)
     }
@@ -150,10 +152,10 @@ object BrokerApiVersionsCommand {
       throw new RuntimeException(s"Request ${request.apiKey()} failed on brokers $bootstrapBrokers")
     }
 
-    private def getApiVersions(node: Node): ApiVersionCollection = {
+    private def getNodeApiVersions(node: Node): NodeApiVersions = {
       val response = send(node, new ApiVersionsRequest.Builder()).asInstanceOf[ApiVersionsResponse]
       Errors.forCode(response.data.errorCode).maybeThrow()
-      response.data.apiKeys
+      new NodeApiVersions(response.data.apiKeys, response.data.supportedFeatures, response.data.zkMigrationReady)
     }
 
     /**
@@ -174,12 +176,12 @@ object BrokerApiVersionsCommand {
       val errors = response.errors
       if (!errors.isEmpty)
         debug(s"Metadata request contained errors: $errors")
-      response.cluster.nodes.asScala.toList
+      response.buildCluster.nodes.asScala.toList
     }
 
     def listAllBrokerVersionInfo(): Map[Node, Try[NodeApiVersions]] =
       findAllBrokers().map { broker =>
-        broker -> Try[NodeApiVersions](new NodeApiVersions(getApiVersions(broker)))
+        broker -> Try[NodeApiVersions](getNodeApiVersions(broker))
       }.toMap
 
     def close(): Unit = {
@@ -197,8 +199,6 @@ object BrokerApiVersionsCommand {
   private object AdminClient {
     val DefaultConnectionMaxIdleMs = 9 * 60 * 1000
     val DefaultRequestTimeoutMs = 5000
-    val DefaultSocketConnectionSetupMs = CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MS_CONFIG
-    val DefaultSocketConnectionSetupMaxMs = CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_CONFIG
     val DefaultMaxInFlightRequestsPerConnection = 100
     val DefaultReconnectBackoffMs = 50
     val DefaultReconnectBackoffMax = 50
@@ -225,6 +225,7 @@ object BrokerApiVersionsCommand {
           CommonClientConfigs.SECURITY_PROTOCOL_CONFIG,
           ConfigDef.Type.STRING,
           CommonClientConfigs.DEFAULT_SECURITY_PROTOCOL,
+          ConfigDef.CaseInsensitiveValidString.in(Utils.enumOptions(classOf[SecurityProtocol]): _*),
           ConfigDef.Importance.MEDIUM,
           CommonClientConfigs.SECURITY_PROTOCOL_DOC)
         .define(

@@ -22,16 +22,9 @@ import org.apache.kafka.common.record.TimestampType;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Optional;
+import java.util.*;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class MockConsumerTest {
 
@@ -129,14 +122,59 @@ public class MockConsumerTest {
 		TopicPartition partition = new TopicPartition("test", 0);
 		consumer.updateEndOffsets(Collections.singletonMap(partition, 10L));
 		// consumer.endOffsets should NOT change the value of end offsets
-		assertEquals(10L, (long) consumer.endOffsets(Collections.singleton(partition)).get(partition));
-		assertEquals(10L, (long) consumer.endOffsets(Collections.singleton(partition)).get(partition));
-		assertEquals(10L, (long) consumer.endOffsets(Collections.singleton(partition)).get(partition));
-		consumer.updateEndOffsets(Collections.singletonMap(partition, 11L));
-		// consumer.endOffsets should NOT change the value of end offsets
-		assertEquals(11L, (long) consumer.endOffsets(Collections.singleton(partition)).get(partition));
-		assertEquals(11L, (long) consumer.endOffsets(Collections.singleton(partition)).get(partition));
-		assertEquals(11L, (long) consumer.endOffsets(Collections.singleton(partition)).get(partition));
-	}
+        assertEquals(10L, (long) consumer.endOffsets(Collections.singleton(partition)).get(partition));
+        assertEquals(10L, (long) consumer.endOffsets(Collections.singleton(partition)).get(partition));
+        assertEquals(10L, (long) consumer.endOffsets(Collections.singleton(partition)).get(partition));
+        consumer.updateEndOffsets(Collections.singletonMap(partition, 11L));
+        // consumer.endOffsets should NOT change the value of end offsets
+        assertEquals(11L, (long) consumer.endOffsets(Collections.singleton(partition)).get(partition));
+        assertEquals(11L, (long) consumer.endOffsets(Collections.singleton(partition)).get(partition));
+        assertEquals(11L, (long) consumer.endOffsets(Collections.singleton(partition)).get(partition));
+    }
+
+    @Test
+    public void testRebalanceListener() {
+        final List<TopicPartition> revoked = new ArrayList<>();
+        final List<TopicPartition> assigned = new ArrayList<>();
+        ConsumerRebalanceListener consumerRebalanceListener = new ConsumerRebalanceListener() {
+            @Override
+            public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+                revoked.clear();
+                revoked.addAll(partitions);
+            }
+
+            @Override
+            public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+                assigned.clear();
+                assigned.addAll(partitions);
+            }
+        };
+
+
+        consumer.subscribe(Collections.singleton("test"), consumerRebalanceListener);
+        assertEquals(0, consumer.poll(Duration.ZERO).count());
+        List<TopicPartition> topicPartitionList = Arrays.asList(new TopicPartition("test", 0), new TopicPartition("test", 1));
+        consumer.rebalance(topicPartitionList);
+
+        assertTrue(revoked.isEmpty());
+        assertEquals(2, assigned.size());
+        assertTrue(assigned.contains(topicPartitionList.get(0)));
+        assertTrue(assigned.contains(topicPartitionList.get(1)));
+
+        consumer.rebalance(Collections.emptyList());
+        assertEquals(2, assigned.size());
+        assertTrue(revoked.contains(topicPartitionList.get(0)));
+        assertTrue(revoked.contains(topicPartitionList.get(1)));
+
+        consumer.rebalance(Collections.singletonList(topicPartitionList.get(0)));
+        assertEquals(1, assigned.size());
+        assertTrue(assigned.contains(topicPartitionList.get(0)));
+
+        consumer.rebalance(Collections.singletonList(topicPartitionList.get(1)));
+        assertEquals(1, assigned.size());
+        assertTrue(assigned.contains(topicPartitionList.get(1)));
+        assertEquals(1, revoked.size());
+        assertTrue(revoked.contains(topicPartitionList.get(0)));
+    }
 
 }

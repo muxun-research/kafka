@@ -21,30 +21,49 @@ import org.apache.kafka.common.protocol.ApiKeys;
 // Abstract class for all control requests including UpdateMetadataRequest, LeaderAndIsrRequest and StopReplicaRequest
 public abstract class AbstractControlRequest extends AbstractRequest {
 
-	public static final long UNKNOWN_BROKER_EPOCH = -1L;
+    public static final long UNKNOWN_BROKER_EPOCH = -1L;
 
-	public static abstract class Builder<T extends AbstractRequest> extends AbstractRequest.Builder<T> {
-		protected final int controllerId;
-		protected final int controllerEpoch;
-		protected final long brokerEpoch;
+    public static abstract class Builder<T extends AbstractRequest> extends AbstractRequest.Builder<T> {
+        protected final int controllerId;
+        protected final int controllerEpoch;
+        protected final long brokerEpoch;
+        protected final boolean kraftController;
 
-		protected Builder(ApiKeys api, short version, int controllerId, int controllerEpoch, long brokerEpoch) {
-			super(api, version);
-			this.controllerId = controllerId;
-			this.controllerEpoch = controllerEpoch;
-			this.brokerEpoch = brokerEpoch;
-		}
+        protected Builder(ApiKeys api, short version, int controllerId, int controllerEpoch, long brokerEpoch) {
+            this(api, version, controllerId, controllerEpoch, brokerEpoch, false);
+        }
 
-	}
+        protected Builder(ApiKeys api, short version, int controllerId, int controllerEpoch, long brokerEpoch, boolean kraftController) {
+            super(api, version);
+            this.controllerId = controllerId;
+            this.controllerEpoch = controllerEpoch;
+            this.brokerEpoch = brokerEpoch;
+            this.kraftController = kraftController;
+        }
 
-	protected AbstractControlRequest(ApiKeys api, short version) {
-		super(api, version);
-	}
+        public int controllerId() {
+            return controllerId;
+        }
 
-	public abstract int controllerId();
+        public int controllerEpoch() {
+            return controllerEpoch;
+        }
 
-	public abstract int controllerEpoch();
+        public long brokerEpoch() {
+            return brokerEpoch;
+        }
+    }
 
-	public abstract long brokerEpoch();
+    protected AbstractControlRequest(ApiKeys api, short version) {
+        super(api, version);
+    }
+
+    public abstract int controllerId();
+
+    public abstract boolean isKRaftController();
+
+    public abstract int controllerEpoch();
+
+    public abstract long brokerEpoch();
 
 }

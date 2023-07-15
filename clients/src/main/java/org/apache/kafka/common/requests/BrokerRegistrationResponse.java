@@ -27,41 +27,46 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class BrokerRegistrationResponse extends AbstractResponse {
-	private final BrokerRegistrationResponseData data;
+    private final BrokerRegistrationResponseData data;
 
-	public BrokerRegistrationResponse(BrokerRegistrationResponseData data) {
-		super(ApiKeys.BROKER_REGISTRATION);
-		this.data = data;
-	}
+    public BrokerRegistrationResponse(BrokerRegistrationResponseData data) {
+        super(ApiKeys.BROKER_REGISTRATION);
+        this.data = data;
+    }
 
-	@Override
-	public BrokerRegistrationResponseData data() {
-		return data;
-	}
+    @Override
+    public BrokerRegistrationResponseData data() {
+        return data;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> errorCounts = new HashMap<>();
-		errorCounts.put(Errors.forCode(data.errorCode()), 1);
-		return errorCounts;
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	public static BrokerRegistrationResponse parse(ByteBuffer buffer, short version) {
-		return new BrokerRegistrationResponse(new BrokerRegistrationResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        Map<Errors, Integer> errorCounts = new HashMap<>();
+        errorCounts.put(Errors.forCode(data.errorCode()), 1);
+        return errorCounts;
+    }
 
-	@Override
-	public boolean shouldClientThrottle(short version) {
-		return true;
-	}
+    public static BrokerRegistrationResponse parse(ByteBuffer buffer, short version) {
+        return new BrokerRegistrationResponse(new BrokerRegistrationResponseData(new ByteBufferAccessor(buffer), version));
+    }
 
-	@Override
-	public String toString() {
-		return data.toString();
-	}
+    @Override
+    public boolean shouldClientThrottle(short version) {
+        return true;
+    }
+
+    @Override
+    public String toString() {
+        return data.toString();
+    }
 }

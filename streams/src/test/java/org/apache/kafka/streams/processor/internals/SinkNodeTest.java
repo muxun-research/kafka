@@ -30,29 +30,28 @@ import org.junit.Test;
 import static org.junit.Assert.fail;
 
 public class SinkNodeTest {
-	private final StateSerdes<Bytes, Bytes> anyStateSerde = StateSerdes.withBuiltinTypes("anyName", Bytes.class, Bytes.class);
-	private final Serializer<byte[]> anySerializer = Serdes.ByteArray().serializer();
-	private final RecordCollector recordCollector = new MockRecordCollector();
-	private final InternalMockProcessorContext context = new InternalMockProcessorContext(anyStateSerde, recordCollector);
-	private final SinkNode<byte[], byte[], ?, ?> sink = new SinkNode<>("anyNodeName",
-			new StaticTopicNameExtractor<>("any-output-topic"), anySerializer, anySerializer, null);
+    private final StateSerdes<Bytes, Bytes> anyStateSerde = StateSerdes.withBuiltinTypes("anyName", Bytes.class, Bytes.class);
+    private final Serializer<byte[]> anySerializer = Serdes.ByteArray().serializer();
+    private final RecordCollector recordCollector = new MockRecordCollector();
+    private final InternalMockProcessorContext<Void, Void> context = new InternalMockProcessorContext<>(anyStateSerde, recordCollector);
+    private final SinkNode<byte[], byte[]> sink = new SinkNode<>("anyNodeName", new StaticTopicNameExtractor<>("any-output-topic"), anySerializer, anySerializer, null);
 
-	// Used to verify that the correct exceptions are thrown if the compiler checks are bypassed
-	@SuppressWarnings("unchecked")
-	private final SinkNode<Object, Object, ?, ?> illTypedSink = (SinkNode) sink;
+    // Used to verify that the correct exceptions are thrown if the compiler checks are bypassed
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private final SinkNode<Object, Object> illTypedSink = (SinkNode) sink;
 
-	@Before
-	public void before() {
-		sink.init(context);
-	}
+    @Before
+    public void before() {
+        sink.init(context);
+    }
 
     @Test
     public void shouldThrowStreamsExceptionOnInputRecordWithInvalidTimestamp() {
         // When/Then
         context.setTime(-1); // ensures a negative timestamp is set for the record we send next
         try {
-			illTypedSink.process(new Record<>("any key".getBytes(), "any value".getBytes(), -1));
-			fail("Should have thrown StreamsException");
+            illTypedSink.process(new Record<>("any key".getBytes(), "any value".getBytes(), -1));
+            fail("Should have thrown StreamsException");
         } catch (final StreamsException ignored) {
             // expected
         }

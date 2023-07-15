@@ -33,81 +33,77 @@ import java.util.Map;
 
 public class AlterClientQuotasResponse extends AbstractResponse {
 
-	private final AlterClientQuotasResponseData data;
+    private final AlterClientQuotasResponseData data;
 
-	public AlterClientQuotasResponse(AlterClientQuotasResponseData data) {
-		super(ApiKeys.ALTER_CLIENT_QUOTAS);
-		this.data = data;
-	}
+    public AlterClientQuotasResponse(AlterClientQuotasResponseData data) {
+        super(ApiKeys.ALTER_CLIENT_QUOTAS);
+        this.data = data;
+    }
 
-	public void complete(Map<ClientQuotaEntity, KafkaFutureImpl<Void>> futures) {
-		for (EntryData entryData : data.entries()) {
-			Map<String, String> entityEntries = new HashMap<>(entryData.entity().size());
-			for (EntityData entityData : entryData.entity()) {
-				entityEntries.put(entityData.entityType(), entityData.entityName());
-			}
-			ClientQuotaEntity entity = new ClientQuotaEntity(entityEntries);
+    public void complete(Map<ClientQuotaEntity, KafkaFutureImpl<Void>> futures) {
+        for (EntryData entryData : data.entries()) {
+            Map<String, String> entityEntries = new HashMap<>(entryData.entity().size());
+            for (EntityData entityData : entryData.entity()) {
+                entityEntries.put(entityData.entityType(), entityData.entityName());
+            }
+            ClientQuotaEntity entity = new ClientQuotaEntity(entityEntries);
 
-			KafkaFutureImpl<Void> future = futures.get(entity);
-			if (future == null) {
-				throw new IllegalArgumentException("Future map must contain entity " + entity);
-			}
+            KafkaFutureImpl<Void> future = futures.get(entity);
+            if (future == null) {
+                throw new IllegalArgumentException("Future map must contain entity " + entity);
+            }
 
-			Errors error = Errors.forCode(entryData.errorCode());
-			if (error == Errors.NONE) {
-				future.complete(null);
-			} else {
-				future.completeExceptionally(error.exception(entryData.errorMessage()));
-			}
-		}
-	}
+            Errors error = Errors.forCode(entryData.errorCode());
+            if (error == Errors.NONE) {
+                future.complete(null);
+            } else {
+                future.completeExceptionally(error.exception(entryData.errorMessage()));
+            }
+        }
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> counts = new HashMap<>();
-		data.entries().forEach(entry ->
-				updateErrorCounts(counts, Errors.forCode(entry.errorCode()))
-		);
-		return counts;
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	@Override
-	public AlterClientQuotasResponseData data() {
-		return data;
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        Map<Errors, Integer> counts = new HashMap<>();
+        data.entries().forEach(entry -> updateErrorCounts(counts, Errors.forCode(entry.errorCode())));
+        return counts;
+    }
 
-	private static List<EntityData> toEntityData(ClientQuotaEntity entity) {
-		List<AlterClientQuotasResponseData.EntityData> entityData = new ArrayList<>(entity.entries().size());
-		for (Map.Entry<String, String> entry : entity.entries().entrySet()) {
-			entityData.add(new AlterClientQuotasResponseData.EntityData()
-					.setEntityType(entry.getKey())
-					.setEntityName(entry.getValue()));
-		}
-		return entityData;
-	}
+    @Override
+    public AlterClientQuotasResponseData data() {
+        return data;
+    }
 
-	public static AlterClientQuotasResponse parse(ByteBuffer buffer, short version) {
-		return new AlterClientQuotasResponse(new AlterClientQuotasResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    private static List<EntityData> toEntityData(ClientQuotaEntity entity) {
+        List<AlterClientQuotasResponseData.EntityData> entityData = new ArrayList<>(entity.entries().size());
+        for (Map.Entry<String, String> entry : entity.entries().entrySet()) {
+            entityData.add(new AlterClientQuotasResponseData.EntityData().setEntityType(entry.getKey()).setEntityName(entry.getValue()));
+        }
+        return entityData;
+    }
 
-	public static AlterClientQuotasResponse fromQuotaEntities(Map<ClientQuotaEntity, ApiError> result, int throttleTimeMs) {
-		List<EntryData> entries = new ArrayList<>(result.size());
-		for (Map.Entry<ClientQuotaEntity, ApiError> entry : result.entrySet()) {
-			ApiError e = entry.getValue();
-			entries.add(new EntryData()
-					.setErrorCode(e.error().code())
-					.setErrorMessage(e.message())
-					.setEntity(toEntityData(entry.getKey())));
-		}
+    public static AlterClientQuotasResponse parse(ByteBuffer buffer, short version) {
+        return new AlterClientQuotasResponse(new AlterClientQuotasResponseData(new ByteBufferAccessor(buffer), version));
+    }
 
-		return new AlterClientQuotasResponse(new AlterClientQuotasResponseData()
-				.setThrottleTimeMs(throttleTimeMs)
-				.setEntries(entries));
-	}
+    public static AlterClientQuotasResponse fromQuotaEntities(Map<ClientQuotaEntity, ApiError> result, int throttleTimeMs) {
+        List<EntryData> entries = new ArrayList<>(result.size());
+        for (Map.Entry<ClientQuotaEntity, ApiError> entry : result.entrySet()) {
+            ApiError e = entry.getValue();
+            entries.add(new EntryData().setErrorCode(e.error().code()).setErrorMessage(e.message()).setEntity(toEntityData(entry.getKey())));
+        }
+
+        return new AlterClientQuotasResponse(new AlterClientQuotasResponseData().setThrottleTimeMs(throttleTimeMs).setEntries(entries));
+    }
 
 }

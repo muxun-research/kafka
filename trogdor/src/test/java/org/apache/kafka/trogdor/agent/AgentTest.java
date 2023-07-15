@@ -17,12 +17,6 @@
 
 package org.apache.kafka.trogdor.agent;
 
-import static java.util.Arrays.asList;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-
 import com.fasterxml.jackson.databind.node.TextNode;
 import org.apache.kafka.common.utils.MockScheduler;
 import org.apache.kafka.common.utils.MockTime;
@@ -41,20 +35,12 @@ import org.apache.kafka.trogdor.fault.FilesUnreadableFaultSpec;
 import org.apache.kafka.trogdor.fault.Kibosh;
 import org.apache.kafka.trogdor.fault.Kibosh.KiboshControlFile;
 import org.apache.kafka.trogdor.fault.Kibosh.KiboshFilesUnreadableFaultSpec;
-import org.apache.kafka.trogdor.rest.AgentStatusResponse;
-import org.apache.kafka.trogdor.rest.CreateWorkerRequest;
-import org.apache.kafka.trogdor.rest.DestroyWorkerRequest;
-import org.apache.kafka.trogdor.rest.JsonRestServer;
-import org.apache.kafka.trogdor.rest.RequestConflictException;
-import org.apache.kafka.trogdor.rest.StopWorkerRequest;
-import org.apache.kafka.trogdor.rest.TaskDone;
-import org.apache.kafka.trogdor.rest.UptimeResponse;
-import org.apache.kafka.trogdor.rest.WorkerDone;
-import org.apache.kafka.trogdor.rest.WorkerRunning;
+import org.apache.kafka.trogdor.rest.*;
 import org.apache.kafka.trogdor.task.NoOpTaskSpec;
 import org.apache.kafka.trogdor.task.SampleTaskSpec;
 import org.apache.kafka.trogdor.task.TaskSpec;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -67,7 +53,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.TreeMap;
 
-import org.junit.jupiter.api.Timeout;
+import static java.util.Arrays.asList;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static org.junit.jupiter.api.Assertions.*;
 
 @Timeout(value = 120000, unit = MILLISECONDS)
 public class AgentTest {
@@ -488,4 +476,4 @@ public class AgentTest {
 		agent.waitForShutdown();
 	}
 
-};
+}

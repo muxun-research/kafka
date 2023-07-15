@@ -19,14 +19,7 @@ package org.apache.kafka.connect.runtime;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.MetricNameTemplate;
-import org.apache.kafka.common.metrics.Gauge;
-import org.apache.kafka.common.metrics.JmxReporter;
-import org.apache.kafka.common.metrics.KafkaMetricsContext;
-import org.apache.kafka.common.metrics.MetricConfig;
-import org.apache.kafka.common.metrics.Metrics;
-import org.apache.kafka.common.metrics.MetricsContext;
-import org.apache.kafka.common.metrics.MetricsReporter;
-import org.apache.kafka.common.metrics.Sensor;
+import org.apache.kafka.common.metrics.*;
 import org.apache.kafka.common.metrics.internals.MetricsUtils;
 import org.apache.kafka.common.utils.AppInfoParser;
 import org.apache.kafka.common.utils.Time;
@@ -34,20 +27,13 @@ import org.apache.kafka.connect.runtime.distributed.DistributedConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
 /**
- * The Connect metrics with JMX reporter.
+ * The Connect metrics with configurable {@link MetricsReporter}s.
  */
 public class ConnectMetrics {
 
@@ -61,42 +47,36 @@ public class ConnectMetrics {
     private final ConcurrentMap<MetricGroupId, MetricGroup> groupsByName = new ConcurrentHashMap<>();
     private final ConnectMetricsRegistry registry = new ConnectMetricsRegistry();
 
-	/**
-	 * Create an instance.
-	 * @param workerId  the worker identifier; may not be null
-	 * @param config    the worker configuration; may not be null
-	 * @param time      the time; may not be null
-	 * @param clusterId the Kafka cluster ID
-	 */
-	public ConnectMetrics(String workerId, WorkerConfig config, Time time, String clusterId) {
-		this.workerId = workerId;
-		this.time = time;
+    /**
+     * Create an instance.
+     * @param workerId  the worker identifier; may not be null
+     * @param config    the worker configuration; may not be null
+     * @param time      the time; may not be null
+     * @param clusterId the Kafka cluster ID
+     */
+    public ConnectMetrics(String workerId, WorkerConfig config, Time time, String clusterId) {
+        this.workerId = workerId;
+        this.time = time;
 
-		int numSamples = config.getInt(CommonClientConfigs.METRICS_NUM_SAMPLES_CONFIG);
-		long sampleWindowMs = config.getLong(CommonClientConfigs.METRICS_SAMPLE_WINDOW_MS_CONFIG);
-		String metricsRecordingLevel = config.getString(CommonClientConfigs.METRICS_RECORDING_LEVEL_CONFIG);
-		List<MetricsReporter> reporters = config.getConfiguredInstances(CommonClientConfigs.METRIC_REPORTER_CLASSES_CONFIG, MetricsReporter.class);
+        int numSamples = config.getInt(CommonClientConfigs.METRICS_NUM_SAMPLES_CONFIG);
+        long sampleWindowMs = config.getLong(CommonClientConfigs.METRICS_SAMPLE_WINDOW_MS_CONFIG);
+        String metricsRecordingLevel = config.getString(CommonClientConfigs.METRICS_RECORDING_LEVEL_CONFIG);
+        List<MetricsReporter> reporters = CommonClientConfigs.metricsReporters(workerId, config);
+        MetricConfig metricConfig = new MetricConfig().samples(numSamples).timeWindow(sampleWindowMs, TimeUnit.MILLISECONDS).recordLevel(Sensor.RecordingLevel.forName(metricsRecordingLevel));
 
-		MetricConfig metricConfig = new MetricConfig().samples(numSamples)
-				.timeWindow(sampleWindowMs, TimeUnit.MILLISECONDS).recordLevel(
-						Sensor.RecordingLevel.forName(metricsRecordingLevel));
-		JmxReporter jmxReporter = new JmxReporter();
-		jmxReporter.configure(config.originals());
-		reporters.add(jmxReporter);
+        Map<String, Object> contextLabels = new HashMap<>();
+        contextLabels.putAll(config.originalsWithPrefix(CommonClientConfigs.METRICS_CONTEXT_PREFIX));
+        contextLabels.put(WorkerConfig.CONNECT_KAFKA_CLUSTER_ID, clusterId);
+        Object groupId = config.originals().get(DistributedConfig.GROUP_ID_CONFIG);
+        if (groupId != null) {
+            contextLabels.put(WorkerConfig.CONNECT_GROUP_ID, groupId);
+        }
+        MetricsContext metricsContext = new KafkaMetricsContext(JMX_PREFIX, contextLabels);
+        this.metrics = new Metrics(metricConfig, reporters, time, metricsContext);
 
-		Map<String, Object> contextLabels = new HashMap<>();
-		contextLabels.putAll(config.originalsWithPrefix(CommonClientConfigs.METRICS_CONTEXT_PREFIX));
-		contextLabels.put(WorkerConfig.CONNECT_KAFKA_CLUSTER_ID, clusterId);
-		Object groupId = config.originals().get(DistributedConfig.GROUP_ID_CONFIG);
-		if (groupId != null) {
-			contextLabels.put(WorkerConfig.CONNECT_GROUP_ID, groupId);
-		}
-		MetricsContext metricsContext = new KafkaMetricsContext(JMX_PREFIX, contextLabels);
-		this.metrics = new Metrics(metricConfig, reporters, time, metricsContext);
-
-		LOG.debug("Registering Connect metrics with JMX for worker '{}'", workerId);
-		AppInfoParser.registerAppInfo(JMX_PREFIX, workerId, metrics, time.milliseconds());
-	}
+        LOG.debug("Registering Connect metrics with JMX for worker '{}'", workerId);
+        AppInfoParser.registerAppInfo(JMX_PREFIX, workerId, metrics, time.milliseconds());
+    }
 
     /**
      * Get the worker identifier.
@@ -149,7 +129,7 @@ public class ConnectMetrics {
 
     protected MetricGroupId groupId(String groupName, String... tagKeyValues) {
         Map<String, String> tags = MetricsUtils.getTags(tagKeyValues);
-		return new MetricGroupId(groupName, tags);
+        return new MetricGroupId(groupName, tags);
     }
 
     /**
@@ -259,7 +239,7 @@ public class ConnectMetrics {
         protected MetricGroup(MetricGroupId groupId) {
             Objects.requireNonNull(groupId);
             this.groupId = groupId;
-            sensorPrefix = "connect-sensor-group: " + groupId.toString() + ";";
+            sensorPrefix = "connect-sensor-group: " + groupId + ";";
         }
 
         /**
@@ -318,9 +298,7 @@ public class ConnectMetrics {
          */
         public <T> void addValueMetric(MetricNameTemplate nameTemplate, final LiteralSupplier<T> supplier) {
             MetricName metricName = metricName(nameTemplate);
-            if (metrics().metric(metricName) == null) {
-                metrics().addMetric(metricName, (Gauge<T>) (config, now) -> supplier.metricValue(now));
-			}
+            metrics().addMetricIfAbsent(metricName, null, (Gauge<T>) (config, now) -> supplier.metricValue(now));
         }
 
         /**
@@ -332,9 +310,7 @@ public class ConnectMetrics {
          */
         public <T> void addImmutableValueMetric(MetricNameTemplate nameTemplate, final T value) {
             MetricName metricName = metricName(nameTemplate);
-            if (metrics().metric(metricName) == null) {
-                metrics().addMetric(metricName, (Gauge<T>) (config, now) -> value);
-			}
+            metrics().addMetricIfAbsent(metricName, null, (Gauge<T>) (config, now) -> value);
         }
 
         /**

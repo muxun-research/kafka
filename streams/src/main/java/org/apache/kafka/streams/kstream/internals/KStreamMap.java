@@ -23,26 +23,28 @@ import org.apache.kafka.streams.processor.api.Processor;
 import org.apache.kafka.streams.processor.api.ProcessorSupplier;
 import org.apache.kafka.streams.processor.api.Record;
 
+import java.util.Objects;
+
 class KStreamMap<KIn, VIn, KOut, VOut> implements ProcessorSupplier<KIn, VIn, KOut, VOut> {
 
-	private final KeyValueMapper<? super KIn, ? super VIn, ? extends KeyValue<? extends KOut, ? extends VOut>> mapper;
+    private final KeyValueMapper<? super KIn, ? super VIn, ? extends KeyValue<? extends KOut, ? extends VOut>> mapper;
 
-	public KStreamMap(final KeyValueMapper<? super KIn, ? super VIn, ? extends KeyValue<? extends KOut, ? extends VOut>> mapper) {
-		this.mapper = mapper;
-	}
+    public KStreamMap(final KeyValueMapper<? super KIn, ? super VIn, ? extends KeyValue<? extends KOut, ? extends VOut>> mapper) {
+        this.mapper = mapper;
+    }
 
-	@Override
-	public Processor<KIn, VIn, KOut, VOut> get() {
-		return new KStreamMapProcessor();
-	}
+    @Override
+    public Processor<KIn, VIn, KOut, VOut> get() {
+        return new KStreamMapProcessor();
+    }
 
-	private class KStreamMapProcessor extends ContextualProcessor<KIn, VIn, KOut, VOut> {
+    private class KStreamMapProcessor extends ContextualProcessor<KIn, VIn, KOut, VOut> {
 
-		@Override
-		public void process(final Record<KIn, VIn> record) {
-			final KeyValue<? extends KOut, ? extends VOut> newPair =
-					mapper.apply(record.key(), record.value());
-			context().forward(record.withKey(newPair.key).withValue(newPair.value));
-		}
-	}
+        @Override
+        public void process(final Record<KIn, VIn> record) {
+            final KeyValue<? extends KOut, ? extends VOut> newPair = mapper.apply(record.key(), record.value());
+            Objects.requireNonNull(newPair, "The provided KeyValueMapper returned null which is not allowed.");
+            context().forward(record.withKey(newPair.key).withValue(newPair.value));
+        }
+    }
 }

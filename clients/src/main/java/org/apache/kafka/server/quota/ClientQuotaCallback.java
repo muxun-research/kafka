@@ -55,9 +55,8 @@ public interface ClientQuotaCallback extends Configurable {
 
     /**
      * Quota configuration update callback that is invoked when quota configuration for an entity is
-     * updated in ZooKeeper. This is useful to track configured quotas if built-in quota configuration
+     * updated in the quorum. This is useful to track configured quotas if built-in quota configuration
      * tools are used for quota management.
-     *
      * @param quotaType   Type of quota being updated
      * @param quotaEntity The quota entity for which quota is being updated
      * @param newValue    The new quota value
@@ -66,7 +65,7 @@ public interface ClientQuotaCallback extends Configurable {
 
     /**
      * Quota configuration removal callback that is invoked when quota configuration for an entity is
-     * removed in ZooKeeper. This is useful to track configured quotas if built-in quota configuration
+     * removed in the quorum. This is useful to track configured quotas if built-in quota configuration
      * tools are used for quota management.
      *
      * @param quotaType   Type of quota being updated

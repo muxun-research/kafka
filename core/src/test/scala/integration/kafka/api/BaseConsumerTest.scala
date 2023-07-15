@@ -16,14 +16,17 @@
  */
 package kafka.api
 
-import org.apache.kafka.clients.consumer.ConsumerConfig
-import org.apache.kafka.common.PartitionInfo
+import org.apache.kafka.clients.consumer.{Consumer, ConsumerConfig}
+import org.apache.kafka.clients.producer.{KafkaProducer, ProducerConfig}
 import org.apache.kafka.common.internals.Topic
-import org.junit.jupiter.api.Test
+import org.apache.kafka.common.serialization.{Deserializer, Serializer}
+import org.apache.kafka.common.{ClusterResource, ClusterResourceListener, PartitionInfo}
 import org.junit.jupiter.api.Assertions._
+import org.junit.jupiter.api.Test
 
+import java.util.Properties
+import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters._
-import scala.collection.Seq
 
 /**
  * Integration tests for the consumer that cover basic usage as well as coordinator failure
@@ -47,6 +50,27 @@ abstract class BaseConsumerTest extends AbstractConsumerTest {
 
     // check async commit callbacks
     sendAndAwaitAsyncCommit(consumer)
+  }
+
+  @Test
+  def testClusterResourceListener(): Unit = {
+    val numRecords = 100
+    val producerProps = new Properties()
+    producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, classOf[BaseConsumerTest.TestClusterResourceListenerSerializer])
+    producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, classOf[BaseConsumerTest.TestClusterResourceListenerSerializer])
+
+    val producer: KafkaProducer[Array[Byte], Array[Byte]] = createProducer(keySerializer = null, valueSerializer = null, producerProps)
+    val startingTimestamp = System.currentTimeMillis()
+    sendRecords(producer, numRecords, tp, startingTimestamp = startingTimestamp)
+
+    val consumerProps = new Properties()
+    consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, classOf[BaseConsumerTest.TestClusterResourceListenerDeserializer])
+    consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, classOf[BaseConsumerTest.TestClusterResourceListenerDeserializer])
+    val consumer: Consumer[Array[Byte], Array[Byte]] = createConsumer(keyDeserializer = null, valueDeserializer = null, consumerProps)
+    consumer.subscribe(List(tp.topic()).asJava)
+    consumeAndVerifyRecords(consumer = consumer, numRecords = numRecords, startingOffset = 0, startingTimestamp = startingTimestamp)
+    assertNotEquals(0, BaseConsumerTest.updateProducerCount.get())
+    assertNotEquals(0, BaseConsumerTest.updateConsumerCount.get())
   }
 
   @Test
@@ -77,5 +101,24 @@ abstract class BaseConsumerTest extends AbstractConsumerTest {
 
     // the failover should not cause a rebalance
     ensureNoRebalance(consumer, listener)
+  }
+}
+
+object BaseConsumerTest {
+  val updateProducerCount = new AtomicInteger()
+  val updateConsumerCount = new AtomicInteger()
+
+  class TestClusterResourceListenerSerializer extends Serializer[Array[Byte]] with ClusterResourceListener {
+
+    override def onUpdate(clusterResource: ClusterResource): Unit = updateProducerCount.incrementAndGet();
+
+    override def serialize(topic: String, data: Array[Byte]): Array[Byte] = data
+  }
+
+  class TestClusterResourceListenerDeserializer extends Deserializer[Array[Byte]] with ClusterResourceListener {
+
+    override def onUpdate(clusterResource: ClusterResource): Unit = updateConsumerCount.incrementAndGet();
+
+    override def deserialize(topic: String, data: Array[Byte]): Array[Byte] = data
   }
 }

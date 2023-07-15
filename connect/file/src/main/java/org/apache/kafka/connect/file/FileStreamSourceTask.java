@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.connect.file;
 
+import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceRecord;
@@ -42,46 +43,45 @@ import java.util.Map;
 public class FileStreamSourceTask extends SourceTask {
     private static final Logger log = LoggerFactory.getLogger(FileStreamSourceTask.class);
     public static final String FILENAME_FIELD = "filename";
-    public  static final String POSITION_FIELD = "position";
+    public static final String POSITION_FIELD = "position";
     private static final Schema VALUE_SCHEMA = Schema.STRING_SCHEMA;
 
-	private String filename;
-	private InputStream stream;
-	private BufferedReader reader = null;
-	private char[] buffer;
-	private int offset = 0;
-	private String topic = null;
-	private int batchSize = FileStreamSourceConnector.DEFAULT_TASK_BATCH_SIZE;
+    private String filename;
+    private InputStream stream;
+    private BufferedReader reader = null;
+    private char[] buffer;
+    private int offset = 0;
+    private String topic;
+    private int batchSize;
 
-	private Long streamOffset;
+    private Long streamOffset;
 
-	public FileStreamSourceTask() {
-		this(1024);
-	}
+    public FileStreamSourceTask() {
+        this(1024);
+    }
 
-	/* visible for testing */
-	FileStreamSourceTask(int initialBufferSize) {
-		buffer = new char[initialBufferSize];
-	}
+    /* visible for testing */
+    FileStreamSourceTask(int initialBufferSize) {
+        buffer = new char[initialBufferSize];
+    }
 
-	@Override
-	public String version() {
-		return new FileStreamSourceConnector().version();
-	}
+    @Override
+    public String version() {
+        return new FileStreamSourceConnector().version();
+    }
 
-	@Override
-	public void start(Map<String, String> props) {
-		filename = props.get(FileStreamSourceConnector.FILE_CONFIG);
-		if (filename == null || filename.isEmpty()) {
+    @Override
+    public void start(Map<String, String> props) {
+        AbstractConfig config = new AbstractConfig(FileStreamSourceConnector.CONFIG_DEF, props);
+        filename = config.getString(FileStreamSourceConnector.FILE_CONFIG);
+        if (filename == null || filename.isEmpty()) {
             stream = System.in;
             // Tracking offset for stdin doesn't make sense
             streamOffset = null;
             reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8));
         }
-        // Missing topic or parsing error is not possible because we've parsed the config in the
-        // Connector
-        topic = props.get(FileStreamSourceConnector.TOPIC_CONFIG);
-        batchSize = Integer.parseInt(props.get(FileStreamSourceConnector.TASK_BATCH_SIZE_CONFIG));
+        topic = config.getString(FileStreamSourceConnector.TOPIC_CONFIG);
+        batchSize = config.getInt(FileStreamSourceConnector.TASK_BATCH_SIZE_CONFIG);
     }
 
     @Override
@@ -146,31 +146,30 @@ public class FileStreamSourceTask extends SourceTask {
 
                 if (nread > 0) {
                     offset += nread;
-					String line;
-					boolean foundOneLine = false;
+                    String line;
+                    boolean foundOneLine = false;
                     do {
                         line = extractLine();
                         if (line != null) {
-							foundOneLine = true;
-							log.trace("Read a line from {}", logFilename());
-							if (records == null)
-								records = new ArrayList<>();
-							records.add(new SourceRecord(offsetKey(filename), offsetValue(streamOffset), topic, null,
-									null, null, VALUE_SCHEMA, line, System.currentTimeMillis()));
+                            foundOneLine = true;
+                            log.trace("Read a line from {}", logFilename());
+                            if (records == null)
+                                records = new ArrayList<>();
+                            records.add(new SourceRecord(offsetKey(filename), offsetValue(streamOffset), topic, null, null, null, VALUE_SCHEMA, line, System.currentTimeMillis()));
 
-							if (records.size() >= batchSize) {
-								return records;
-							}
-						}
-					} while (line != null);
+                            if (records.size() >= batchSize) {
+                                return records;
+                            }
+                        }
+                    } while (line != null);
 
-					if (!foundOneLine && offset == buffer.length) {
-						char[] newbuf = new char[buffer.length * 2];
-						System.arraycopy(buffer, 0, newbuf, 0, buffer.length);
-						log.info("Increased buffer from {} to {}", buffer.length, newbuf.length);
-						buffer = newbuf;
-					}
-				}
+                    if (!foundOneLine && offset == buffer.length) {
+                        char[] newbuf = new char[buffer.length * 2];
+                        System.arraycopy(buffer, 0, newbuf, 0, buffer.length);
+                        log.info("Increased buffer from {} to {}", buffer.length, newbuf.length);
+                        buffer = newbuf;
+                    }
+                }
             }
 
             if (nread <= 0)
@@ -233,19 +232,19 @@ public class FileStreamSourceTask extends SourceTask {
     }
 
     private Map<String, String> offsetKey(String filename) {
-		return Collections.singletonMap(FILENAME_FIELD, filename);
-	}
+        return Collections.singletonMap(FILENAME_FIELD, filename);
+    }
 
-	private Map<String, Long> offsetValue(Long pos) {
-		return Collections.singletonMap(POSITION_FIELD, pos);
-	}
+    private Map<String, Long> offsetValue(Long pos) {
+        return Collections.singletonMap(POSITION_FIELD, pos);
+    }
 
-	private String logFilename() {
-		return filename == null ? "stdin" : filename;
-	}
+    private String logFilename() {
+        return filename == null ? "stdin" : filename;
+    }
 
-	/* visible for testing */
-	int bufferSize() {
-		return buffer.length;
-	}
+    /* visible for testing */
+    int bufferSize() {
+        return buffer.length;
+    }
 }

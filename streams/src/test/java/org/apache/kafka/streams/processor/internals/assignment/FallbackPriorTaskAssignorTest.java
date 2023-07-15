@@ -19,56 +19,40 @@ package org.apache.kafka.streams.processor.internals.assignment;
 import org.apache.kafka.streams.processor.TaskId;
 import org.junit.Test;
 
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
-import java.util.UUID;
+import java.util.*;
 
 import static java.util.Arrays.asList;
 import static org.apache.kafka.common.utils.Utils.mkSet;
-import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.TASK_0_0;
-import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.TASK_0_1;
-import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.TASK_0_2;
-import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.UUID_1;
-import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.UUID_2;
+import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.*;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.empty;
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.*;
 
 public class FallbackPriorTaskAssignorTest {
 
-	private final Map<UUID, ClientState> clients = new TreeMap<>();
+    private final Map<UUID, ClientState> clients = new TreeMap<>();
 
-	@Test
-	public void shouldViolateBalanceToPreserveActiveTaskStickiness() {
-		final ClientState c1 = createClientWithPreviousActiveTasks(UUID_1, 1, TASK_0_0, TASK_0_1, TASK_0_2);
-		final ClientState c2 = createClient(UUID_2, 1);
+    @Test
+    public void shouldViolateBalanceToPreserveActiveTaskStickiness() {
+        final ClientState c1 = createClientWithPreviousActiveTasks(UUID_1, 1, TASK_0_0, TASK_0_1, TASK_0_2);
+        final ClientState c2 = createClient(UUID_2, 1);
 
-		final List<TaskId> taskIds = asList(TASK_0_0, TASK_0_1, TASK_0_2);
-		Collections.shuffle(taskIds);
-		final boolean probingRebalanceNeeded = new FallbackPriorTaskAssignor().assign(
-				clients,
-				new HashSet<>(taskIds),
-				new HashSet<>(taskIds),
-				new AssignorConfiguration.AssignmentConfigs(0L, 1, 0, 60_000L)
-		);
-		assertThat(probingRebalanceNeeded, is(true));
+        final List<TaskId> taskIds = asList(TASK_0_0, TASK_0_1, TASK_0_2);
+        Collections.shuffle(taskIds);
+        final boolean probingRebalanceNeeded = new FallbackPriorTaskAssignor().assign(clients, new HashSet<>(taskIds), new HashSet<>(taskIds), new AssignorConfiguration.AssignmentConfigs(0L, 1, 0, 60_000L, EMPTY_RACK_AWARE_ASSIGNMENT_TAGS));
+        assertThat(probingRebalanceNeeded, is(true));
 
-		assertThat(c1.activeTasks(), equalTo(mkSet(TASK_0_0, TASK_0_1, TASK_0_2)));
-		assertThat(c2.activeTasks(), empty());
-	}
+        assertThat(c1.activeTasks(), equalTo(mkSet(TASK_0_0, TASK_0_1, TASK_0_2)));
+        assertThat(c2.activeTasks(), empty());
+    }
 
-	private ClientState createClient(final UUID processId, final int capacity) {
-		return createClientWithPreviousActiveTasks(processId, capacity);
-	}
+    private ClientState createClient(final UUID processId, final int capacity) {
+        return createClientWithPreviousActiveTasks(processId, capacity);
+    }
 
-	private ClientState createClientWithPreviousActiveTasks(final UUID processId, final int capacity, final TaskId... taskIds) {
-		final ClientState clientState = new ClientState(capacity);
-		clientState.addPreviousActiveTasks(mkSet(taskIds));
-		clients.put(processId, clientState);
-		return clientState;
-	}
+    private ClientState createClientWithPreviousActiveTasks(final UUID processId, final int capacity, final TaskId... taskIds) {
+        final ClientState clientState = new ClientState(capacity);
+        clientState.addPreviousActiveTasks(mkSet(taskIds));
+        clients.put(processId, clientState);
+        return clientState;
+    }
 }

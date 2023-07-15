@@ -17,21 +17,22 @@
 
 package org.apache.kafka.connect.integration;
 
+import org.apache.kafka.common.utils.MockTime;
+import org.apache.kafka.common.utils.Time;
+import org.apache.kafka.test.IntegrationTest;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.experimental.categories.Category;
+
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.kafka.common.utils.MockTime;
-import org.apache.kafka.common.utils.Time;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import static org.junit.Assert.*;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-
+@Category(IntegrationTest.class)
 public class StartAndStopCounterTest {
 
     private StartAndStopCounter counter;
@@ -89,6 +90,7 @@ public class StartAndStopCounterTest {
         assertTrue(future.get(200, TimeUnit.MILLISECONDS));
         assertTrue(future.isDone());
     }
+
     @Test
     public void shouldFailToWaitForRestartThatNeverHappens() throws Exception {
         waiters = Executors.newSingleThreadExecutor();

@@ -20,6 +20,7 @@ import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -28,9 +29,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class SetSchemaMetadataTest {
     private final SetSchemaMetadata<SinkRecord> xform = new SetSchemaMetadata.Value<>();
@@ -94,11 +93,29 @@ public class SetSchemaMetadataTest {
 
         final SinkRecord updatedRecord = xform.apply(record);
 
-		assertEquals("foo", updatedRecord.valueSchema().name());
-		assertEquals(Integer.valueOf(42), updatedRecord.valueSchema().version());
+        assertEquals("foo", updatedRecord.valueSchema().name());
+        assertEquals(Integer.valueOf(42), updatedRecord.valueSchema().version());
 
         // Make sure the struct's schema and fields all point to the new schema
         assertMatchingSchema((Struct) updatedRecord.value(), updatedRecord.valueSchema());
+    }
+
+    @Test
+    public void valueSchemaRequired() {
+        final SinkRecord record = new SinkRecord("", 0, null, null, null, 42, 0);
+        assertThrows(DataException.class, () -> xform.apply(record));
+    }
+
+    @Test
+    public void ignoreRecordWithNullValue() {
+        final SinkRecord record = new SinkRecord("", 0, null, null, null, null, 0);
+
+        final SinkRecord updatedRecord = xform.apply(record);
+
+        assertNull(updatedRecord.key());
+        assertNull(updatedRecord.keySchema());
+        assertNull(updatedRecord.value());
+        assertNull(updatedRecord.valueSchema());
     }
 
     @Test
@@ -107,9 +124,7 @@ public class SetSchemaMetadataTest {
         final String fieldName2 = "f2";
         final String fieldValue1 = "value1";
         final int fieldValue2 = 1;
-        final Schema schema = SchemaBuilder.struct()
-                                      .name("my.orig.SchemaDefn")
-                                      .field(fieldName1, Schema.STRING_SCHEMA)
+        final Schema schema = SchemaBuilder.struct().name("my.orig.SchemaDefn").field(fieldName1, Schema.STRING_SCHEMA)
                                       .field(fieldName2, Schema.INT32_SCHEMA)
                                       .build();
         final Struct value = new Struct(schema).put(fieldName1, fieldValue1).put(fieldName2, fieldValue2);

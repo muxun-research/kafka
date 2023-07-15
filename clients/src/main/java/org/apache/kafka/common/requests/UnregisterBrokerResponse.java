@@ -27,38 +27,43 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class UnregisterBrokerResponse extends AbstractResponse {
-	private final UnregisterBrokerResponseData data;
+    private final UnregisterBrokerResponseData data;
 
-	public UnregisterBrokerResponse(UnregisterBrokerResponseData data) {
-		super(ApiKeys.UNREGISTER_BROKER);
-		this.data = data;
-	}
+    public UnregisterBrokerResponse(UnregisterBrokerResponseData data) {
+        super(ApiKeys.UNREGISTER_BROKER);
+        this.data = data;
+    }
 
-	@Override
-	public UnregisterBrokerResponseData data() {
-		return data;
-	}
+    @Override
+    public UnregisterBrokerResponseData data() {
+        return data;
+    }
 
-	@Override
-	public int throttleTimeMs() {
-		return data.throttleTimeMs();
-	}
+    @Override
+    public int throttleTimeMs() {
+        return data.throttleTimeMs();
+    }
 
-	@Override
-	public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> errorCounts = new HashMap<>();
-		if (data.errorCode() != 0) {
-			errorCounts.put(Errors.forCode(data.errorCode()), 1);
-		}
-		return errorCounts;
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-	public static UnregisterBrokerResponse parse(ByteBuffer buffer, short version) {
-		return new UnregisterBrokerResponse(new UnregisterBrokerResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        Map<Errors, Integer> errorCounts = new HashMap<>();
+        if (data.errorCode() != 0) {
+            errorCounts.put(Errors.forCode(data.errorCode()), 1);
+        }
+        return errorCounts;
+    }
 
-	@Override
-	public boolean shouldClientThrottle(short version) {
-		return true;
-	}
+    public static UnregisterBrokerResponse parse(ByteBuffer buffer, short version) {
+        return new UnregisterBrokerResponse(new UnregisterBrokerResponseData(new ByteBufferAccessor(buffer), version));
+    }
+
+    @Override
+    public boolean shouldClientThrottle(short version) {
+        return true;
+    }
 }

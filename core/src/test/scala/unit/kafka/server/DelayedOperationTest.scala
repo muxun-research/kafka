@@ -17,23 +17,22 @@
 
 package kafka.server
 
+import kafka.utils.CoreUtils.inLock
+import kafka.utils.TestUtils
+import org.apache.kafka.common.utils.Time
+import org.junit.jupiter.api.Assertions._
+import org.junit.jupiter.api.{AfterEach, BeforeEach, Test}
+
 import java.util.Random
 import java.util.concurrent._
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.ReentrantLock
-
-import kafka.utils.CoreUtils.inLock
-import kafka.utils.TestUtils
-import org.apache.kafka.common.utils.Time
-import org.junit.jupiter.api.{AfterEach, BeforeEach, Test}
-import org.junit.jupiter.api.Assertions._
-
 import scala.jdk.CollectionConverters._
 
 class DelayedOperationTest {
 
-  var purgatory: DelayedOperationPurgatory[DelayedOperation] = null
-  var executorService: ExecutorService = null
+  var purgatory: DelayedOperationPurgatory[DelayedOperation] = _
+  var executorService: ExecutorService = _
 
   @BeforeEach
   def setUp(): Unit = {

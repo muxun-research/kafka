@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.raft.internals;
 
+import org.apache.kafka.raft.Batch;
 import org.apache.kafka.raft.BatchReader;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -23,42 +24,35 @@ import org.mockito.Mockito;
 import java.util.Arrays;
 import java.util.OptionalLong;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 class MemoryBatchReaderTest {
 
-	@Test
-	public void testIteration() {
-		BatchReader.Batch<String> batch1 = new BatchReader.Batch<>(0L, 1,
-				Arrays.asList("a", "b", "c"));
-		BatchReader.Batch<String> batch2 = new BatchReader.Batch<>(3L, 2,
-				Arrays.asList("d", "e"));
-		BatchReader.Batch<String> batch3 = new BatchReader.Batch<>(5L, 2,
-				Arrays.asList("f", "g", "h", "i"));
+    @Test
+    public void testIteration() {
+        Batch<String> batch1 = Batch.data(0L, 1, 0L, 3, Arrays.asList("a", "b", "c"));
+        Batch<String> batch2 = Batch.data(3L, 2, 1L, 2, Arrays.asList("d", "e"));
+        Batch<String> batch3 = Batch.data(5L, 2, 3L, 4, Arrays.asList("f", "g", "h", "i"));
 
-		@SuppressWarnings("unchecked")
-		CloseListener<BatchReader<String>> listener = Mockito.mock(CloseListener.class);
-		MemoryBatchReader<String> reader = new MemoryBatchReader<>(
-				Arrays.asList(batch1, batch2, batch3), listener);
+        @SuppressWarnings("unchecked") CloseListener<BatchReader<String>> listener = Mockito.mock(CloseListener.class);
+        MemoryBatchReader<String> reader = MemoryBatchReader.of(Arrays.asList(batch1, batch2, batch3), listener);
 
-		assertEquals(0L, reader.baseOffset());
-		assertEquals(OptionalLong.of(8L), reader.lastOffset());
+        assertEquals(0L, reader.baseOffset());
+        assertEquals(OptionalLong.of(8L), reader.lastOffset());
 
-		assertTrue(reader.hasNext());
-		assertEquals(batch1, reader.next());
+        assertTrue(reader.hasNext());
+        assertEquals(batch1, reader.next());
 
-		assertTrue(reader.hasNext());
-		assertEquals(batch2, reader.next());
+        assertTrue(reader.hasNext());
+        assertEquals(batch2, reader.next());
 
-		assertTrue(reader.hasNext());
-		assertEquals(batch3, reader.next());
+        assertTrue(reader.hasNext());
+        assertEquals(batch3, reader.next());
 
-		assertFalse(reader.hasNext());
+        assertFalse(reader.hasNext());
 
-		reader.close();
-		Mockito.verify(listener).onClose(reader);
-	}
+        reader.close();
+        Mockito.verify(listener).onClose(reader);
+    }
 
 }

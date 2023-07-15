@@ -25,12 +25,11 @@ import java.util.Map;
  */
 public class ConfigTransformerResult {
 
-    private Map<String, Long> ttls;
-    private Map<String, String> data;
+    private final Map<String, Long> ttls;
+    private final Map<String, String> data;
 
     /**
      * Creates a new ConfigTransformerResult with the given data and TTL values for a set of paths.
-     *
      * @param data a Map of key-value pairs
      * @param ttls a Map of path and TTL values (in milliseconds)
      */

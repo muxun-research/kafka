@@ -17,11 +17,11 @@
 package org.apache.kafka.connect.runtime;
 
 import org.apache.kafka.common.utils.Exit;
+import org.apache.kafka.connect.runtime.rest.ConnectRestServer;
 import org.apache.kafka.connect.runtime.rest.RestServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.net.URI;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -33,13 +33,13 @@ public class Connect {
     private static final Logger log = LoggerFactory.getLogger(Connect.class);
 
     private final Herder herder;
-    private final RestServer rest;
+    private final ConnectRestServer rest;
     private final CountDownLatch startLatch = new CountDownLatch(1);
     private final CountDownLatch stopLatch = new CountDownLatch(1);
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
     private final ShutdownHook shutdownHook;
 
-    public Connect(Herder herder, RestServer rest) {
+    public Connect(Herder herder, ConnectRestServer rest) {
         log.debug("Kafka Connect instance created");
         this.herder = herder;
         this.rest = rest;
@@ -48,8 +48,8 @@ public class Connect {
 
     public void start() {
         try {
-			log.info("Kafka Connect starting");
-			Exit.addShutdownHook("connect-shutdown-hook", shutdownHook);
+            log.info("Kafka Connect starting");
+            Exit.addShutdownHook("connect-shutdown-hook", shutdownHook);
 
             herder.start();
             rest.initializeResources(herder);
@@ -74,38 +74,34 @@ public class Connect {
         } finally {
             stopLatch.countDown();
         }
-	}
+    }
 
-	public void awaitStop() {
-		try {
-			stopLatch.await();
-		} catch (InterruptedException e) {
-			log.error("Interrupted waiting for Kafka Connect to shutdown");
-		}
-	}
+    public void awaitStop() {
+        try {
+            stopLatch.await();
+        } catch (InterruptedException e) {
+            log.error("Interrupted waiting for Kafka Connect to shutdown");
+        }
+    }
 
-	public boolean isRunning() {
-		return herder.isRunning();
-	}
+    public boolean isRunning() {
+        return herder.isRunning();
+    }
 
-	// Visible for testing
-	public URI restUrl() {
-		return rest.serverUrl();
-	}
+    // Visible for testing
+    public RestServer rest() {
+        return rest;
+    }
 
-	public URI adminUrl() {
-		return rest.adminUrl();
-	}
-
-	private class ShutdownHook extends Thread {
-		@Override
-		public void run() {
-			try {
-				startLatch.await();
-				Connect.this.stop();
-			} catch (InterruptedException e) {
-				log.error("Interrupted in shutdown hook while waiting for Kafka Connect startup to finish");
-			}
+    private class ShutdownHook extends Thread {
+        @Override
+        public void run() {
+            try {
+                startLatch.await();
+                Connect.this.stop();
+            } catch (InterruptedException e) {
+                log.error("Interrupted in shutdown hook while waiting for Kafka Connect startup to finish");
+            }
         }
     }
 }

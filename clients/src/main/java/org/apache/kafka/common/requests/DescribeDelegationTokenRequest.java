@@ -53,7 +53,7 @@ public class DescribeDelegationTokenRequest extends AbstractRequest {
         }
     }
 
-	private final DescribeDelegationTokenRequestData data;
+    private final DescribeDelegationTokenRequestData data;
 
     public DescribeDelegationTokenRequest(DescribeDelegationTokenRequestData data, short version) {
         super(ApiKeys.DESCRIBE_DELEGATION_TOKEN, version);
@@ -63,19 +63,18 @@ public class DescribeDelegationTokenRequest extends AbstractRequest {
     @Override
     public DescribeDelegationTokenRequestData data() {
         return data;
-	}
+    }
 
-	public boolean ownersListEmpty() {
-		return data.owners() != null && data.owners().isEmpty();
-	}
+    public boolean ownersListEmpty() {
+        return data.owners() != null && data.owners().isEmpty();
+    }
 
-	@Override
-	public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-		return new DescribeDelegationTokenResponse(throttleTimeMs, Errors.forException(e));
-	}
+    @Override
+    public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
+        return new DescribeDelegationTokenResponse(version(), throttleTimeMs, Errors.forException(e));
+    }
 
-	public static DescribeDelegationTokenRequest parse(ByteBuffer buffer, short version) {
-		return new DescribeDelegationTokenRequest(new DescribeDelegationTokenRequestData(
-				new ByteBufferAccessor(buffer), version), version);
-	}
+    public static DescribeDelegationTokenRequest parse(ByteBuffer buffer, short version) {
+        return new DescribeDelegationTokenRequest(new DescribeDelegationTokenRequestData(new ByteBufferAccessor(buffer), version), version);
+    }
 }

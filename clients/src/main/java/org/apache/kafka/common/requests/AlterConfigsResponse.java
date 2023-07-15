@@ -29,39 +29,39 @@ import java.util.stream.Collectors;
 
 public class AlterConfigsResponse extends AbstractResponse {
 
-	private final AlterConfigsResponseData data;
+    private final AlterConfigsResponseData data;
 
-	public AlterConfigsResponse(AlterConfigsResponseData data) {
-		super(ApiKeys.ALTER_CONFIGS);
-		this.data = data;
-	}
+    public AlterConfigsResponse(AlterConfigsResponseData data) {
+        super(ApiKeys.ALTER_CONFIGS);
+        this.data = data;
+    }
 
-	public Map<ConfigResource, ApiError> errors() {
-		return data.responses().stream().collect(Collectors.toMap(
-				response -> new ConfigResource(
-						ConfigResource.Type.forId(response.resourceType()),
-						response.resourceName()),
-				response -> new ApiError(Errors.forCode(response.errorCode()), response.errorMessage())
-		));
-	}
+    public Map<ConfigResource, ApiError> errors() {
+        return data.responses().stream().collect(Collectors.toMap(response -> new ConfigResource(ConfigResource.Type.forId(response.resourceType()), response.resourceName()), response -> new ApiError(Errors.forCode(response.errorCode()), response.errorMessage())));
+    }
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-		return apiErrorCounts(errors());
+        return apiErrorCounts(errors());
     }
 
     @Override
     public int throttleTimeMs() {
-		return data.throttleTimeMs();
+        return data.throttleTimeMs();
     }
 
-	@Override
-	public AlterConfigsResponseData data() {
-		return data;
-	}
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
+
+    @Override
+    public AlterConfigsResponseData data() {
+        return data;
+    }
 
     public static AlterConfigsResponse parse(ByteBuffer buffer, short version) {
-		return new AlterConfigsResponse(new AlterConfigsResponseData(new ByteBufferAccessor(buffer), version));
+        return new AlterConfigsResponse(new AlterConfigsResponseData(new ByteBufferAccessor(buffer), version));
     }
 
     @Override

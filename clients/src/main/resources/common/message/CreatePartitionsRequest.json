@@ -17,7 +17,9 @@
   "apiKey": 37,
   "type": "request",
   "listeners": [
-    "zkBroker"
+    "zkBroker",
+    "broker",
+    "controller"
   ],
   "name": "CreatePartitionsRequest",
   // Version 1 is the same as version 0.
@@ -61,12 +63,23 @@
               "type": "[]int32",
               "versions": "0+",
               "entityType": "brokerId",
-          "about": "The assigned broker IDs." }
-      ]}
-    ]},
-    { "name": "TimeoutMs", "type": "int32", "versions": "0+",
-      "about": "The time in ms to wait for the partitions to be created." },
-    { "name": "ValidateOnly", "type": "bool", "versions": "0+",
-      "about": "If true, then validate the request, but don't actually increase the number of partitions." }
+              "about": "The assigned broker IDs."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "TimeoutMs",
+      "type": "int32",
+      "versions": "0+",
+      "about": "The time in ms to wait for the partitions to be created."
+    },
+    {
+      "name": "ValidateOnly",
+      "type": "bool",
+      "versions": "0+",
+      "about": "If true, then validate the request, but don't actually increase the number of partitions."
+    }
   ]
 }

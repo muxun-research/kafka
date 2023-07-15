@@ -23,18 +23,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.message.ListOffsetsRequestData;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.requests.ListOffsetsRequest;
-import org.openjdk.jmh.annotations.Benchmark;
-import org.openjdk.jmh.annotations.BenchmarkMode;
-import org.openjdk.jmh.annotations.Fork;
-import org.openjdk.jmh.annotations.Level;
-import org.openjdk.jmh.annotations.Measurement;
-import org.openjdk.jmh.annotations.Mode;
-import org.openjdk.jmh.annotations.OutputTimeUnit;
-import org.openjdk.jmh.annotations.Param;
-import org.openjdk.jmh.annotations.Scope;
-import org.openjdk.jmh.annotations.Setup;
-import org.openjdk.jmh.annotations.State;
-import org.openjdk.jmh.annotations.Warmup;
+import org.openjdk.jmh.annotations.*;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -48,33 +37,32 @@ import java.util.concurrent.TimeUnit;
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 public class ListOffsetRequestBenchmark {
-	@Param({"10", "500", "1000"})
-	private int topicCount;
+    @Param({"10", "500", "1000"})
+    private int topicCount;
 
-	@Param({"3", "10", "20"})
-	private int partitionCount;
+    @Param({"3", "10", "20"})
+    private int partitionCount;
 
-	Map<TopicPartition, ListOffsetsRequestData.ListOffsetsPartition> offsetData;
+    Map<TopicPartition, ListOffsetsRequestData.ListOffsetsPartition> offsetData;
 
-	ListOffsetsRequest offsetRequest;
+    ListOffsetsRequest offsetRequest;
 
-	@Setup(Level.Trial)
-	public void setup() {
-		this.offsetData = new HashMap<>();
-		for (int topicIdx = 0; topicIdx < topicCount; topicIdx++) {
-			String topic = UUID.randomUUID().toString();
-			for (int partitionId = 0; partitionId < partitionCount; partitionId++) {
-				ListOffsetsRequestData.ListOffsetsPartition data = new ListOffsetsRequestData.ListOffsetsPartition();
-				this.offsetData.put(new TopicPartition(topic, partitionId), data);
-			}
-		}
+    @Setup(Level.Trial)
+    public void setup() {
+        this.offsetData = new HashMap<>();
+        for (int topicIdx = 0; topicIdx < topicCount; topicIdx++) {
+            String topic = UUID.randomUUID().toString();
+            for (int partitionId = 0; partitionId < partitionCount; partitionId++) {
+                ListOffsetsRequestData.ListOffsetsPartition data = new ListOffsetsRequestData.ListOffsetsPartition();
+                this.offsetData.put(new TopicPartition(topic, partitionId), data);
+            }
+        }
 
-		this.offsetRequest = ListOffsetsRequest.Builder.forConsumer(false, IsolationLevel.READ_UNCOMMITTED)
-				.build(ApiKeys.LIST_OFFSETS.latestVersion());
-	}
+        this.offsetRequest = ListOffsetsRequest.Builder.forConsumer(false, IsolationLevel.READ_UNCOMMITTED, false).build(ApiKeys.LIST_OFFSETS.latestVersion());
+    }
 
-	@Benchmark
-	public String testRequestToJson() {
-		return RequestConvertToJson.request(offsetRequest).toString();
-	}
+    @Benchmark
+    public String testRequestToJson() {
+        return RequestConvertToJson.request(offsetRequest).toString();
+    }
 }

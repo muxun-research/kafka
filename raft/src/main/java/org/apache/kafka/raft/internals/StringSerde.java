@@ -20,29 +20,28 @@ import org.apache.kafka.common.protocol.ObjectSerializationCache;
 import org.apache.kafka.common.protocol.Readable;
 import org.apache.kafka.common.protocol.Writable;
 import org.apache.kafka.common.utils.Utils;
-import org.apache.kafka.raft.RecordSerde;
+import org.apache.kafka.server.common.serialization.RecordSerde;
 
 public class StringSerde implements RecordSerde<String> {
 
-	@Override
-	public int recordSize(String data, ObjectSerializationCache serializationCache) {
-		return recordSize(data);
-	}
+    @Override
+    public int recordSize(String data, ObjectSerializationCache serializationCache) {
+        return recordSize(data);
+    }
 
-	public int recordSize(String data) {
-		return Utils.utf8Length(data);
-	}
+    public int recordSize(String data) {
+        return Utils.utf8Length(data);
+    }
 
-	@Override
-	public void write(String data, ObjectSerializationCache serializationCache, Writable out) {
-		out.writeByteArray(Utils.utf8(data));
-	}
+    @Override
+    public void write(String data, ObjectSerializationCache serializationCache, Writable out) {
+        out.writeByteArray(Utils.utf8(data));
+    }
 
-	@Override
-	public String read(Readable input, int size) {
-		byte[] data = new byte[size];
-		input.readArray(data);
-		return Utils.utf8(data);
-	}
+    @Override
+    public String read(Readable input, int size) {
+        byte[] data = input.readArray(size);
+        return Utils.utf8(data);
+    }
 
 }

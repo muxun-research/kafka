@@ -20,7 +20,9 @@
   // Starting in version 1, on quota violation, brokers send out responses before throttling.
   //
   // Version 2 is the first flexible version.
-  "validVersions": "0-2",
+  //
+  // Version 3 adds token requester details
+  "validVersions": "0-3",
   "flexibleVersions": "2+",
   "fields": [
     {
@@ -42,6 +44,18 @@
       "about": "The name of the token owner."
     },
     {
+      "name": "TokenRequesterPrincipalType",
+      "type": "string",
+      "versions": "3+",
+      "about": "The principal type of the requester of the token."
+    },
+    {
+      "name": "TokenRequesterPrincipalName",
+      "type": "string",
+      "versions": "3+",
+      "about": "The principal type of the requester of the token."
+    },
+    {
       "name": "IssueTimestampMs",
       "type": "int64",
       "versions": "0+",
@@ -51,14 +65,31 @@
       "name": "ExpiryTimestampMs",
       "type": "int64",
       "versions": "0+",
-      "about": "When this token expires." },
-    { "name": "MaxTimestampMs", "type": "int64", "versions": "0+",
-      "about": "The maximum lifetime of this token." },
-    { "name": "TokenId", "type": "string", "versions": "0+",
-      "about": "The token UUID." },
-    { "name": "Hmac", "type": "bytes", "versions": "0+",
-      "about": "HMAC of the delegation token." },
-    { "name": "ThrottleTimeMs", "type": "int32", "versions": "0+",
-      "about": "The duration in milliseconds for which the request was throttled due to a quota violation, or zero if the request did not violate any quota." }
+      "about": "When this token expires."
+    },
+    {
+      "name": "MaxTimestampMs",
+      "type": "int64",
+      "versions": "0+",
+      "about": "The maximum lifetime of this token."
+    },
+    {
+      "name": "TokenId",
+      "type": "string",
+      "versions": "0+",
+      "about": "The token UUID."
+    },
+    {
+      "name": "Hmac",
+      "type": "bytes",
+      "versions": "0+",
+      "about": "HMAC of the delegation token."
+    },
+    {
+      "name": "ThrottleTimeMs",
+      "type": "int32",
+      "versions": "0+",
+      "about": "The duration in milliseconds for which the request was throttled due to a quota violation, or zero if the request did not violate any quota."
+    }
   ]
 }

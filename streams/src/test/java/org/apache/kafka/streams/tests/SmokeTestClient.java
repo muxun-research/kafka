@@ -19,29 +19,14 @@ package org.apache.kafka.streams.tests;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.common.utils.KafkaThread;
-import org.apache.kafka.common.utils.Utils;
-import org.apache.kafka.streams.KafkaStreams;
-import org.apache.kafka.streams.KeyValue;
-import org.apache.kafka.streams.StreamsBuilder;
-import org.apache.kafka.streams.StreamsConfig;
-import org.apache.kafka.streams.Topology;
+import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.errors.StreamsUncaughtExceptionHandler;
-import org.apache.kafka.streams.kstream.Consumed;
-import org.apache.kafka.streams.kstream.Grouped;
-import org.apache.kafka.streams.kstream.KGroupedStream;
-import org.apache.kafka.streams.kstream.KStream;
-import org.apache.kafka.streams.kstream.KTable;
-import org.apache.kafka.streams.kstream.Materialized;
-import org.apache.kafka.streams.kstream.Produced;
+import org.apache.kafka.streams.kstream.*;
 import org.apache.kafka.streams.kstream.Suppressed.BufferConfig;
-import org.apache.kafka.streams.kstream.TimeWindows;
-import org.apache.kafka.streams.kstream.Windowed;
 import org.apache.kafka.streams.state.Stores;
 import org.apache.kafka.streams.state.WindowStore;
+import org.apache.kafka.test.TestUtils;
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Properties;
@@ -52,111 +37,91 @@ import static org.apache.kafka.streams.kstream.Suppressed.untilWindowCloses;
 
 public class SmokeTestClient extends SmokeTestUtil {
 
-	private final String name;
+    private final String name;
 
-	private KafkaStreams streams;
-	private boolean uncaughtException = false;
-	private volatile boolean closed;
+    private KafkaStreams streams;
+    private boolean uncaughtException = false;
+    private volatile boolean closed;
 
-	private static void addShutdownHook(final String name, final Runnable runnable) {
-		if (name != null) {
-			Runtime.getRuntime().addShutdownHook(KafkaThread.nonDaemon(name, runnable));
-		} else {
-			Runtime.getRuntime().addShutdownHook(new Thread(runnable));
-		}
-	}
+    private static void addShutdownHook(final String name, final Runnable runnable) {
+        if (name != null) {
+            Runtime.getRuntime().addShutdownHook(KafkaThread.nonDaemon(name, runnable));
+        } else {
+            Runtime.getRuntime().addShutdownHook(new Thread(runnable));
+        }
+    }
 
-	private static File tempDirectory() {
-		final String prefix = "kafka-";
-		final File file;
-		try {
-			file = Files.createTempDirectory(prefix).toFile();
-		} catch (final IOException ex) {
-			throw new RuntimeException("Failed to create a temp dir", ex);
-		}
-		file.deleteOnExit();
+    public SmokeTestClient(final String name) {
+        this.name = name;
+    }
 
-		addShutdownHook("delete-temp-file-shutdown-hook", () -> {
-			try {
-				Utils.delete(file);
-			} catch (final IOException e) {
-				System.out.println("Error deleting " + file.getAbsolutePath());
-				e.printStackTrace(System.out);
-			}
-		});
+    public boolean closed() {
+        return closed;
+    }
 
-		return file;
-	}
+    public void start(final Properties streamsProperties) {
+        final Topology build = getTopology();
+        streams = new KafkaStreams(build, getStreamsConfig(streamsProperties));
 
-	public SmokeTestClient(final String name) {
-		this.name = name;
-	}
+        final CountDownLatch countDownLatch = new CountDownLatch(1);
+        streams.setStateListener((newState, oldState) -> {
+            System.out.printf("%s %s: %s -> %s%n", name, Instant.now(), oldState, newState);
+            if (oldState == KafkaStreams.State.REBALANCING && newState == KafkaStreams.State.RUNNING) {
+                countDownLatch.countDown();
+            }
 
-	public boolean closed() {
-		return closed;
-	}
+            if (newState == KafkaStreams.State.NOT_RUNNING) {
+                closed = true;
+            }
+        });
 
-	public void start(final Properties streamsProperties) {
-		final Topology build = getTopology();
-		streams = new KafkaStreams(build, getStreamsConfig(streamsProperties));
+        streams.setUncaughtExceptionHandler(e -> {
+            System.out.println(name + ": SMOKE-TEST-CLIENT-EXCEPTION");
+            System.out.println(name + ": FATAL: An unexpected exception is encountered on thread " + Thread.currentThread() + ": " + e);
+            e.printStackTrace(System.out);
+            uncaughtException = true;
+            return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_CLIENT;
+        });
 
-		final CountDownLatch countDownLatch = new CountDownLatch(1);
-		streams.setStateListener((newState, oldState) -> {
-			System.out.printf("%s %s: %s -> %s%n", name, Instant.now(), oldState, newState);
-			if (oldState == KafkaStreams.State.REBALANCING && newState == KafkaStreams.State.RUNNING) {
-				countDownLatch.countDown();
-			}
+        addShutdownHook("streams-shutdown-hook", this::close);
 
-			if (newState == KafkaStreams.State.NOT_RUNNING) {
-				closed = true;
-			}
-		});
-
-		streams.setUncaughtExceptionHandler(e -> {
-			System.out.println(name + ": SMOKE-TEST-CLIENT-EXCEPTION");
-			System.out.println(name + ": FATAL: An unexpected exception is encountered on thread " + Thread.currentThread() + ": " + e);
-			e.printStackTrace(System.out);
-			uncaughtException = true;
-			return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_CLIENT;
-		});
-
-		addShutdownHook("streams-shutdown-hook", this::close);
-
-		streams.start();
-		try {
-			if (!countDownLatch.await(1, TimeUnit.MINUTES)) {
-				System.out.println(name + ": SMOKE-TEST-CLIENT-EXCEPTION: Didn't start in one minute");
-			}
-		} catch (final InterruptedException e) {
-			System.out.println(name + ": SMOKE-TEST-CLIENT-EXCEPTION: " + e);
-			e.printStackTrace(System.out);
-		}
-		System.out.println(name + ": SMOKE-TEST-CLIENT-STARTED");
-		System.out.println(name + " started at " + Instant.now());
-	}
+        streams.start();
+        try {
+            if (!countDownLatch.await(1, TimeUnit.MINUTES)) {
+                System.out.println(name + ": SMOKE-TEST-CLIENT-EXCEPTION: Didn't start in one minute");
+            } else {
+                System.out.println(name + ": SMOKE-TEST-CLIENT-STARTED");
+                System.out.println(name + " started at " + Instant.now());
+            }
+        } catch (final InterruptedException e) {
+            System.out.println(name + ": SMOKE-TEST-CLIENT-EXCEPTION: " + e);
+            e.printStackTrace(System.out);
+        }
+    }
 
     public void closeAsync() {
         streams.close(Duration.ZERO);
     }
 
     public void close() {
-		final boolean wasClosed = streams.close(Duration.ofMinutes(1));
+        final boolean wasClosed = streams.close(Duration.ofMinutes(1));
 
-		if (wasClosed && !uncaughtException) {
-			System.out.println(name + ": SMOKE-TEST-CLIENT-CLOSED");
-		} else if (wasClosed) {
-			System.out.println(name + ": SMOKE-TEST-CLIENT-EXCEPTION");
-		} else {
-			System.out.println(name + ": SMOKE-TEST-CLIENT-EXCEPTION: Didn't close in time.");
-		}
-	}
+        if (wasClosed && !uncaughtException) {
+            System.out.println(name + ": SMOKE-TEST-CLIENT-CLOSED");
+        } else if (wasClosed) {
+            System.out.println(name + ": SMOKE-TEST-CLIENT-EXCEPTION: Got an uncaught exception");
+        } else {
+            System.out.println(name + ": SMOKE-TEST-CLIENT-EXCEPTION: Didn't close in time.");
+        }
+    }
 
     private Properties getStreamsConfig(final Properties props) {
         final Properties fullProps = new Properties(props);
         fullProps.put(StreamsConfig.APPLICATION_ID_CONFIG, "SmokeTest");
-		fullProps.put(StreamsConfig.CLIENT_ID_CONFIG, "SmokeTest-" + name);
-		fullProps.put(StreamsConfig.STATE_DIR_CONFIG, tempDirectory().getAbsolutePath());
-		fullProps.putAll(props);
+        fullProps.put(StreamsConfig.CLIENT_ID_CONFIG, "SmokeTest-" + name);
+        fullProps.put(StreamsConfig.STATE_DIR_CONFIG, TestUtils.tempDirectory().getAbsolutePath());
+        fullProps.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.EXACTLY_ONCE_V2);
+        fullProps.putAll(props);
         return fullProps;
     }
 
@@ -172,8 +137,7 @@ public class SmokeTestClient extends SmokeTestUtil {
         // min
         final KGroupedStream<String, Integer> groupedData = data.groupByKey(Grouped.with(stringSerde, intSerde));
 
-        final KTable<Windowed<String>, Integer> minAggregation = groupedData
-            .windowedBy(TimeWindows.of(Duration.ofDays(1)).grace(Duration.ofMinutes(1)))
+        final KTable<Windowed<String>, Integer> minAggregation = groupedData.windowedBy(TimeWindows.ofSizeAndGrace(Duration.ofDays(1), Duration.ofMinutes(1)))
             .aggregate(
                 () -> Integer.MAX_VALUE,
                 (aggKey, value, aggregate) -> (value < aggregate) ? value : aggregate,
@@ -192,8 +156,7 @@ public class SmokeTestClient extends SmokeTestUtil {
             .filterNot((k, v) -> k.equals("flush"))
             .to("min", Produced.with(stringSerde, intSerde));
 
-        final KTable<Windowed<String>, Integer> smallWindowSum = groupedData
-            .windowedBy(TimeWindows.of(Duration.ofSeconds(2)).advanceBy(Duration.ofSeconds(1)).grace(Duration.ofSeconds(30)))
+        final KTable<Windowed<String>, Integer> smallWindowSum = groupedData.windowedBy(TimeWindows.ofSizeAndGrace(Duration.ofSeconds(2), Duration.ofSeconds(30)).advanceBy(Duration.ofSeconds(1)))
             .reduce((l, r) -> l + r);
 
         streamify(smallWindowSum, "sws-raw");
@@ -207,8 +170,7 @@ public class SmokeTestClient extends SmokeTestUtil {
         minTable.toStream().process(SmokeTestUtil.printProcessorSupplier("min", name));
 
         // max
-        groupedData
-            .windowedBy(TimeWindows.of(Duration.ofDays(2)))
+        groupedData.windowedBy(TimeWindows.ofSizeWithNoGrace(Duration.ofDays(2)))
             .aggregate(
                 () -> Integer.MIN_VALUE,
                 (aggKey, value, aggregate) -> (value > aggregate) ? value : aggregate,
@@ -224,8 +186,7 @@ public class SmokeTestClient extends SmokeTestUtil {
         maxTable.toStream().process(SmokeTestUtil.printProcessorSupplier("max", name));
 
         // sum
-        groupedData
-            .windowedBy(TimeWindows.of(Duration.ofDays(2)))
+        groupedData.windowedBy(TimeWindows.ofSizeWithNoGrace(Duration.ofDays(2)))
             .aggregate(
                 () -> 0L,
                 (aggKey, value, aggregate) -> (long) value + aggregate,
@@ -239,8 +200,7 @@ public class SmokeTestClient extends SmokeTestUtil {
         sumTable.toStream().process(SmokeTestUtil.printProcessorSupplier("sum", name));
 
         // cnt
-        groupedData
-            .windowedBy(TimeWindows.of(Duration.ofDays(2)))
+        groupedData.windowedBy(TimeWindows.ofSizeWithNoGrace(Duration.ofDays(2)))
             .count(Materialized.as("uwin-cnt"))
             .toStream(new Unwindow<>())
             .filterNot((k, v) -> k.equals("flush"))

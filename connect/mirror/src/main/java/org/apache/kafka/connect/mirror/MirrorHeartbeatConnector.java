@@ -16,7 +16,9 @@
  */
 package org.apache.kafka.connect.mirror;
 
+import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.common.config.ConfigDef;
+import org.apache.kafka.common.utils.AppInfoParser;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.connect.connector.Task;
 import org.apache.kafka.connect.source.SourceConnector;
@@ -27,60 +29,63 @@ import java.util.Map;
 
 /**
  * Emits heartbeats to Kafka.
+ * @see MirrorHeartbeatConfig for supported config properties.
  */
 public class MirrorHeartbeatConnector extends SourceConnector {
-	private MirrorConnectorConfig config;
-	private Scheduler scheduler;
+    private MirrorHeartbeatConfig config;
+    private Scheduler scheduler;
+    private Admin targetAdminClient;
 
-	public MirrorHeartbeatConnector() {
-		// nop
-	}
+    public MirrorHeartbeatConnector() {
+        // nop
+    }
 
-	// visible for testing
-	MirrorHeartbeatConnector(MirrorConnectorConfig config) {
-		this.config = config;
-	}
+    // visible for testing
+    MirrorHeartbeatConnector(MirrorHeartbeatConfig config) {
+        this.config = config;
+    }
 
-	@Override
-	public void start(Map<String, String> props) {
-		config = new MirrorConnectorConfig(props);
-		scheduler = new Scheduler(MirrorHeartbeatConnector.class, config.adminTimeout());
-		scheduler.execute(this::createInternalTopics, "creating internal topics");
-	}
+    @Override
+    public void start(Map<String, String> props) {
+        config = new MirrorHeartbeatConfig(props);
+        targetAdminClient = config.forwardingAdmin(config.targetAdminConfig("heartbeats-target-admin"));
+        scheduler = new Scheduler(getClass(), config.entityLabel(), config.adminTimeout());
+        scheduler.execute(this::createInternalTopics, "creating internal topics");
+    }
 
-	@Override
-	public void stop() {
-		Utils.closeQuietly(scheduler, "scheduler");
-	}
+    @Override
+    public void stop() {
+        Utils.closeQuietly(scheduler, "scheduler");
+        Utils.closeQuietly(targetAdminClient, "target admin client");
+    }
 
-	@Override
-	public Class<? extends Task> taskClass() {
-		return MirrorHeartbeatTask.class;
-	}
+    @Override
+    public Class<? extends Task> taskClass() {
+        return MirrorHeartbeatTask.class;
+    }
 
-	@Override
-	public List<Map<String, String>> taskConfigs(int maxTasks) {
-		// if the heartbeats emission is disabled by setting `emit.heartbeats.enabled` to `false`,
-		// the interval heartbeat emission will be negative and no `MirrorHeartbeatTask` will be created
-		if (config.emitHeartbeatsInterval().isNegative()) {
-			return Collections.emptyList();
-		}
-		// just need a single task
-		return Collections.singletonList(config.originalsStrings());
-	}
+    @Override
+    public List<Map<String, String>> taskConfigs(int maxTasks) {
+        // if the heartbeats emission is disabled by setting `emit.heartbeats.enabled` to `false`,
+        // the interval heartbeat emission will be negative and no `MirrorHeartbeatTask` will be created
+        if (config.emitHeartbeatsInterval().isNegative()) {
+            return Collections.emptyList();
+        }
+        // just need a single task
+        return Collections.singletonList(config.originalsStrings());
+    }
 
-	@Override
-	public ConfigDef config() {
-		return MirrorConnectorConfig.CONNECTOR_CONFIG_DEF;
-	}
+    @Override
+    public ConfigDef config() {
+        return MirrorHeartbeatConfig.CONNECTOR_CONFIG_DEF;
+    }
 
-	@Override
-	public String version() {
-		return "1";
-	}
+    @Override
+    public String version() {
+        return AppInfoParser.getVersion();
+    }
 
-	private void createInternalTopics() {
-		MirrorUtils.createSinglePartitionCompactedTopic(config.heartbeatsTopic(),
-				config.heartbeatsTopicReplicationFactor(), config.targetAdminConfig());
-	}
+    private void createInternalTopics() {
+        MirrorUtils.createSinglePartitionCompactedTopic(config.heartbeatsTopic(), config.heartbeatsTopicReplicationFactor(), targetAdminClient);
+    }
 }

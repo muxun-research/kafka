@@ -54,6 +54,7 @@ object TransactionLog {
 
   /**
    * Generates the bytes for transaction log message key
+   *
    * @return key bytes
    */
   private[transaction] def keyToBytes(transactionalId: String): Array[Byte] = {
@@ -63,6 +64,7 @@ object TransactionLog {
 
   /**
    * Generates the payload bytes for transaction log message value
+   *
    * @return value payload bytes
    */
   private[transaction] def valueToBytes(txnMetadata: TxnTransitMetadata): Array[Byte] = {
@@ -78,7 +80,9 @@ object TransactionLog {
           .setPartitionIds(partitions.map(tp => Integer.valueOf(tp.partition)).toList.asJava)
       }.toList.asJava
 
-    MessageUtil.toVersionPrefixedBytes(TransactionLogValue.HIGHEST_SUPPORTED_VERSION,
+    // Serialize with the highest supported non-flexible version
+    // until a tagged field is introduced or the version is bumped.
+    MessageUtil.toVersionPrefixedBytes(0,
       new TransactionLogValue()
         .setProducerId(txnMetadata.producerId)
         .setProducerEpoch(txnMetadata.producerEpoch)
@@ -90,10 +94,11 @@ object TransactionLog {
   }
 
   /**
-    * Decodes the transaction log messages' key
+   * Decodes the transaction log messages' key
+   *
    * @return the key
-    */
-  def readTxnRecordKey(buffer: ByteBuffer): TxnKey = {
+   */
+  def readTxnRecordKey(buffer: ByteBuffer): BaseKey = {
     val version = buffer.getShort
     if (version >= TransactionLogKey.LOWEST_SUPPORTED_VERSION && version <= TransactionLogKey.HIGHEST_SUPPORTED_VERSION) {
       val value = new TransactionLogKey(new ByteBufferAccessor(buffer), version)
@@ -101,11 +106,14 @@ object TransactionLog {
         version = version,
         transactionalId = value.transactionalId
       )
-    } else throw new IllegalStateException(s"Unknown version $version from the transaction log message")
+    } else {
+      UnknownKey(version)
+    }
   }
 
   /**
    * Decodes the transaction log messages' payload and retrieves the transaction metadata from it
+   *
    * @return a transaction metadata object from the message
    */
   def readTxnRecordValue(transactionalId: String, buffer: ByteBuffer): Option[TransactionMetadata] = {
@@ -142,17 +150,21 @@ object TransactionLog {
   // Formatter for use with tools to read transaction log messages
   class TransactionLogMessageFormatter extends MessageFormatter {
     def writeTo(consumerRecord: ConsumerRecord[Array[Byte], Array[Byte]], output: PrintStream): Unit = {
-      Option(consumerRecord.key).map(key => readTxnRecordKey(ByteBuffer.wrap(key))).foreach { txnKey =>
-        val transactionalId = txnKey.transactionalId
-        val value = consumerRecord.value
-        val producerIdMetadata = if (value == null)
-          None
-        else
-          readTxnRecordValue(transactionalId, ByteBuffer.wrap(value))
-        output.write(transactionalId.getBytes(StandardCharsets.UTF_8))
-        output.write("::".getBytes(StandardCharsets.UTF_8))
-        output.write(producerIdMetadata.getOrElse("NULL").toString.getBytes(StandardCharsets.UTF_8))
-        output.write("\n".getBytes(StandardCharsets.UTF_8))
+      Option(consumerRecord.key).map(key => readTxnRecordKey(ByteBuffer.wrap(key))).foreach {
+        case txnKey: TxnKey =>
+          val transactionalId = txnKey.transactionalId
+          val value = consumerRecord.value
+          val producerIdMetadata = if (value == null)
+            None
+          else
+            readTxnRecordValue(transactionalId, ByteBuffer.wrap(value))
+          output.write(transactionalId.getBytes(StandardCharsets.UTF_8))
+          output.write("::".getBytes(StandardCharsets.UTF_8))
+          output.write(producerIdMetadata.getOrElse("NULL").toString.getBytes(StandardCharsets.UTF_8))
+          output.write("\n".getBytes(StandardCharsets.UTF_8))
+
+        case unknownKey: UnknownKey =>
+          output.write(s"unknown::version=${unknownKey.version}\n".getBytes(StandardCharsets.UTF_8))
       }
     }
   }
@@ -161,25 +173,43 @@ object TransactionLog {
    * Exposed for printing records using [[kafka.tools.DumpLogSegments]]
    */
   def formatRecordKeyAndValue(record: Record): (Option[String], Option[String]) = {
-    val txnKey = TransactionLog.readTxnRecordKey(record.key)
-    val keyString = s"transaction_metadata::transactionalId=${txnKey.transactionalId}"
+    TransactionLog.readTxnRecordKey(record.key) match {
+      case txnKey: TxnKey =>
+        val keyString = s"transaction_metadata::transactionalId=${txnKey.transactionalId}"
 
-    val valueString = TransactionLog.readTxnRecordValue(txnKey.transactionalId, record.value) match {
-      case None => "<DELETE>"
+        val valueString = TransactionLog.readTxnRecordValue(txnKey.transactionalId, record.value) match {
+          case None => "<DELETE>"
 
-      case Some(txnMetadata) => s"producerId:${txnMetadata.producerId}," +
-        s"producerEpoch:${txnMetadata.producerEpoch}," +
-        s"state=${txnMetadata.state}," +
-        s"partitions=${txnMetadata.topicPartitions.mkString("[", ",", "]")}," +
-        s"txnLastUpdateTimestamp=${txnMetadata.txnLastUpdateTimestamp}," +
-        s"txnTimeoutMs=${txnMetadata.txnTimeoutMs}"
+          case Some(txnMetadata) => s"producerId:${txnMetadata.producerId}," +
+            s"producerEpoch:${txnMetadata.producerEpoch}," +
+            s"state=${txnMetadata.state}," +
+            s"partitions=${txnMetadata.topicPartitions.mkString("[", ",", "]")}," +
+            s"txnLastUpdateTimestamp=${txnMetadata.txnLastUpdateTimestamp}," +
+            s"txnTimeoutMs=${txnMetadata.txnTimeoutMs}"
+        }
+
+        (Some(keyString), Some(valueString))
+
+      case unknownKey: UnknownKey =>
+        (Some(s"unknown::version=${unknownKey.version}"), None)
     }
-
-    (Some(keyString), Some(valueString))
   }
 
 }
 
-case class TxnKey(version: Short, transactionalId: String) {
+sealed trait BaseKey {
+  def version: Short
+
+  def transactionalId: String
+}
+
+case class TxnKey(version: Short, transactionalId: String) extends BaseKey {
   override def toString: String = transactionalId
 }
+
+case class UnknownKey(version: Short) extends BaseKey {
+  override def transactionalId: String = null
+
+  override def toString: String = transactionalId
+}
+

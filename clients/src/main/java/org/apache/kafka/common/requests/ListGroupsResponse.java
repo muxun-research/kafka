@@ -33,7 +33,7 @@ public class ListGroupsResponse extends AbstractResponse {
 		this.data = data;
     }
 
-	@Override
+    @Override
     public ListGroupsResponseData data() {
         return data;
     }
@@ -44,12 +44,17 @@ public class ListGroupsResponse extends AbstractResponse {
     }
 
     @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
+
+    @Override
     public Map<Errors, Integer> errorCounts() {
-		return errorCounts(Errors.forCode(data.errorCode()));
+        return errorCounts(Errors.forCode(data.errorCode()));
     }
 
     public static ListGroupsResponse parse(ByteBuffer buffer, short version) {
-		return new ListGroupsResponse(new ListGroupsResponseData(new ByteBufferAccessor(buffer), version));
+        return new ListGroupsResponse(new ListGroupsResponseData(new ByteBufferAccessor(buffer), version));
     }
 
     @Override

@@ -42,16 +42,16 @@ import java.util.Iterator;
  * See {@link MemoryRecords} for the in-memory representation and {@link FileRecords} for the on-disk representation.
  */
 public interface Records extends TransferableRecords {
-	int OFFSET_OFFSET = 0;
-	int OFFSET_LENGTH = 8;
-	int SIZE_OFFSET = OFFSET_OFFSET + OFFSET_LENGTH;
-	int SIZE_LENGTH = 4;
-	int LOG_OVERHEAD = SIZE_OFFSET + SIZE_LENGTH;
+    int OFFSET_OFFSET = 0;
+    int OFFSET_LENGTH = 8;
+    int SIZE_OFFSET = OFFSET_OFFSET + OFFSET_LENGTH;
+    int SIZE_LENGTH = 4;
+    int LOG_OVERHEAD = SIZE_OFFSET + SIZE_LENGTH;
 
-	// the magic offset is at the same offset for all current message formats, but the 4 bytes
-	// between the size and the magic is dependent on the version.
-	int MAGIC_OFFSET = 16;
-	int MAGIC_LENGTH = 1;
+    // The magic offset is at the same offset for all current message formats, but the 4 bytes
+    // between the size and the magic is dependent on the version.
+    int MAGIC_OFFSET = LOG_OVERHEAD + 4;
+    int MAGIC_LENGTH = 1;
     int HEADER_SIZE_UP_TO_MAGIC = MAGIC_OFFSET + MAGIC_LENGTH;
 
     /**
@@ -76,14 +76,6 @@ public interface Records extends TransferableRecords {
      * @return true if all record batches have a matching magic value, false otherwise
      */
     boolean hasMatchingMagic(byte magic);
-
-    /**
-     * Check whether this log buffer has a magic value compatible with a particular value
-     * (i.e. whether all message sets contained in the buffer have a matching or lower magic).
-     * @param magic The magic version to ensure compatibility with
-     * @return true if all batches have compatible magic, false otherwise
-     */
-    boolean hasCompatibleMagic(byte magic);
 
     /**
      * Convert all batches in this buffer to the format passed as a parameter. Note that this requires

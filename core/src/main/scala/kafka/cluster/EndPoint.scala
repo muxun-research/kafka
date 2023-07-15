@@ -22,6 +22,7 @@ import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.utils.Utils
 import org.apache.kafka.common.{KafkaException, Endpoint => JEndpoint}
 
+import java.util.Locale
 import scala.collection.Map
 
 object EndPoint {
@@ -57,10 +58,23 @@ object EndPoint {
       case _ => throw new KafkaException(s"Unable to parse $connectionString to a broker endpoint")
     }
   }
+
+  def parseListenerName(connectionString: String): String = {
+    connectionString match {
+      case uriParseExp(listenerNameString, _, _) => listenerNameString.toUpperCase(Locale.ROOT)
+      case _ => throw new KafkaException(s"Unable to parse a listener name from $connectionString")
+    }
+  }
+
+  def fromJava(endpoint: JEndpoint): EndPoint =
+    new EndPoint(endpoint.host(),
+      endpoint.port(),
+      new ListenerName(endpoint.listenerName().get()),
+      endpoint.securityProtocol())
 }
 
 /**
- * broker定义的一部分，匹配host/pair对到协议中
+ * Part of the broker definition - matching host/port pair to a protocol
  */
 case class EndPoint(host: String, port: Int, listenerName: ListenerName, securityProtocol: SecurityProtocol) {
   def connectionString: String = {

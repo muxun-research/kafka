@@ -16,57 +16,47 @@
  */
 package org.apache.kafka.streams.state.internals;
 
-import java.util.NavigableMap;
-import java.util.TreeMap;
-import java.util.TreeSet;
-
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
+import org.apache.kafka.streams.processor.internals.metrics.TaskMetrics;
 import org.apache.kafka.streams.state.internals.metrics.NamedCacheMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 class NamedCache {
-	private static final Logger log = LoggerFactory.getLogger(NamedCache.class);
-	private final String name;
-	private final String storeName;
-	private final String taskName;
-	private final NavigableMap<Bytes, LRUNode> cache = new TreeMap<>();
-	private final Set<Bytes> dirtyKeys = new LinkedHashSet<>();
-	private ThreadCache.DirtyEntryFlushListener listener;
-	private LRUNode tail;
-	private LRUNode head;
-	private long currentSizeBytes;
+    private static final Logger log = LoggerFactory.getLogger(NamedCache.class);
+    private final String name;
+    private final String storeName;
+    private final String taskName;
+    private final NavigableMap<Bytes, LRUNode> cache = new TreeMap<>();
+    private final Set<Bytes> dirtyKeys = new LinkedHashSet<>();
+    private ThreadCache.DirtyEntryFlushListener listener;
+    private LRUNode tail;
+    private LRUNode head;
+    private long currentSizeBytes;
 
-	private final StreamsMetricsImpl streamsMetrics;
-	private final Sensor hitRatioSensor;
+    private final StreamsMetricsImpl streamsMetrics;
+    private final Sensor hitRatioSensor;
+    private final Sensor totalCacheSizeSensor;
 
-	// internal stats
-	private long numReadHits = 0;
-	private long numReadMisses = 0;
-	private long numOverwrites = 0;
-	private long numFlushes = 0;
+    // internal stats
+    private long numReadHits = 0;
+    private long numReadMisses = 0;
+    private long numOverwrites = 0;
+    private long numFlushes = 0;
 
-	NamedCache(final String name, final StreamsMetricsImpl streamsMetrics) {
-		this.name = name;
-		this.streamsMetrics = streamsMetrics;
-		storeName = ThreadCache.underlyingStoreNamefromCacheName(name);
-		taskName = ThreadCache.taskIDfromCacheName(name);
-		hitRatioSensor = NamedCacheMetrics.hitRatioSensor(
-				streamsMetrics,
-				Thread.currentThread().getName(),
-				taskName,
-				storeName
-		);
-	}
+    NamedCache(final String name, final StreamsMetricsImpl streamsMetrics) {
+        this.name = name;
+        this.streamsMetrics = streamsMetrics;
+        storeName = ThreadCache.underlyingStoreNamefromCacheName(name);
+        taskName = ThreadCache.taskIDfromCacheName(name);
+        hitRatioSensor = NamedCacheMetrics.hitRatioSensor(streamsMetrics, Thread.currentThread().getName(), taskName, storeName);
+        totalCacheSizeSensor = TaskMetrics.totalCacheSizeBytesSensor(Thread.currentThread().getName(), taskName, streamsMetrics);
+    }
 
     synchronized final String name() {
         return name;
@@ -182,6 +172,7 @@ class NamedCache {
             dirtyKeys.add(key);
         }
         currentSizeBytes += node.size();
+        totalCacheSizeSensor.record(currentSizeBytes);
     }
 
     synchronized long sizeInBytes() {
@@ -195,8 +186,8 @@ class NamedCache {
 
             return null;
         } else {
-			numReadHits++;
-			hitRatioSensor.record((double) numReadHits / (double) (numReadHits + numReadMisses));
+            numReadHits++;
+            hitRatioSensor.record((double) numReadHits / (double) (numReadHits + numReadMisses));
         }
         return node;
     }
@@ -243,6 +234,7 @@ class NamedCache {
         if (eldest.entry.isDirty()) {
             flush(eldest);
         }
+        totalCacheSizeSensor.record(currentSizeBytes);
     }
 
     synchronized LRUCacheEntry putIfAbsent(final Bytes key, final LRUCacheEntry value) {
@@ -269,49 +261,66 @@ class NamedCache {
         remove(node);
         dirtyKeys.remove(key);
         currentSizeBytes -= node.size();
+        totalCacheSizeSensor.record(currentSizeBytes);
         return node.entry();
-	}
+    }
 
-	public long size() {
-		return cache.size();
-	}
+    public long size() {
+        return cache.size();
+    }
 
-	public boolean isEmpty() {
-		return cache.isEmpty();
-	}
+    public boolean isEmpty() {
+        return cache.isEmpty();
+    }
 
-	synchronized Iterator<Bytes> keyRange(final Bytes from, final Bytes to, final boolean toInclusive) {
-		return keySetIterator(cache.navigableKeySet().subSet(from, true, to, toInclusive), true);
-	}
+    synchronized Iterator<Bytes> keyRange(final Bytes from, final Bytes to, final boolean toInclusive) {
+        final Set<Bytes> rangeSet = computeSubSet(from, to, toInclusive);
+        return keySetIterator(rangeSet, true);
+    }
 
-	synchronized Iterator<Bytes> reverseKeyRange(final Bytes from, final Bytes to) {
-		return keySetIterator(cache.navigableKeySet().subSet(from, true, to, true), false);
-	}
+    synchronized Iterator<Bytes> reverseKeyRange(final Bytes from, final Bytes to) {
+        final Set<Bytes> rangeSet = computeSubSet(from, to, true);
+        return keySetIterator(rangeSet, false);
+    }
 
-	private Iterator<Bytes> keySetIterator(final Set<Bytes> keySet, final boolean forward) {
-		if (forward) {
-			return new TreeSet<>(keySet).iterator();
-		} else {
-			return new TreeSet<>(keySet).descendingIterator();
-		}
-	}
+    private Set<Bytes> computeSubSet(final Bytes from, final Bytes to, final boolean toInclusive) {
+        if (from == null && to == null) {
+            return cache.navigableKeySet();
+        } else if (from == null) {
+            return cache.headMap(to, toInclusive).keySet();
+        } else if (to == null) {
+            return cache.tailMap(from, true).keySet();
+        } else if (from.compareTo(to) > 0) {
+            return Collections.emptyNavigableSet();
+        } else {
+            return cache.navigableKeySet().subSet(from, true, to, toInclusive);
+        }
+    }
 
-	synchronized Iterator<Bytes> allKeys() {
-		return keySetIterator(cache.navigableKeySet(), true);
-	}
+    private Iterator<Bytes> keySetIterator(final Set<Bytes> keySet, final boolean forward) {
+        if (forward) {
+            return new TreeSet<>(keySet).iterator();
+        } else {
+            return new TreeSet<>(keySet).descendingIterator();
+        }
+    }
 
-	synchronized Iterator<Bytes> reverseAllKeys() {
-		return keySetIterator(cache.navigableKeySet(), false);
-	}
+    synchronized Iterator<Bytes> allKeys() {
+        return keySetIterator(cache.navigableKeySet(), true);
+    }
 
-	synchronized LRUCacheEntry first() {
-		if (head == null) {
-			return null;
-		}
-		return head.entry;
-	}
+    synchronized Iterator<Bytes> reverseAllKeys() {
+        return keySetIterator(cache.navigableKeySet(), false);
+    }
 
-	synchronized LRUCacheEntry last() {
+    synchronized LRUCacheEntry first() {
+        if (head == null) {
+            return null;
+        }
+        return head.entry;
+    }
+
+    synchronized LRUCacheEntry last() {
         if (tail == null) {
             return null;
         }
@@ -331,8 +340,15 @@ class NamedCache {
         listener = null;
         currentSizeBytes = 0;
         dirtyKeys.clear();
-		cache.clear();
-		streamsMetrics.removeAllCacheLevelSensors(Thread.currentThread().getName(), taskName, storeName);
+        cache.clear();
+        streamsMetrics.removeAllCacheLevelSensors(Thread.currentThread().getName(), taskName, storeName);
+    }
+
+    synchronized void clear() {
+        head = tail = null;
+        currentSizeBytes = 0;
+        dirtyKeys.clear();
+        cache.clear();
     }
 
     /**

@@ -56,14 +56,16 @@ public class AlterPartitionReassignmentsResponse extends AbstractResponse {
     }
 
     @Override
-    public Map<Errors, Integer> errorCounts() {
-		Map<Errors, Integer> counts = new HashMap<>();
-		updateErrorCounts(counts, Errors.forCode(data.errorCode()));
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
 
-		data.responses().forEach(topicResponse ->
-				topicResponse.partitions().forEach(partitionResponse ->
-						updateErrorCounts(counts, Errors.forCode(partitionResponse.errorCode()))
-				));
+    @Override
+    public Map<Errors, Integer> errorCounts() {
+        Map<Errors, Integer> counts = new HashMap<>();
+        updateErrorCounts(counts, Errors.forCode(data.errorCode()));
+
+        data.responses().forEach(topicResponse -> topicResponse.partitions().forEach(partitionResponse -> updateErrorCounts(counts, Errors.forCode(partitionResponse.errorCode()))));
 		return counts;
 	}
 }

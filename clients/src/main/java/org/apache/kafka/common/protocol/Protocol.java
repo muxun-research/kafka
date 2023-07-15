@@ -43,22 +43,22 @@ public class Protocol {
 
         // Top level fields
         for (BoundField field: schema.fields()) {
-			Type type = field.def.type;
-			if (type.isArray()) {
-				b.append("[");
-				b.append(field.def.name);
-				b.append("] ");
-				if (!subTypes.containsKey(field.def.name)) {
-					subTypes.put(field.def.name, type.arrayElementType().get());
-				}
-			} else if (type instanceof TaggedFields) {
-				b.append("TAG_BUFFER ");
-			} else {
-				b.append(field.def.name);
-				b.append(" ");
-				if (!subTypes.containsKey(field.def.name))
-					subTypes.put(field.def.name, type);
-			}
+            Type type = field.def.type;
+            if (type.isArray()) {
+                b.append("[");
+                b.append(field.def.name);
+                b.append("] ");
+                if (!subTypes.containsKey(field.def.name)) {
+                    subTypes.put(field.def.name, type.arrayElementType().get());
+                }
+            } else if (type instanceof TaggedFields) {
+                b.append("TAG_BUFFER ");
+            } else {
+                b.append(field.def.name);
+                b.append(" ");
+                if (!subTypes.containsKey(field.def.name))
+                    subTypes.put(field.def.name, type);
+            }
         }
         b.append("\n");
 
@@ -83,14 +83,14 @@ public class Protocol {
 
     private static void populateSchemaFields(Schema schema, Set<BoundField> fields) {
         for (BoundField field: schema.fields()) {
-			fields.add(field);
-			if (field.def.type.isArray()) {
-				Type innerType = field.def.type.arrayElementType().get();
-				if (innerType instanceof Schema)
-					populateSchemaFields((Schema) innerType, fields);
-			} else if (field.def.type instanceof Schema)
-				populateSchemaFields((Schema) field.def.type, fields);
-		}
+            fields.add(field);
+            if (field.def.type.isArray()) {
+                Type innerType = field.def.type.arrayElementType().get();
+                if (innerType instanceof Schema)
+                    populateSchemaFields((Schema) innerType, fields);
+            } else if (field.def.type instanceof Schema)
+                populateSchemaFields((Schema) field.def.type, fields);
+        }
     }
 
     private static void schemaToFieldTableHtml(Schema schema, StringBuilder b) {
@@ -112,43 +112,43 @@ public class Protocol {
             b.append("</td>");
             b.append("</tr>\n");
         }
-        b.append("</table>\n");
+        b.append("</tbody></table>\n");
     }
 
     public static String toHtml() {
-		final StringBuilder b = new StringBuilder();
-		b.append("<h5>Headers:</h5>\n");
+        final StringBuilder b = new StringBuilder();
+        b.append("<h5>Headers:</h5>\n");
 
-		for (int i = 0; i < RequestHeaderData.SCHEMAS.length; i++) {
-			b.append("<pre>");
-			b.append("Request Header v").append(i).append(" => ");
-			schemaToBnfHtml(RequestHeaderData.SCHEMAS[i], b, 2);
-			b.append("</pre>\n");
-			schemaToFieldTableHtml(RequestHeaderData.SCHEMAS[i], b);
-		}
-		for (int i = 0; i < ResponseHeaderData.SCHEMAS.length; i++) {
-			b.append("<pre>");
-			b.append("Response Header v").append(i).append(" => ");
-			schemaToBnfHtml(ResponseHeaderData.SCHEMAS[i], b, 2);
-			b.append("</pre>\n");
-			schemaToFieldTableHtml(ResponseHeaderData.SCHEMAS[i], b);
-		}
-		for (ApiKeys key : ApiKeys.zkBrokerApis()) {
-			// Key
-			b.append("<h5>");
-			b.append("<a name=\"The_Messages_" + key.name + "\">");
-			b.append(key.name);
-			b.append(" API (Key: ");
-			b.append(key.id);
-			b.append("):</a></h5>\n\n");
-			// Requests
-			b.append("<b>Requests:</b><br>\n");
-			Schema[] requests = key.messageType.requestSchemas();
+        for (int i = 0; i < RequestHeaderData.SCHEMAS.length; i++) {
+            b.append("<pre>");
+            b.append("Request Header v").append(i).append(" => ");
+            schemaToBnfHtml(RequestHeaderData.SCHEMAS[i], b, 2);
+            b.append("</pre>\n");
+            schemaToFieldTableHtml(RequestHeaderData.SCHEMAS[i], b);
+        }
+        for (int i = 0; i < ResponseHeaderData.SCHEMAS.length; i++) {
+            b.append("<pre>");
+            b.append("Response Header v").append(i).append(" => ");
+            schemaToBnfHtml(ResponseHeaderData.SCHEMAS[i], b, 2);
+            b.append("</pre>\n");
+            schemaToFieldTableHtml(ResponseHeaderData.SCHEMAS[i], b);
+        }
+        for (ApiKeys key : ApiKeys.clientApis()) {
+            // Key
+            b.append("<h5>");
+            b.append("<a name=\"The_Messages_" + key.name + "\">");
+            b.append(key.name);
+            b.append(" API (Key: ");
+            b.append(key.id);
+            b.append("):</a></h5>\n\n");
+            // Requests
+            b.append("<b>Requests:</b><br>\n");
+            Schema[] requests = key.messageType.requestSchemas();
             for (int i = 0; i < requests.length; i++) {
                 Schema schema = requests[i];
                 // Schema
                 if (schema != null) {
-                    b.append("<p>");
+                    b.append("<div>");
                     // Version header
                     b.append("<pre>");
                     b.append(key.name);
@@ -159,17 +159,17 @@ public class Protocol {
                     b.append("</pre>");
                     schemaToFieldTableHtml(requests[i], b);
                 }
-                b.append("</p>\n");
+                b.append("</div>\n");
             }
 
             // Responses
             b.append("<b>Responses:</b><br>\n");
-			Schema[] responses = key.messageType.responseSchemas();
+            Schema[] responses = key.messageType.responseSchemas();
             for (int i = 0; i < responses.length; i++) {
                 Schema schema = responses[i];
                 // Schema
                 if (schema != null) {
-                    b.append("<p>");
+                    b.append("<div>");
                     // Version header
                     b.append("<pre>");
                     b.append(key.name);
@@ -180,7 +180,7 @@ public class Protocol {
                     b.append("</pre>");
                     schemaToFieldTableHtml(responses[i], b);
                 }
-                b.append("</p>\n");
+                b.append("</div>\n");
             }
         }
 

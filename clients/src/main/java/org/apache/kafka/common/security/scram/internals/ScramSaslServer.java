@@ -39,6 +39,7 @@ import javax.security.sasl.SaslException;
 import javax.security.sasl.SaslServer;
 import javax.security.sasl.SaslServerFactory;
 import java.security.InvalidKeyException;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Collection;
@@ -49,6 +50,7 @@ import java.util.Set;
  * SaslServer implementation for SASL/SCRAM. This server is configured with a callback
  * handler for integration with a credential manager. Kafka brokers provide callbacks
  * based on a Zookeeper-based password store.
+ *
  * @see <a href="https://tools.ietf.org/html/rfc5802">RFC 5802</a>
  */
 public class ScramSaslServer implements SaslServer {
@@ -106,7 +108,7 @@ public class ScramSaslServer implements SaslServer {
                     try {
                         String saslName = clientFirstMessage.saslName();
                         this.username = ScramFormatter.username(saslName);
-						NameCallback nameCallback = new NameCallback("username", username);
+                        NameCallback nameCallback = new NameCallback("username", username);
                         ScramCredentialCallback credentialCallback;
                         if (scramExtensions.tokenAuthenticated()) {
                             DelegationTokenCredentialCallback tokenCallback = new DelegationTokenCredentialCallback();
@@ -224,7 +226,7 @@ public class ScramSaslServer implements SaslServer {
             byte[] expectedStoredKey = scramCredential.storedKey();
             byte[] clientSignature = formatter.clientSignature(expectedStoredKey, clientFirstMessage, serverFirstMessage, clientFinalMessage);
             byte[] computedStoredKey = formatter.storedKey(clientSignature, clientFinalMessage.proof());
-            if (!Arrays.equals(computedStoredKey, expectedStoredKey))
+            if (!MessageDigest.isEqual(computedStoredKey, expectedStoredKey))
                 throw new SaslException("Invalid client credentials");
         } catch (InvalidKeyException e) {
             throw new SaslException("Sasl client verification failed", e);
@@ -258,6 +260,6 @@ public class ScramSaslServer implements SaslServer {
         public String[] getMechanismNames(Map<String, ?> props) {
             Collection<String> mechanisms = ScramMechanism.mechanismNames();
             return mechanisms.toArray(new String[0]);
-		}
+        }
     }
 }

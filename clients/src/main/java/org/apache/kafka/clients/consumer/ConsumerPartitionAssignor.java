@@ -23,12 +23,9 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.utils.Utils;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
+
+import static org.apache.kafka.clients.consumer.internals.AbstractStickyAssignor.DEFAULT_GENERATION;
 
 /**
  * This interface is used to define custom partition assignment for use in
@@ -37,11 +34,13 @@ import java.util.Set;
  * as the group coordinator. The coordinator selects one member to perform the group assignment and
  * propagates the subscriptions of all members to it. Then {@link #assign(Cluster, GroupSubscription)} is called
  * to perform the assignment and the results are forwarded back to each respective members
- *
+ * <p>
  * In some cases, it is useful to forward additional metadata to the assignor in order to make
  * assignment decisions. For this, you can override {@link #subscriptionUserData(Set)} and provide custom
  * userData in the returned Subscription. For example, to have a rack-aware assignor, an implementation
  * can use this user data to forward the rackId belonging to each member.
+ * <p>
+ * The implementation can extend {@link Configurable} to get configs from consumer.
  */
 public interface ConsumerPartitionAssignor {
 
@@ -101,21 +100,29 @@ public interface ConsumerPartitionAssignor {
         private final List<String> topics;
         private final ByteBuffer userData;
         private final List<TopicPartition> ownedPartitions;
+        private final Optional<String> rackId;
         private Optional<String> groupInstanceId;
+        private final Optional<Integer> generationId;
 
-        public Subscription(List<String> topics, ByteBuffer userData, List<TopicPartition> ownedPartitions) {
+        public Subscription(List<String> topics, ByteBuffer userData, List<TopicPartition> ownedPartitions, int generationId, Optional<String> rackId) {
             this.topics = topics;
             this.userData = userData;
             this.ownedPartitions = ownedPartitions;
             this.groupInstanceId = Optional.empty();
+            this.generationId = generationId < 0 ? Optional.empty() : Optional.of(generationId);
+            this.rackId = rackId;
+        }
+
+        public Subscription(List<String> topics, ByteBuffer userData, List<TopicPartition> ownedPartitions) {
+            this(topics, userData, ownedPartitions, DEFAULT_GENERATION, Optional.empty());
         }
 
         public Subscription(List<String> topics, ByteBuffer userData) {
-            this(topics, userData, Collections.emptyList());
+            this(topics, userData, Collections.emptyList(), DEFAULT_GENERATION, Optional.empty());
         }
 
         public Subscription(List<String> topics) {
-            this(topics, null, Collections.emptyList());
+            this(topics, null, Collections.emptyList(), DEFAULT_GENERATION, Optional.empty());
         }
 
         public List<String> topics() {
@@ -127,173 +134,176 @@ public interface ConsumerPartitionAssignor {
         }
 
         public List<TopicPartition> ownedPartitions() {
-			return ownedPartitions;
-		}
+            return ownedPartitions;
+        }
 
-		public void setGroupInstanceId(Optional<String> groupInstanceId) {
-			this.groupInstanceId = groupInstanceId;
-		}
+        public Optional<String> rackId() {
+            return rackId;
+        }
 
-		public Optional<String> groupInstanceId() {
-			return groupInstanceId;
-		}
+        public void setGroupInstanceId(Optional<String> groupInstanceId) {
+            this.groupInstanceId = groupInstanceId;
+        }
 
-		@Override
-		public String toString() {
-			return "Subscription(" +
-					"topics=" + topics +
-					(userData == null ? "" : ", userDataSize=" + userData.remaining()) +
-					", ownedPartitions=" + ownedPartitions +
-					", groupInstanceId=" + (groupInstanceId.map(String::toString).orElse("null")) +
-					")";
-		}
-	}
+        public Optional<String> groupInstanceId() {
+            return groupInstanceId;
+        }
 
-	final class Assignment {
-		private List<TopicPartition> partitions;
-		private ByteBuffer userData;
+        public Optional<Integer> generationId() {
+            return generationId;
+        }
 
-		public Assignment(List<TopicPartition> partitions, ByteBuffer userData) {
-			this.partitions = partitions;
-			this.userData = userData;
-		}
+        @Override
+        public String toString() {
+            return "Subscription(" + "topics=" + topics + (userData == null ? "" : ", userDataSize=" + userData.remaining()) + ", ownedPartitions=" + ownedPartitions + ", groupInstanceId=" + groupInstanceId.map(String::toString).orElse("null") + ", generationId=" + generationId.orElse(-1) + ", rackId=" + (rackId.orElse("null")) + ")";
+        }
+    }
 
-		public Assignment(List<TopicPartition> partitions) {
-			this(partitions, null);
-		}
+    final class Assignment {
+        private List<TopicPartition> partitions;
+        private ByteBuffer userData;
 
-		public List<TopicPartition> partitions() {
-			return partitions;
-		}
+        public Assignment(List<TopicPartition> partitions, ByteBuffer userData) {
+            this.partitions = partitions;
+            this.userData = userData;
+        }
 
-		public ByteBuffer userData() {
-			return userData;
-		}
+        public Assignment(List<TopicPartition> partitions) {
+            this(partitions, null);
+        }
 
-		@Override
-		public String toString() {
-			return "Assignment(" +
-					"partitions=" + partitions +
-					(userData == null ? "" : ", userDataSize=" + userData.remaining()) +
-					')';
-		}
-	}
+        public List<TopicPartition> partitions() {
+            return partitions;
+        }
 
-	final class GroupSubscription {
-		private final Map<String, Subscription> subscriptions;
+        public ByteBuffer userData() {
+            return userData;
+        }
 
-		public GroupSubscription(Map<String, Subscription> subscriptions) {
-			this.subscriptions = subscriptions;
-		}
+        @Override
+        public String toString() {
+            return "Assignment(" + "partitions=" + partitions + (userData == null ? "" : ", userDataSize=" + userData.remaining()) + ')';
+        }
+    }
 
-		public Map<String, Subscription> groupSubscription() {
-			return subscriptions;
-		}
+    final class GroupSubscription {
+        private final Map<String, Subscription> subscriptions;
 
-		@Override
-		public String toString() {
-			return "GroupSubscription(" +
-					"subscriptions=" + subscriptions +
-					")";
-		}
-	}
+        public GroupSubscription(Map<String, Subscription> subscriptions) {
+            this.subscriptions = subscriptions;
+        }
 
-	final class GroupAssignment {
-		private final Map<String, Assignment> assignments;
+        public Map<String, Subscription> groupSubscription() {
+            return subscriptions;
+        }
 
-		public GroupAssignment(Map<String, Assignment> assignments) {
-			this.assignments = assignments;
-		}
+        @Override
+        public String toString() {
+            return "GroupSubscription(" + "subscriptions=" + subscriptions + ")";
+        }
+    }
 
-		public Map<String, Assignment> groupAssignment() {
-			return assignments;
-		}
+    final class GroupAssignment {
+        private final Map<String, Assignment> assignments;
 
-		@Override
-		public String toString() {
-			return "GroupAssignment(" +
-					"assignments=" + assignments +
-					")";
-		}
-	}
+        public GroupAssignment(Map<String, Assignment> assignments) {
+            this.assignments = assignments;
+        }
 
-	/**
-	 * The rebalance protocol defines partition assignment and revocation semantics. The purpose is to establish a
-	 * consistent set of rules that all consumers in a group follow in order to transfer ownership of a partition.
-	 * {@link ConsumerPartitionAssignor} implementors can claim supporting one or more rebalance protocols via the
-	 * {@link ConsumerPartitionAssignor#supportedProtocols()}, and it is their responsibility to respect the rules
-	 * of those protocols in their {@link ConsumerPartitionAssignor#assign(Cluster, GroupSubscription)} implementations.
-	 * Failures to follow the rules of the supported protocols would lead to runtime error or undefined behavior.
-	 * <p>
-	 * The {@link RebalanceProtocol#EAGER} rebalance protocol requires a consumer to always revoke all its owned
-	 * partitions before participating in a rebalance event. It therefore allows a complete reshuffling of the assignment.
-	 * <p>
-	 * {@link RebalanceProtocol#COOPERATIVE} rebalance protocol allows a consumer to retain its currently owned
-	 * partitions before participating in a rebalance event. The assignor should not reassign any owned partitions
-	 * immediately, but instead may indicate consumers the need for partition revocation so that the revoked
-	 * partitions can be reassigned to other consumers in the next rebalance event. This is designed for sticky assignment
-	 * logic which attempts to minimize partition reassignment with cooperative adjustments.
-	 */
-	enum RebalanceProtocol {
-		EAGER((byte) 0), COOPERATIVE((byte) 1);
+        public Map<String, Assignment> groupAssignment() {
+            return assignments;
+        }
 
-		private final byte id;
+        @Override
+        public String toString() {
+            return "GroupAssignment(" + "assignments=" + assignments + ")";
+        }
+    }
 
-		RebalanceProtocol(byte id) {
-			this.id = id;
-		}
+    /**
+     * The rebalance protocol defines partition assignment and revocation semantics. The purpose is to establish a
+     * consistent set of rules that all consumers in a group follow in order to transfer ownership of a partition.
+     * {@link ConsumerPartitionAssignor} implementors can claim supporting one or more rebalance protocols via the
+     * {@link ConsumerPartitionAssignor#supportedProtocols()}, and it is their responsibility to respect the rules
+     * of those protocols in their {@link ConsumerPartitionAssignor#assign(Cluster, GroupSubscription)} implementations.
+     * Failures to follow the rules of the supported protocols would lead to runtime error or undefined behavior.
+     * <p>
+     * The {@link RebalanceProtocol#EAGER} rebalance protocol requires a consumer to always revoke all its owned
+     * partitions before participating in a rebalance event. It therefore allows a complete reshuffling of the assignment.
+     * <p>
+     * {@link RebalanceProtocol#COOPERATIVE} rebalance protocol allows a consumer to retain its currently owned
+     * partitions before participating in a rebalance event. The assignor should not reassign any owned partitions
+     * immediately, but instead may indicate consumers the need for partition revocation so that the revoked
+     * partitions can be reassigned to other consumers in the next rebalance event. This is designed for sticky assignment
+     * logic which attempts to minimize partition reassignment with cooperative adjustments.
+     */
+    enum RebalanceProtocol {
+        EAGER((byte) 0), COOPERATIVE((byte) 1);
 
-		public byte id() {
-			return id;
-		}
+        private final byte id;
+
+        RebalanceProtocol(byte id) {
+            this.id = id;
+        }
+
+        public byte id() {
+            return id;
+        }
 
         public static RebalanceProtocol forId(byte id) {
             switch (id) {
-				case 0:
-					return EAGER;
-				case 1:
-					return COOPERATIVE;
-				default:
-					throw new IllegalArgumentException("Unknown rebalance protocol id: " + id);
-			}
-		}
-	}
+                case 0:
+                    return EAGER;
+                case 1:
+                    return COOPERATIVE;
+                default:
+                    throw new IllegalArgumentException("Unknown rebalance protocol id: " + id);
+            }
+        }
+    }
 
-	/**
-	 * Get a list of configured instances of {@link org.apache.kafka.clients.consumer.ConsumerPartitionAssignor}
-	 * based on the class names/types specified by {@link org.apache.kafka.clients.consumer.ConsumerConfig#PARTITION_ASSIGNMENT_STRATEGY_CONFIG}
-	 */
-	static List<ConsumerPartitionAssignor> getAssignorInstances(List<String> assignorClasses, Map<String, Object> configs) {
-		List<ConsumerPartitionAssignor> assignors = new ArrayList<>();
+    /**
+     * Get a list of configured instances of {@link org.apache.kafka.clients.consumer.ConsumerPartitionAssignor}
+     * based on the class names/types specified by {@link org.apache.kafka.clients.consumer.ConsumerConfig#PARTITION_ASSIGNMENT_STRATEGY_CONFIG}
+     */
+    static List<ConsumerPartitionAssignor> getAssignorInstances(List<String> assignorClasses, Map<String, Object> configs) {
+        List<ConsumerPartitionAssignor> assignors = new ArrayList<>();
+        // a map to store assignor name -> assignor class name
+        Map<String, String> assignorNameMap = new HashMap<>();
 
-		if (assignorClasses == null)
-			return assignors;
+        if (assignorClasses == null)
+            return assignors;
 
-		for (Object klass : assignorClasses) {
-			// first try to get the class if passed in as a string
-			if (klass instanceof String) {
-				try {
-					klass = Class.forName((String) klass, true, Utils.getContextOrKafkaClassLoader());
-				} catch (ClassNotFoundException classNotFound) {
-					throw new KafkaException(klass + " ClassNotFoundException exception occurred", classNotFound);
-				}
-			}
+        for (Object klass : assignorClasses) {
+            // first try to get the class if passed in as a string
+            if (klass instanceof String) {
+                try {
+                    klass = Class.forName((String) klass, true, Utils.getContextOrKafkaClassLoader());
+                } catch (ClassNotFoundException classNotFound) {
+                    throw new KafkaException(klass + " ClassNotFoundException exception occurred", classNotFound);
+                }
+            }
 
-			if (klass instanceof Class<?>) {
-				Object assignor = Utils.newInstance((Class<?>) klass);
-				if (assignor instanceof Configurable)
-					((Configurable) assignor).configure(configs);
+            if (klass instanceof Class<?>) {
+                Object assignor = Utils.newInstance((Class<?>) klass);
+                if (assignor instanceof Configurable)
+                    ((Configurable) assignor).configure(configs);
 
-				if (assignor instanceof ConsumerPartitionAssignor) {
-					assignors.add((ConsumerPartitionAssignor) assignor);
-				} else {
-					throw new KafkaException(klass + " is not an instance of " + ConsumerPartitionAssignor.class.getName());
-				}
-			} else {
-				throw new KafkaException("List contains element of type " + klass.getClass().getName() + ", expected String or Class");
-			}
-		}
-		return assignors;
-	}
+                if (assignor instanceof ConsumerPartitionAssignor) {
+                    String assignorName = ((ConsumerPartitionAssignor) assignor).name();
+                    if (assignorNameMap.containsKey(assignorName)) {
+                        throw new KafkaException("The assignor name: '" + assignorName + "' is used in more than one assignor: " + assignorNameMap.get(assignorName) + ", " + assignor.getClass().getName());
+                    }
+                    assignorNameMap.put(assignorName, assignor.getClass().getName());
+                    assignors.add((ConsumerPartitionAssignor) assignor);
+                } else {
+                    throw new KafkaException(klass + " is not an instance of " + ConsumerPartitionAssignor.class.getName());
+                }
+            } else {
+                throw new KafkaException("List contains element of type " + klass.getClass().getName() + ", expected String or Class");
+            }
+        }
+        return assignors;
+    }
 
 }

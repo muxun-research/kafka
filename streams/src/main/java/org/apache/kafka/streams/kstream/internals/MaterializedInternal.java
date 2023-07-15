@@ -17,6 +17,7 @@
 package org.apache.kafka.streams.kstream.internals;
 
 import org.apache.kafka.common.serialization.Serde;
+import org.apache.kafka.streams.TopologyConfig;
 import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.state.StoreSupplier;
@@ -35,18 +36,30 @@ public class MaterializedInternal<K, V, S extends StateStore> extends Materializ
     public MaterializedInternal(final Materialized<K, V, S> materialized,
                                 final InternalNameProvider nameProvider,
                                 final String generatedStorePrefix) {
-		super(materialized);
+        super(materialized);
 
-		// if storeName is not provided, the corresponding KTable would never be queryable;
-		// but we still need to provide an internal name for it in case we materialize.
-		queryable = storeName() != null;
-		if (!queryable && nameProvider != null) {
-			storeName = nameProvider.newStoreName(generatedStorePrefix);
-		}
-	}
+        // if storeName is not provided, the corresponding KTable would never be queryable;
+        // but we still need to provide an internal name for it in case we materialize.
+        queryable = storeName() != null;
+        if (!queryable && nameProvider != null) {
+            storeName = nameProvider.newStoreName(generatedStorePrefix);
+        }
+
+        // if store type is not configured during creating Materialized, then try to get the topologyConfigs from nameProvider
+        // otherwise, set to default rocksDB
+        if (storeType == null) {
+            storeType = StoreType.ROCKS_DB;
+            if (nameProvider instanceof InternalStreamsBuilder) {
+                final TopologyConfig topologyConfig = ((InternalStreamsBuilder) nameProvider).internalTopologyBuilder.topologyConfigs();
+                if (topologyConfig != null) {
+                    storeType = topologyConfig.parseStoreType();
+                }
+            }
+        }
+    }
 
     public String queryableStoreName() {
-		return queryable ? storeName() : null;
+        return queryable ? storeName() : null;
     }
 
     public String storeName() {
@@ -54,6 +67,10 @@ public class MaterializedInternal<K, V, S extends StateStore> extends Materializ
             return storeSupplier.name();
         }
         return storeName;
+    }
+
+    public StoreType storeType() {
+        return storeType;
     }
 
     public StoreSupplier<S> storeSupplier() {

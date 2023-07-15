@@ -19,10 +19,7 @@ package org.apache.kafka.common.utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
+import java.lang.reflect.*;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -75,8 +72,12 @@ public class LoggingSignalHandler {
     private Object createSignalHandler(final Map<String, Object> jvmSignalHandlers) {
         InvocationHandler invocationHandler = new InvocationHandler() {
 
-            private String getName(Object signal) throws ReflectiveOperationException {
-                return (String) signalGetNameMethod.invoke(signal);
+            private String getName(Object signal) throws Throwable {
+                try {
+                    return (String) signalGetNameMethod.invoke(signal);
+                } catch (InvocationTargetException e) {
+                    throw e.getCause();
+                }
             }
 
             private void handle(Object signalHandler, Object signal) throws ReflectiveOperationException {

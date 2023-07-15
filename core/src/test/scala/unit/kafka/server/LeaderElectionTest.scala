@@ -17,28 +17,25 @@
 
 package kafka.server
 
-import java.util.Collections
-
-import org.apache.kafka.common.{TopicPartition, Uuid}
-
-import scala.jdk.CollectionConverters._
 import kafka.api.LeaderAndIsr
-import org.apache.kafka.common.requests._
-import org.junit.jupiter.api.Assertions._
-import kafka.utils.TestUtils
 import kafka.cluster.Broker
 import kafka.controller.{ControllerChannelManager, ControllerContext, StateChangeLogger}
+import kafka.utils.TestUtils
 import kafka.utils.TestUtils._
-import kafka.zk.ZooKeeperTestHarness
-import org.apache.kafka.common.message.LeaderAndIsrRequestData.LeaderAndIsrPartitionState
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
+import org.apache.kafka.common.requests._
 import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.utils.Time
-import org.junit.jupiter.api.{AfterEach, BeforeEach, Test}
+import org.apache.kafka.common.{TopicPartition, Uuid}
+import org.junit.jupiter.api.Assertions._
+import org.junit.jupiter.api.{AfterEach, BeforeEach, Test, TestInfo}
 
-class LeaderElectionTest extends ZooKeeperTestHarness {
+import java.util.Collections
+import scala.jdk.CollectionConverters._
+
+class LeaderElectionTest extends QuorumTestHarness {
   val brokerId1 = 0
   val brokerId2 = 1
 
@@ -47,8 +44,8 @@ class LeaderElectionTest extends ZooKeeperTestHarness {
   var staleControllerEpochDetected = false
 
   @BeforeEach
-  override def setUp(): Unit = {
-    super.setUp()
+  override def setUp(testInfo: TestInfo): Unit = {
+    super.setUp(testInfo)
 
     val configProps1 = TestUtils.createBrokerConfig(brokerId1, zkConnect, enableControlledShutdown = false)
     val configProps2 = TestUtils.createBrokerConfig(brokerId2, zkConnect, enableControlledShutdown = false)
@@ -86,7 +83,8 @@ class LeaderElectionTest extends ZooKeeperTestHarness {
     // kill the server hosting the preferred replica/initial leader
     servers.head.shutdown()
     // check if leader moves to the other server
-    val leader2 = waitUntilLeaderIsElectedOrChanged(zkClient, topic, partitionId, oldLeaderOpt = Some(leader1))
+    val leader2 = waitUntilLeaderIsElectedOrChanged(zkClient, topic, partitionId,
+      oldLeaderOpt = Some(leader1), ignoreNoLeader = true)
     val leaderEpoch2 = zkClient.getEpochForPartition(new TopicPartition(topic, partitionId)).get
     assertEquals(1, leader2, "Leader must move to broker 1")
     // new leaderEpoch will be leaderEpoch1+2, one increment during ReplicaStateMachine.startup()-> handleStateChanges
@@ -138,9 +136,14 @@ class LeaderElectionTest extends ZooKeeperTestHarness {
     val controllerContext = new ControllerContext
     controllerContext.setLiveBrokers(brokerAndEpochs)
     val metrics = new Metrics
-    val controllerChannelManager = new ControllerChannelManager(controllerContext, controllerConfig, Time.SYSTEM,
-      metrics, new StateChangeLogger(controllerId, inControllerContext = true, None))
-    controllerChannelManager.startup()
+    val controllerChannelManager = new ControllerChannelManager(
+      () => controllerContext.epoch,
+      controllerConfig,
+      Time.SYSTEM,
+      metrics,
+      new StateChangeLogger(controllerId, inControllerContext = true, None)
+    )
+    controllerChannelManager.startup(controllerContext.liveOrShuttingDownBrokers)
     try {
       val staleControllerEpoch = 0
       val partitionStates = Seq(
@@ -149,9 +152,9 @@ class LeaderElectionTest extends ZooKeeperTestHarness {
           .setPartitionIndex(partitionId)
           .setControllerEpoch(2)
           .setLeader(brokerId2)
-          .setLeaderEpoch(LeaderAndIsr.initialLeaderEpoch)
+          .setLeaderEpoch(LeaderAndIsr.InitialLeaderEpoch)
           .setIsr(Seq(brokerId1, brokerId2).map(Integer.valueOf).asJava)
-          .setZkVersion(LeaderAndIsr.initialZKVersion)
+          .setPartitionEpoch(LeaderAndIsr.InitialPartitionEpoch)
           .setReplicas(Seq(0, 1).map(Integer.valueOf).asJava)
           .setIsNew(false)
       )

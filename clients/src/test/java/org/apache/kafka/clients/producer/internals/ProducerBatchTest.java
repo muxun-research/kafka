@@ -22,69 +22,50 @@ import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeader;
-import org.apache.kafka.common.record.CompressionType;
-import org.apache.kafka.common.record.MemoryRecords;
-import org.apache.kafka.common.record.MemoryRecordsBuilder;
-import org.apache.kafka.common.record.Record;
-import org.apache.kafka.common.record.RecordBatch;
-import org.apache.kafka.common.record.TimestampType;
+import org.apache.kafka.common.record.*;
 import org.apache.kafka.test.TestUtils;
 import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Deque;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 
-import static org.apache.kafka.common.record.RecordBatch.MAGIC_VALUE_V0;
-import static org.apache.kafka.common.record.RecordBatch.MAGIC_VALUE_V1;
-import static org.apache.kafka.common.record.RecordBatch.MAGIC_VALUE_V2;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.apache.kafka.common.record.RecordBatch.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class ProducerBatchTest {
 
     private final long now = 1488748346917L;
 
-	private final MemoryRecordsBuilder memoryRecordsBuilder = MemoryRecords.builder(ByteBuffer.allocate(512),
-			CompressionType.NONE, TimestampType.CREATE_TIME, 128);
+    private final MemoryRecordsBuilder memoryRecordsBuilder = MemoryRecords.builder(ByteBuffer.allocate(512), CompressionType.NONE, TimestampType.CREATE_TIME, 128);
 
     @Test
     public void testBatchAbort() throws Exception {
         ProducerBatch batch = new ProducerBatch(new TopicPartition("topic", 1), memoryRecordsBuilder, now);
         MockCallback callback = new MockCallback();
-		FutureRecordMetadata future = batch.tryAppend(now, null, new byte[10], Record.EMPTY_HEADERS, callback, now);
+        FutureRecordMetadata future = batch.tryAppend(now, null, new byte[10], Record.EMPTY_HEADERS, callback, now);
 
-		KafkaException exception = new KafkaException();
-		batch.abort(exception);
-		assertTrue(future.isDone());
-		assertEquals(1, callback.invocations);
-		assertEquals(exception, callback.exception);
-		assertNull(callback.metadata);
+        KafkaException exception = new KafkaException();
+        batch.abort(exception);
+        assertTrue(future.isDone());
+        assertEquals(1, callback.invocations);
+        assertEquals(exception, callback.exception);
+        assertNull(callback.metadata);
 
-		// subsequent completion should be ignored
-		assertFalse(batch.complete(500L, 2342342341L));
-		assertFalse(batch.completeExceptionally(new KafkaException(), index -> new KafkaException()));
-		assertEquals(1, callback.invocations);
+        // subsequent completion should be ignored
+        assertFalse(batch.complete(500L, 2342342341L));
+        assertFalse(batch.completeExceptionally(new KafkaException(), index -> new KafkaException()));
+        assertEquals(1, callback.invocations);
 
-		assertTrue(future.isDone());
-		try {
-			future.get();
-			fail("Future should have thrown");
-		} catch (ExecutionException e) {
-			assertEquals(exception, e.getCause());
-		}
-	}
+        assertTrue(future.isDone());
+        try {
+            future.get();
+            fail("Future should have thrown");
+        } catch (ExecutionException e) {
+            assertEquals(exception, e.getCause());
+        }
+    }
 
     @Test
     public void testBatchCannotAbortTwice() throws Exception {
@@ -119,11 +100,11 @@ public class ProducerBatchTest {
         ProducerBatch batch = new ProducerBatch(new TopicPartition("topic", 1), memoryRecordsBuilder, now);
         MockCallback callback = new MockCallback();
         FutureRecordMetadata future = batch.tryAppend(now, null, new byte[10], Record.EMPTY_HEADERS, callback, now);
-		batch.complete(500L, 10L);
-		assertEquals(1, callback.invocations);
+        batch.complete(500L, 10L);
+        assertEquals(1, callback.invocations);
         assertNull(callback.exception);
-		assertNotNull(callback.metadata);
-		assertThrows(IllegalStateException.class, () -> batch.complete(1000L, 20L));
+        assertNotNull(callback.metadata);
+        assertThrows(IllegalStateException.class, () -> batch.complete(1000L, 20L));
         RecordMetadata recordMetadata = future.get();
         assertEquals(500L, recordMetadata.offset());
         assertEquals(10L, recordMetadata.timestamp());
@@ -150,15 +131,15 @@ public class ProducerBatchTest {
                 }
             }
             Deque<ProducerBatch> batches = batch.split(200);
-			assertTrue(batches.size() >= 2, "This batch should be split to multiple small batches.");
+            assertTrue(batches.size() >= 2, "This batch should be split to multiple small batches.");
 
             for (ProducerBatch splitProducerBatch : batches) {
                 for (RecordBatch splitBatch : splitProducerBatch.records().batches()) {
                     for (Record record : splitBatch) {
-						assertTrue(record.headers().length == 1, "Header size should be 1.");
-						assertTrue(record.headers()[0].key().equals("header-key"), "Header key should be 'header-key'.");
-						assertTrue(new String(record.headers()[0].value()).equals("header-value"), "Header value should be 'header-value'.");
-					}
+                        assertEquals(1, record.headers().length, "Header size should be 1.");
+                        assertEquals("header-key", record.headers()[0].key(), "Header key should be 'header-key'.");
+                        assertEquals("header-value", new String(record.headers()[0].value()), "Header value should be 'header-value'.");
+                    }
                 }
             }
         }
@@ -227,78 +208,68 @@ public class ProducerBatchTest {
         batch.reenqueued(now);
         // Set `now` to 2ms before the create time.
         assertFalse(batch.hasReachedDeliveryTimeout(10240, now - 2L));
-	}
+    }
 
-	@Test
-	public void testShouldNotAttemptAppendOnceRecordsBuilderIsClosedForAppends() {
-		ProducerBatch batch = new ProducerBatch(new TopicPartition("topic", 1), memoryRecordsBuilder, now);
-		FutureRecordMetadata result0 = batch.tryAppend(now, null, new byte[10], Record.EMPTY_HEADERS, null, now);
-		assertNotNull(result0);
-		assertTrue(memoryRecordsBuilder.hasRoomFor(now, null, new byte[10], Record.EMPTY_HEADERS));
-		memoryRecordsBuilder.closeForRecordAppends();
-		assertFalse(memoryRecordsBuilder.hasRoomFor(now, null, new byte[10], Record.EMPTY_HEADERS));
-		assertNull(batch.tryAppend(now + 1, null, new byte[10], Record.EMPTY_HEADERS, null, now + 1));
-	}
+    @Test
+    public void testShouldNotAttemptAppendOnceRecordsBuilderIsClosedForAppends() {
+        ProducerBatch batch = new ProducerBatch(new TopicPartition("topic", 1), memoryRecordsBuilder, now);
+        FutureRecordMetadata result0 = batch.tryAppend(now, null, new byte[10], Record.EMPTY_HEADERS, null, now);
+        assertNotNull(result0);
+        assertTrue(memoryRecordsBuilder.hasRoomFor(now, null, new byte[10], Record.EMPTY_HEADERS));
+        memoryRecordsBuilder.closeForRecordAppends();
+        assertFalse(memoryRecordsBuilder.hasRoomFor(now, null, new byte[10], Record.EMPTY_HEADERS));
+        assertNull(batch.tryAppend(now + 1, null, new byte[10], Record.EMPTY_HEADERS, null, now + 1));
+    }
 
-	@Test
-	public void testCompleteExceptionallyWithRecordErrors() {
-		int recordCount = 5;
-		RuntimeException topLevelException = new RuntimeException();
+    @Test
+    public void testCompleteExceptionallyWithRecordErrors() {
+        int recordCount = 5;
+        RuntimeException topLevelException = new RuntimeException();
 
-		Map<Integer, RuntimeException> recordExceptionMap = new HashMap<>();
-		recordExceptionMap.put(0, new RuntimeException());
-		recordExceptionMap.put(3, new RuntimeException());
+        Map<Integer, RuntimeException> recordExceptionMap = new HashMap<>();
+        recordExceptionMap.put(0, new RuntimeException());
+        recordExceptionMap.put(3, new RuntimeException());
 
-		Function<Integer, RuntimeException> recordExceptions = batchIndex ->
-				recordExceptionMap.getOrDefault(batchIndex, topLevelException);
+        Function<Integer, RuntimeException> recordExceptions = batchIndex -> recordExceptionMap.getOrDefault(batchIndex, topLevelException);
 
-		testCompleteExceptionally(recordCount, topLevelException, recordExceptions);
-	}
+        testCompleteExceptionally(recordCount, topLevelException, recordExceptions);
+    }
 
-	@Test
-	public void testCompleteExceptionallyWithNullRecordErrors() {
-		int recordCount = 5;
-		RuntimeException topLevelException = new RuntimeException();
-		assertThrows(NullPointerException.class, () ->
-				testCompleteExceptionally(recordCount, topLevelException, null));
-	}
+    @Test
+    public void testCompleteExceptionallyWithNullRecordErrors() {
+        int recordCount = 5;
+        RuntimeException topLevelException = new RuntimeException();
+        assertThrows(NullPointerException.class, () -> testCompleteExceptionally(recordCount, topLevelException, null));
+    }
 
-	private void testCompleteExceptionally(
-			int recordCount,
-			RuntimeException topLevelException,
-			Function<Integer, RuntimeException> recordExceptions
-	) {
-		ProducerBatch batch = new ProducerBatch(
-				new TopicPartition("topic", 1),
-				memoryRecordsBuilder,
-				now
-		);
+    private void testCompleteExceptionally(int recordCount, RuntimeException topLevelException, Function<Integer, RuntimeException> recordExceptions) {
+        ProducerBatch batch = new ProducerBatch(new TopicPartition("topic", 1), memoryRecordsBuilder, now);
 
-		List<FutureRecordMetadata> futures = new ArrayList<>(recordCount);
-		for (int i = 0; i < recordCount; i++) {
-			futures.add(batch.tryAppend(now, null, new byte[10], Record.EMPTY_HEADERS, null, now));
-		}
-		assertEquals(recordCount, batch.recordCount);
+        List<FutureRecordMetadata> futures = new ArrayList<>(recordCount);
+        for (int i = 0; i < recordCount; i++) {
+            futures.add(batch.tryAppend(now, null, new byte[10], Record.EMPTY_HEADERS, null, now));
+        }
+        assertEquals(recordCount, batch.recordCount);
 
-		batch.completeExceptionally(topLevelException, recordExceptions);
-		assertTrue(batch.isDone());
+        batch.completeExceptionally(topLevelException, recordExceptions);
+        assertTrue(batch.isDone());
 
-		for (int i = 0; i < futures.size(); i++) {
-			FutureRecordMetadata future = futures.get(i);
-			RuntimeException caughtException = TestUtils.assertFutureThrows(future, RuntimeException.class);
-			RuntimeException expectedException = recordExceptions.apply(i);
-			assertEquals(expectedException, caughtException);
-		}
-	}
+        for (int i = 0; i < futures.size(); i++) {
+            FutureRecordMetadata future = futures.get(i);
+            RuntimeException caughtException = TestUtils.assertFutureThrows(future, RuntimeException.class);
+            RuntimeException expectedException = recordExceptions.apply(i);
+            assertEquals(expectedException, caughtException);
+        }
+    }
 
-	private static class MockCallback implements Callback {
-		private int invocations = 0;
-		private RecordMetadata metadata;
-		private Exception exception;
+    private static class MockCallback implements Callback {
+        private int invocations = 0;
+        private RecordMetadata metadata;
+        private Exception exception;
 
-		@Override
-		public void onCompletion(RecordMetadata metadata, Exception exception) {
-			invocations++;
+        @Override
+        public void onCompletion(RecordMetadata metadata, Exception exception) {
+            invocations++;
             this.metadata = metadata;
             this.exception = exception;
         }

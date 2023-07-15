@@ -16,16 +16,12 @@
  */
 package org.apache.kafka.test;
 
-import java.util.Arrays;
-
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.metrics.Sensor;
-import org.apache.kafka.common.metrics.stats.Avg;
-import org.apache.kafka.common.metrics.stats.Max;
-import org.apache.kafka.common.metrics.stats.Percentile;
-import org.apache.kafka.common.metrics.stats.Percentiles;
+import org.apache.kafka.common.metrics.stats.*;
 import org.apache.kafka.common.metrics.stats.Percentiles.BucketSizing;
-import org.apache.kafka.common.metrics.stats.WindowedCount;
+
+import java.util.Arrays;
 
 public class MetricsBench {
 
@@ -39,18 +35,13 @@ public class MetricsBench {
                 sensor.add(metrics.metricName(sensor.name() + ".avg", "grp1"), new Avg());
                 sensor.add(metrics.metricName(sensor.name() + ".count", "grp1"), new WindowedCount());
                 sensor.add(metrics.metricName(sensor.name() + ".max", "grp1"), new Max());
-                sensor.add(new Percentiles(1024,
-                        0.0,
-                        iters,
-                        BucketSizing.CONSTANT,
-                        new Percentile(metrics.metricName(sensor.name() + ".median", "grp1"), 50.0),
-                        new Percentile(metrics.metricName(sensor.name() +  ".p_99", "grp1"), 99.0)));
+                sensor.add(new Percentiles(1024, 0.0, iters, BucketSizing.CONSTANT, new Percentile(metrics.metricName(sensor.name() + ".median", "grp1"), 50.0), new Percentile(metrics.metricName(sensor.name() + ".p_99", "grp1"), 99.0)));
             }
             long start = System.nanoTime();
             for (int i = 0; i < iters; i++)
                 parent.record(i);
-            double ellapsed = (System.nanoTime() - start) / (double) iters;
-            System.out.println(String.format("%.2f ns per metric recording.", ellapsed));
+            double elapsed = (System.nanoTime() - start) / (double) iters;
+            System.out.println(String.format("%.2f ns per metric recording.", elapsed));
         } finally {
             metrics.close();
         }

@@ -31,87 +31,86 @@ import static org.apache.kafka.streams.processor.internals.ProcessorContextUtils
  * Simple wrapper around a {@link SessionStore} to support writing
  * updates to a changelog
  */
-class ChangeLoggingSessionBytesStore
-    extends WrappedStateStore<SessionStore<Bytes, byte[]>, byte[], byte[]>
-    implements SessionStore<Bytes, byte[]> {
+public class ChangeLoggingSessionBytesStore extends WrappedStateStore<SessionStore<Bytes, byte[]>, byte[], byte[]> implements SessionStore<Bytes, byte[]> {
 
-	private InternalProcessorContext context;
+    private InternalProcessorContext context;
 
-	ChangeLoggingSessionBytesStore(final SessionStore<Bytes, byte[]> bytesStore) {
-		super(bytesStore);
-	}
+    ChangeLoggingSessionBytesStore(final SessionStore<Bytes, byte[]> bytesStore) {
+        super(bytesStore);
+    }
 
-	@Deprecated
-	@Override
-	public void init(final ProcessorContext context, final StateStore root) {
-		super.init(context, root);
-		this.context = asInternalProcessorContext(context);
-	}
+    @Deprecated
+    @Override
+    public void init(final ProcessorContext context, final StateStore root) {
+        this.context = asInternalProcessorContext(context);
+        super.init(context, root);
+    }
 
-	@Override
-	public void init(final StateStoreContext context, final StateStore root) {
-		super.init(context, root);
-		this.context = asInternalProcessorContext(context);
-	}
+    @Override
+    public void init(final StateStoreContext context, final StateStore root) {
+        this.context = asInternalProcessorContext(context);
+        super.init(context, root);
+    }
 
-	@Override
-	public KeyValueIterator<Windowed<Bytes>, byte[]> findSessions(final Bytes key, final long earliestSessionEndTime, final long latestSessionStartTime) {
-		return wrapped().findSessions(key, earliestSessionEndTime, latestSessionStartTime);
-	}
+    @Override
+    public KeyValueIterator<Windowed<Bytes>, byte[]> findSessions(final Bytes key, final long earliestSessionEndTime, final long latestSessionStartTime) {
+        return wrapped().findSessions(key, earliestSessionEndTime, latestSessionStartTime);
+    }
 
-	@Override
-	public KeyValueIterator<Windowed<Bytes>, byte[]> backwardFindSessions(final Bytes key,
-																		  final long earliestSessionEndTime,
-																		  final long latestSessionStartTime) {
-		return wrapped().backwardFindSessions(key, earliestSessionEndTime, latestSessionStartTime);
-	}
+    @Override
+    public KeyValueIterator<Windowed<Bytes>, byte[]> backwardFindSessions(final Bytes key, final long earliestSessionEndTime, final long latestSessionStartTime) {
+        return wrapped().backwardFindSessions(key, earliestSessionEndTime, latestSessionStartTime);
+    }
 
-	@Override
-	public KeyValueIterator<Windowed<Bytes>, byte[]> findSessions(final Bytes keyFrom, final Bytes keyTo, final long earliestSessionEndTime, final long latestSessionStartTime) {
-		return wrapped().findSessions(keyFrom, keyTo, earliestSessionEndTime, latestSessionStartTime);
-	}
+    @Override
+    public KeyValueIterator<Windowed<Bytes>, byte[]> findSessions(final Bytes keyFrom, final Bytes keyTo, final long earliestSessionEndTime, final long latestSessionStartTime) {
+        return wrapped().findSessions(keyFrom, keyTo, earliestSessionEndTime, latestSessionStartTime);
+    }
 
-	@Override
-	public KeyValueIterator<Windowed<Bytes>, byte[]> backwardFindSessions(final Bytes keyFrom, final Bytes keyTo,
-																		  final long earliestSessionEndTime,
-																		  final long latestSessionStartTime) {
-		return wrapped().backwardFindSessions(keyFrom, keyTo, earliestSessionEndTime, latestSessionStartTime);
-	}
+    @Override
+    public KeyValueIterator<Windowed<Bytes>, byte[]> backwardFindSessions(final Bytes keyFrom, final Bytes keyTo, final long earliestSessionEndTime, final long latestSessionStartTime) {
+        return wrapped().backwardFindSessions(keyFrom, keyTo, earliestSessionEndTime, latestSessionStartTime);
+    }
 
-	@Override
-	public void remove(final Windowed<Bytes> sessionKey) {
-		wrapped().remove(sessionKey);
-		context.logChange(name(), SessionKeySchema.toBinary(sessionKey), null, context.timestamp());
-	}
+    @Override
+    public void remove(final Windowed<Bytes> sessionKey) {
+        wrapped().remove(sessionKey);
+        context.logChange(name(), SessionKeySchema.toBinary(sessionKey), null, context.timestamp(), wrapped().getPosition());
+    }
 
-	@Override
-	public void put(final Windowed<Bytes> sessionKey, final byte[] aggregate) {
-		wrapped().put(sessionKey, aggregate);
-		context.logChange(name(), SessionKeySchema.toBinary(sessionKey), aggregate, context.timestamp());
-	}
+    @Override
+    public void put(final Windowed<Bytes> sessionKey, final byte[] aggregate) {
+        wrapped().put(sessionKey, aggregate);
+        context.logChange(name(), SessionKeySchema.toBinary(sessionKey), aggregate, context.timestamp(), wrapped().getPosition());
+    }
 
-	@Override
-	public byte[] fetchSession(final Bytes key, final long startTime, final long endTime) {
-		return wrapped().fetchSession(key, startTime, endTime);
-	}
+    @Override
+    public byte[] fetchSession(final Bytes key, final long earliestSessionEndTime, final long latestSessionStartTime) {
+        return wrapped().fetchSession(key, earliestSessionEndTime, latestSessionStartTime);
+    }
 
-	@Override
-	public KeyValueIterator<Windowed<Bytes>, byte[]> backwardFetch(final Bytes key) {
-		return wrapped().backwardFetch(key);
-	}
+    @Override
+    public KeyValueIterator<Windowed<Bytes>, byte[]> findSessions(final long earliestSessionEndTime, final long latestSessionEndTime) {
+        return wrapped().findSessions(earliestSessionEndTime, latestSessionEndTime);
+    }
 
-	@Override
-	public KeyValueIterator<Windowed<Bytes>, byte[]> fetch(final Bytes key) {
-		return wrapped().fetch(key);
-	}
+    @Override
+    public KeyValueIterator<Windowed<Bytes>, byte[]> backwardFetch(final Bytes key) {
+        return wrapped().backwardFetch(key);
+    }
 
-	@Override
-	public KeyValueIterator<Windowed<Bytes>, byte[]> backwardFetch(final Bytes from, final Bytes to) {
-		return wrapped().backwardFetch(from, to);
-	}
+    @Override
+    public KeyValueIterator<Windowed<Bytes>, byte[]> fetch(final Bytes key) {
+        return wrapped().fetch(key);
+    }
 
-	@Override
-	public KeyValueIterator<Windowed<Bytes>, byte[]> fetch(final Bytes from, final Bytes to) {
-		return wrapped().fetch(from, to);
-	}
+    @Override
+    public KeyValueIterator<Windowed<Bytes>, byte[]> backwardFetch(final Bytes keyFrom, final Bytes keyTo) {
+        return wrapped().backwardFetch(keyFrom, keyTo);
+    }
+
+    @Override
+    public KeyValueIterator<Windowed<Bytes>, byte[]> fetch(final Bytes keyFrom, final Bytes keyTo) {
+        return wrapped().fetch(keyFrom, keyTo);
+    }
 }

@@ -25,6 +25,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * This interface provides storing and fetching remote log segment metadata with strongly consistent semantics.
@@ -52,140 +53,134 @@ import java.util.Set;
 @InterfaceStability.Evolving
 public interface RemoteLogMetadataManager extends Configurable, Closeable {
 
-	/**
-	 * Adds {@link RemoteLogSegmentMetadata} with the containing {@link RemoteLogSegmentId} into {@link RemoteLogMetadataManager}.
-	 * <p>
-	 * RemoteLogSegmentMetadata is identified by RemoteLogSegmentId and it should have the initial state which is {@link RemoteLogSegmentState#COPY_SEGMENT_STARTED}.
-	 * <p>
-	 * {@link #updateRemoteLogSegmentMetadata(RemoteLogSegmentMetadataUpdate)} should be used to update an existing RemoteLogSegmentMetadata.
-	 * @param remoteLogSegmentMetadata metadata about the remote log segment.
-	 * @throws RemoteStorageException   if there are any storage related errors occurred.
-	 * @throws IllegalArgumentException if the given metadata instance does not have the state as {@link RemoteLogSegmentState#COPY_SEGMENT_STARTED}
-	 */
-	void addRemoteLogSegmentMetadata(RemoteLogSegmentMetadata remoteLogSegmentMetadata) throws RemoteStorageException;
+    /**
+     * This method is used to add {@link RemoteLogSegmentMetadata} asynchronously with the containing {@link RemoteLogSegmentId} into {@link RemoteLogMetadataManager}.
+     * <p>
+     * RemoteLogSegmentMetadata is identified by RemoteLogSegmentId and it should have the initial state which is {@link RemoteLogSegmentState#COPY_SEGMENT_STARTED}.
+     * <p>
+     * {@link #updateRemoteLogSegmentMetadata(RemoteLogSegmentMetadataUpdate)} should be used to update an existing RemoteLogSegmentMetadata.
+     * @param remoteLogSegmentMetadata metadata about the remote log segment.
+     * @return a CompletableFuture which will complete once this operation is finished.
+     * @throws RemoteStorageException   if there are any storage related errors occurred.
+     * @throws IllegalArgumentException if the given metadata instance does not have the state as {@link RemoteLogSegmentState#COPY_SEGMENT_STARTED}
+     */
+    CompletableFuture<Void> addRemoteLogSegmentMetadata(RemoteLogSegmentMetadata remoteLogSegmentMetadata) throws RemoteStorageException;
 
-	/**
-	 * This method is used to update the {@link RemoteLogSegmentMetadata}. Currently, it allows to update with the new
-	 * state based on the life cycle of the segment. It can go through the below state transitions.
-	 * <p>
-	 * <pre>
-	 * +---------------------+            +----------------------+
-	 * |COPY_SEGMENT_STARTED |-----------&gt;|COPY_SEGMENT_FINISHED |
-	 * +-------------------+-+            +--+-------------------+
-	 *                     |                 |
-	 *                     |                 |
-	 *                     v                 v
-	 *                  +--+-----------------+-+
-	 *                  |DELETE_SEGMENT_STARTED|
-	 *                  +-----------+----------+
-	 *                              |
-	 *                              |
-	 *                              v
-	 *                  +-----------+-----------+
-	 *                  |DELETE_SEGMENT_FINISHED|
-	 *                  +-----------------------+
-	 * </pre>
-	 * <p>
-	 * {@link RemoteLogSegmentState#COPY_SEGMENT_STARTED} - This state indicates that the segment copying to remote storage is started but not yet finished.
-	 * {@link RemoteLogSegmentState#COPY_SEGMENT_FINISHED} - This state indicates that the segment copying to remote storage is finished.
-	 * <br>
-	 * The leader broker copies the log segments to the remote storage and puts the remote log segment metadata with the
-	 * state as “COPY_SEGMENT_STARTED” and updates the state as “COPY_SEGMENT_FINISHED” once the copy is successful.
-	 * <p></p>
-	 * {@link RemoteLogSegmentState#DELETE_SEGMENT_STARTED} - This state indicates that the segment deletion is started but not yet finished.
-	 * {@link RemoteLogSegmentState#DELETE_SEGMENT_FINISHED} - This state indicates that the segment is deleted successfully.
-	 * <br>
-	 * Leader partitions publish both the above delete segment events when remote log retention is reached for the
-	 * respective segments. Remote Partition Removers also publish these events when a segment is deleted as part of
-	 * the remote partition deletion.
-	 * @param remoteLogSegmentMetadataUpdate update of the remote log segment metadata.
-	 * @throws RemoteStorageException          if there are any storage related errors occurred.
-	 * @throws RemoteResourceNotFoundException when there are no resources associated with the given remoteLogSegmentMetadataUpdate.
-	 * @throws IllegalArgumentException        if the given metadata instance has the state as {@link RemoteLogSegmentState#COPY_SEGMENT_STARTED}
-	 */
-	void updateRemoteLogSegmentMetadata(RemoteLogSegmentMetadataUpdate remoteLogSegmentMetadataUpdate)
-			throws RemoteStorageException;
+    /**
+     * This method is used to update the {@link RemoteLogSegmentMetadata} asynchronously. Currently, it allows to update with the new
+     * state based on the life cycle of the segment. It can go through the below state transitions.
+     * <p>
+     * <pre>
+     * +---------------------+            +----------------------+
+     * |COPY_SEGMENT_STARTED |-----------&gt;|COPY_SEGMENT_FINISHED |
+     * +-------------------+-+            +--+-------------------+
+     *                     |                 |
+     *                     |                 |
+     *                     v                 v
+     *                  +--+-----------------+-+
+     *                  |DELETE_SEGMENT_STARTED|
+     *                  +-----------+----------+
+     *                              |
+     *                              |
+     *                              v
+     *                  +-----------+-----------+
+     *                  |DELETE_SEGMENT_FINISHED|
+     *                  +-----------------------+
+     * </pre>
+     * <p>
+     * {@link RemoteLogSegmentState#COPY_SEGMENT_STARTED} - This state indicates that the segment copying to remote storage is started but not yet finished.
+     * {@link RemoteLogSegmentState#COPY_SEGMENT_FINISHED} - This state indicates that the segment copying to remote storage is finished.
+     * <br>
+     * The leader broker copies the log segments to the remote storage and puts the remote log segment metadata with the
+     * state as “COPY_SEGMENT_STARTED” and updates the state as “COPY_SEGMENT_FINISHED” once the copy is successful.
+     * <p></p>
+     * {@link RemoteLogSegmentState#DELETE_SEGMENT_STARTED} - This state indicates that the segment deletion is started but not yet finished.
+     * {@link RemoteLogSegmentState#DELETE_SEGMENT_FINISHED} - This state indicates that the segment is deleted successfully.
+     * <br>
+     * Leader partitions publish both the above delete segment events when remote log retention is reached for the
+     * respective segments. Remote Partition Removers also publish these events when a segment is deleted as part of
+     * the remote partition deletion.
+     * @param remoteLogSegmentMetadataUpdate update of the remote log segment metadata.
+     * @return a CompletableFuture which will complete once this operation is finished.
+     * @throws RemoteStorageException          if there are any storage related errors occurred.
+     * @throws RemoteResourceNotFoundException when there are no resources associated with the given remoteLogSegmentMetadataUpdate.
+     * @throws IllegalArgumentException        if the given metadata instance has the state as {@link RemoteLogSegmentState#COPY_SEGMENT_STARTED}
+     */
+    CompletableFuture<Void> updateRemoteLogSegmentMetadata(RemoteLogSegmentMetadataUpdate remoteLogSegmentMetadataUpdate) throws RemoteStorageException;
 
-	/**
-	 * Returns {@link RemoteLogSegmentMetadata} if it exists for the given topic partition containing the offset with
-	 * the given leader-epoch for the offset, else returns {@link Optional#empty()}.
-	 * @param topicIdPartition topic partition
-	 * @param epochForOffset   leader epoch for the given offset
-	 * @param offset           offset
-	 * @return the requested remote log segment metadata if it exists.
-	 * @throws RemoteStorageException if there are any storage related errors occurred.
-	 */
-	Optional<RemoteLogSegmentMetadata> remoteLogSegmentMetadata(TopicIdPartition topicIdPartition,
-																int epochForOffset,
-																long offset)
-			throws RemoteStorageException;
+    /**
+     * Returns {@link RemoteLogSegmentMetadata} if it exists for the given topic partition containing the offset with
+     * the given leader-epoch for the offset, else returns {@link Optional#empty()}.
+     * @param topicIdPartition topic partition
+     * @param epochForOffset   leader epoch for the given offset
+     * @param offset           offset
+     * @return the requested remote log segment metadata if it exists.
+     * @throws RemoteStorageException if there are any storage related errors occurred.
+     */
+    Optional<RemoteLogSegmentMetadata> remoteLogSegmentMetadata(TopicIdPartition topicIdPartition, int epochForOffset, long offset) throws RemoteStorageException;
 
-	/**
-	 * Returns the highest log offset of topic partition for the given leader epoch in remote storage. This is used by
-	 * remote log management subsystem to know up to which offset the segments have been copied to remote storage for
-	 * a given leader epoch.
-	 * @param topicIdPartition topic partition
-	 * @param leaderEpoch      leader epoch
-	 * @return the requested highest log offset if exists.
-	 * @throws RemoteStorageException if there are any storage related errors occurred.
-	 */
-	Optional<Long> highestOffsetForEpoch(TopicIdPartition topicIdPartition,
-										 int leaderEpoch) throws RemoteStorageException;
+    /**
+     * Returns the highest log offset of topic partition for the given leader epoch in remote storage. This is used by
+     * remote log management subsystem to know up to which offset the segments have been copied to remote storage for
+     * a given leader epoch.
+     * @param topicIdPartition topic partition
+     * @param leaderEpoch      leader epoch
+     * @return the requested highest log offset if exists.
+     * @throws RemoteStorageException if there are any storage related errors occurred.
+     */
+    Optional<Long> highestOffsetForEpoch(TopicIdPartition topicIdPartition, int leaderEpoch) throws RemoteStorageException;
 
-	/**
-	 * This method is used to update the metadata about remote partition delete event. Currently, it allows updating the
-	 * state ({@link RemotePartitionDeleteState}) of a topic partition in remote metadata storage. Controller invokes
-	 * this method with {@link RemotePartitionDeleteMetadata} having state as {@link RemotePartitionDeleteState#DELETE_PARTITION_MARKED}.
-	 * So, remote partition removers can act on this event to clean the respective remote log segments of the partition.
-	 * <p><br>
-	 * In the case of default RLMM implementation, remote partition remover processes {@link RemotePartitionDeleteState#DELETE_PARTITION_MARKED}
-	 * <ul>
-	 * <li> sends an event with state as {@link RemotePartitionDeleteState#DELETE_PARTITION_STARTED}
-	 * <li> gets all the remote log segments and deletes them.
-	 * <li> sends an event with state as {@link RemotePartitionDeleteState#DELETE_PARTITION_FINISHED} once all the remote log segments are
-	 * deleted.
-	 * </ul>
-	 * @param remotePartitionDeleteMetadata update on delete state of a partition.
-	 * @throws RemoteStorageException          if there are any storage related errors occurred.
-	 * @throws RemoteResourceNotFoundException when there are no resources associated with the given remotePartitionDeleteMetadata.
-	 */
-	void putRemotePartitionDeleteMetadata(RemotePartitionDeleteMetadata remotePartitionDeleteMetadata)
-			throws RemoteStorageException;
+    /**
+     * This method is used to update the metadata about remote partition delete event asynchronously. Currently, it allows updating the
+     * state ({@link RemotePartitionDeleteState}) of a topic partition in remote metadata storage. Controller invokes
+     * this method with {@link RemotePartitionDeleteMetadata} having state as {@link RemotePartitionDeleteState#DELETE_PARTITION_MARKED}.
+     * So, remote partition removers can act on this event to clean the respective remote log segments of the partition.
+     * <p><br>
+     * In the case of default RLMM implementation, remote partition remover processes {@link RemotePartitionDeleteState#DELETE_PARTITION_MARKED}
+     * <ul>
+     * <li> sends an event with state as {@link RemotePartitionDeleteState#DELETE_PARTITION_STARTED}
+     * <li> gets all the remote log segments and deletes them.
+     * <li> sends an event with state as {@link RemotePartitionDeleteState#DELETE_PARTITION_FINISHED} once all the remote log segments are
+     * deleted.
+     * </ul>
+     * @param remotePartitionDeleteMetadata update on delete state of a partition.
+     * @return a CompletableFuture which will complete once this operation is finished.
+     * @throws RemoteStorageException          if there are any storage related errors occurred.
+     * @throws RemoteResourceNotFoundException when there are no resources associated with the given remotePartitionDeleteMetadata.
+     */
+    CompletableFuture<Void> putRemotePartitionDeleteMetadata(RemotePartitionDeleteMetadata remotePartitionDeleteMetadata) throws RemoteStorageException;
 
-	/**
-	 * Returns all the remote log segment metadata of the given topicIdPartition.
-	 * <p>
-	 * Remote Partition Removers uses this method to fetch all the segments for a given topic partition, so that they
-	 * can delete them.
-	 * @return Iterator of all the remote log segment metadata for the given topic partition.
-	 */
-	Iterator<RemoteLogSegmentMetadata> listRemoteLogSegments(TopicIdPartition topicIdPartition)
-			throws RemoteStorageException;
+    /**
+     * Returns all the remote log segment metadata of the given topicIdPartition.
+     * <p>
+     * Remote Partition Removers uses this method to fetch all the segments for a given topic partition, so that they
+     * can delete them.
+     * @return Iterator of all the remote log segment metadata for the given topic partition.
+     */
+    Iterator<RemoteLogSegmentMetadata> listRemoteLogSegments(TopicIdPartition topicIdPartition) throws RemoteStorageException;
 
-	/**
-	 * Returns iterator of remote log segment metadata, sorted by {@link RemoteLogSegmentMetadata#startOffset()} in
-	 * ascending order which contains the given leader epoch. This is used by remote log retention management subsystem
-	 * to fetch the segment metadata for a given leader epoch.
-	 * @param topicIdPartition topic partition
-	 * @param leaderEpoch      leader epoch
-	 * @return Iterator of remote segments, sorted by start offset in ascending order.
-	 */
-	Iterator<RemoteLogSegmentMetadata> listRemoteLogSegments(TopicIdPartition topicIdPartition,
-															 int leaderEpoch) throws RemoteStorageException;
+    /**
+     * Returns iterator of remote log segment metadata, sorted by {@link RemoteLogSegmentMetadata#startOffset()} in
+     * ascending order which contains the given leader epoch. This is used by remote log retention management subsystem
+     * to fetch the segment metadata for a given leader epoch.
+     * @param topicIdPartition topic partition
+     * @param leaderEpoch      leader epoch
+     * @return Iterator of remote segments, sorted by start offset in ascending order.
+     */
+    Iterator<RemoteLogSegmentMetadata> listRemoteLogSegments(TopicIdPartition topicIdPartition, int leaderEpoch) throws RemoteStorageException;
 
-	/**
-	 * This method is invoked only when there are changes in leadership of the topic partitions that this broker is
-	 * responsible for.
-	 * @param leaderPartitions   partitions that have become leaders on this broker.
-	 * @param followerPartitions partitions that have become followers on this broker.
-	 */
-	void onPartitionLeadershipChanges(Set<TopicIdPartition> leaderPartitions,
-									  Set<TopicIdPartition> followerPartitions);
+    /**
+     * This method is invoked only when there are changes in leadership of the topic partitions that this broker is
+     * responsible for.
+     * @param leaderPartitions   partitions that have become leaders on this broker.
+     * @param followerPartitions partitions that have become followers on this broker.
+     */
+    void onPartitionLeadershipChanges(Set<TopicIdPartition> leaderPartitions, Set<TopicIdPartition> followerPartitions);
 
-	/**
-	 * This method is invoked only when the topic partitions are stopped on this broker. This can happen when a
-	 * partition is emigrated to other broker or a partition is deleted.
-	 * @param partitions topic partitions that have been stopped.
-	 */
-	void onStopPartitions(Set<TopicIdPartition> partitions);
+    /**
+     * This method is invoked only when the topic partitions are stopped on this broker. This can happen when a
+     * partition is emigrated to other broker or a partition is deleted.
+     * @param partitions topic partitions that have been stopped.
+     */
+    void onStopPartitions(Set<TopicIdPartition> partitions);
 }

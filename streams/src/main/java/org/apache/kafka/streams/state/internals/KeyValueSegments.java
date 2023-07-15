@@ -25,37 +25,39 @@ import org.apache.kafka.streams.state.internals.metrics.RocksDBMetricsRecorder;
  */
 class KeyValueSegments extends AbstractSegments<KeyValueSegment> {
 
-	private final RocksDBMetricsRecorder metricsRecorder;
+    private final RocksDBMetricsRecorder metricsRecorder;
 
-	KeyValueSegments(final String name,
-					 final String metricsScope,
-					 final long retentionPeriod,
-					 final long segmentInterval) {
-		super(name, retentionPeriod, segmentInterval);
-		metricsRecorder = new RocksDBMetricsRecorder(metricsScope, name);
-	}
+    KeyValueSegments(final String name, final String metricsScope, final long retentionPeriod, final long segmentInterval) {
+        super(name, retentionPeriod, segmentInterval);
+        metricsRecorder = new RocksDBMetricsRecorder(metricsScope, name);
+    }
 
-	@Override
-	public KeyValueSegment getOrCreateSegment(final long segmentId,
-											  final ProcessorContext context) {
-		if (segments.containsKey(segmentId)) {
-			return segments.get(segmentId);
-		} else {
-			final KeyValueSegment newSegment =
-					new KeyValueSegment(segmentName(segmentId), name, segmentId, metricsRecorder);
+    @Override
+    public KeyValueSegment getOrCreateSegment(final long segmentId, final ProcessorContext context) {
+        if (segments.containsKey(segmentId)) {
+            return segments.get(segmentId);
+        } else {
+            final KeyValueSegment newSegment = new KeyValueSegment(segmentName(segmentId), name, segmentId, metricsRecorder);
 
-			if (segments.put(segmentId, newSegment) != null) {
-				throw new IllegalStateException("KeyValueSegment already exists. Possible concurrent access.");
-			}
+            if (segments.put(segmentId, newSegment) != null) {
+                throw new IllegalStateException("KeyValueSegment already exists. Possible concurrent access.");
+            }
 
-			newSegment.openDB(context.appConfigs(), context.stateDir());
-			return newSegment;
-		}
-	}
+            newSegment.openDB(context.appConfigs(), context.stateDir());
+            return newSegment;
+        }
+    }
 
-	@Override
-	public void openExisting(final ProcessorContext context, final long streamTime) {
-		metricsRecorder.init(ProcessorContextUtils.getMetricsImpl(context), context.taskId());
-		super.openExisting(context, streamTime);
-	}
+    @Override
+    public KeyValueSegment getOrCreateSegmentIfLive(final long segmentId, final ProcessorContext context, final long streamTime) {
+        final KeyValueSegment segment = super.getOrCreateSegmentIfLive(segmentId, context, streamTime);
+        cleanupExpiredSegments(streamTime);
+        return segment;
+    }
+
+    @Override
+    public void openExisting(final ProcessorContext context, final long streamTime) {
+        metricsRecorder.init(ProcessorContextUtils.getMetricsImpl(context), context.taskId());
+        super.openExisting(context, streamTime);
+    }
 }

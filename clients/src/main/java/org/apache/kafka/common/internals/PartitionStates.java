@@ -18,14 +18,7 @@ package org.apache.kafka.common.internals;
 
 import org.apache.kafka.common.TopicPartition;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.function.BiConsumer;
 
 /**
@@ -60,6 +53,11 @@ public class PartitionStates<S> {
 
     public void updateAndMoveToEnd(TopicPartition topicPartition, S state) {
         map.remove(topicPartition);
+        map.put(topicPartition, state);
+        updateSize();
+    }
+
+    public void update(TopicPartition topicPartition, S state) {
         map.put(topicPartition, state);
         updateSize();
     }

@@ -26,26 +26,19 @@ import java.util.stream.Collectors;
  * The consumer group state.
  */
 public enum ConsumerGroupState {
-	UNKNOWN("Unknown"),
-	PREPARING_REBALANCE("PreparingRebalance"),
-	COMPLETING_REBALANCE("CompletingRebalance"),
-	STABLE("Stable"),
-	DEAD("Dead"),
-	EMPTY("Empty");
+    UNKNOWN("Unknown"), PREPARING_REBALANCE("PreparingRebalance"), COMPLETING_REBALANCE("CompletingRebalance"), STABLE("Stable"), DEAD("Dead"), EMPTY("Empty");
 
-	private final static Map<String, ConsumerGroupState> NAME_TO_ENUM = Arrays.stream(values())
-			.collect(Collectors.toMap(state -> state.name, Function.identity()));
-	;
+    private final static Map<String, ConsumerGroupState> NAME_TO_ENUM = Arrays.stream(values()).collect(Collectors.toMap(state -> state.name, Function.identity()));
 
-	private final String name;
+    private final String name;
 
-	ConsumerGroupState(String name) {
-		this.name = name;
-	}
+    ConsumerGroupState(String name) {
+        this.name = name;
+    }
 
-	/**
-	 * Parse a string into a consumer group state.
-	 */
+    /**
+     * Parse a string into a consumer group state.
+     */
     public static ConsumerGroupState parse(String name) {
         ConsumerGroupState state = NAME_TO_ENUM.get(name);
         return state == null ? UNKNOWN : state;

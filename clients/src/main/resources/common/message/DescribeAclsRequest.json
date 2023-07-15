@@ -17,12 +17,15 @@
   "apiKey": 29,
   "type": "request",
   "listeners": [
-    "zkBroker"
+    "zkBroker",
+    "broker",
+    "controller"
   ],
   "name": "DescribeAclsRequest",
   // Version 1 adds resource pattern type.
   // Version 2 enables flexible versions.
-  "validVersions": "0-2",
+  // Version 3 adds user resource type.
+  "validVersions": "0-3",
   "flexibleVersions": "2+",
   "fields": [
     {
@@ -58,10 +61,19 @@
       "type": "string",
       "versions": "0+",
       "nullableVersions": "0+",
-      "about": "The host to match, or null to match any host." },
-    { "name": "Operation", "type": "int8", "versions": "0+",
-      "about": "The operation to match." },
-    { "name": "PermissionType", "type": "int8", "versions": "0+",
-      "about": "The permission type to match." }
+      "about": "The host to match, or null to match any host."
+    },
+    {
+      "name": "Operation",
+      "type": "int8",
+      "versions": "0+",
+      "about": "The operation to match."
+    },
+    {
+      "name": "PermissionType",
+      "type": "int8",
+      "versions": "0+",
+      "about": "The permission type to match."
+    }
   ]
 }

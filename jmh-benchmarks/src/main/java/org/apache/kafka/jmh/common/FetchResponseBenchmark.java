@@ -17,7 +17,9 @@
 
 package org.apache.kafka.jmh.common;
 
+import org.apache.kafka.common.TopicIdPartition;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.message.FetchResponseData;
 import org.apache.kafka.common.network.Send;
 import org.apache.kafka.common.protocol.ApiKeys;
@@ -28,22 +30,13 @@ import org.apache.kafka.common.record.SimpleRecord;
 import org.apache.kafka.common.requests.ByteBufferChannel;
 import org.apache.kafka.common.requests.FetchResponse;
 import org.apache.kafka.common.requests.ResponseHeader;
-import org.openjdk.jmh.annotations.Benchmark;
-import org.openjdk.jmh.annotations.BenchmarkMode;
-import org.openjdk.jmh.annotations.Fork;
-import org.openjdk.jmh.annotations.Level;
-import org.openjdk.jmh.annotations.Measurement;
-import org.openjdk.jmh.annotations.Mode;
-import org.openjdk.jmh.annotations.OutputTimeUnit;
-import org.openjdk.jmh.annotations.Param;
-import org.openjdk.jmh.annotations.Scope;
-import org.openjdk.jmh.annotations.Setup;
-import org.openjdk.jmh.annotations.State;
-import org.openjdk.jmh.annotations.Warmup;
+import org.openjdk.jmh.annotations.*;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -54,53 +47,63 @@ import java.util.concurrent.TimeUnit;
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 public class FetchResponseBenchmark {
-	@Param({"10", "500", "1000"})
-	private int topicCount;
+    @Param({"10", "500", "1000"})
+    private int topicCount;
 
-	@Param({"3", "10", "20"})
-	private int partitionCount;
+    @Param({"3", "10", "20"})
+    private int partitionCount;
 
-	LinkedHashMap<TopicPartition, FetchResponseData.PartitionData> responseData;
+    LinkedHashMap<TopicIdPartition, FetchResponseData.PartitionData> responseData;
 
-	ResponseHeader header;
+    Map<String, Uuid> topicIds;
 
-	FetchResponse fetchResponse;
+    Map<Uuid, String> topicNames;
 
-	@Setup(Level.Trial)
-	public void setup() {
-		MemoryRecords records = MemoryRecords.withRecords(CompressionType.NONE,
-				new SimpleRecord(1000, "key1".getBytes(StandardCharsets.UTF_8), "value1".getBytes(StandardCharsets.UTF_8)),
-				new SimpleRecord(1001, "key2".getBytes(StandardCharsets.UTF_8), "value2".getBytes(StandardCharsets.UTF_8)),
-				new SimpleRecord(1002, "key3".getBytes(StandardCharsets.UTF_8), "value3".getBytes(StandardCharsets.UTF_8)));
+    ResponseHeader header;
 
-		this.responseData = new LinkedHashMap<>();
-		for (int topicIdx = 0; topicIdx < topicCount; topicIdx++) {
-			String topic = UUID.randomUUID().toString();
-			for (int partitionId = 0; partitionId < partitionCount; partitionId++) {
-				FetchResponseData.PartitionData partitionData = new FetchResponseData.PartitionData()
-						.setPartitionIndex(partitionId)
-						.setLastStableOffset(0)
-						.setLogStartOffset(0)
-						.setRecords(records);
-				responseData.put(new TopicPartition(topic, partitionId), partitionData);
-			}
-		}
+    FetchResponse fetchResponse;
 
-		this.header = new ResponseHeader(100, ApiKeys.FETCH.responseHeaderVersion(ApiKeys.FETCH.latestVersion()));
-		this.fetchResponse = FetchResponse.of(Errors.NONE, 0, 0, responseData);
-	}
+    FetchResponseData fetchResponseData;
 
-	@Benchmark
-	public int testConstructFetchResponse() {
-		FetchResponse fetchResponse = FetchResponse.of(Errors.NONE, 0, 0, responseData);
-		return fetchResponse.responseData().size();
-	}
+    @Setup(Level.Trial)
+    public void setup() {
+        MemoryRecords records = MemoryRecords.withRecords(CompressionType.NONE, new SimpleRecord(1000, "key1".getBytes(StandardCharsets.UTF_8), "value1".getBytes(StandardCharsets.UTF_8)), new SimpleRecord(1001, "key2".getBytes(StandardCharsets.UTF_8), "value2".getBytes(StandardCharsets.UTF_8)), new SimpleRecord(1002, "key3".getBytes(StandardCharsets.UTF_8), "value3".getBytes(StandardCharsets.UTF_8)));
 
-	@Benchmark
-	public int testSerializeFetchResponse() throws IOException {
-		Send send = fetchResponse.toSend(header, ApiKeys.FETCH.latestVersion());
-		ByteBufferChannel channel = new ByteBufferChannel(send.size());
-		send.writeTo(channel);
-		return channel.buffer().limit();
-	}
+        this.responseData = new LinkedHashMap<>();
+        this.topicIds = new HashMap<>();
+        this.topicNames = new HashMap<>();
+        for (int topicIdx = 0; topicIdx < topicCount; topicIdx++) {
+            String topic = UUID.randomUUID().toString();
+            Uuid id = Uuid.randomUuid();
+            topicIds.put(topic, id);
+            topicNames.put(id, topic);
+            for (int partitionId = 0; partitionId < partitionCount; partitionId++) {
+                FetchResponseData.PartitionData partitionData = new FetchResponseData.PartitionData().setPartitionIndex(partitionId).setLastStableOffset(0).setLogStartOffset(0).setRecords(records);
+                responseData.put(new TopicIdPartition(id, new TopicPartition(topic, partitionId)), partitionData);
+            }
+        }
+
+        this.header = new ResponseHeader(100, ApiKeys.FETCH.responseHeaderVersion(ApiKeys.FETCH.latestVersion()));
+        this.fetchResponse = FetchResponse.of(Errors.NONE, 0, 0, responseData);
+        this.fetchResponseData = this.fetchResponse.data();
+    }
+
+    @Benchmark
+    public int testConstructFetchResponse() {
+        FetchResponse fetchResponse = FetchResponse.of(Errors.NONE, 0, 0, responseData);
+        return fetchResponse.data().responses().size();
+    }
+
+    @Benchmark
+    public int testPartitionMapFromData() {
+        return new FetchResponse(fetchResponseData).responseData(topicNames, ApiKeys.FETCH.latestVersion()).size();
+    }
+
+    @Benchmark
+    public int testSerializeFetchResponse() throws IOException {
+        Send send = fetchResponse.toSend(header, ApiKeys.FETCH.latestVersion());
+        ByteBufferChannel channel = new ByteBufferChannel(send.size());
+        send.writeTo(channel);
+        return channel.buffer().limit();
+    }
 }

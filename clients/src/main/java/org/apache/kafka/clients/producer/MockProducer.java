@@ -18,28 +18,16 @@ package org.apache.kafka.clients.producer;
 
 import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
-import org.apache.kafka.clients.producer.internals.DefaultPartitioner;
 import org.apache.kafka.clients.producer.internals.FutureRecordMetadata;
 import org.apache.kafka.clients.producer.internals.ProduceRequestResult;
-import org.apache.kafka.common.Cluster;
-import org.apache.kafka.common.KafkaException;
-import org.apache.kafka.common.Metric;
-import org.apache.kafka.common.MetricName;
-import org.apache.kafka.common.PartitionInfo;
-import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.*;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.record.RecordBatch;
 import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.common.utils.Time;
 
 import java.time.Duration;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.Future;
 
 /**
@@ -59,45 +47,40 @@ public class MockProducer<K, V> implements Producer<K, V> {
     private final List<Map<String, Map<TopicPartition, OffsetAndMetadata>>> consumerGroupOffsets;
     private Map<String, Map<TopicPartition, OffsetAndMetadata>> uncommittedConsumerGroupOffsets;
     private final Serializer<K> keySerializer;
-	private final Serializer<V> valueSerializer;
-	private boolean autoComplete;
-	private boolean closed;
-	private boolean transactionInitialized;
-	private boolean transactionInFlight;
-	private boolean transactionCommitted;
-	private boolean transactionAborted;
-	private boolean producerFenced;
-	private boolean sentOffsets;
-	private long commitCount = 0L;
-	private final Map<MetricName, Metric> mockMetrics;
+    private final Serializer<V> valueSerializer;
+    private boolean autoComplete;
+    private boolean closed;
+    private boolean transactionInitialized;
+    private boolean transactionInFlight;
+    private boolean transactionCommitted;
+    private boolean transactionAborted;
+    private boolean producerFenced;
+    private boolean sentOffsets;
+    private long commitCount = 0L;
+    private final Map<MetricName, Metric> mockMetrics;
 
-	public RuntimeException initTransactionException = null;
-	public RuntimeException beginTransactionException = null;
-	public RuntimeException sendOffsetsToTransactionException = null;
-	public RuntimeException commitTransactionException = null;
-	public RuntimeException abortTransactionException = null;
-	public RuntimeException sendException = null;
-	public RuntimeException flushException = null;
-	public RuntimeException partitionsForException = null;
-	public RuntimeException closeException = null;
+    public RuntimeException initTransactionException = null;
+    public RuntimeException beginTransactionException = null;
+    public RuntimeException sendOffsetsToTransactionException = null;
+    public RuntimeException commitTransactionException = null;
+    public RuntimeException abortTransactionException = null;
+    public RuntimeException sendException = null;
+    public RuntimeException flushException = null;
+    public RuntimeException partitionsForException = null;
+    public RuntimeException closeException = null;
 
-	/**
-	 * Create a mock producer
-	 *
-	 * @param cluster The cluster holding metadata for this producer
-	 * @param autoComplete If true automatically complete all requests successfully and execute the callback. Otherwise
-	 *        the user must call {@link #completeNext()} or {@link #errorNext(RuntimeException)} after
-	 *        {@link #send(ProducerRecord) send()} to complete the call and unblock the {@link
-	 *        java.util.concurrent.Future Future&lt;RecordMetadata&gt;} that is returned.
-	 * @param partitioner The partition strategy
-     * @param keySerializer The serializer for key that implements {@link Serializer}.
+    /**
+     * Create a mock producer
+     * @param cluster         The cluster holding metadata for this producer
+     * @param autoComplete    If true automatically complete all requests successfully and execute the callback. Otherwise
+     *                        the user must call {@link #completeNext()} or {@link #errorNext(RuntimeException)} after
+     *                        {@link #send(ProducerRecord) send()} to complete the call and unblock the {@link
+     *                        java.util.concurrent.Future Future&lt;RecordMetadata&gt;} that is returned.
+     * @param partitioner     The partition strategy
+     * @param keySerializer   The serializer for key that implements {@link Serializer}.
      * @param valueSerializer The serializer for value that implements {@link Serializer}.
      */
-    public MockProducer(final Cluster cluster,
-                        final boolean autoComplete,
-                        final Partitioner partitioner,
-                        final Serializer<K> keySerializer,
-                        final Serializer<V> valueSerializer) {
+    public MockProducer(final Cluster cluster, final boolean autoComplete, final Partitioner partitioner, final Serializer<K> keySerializer, final Serializer<V> valueSerializer) {
         this.cluster = cluster;
         this.autoComplete = autoComplete;
         this.partitioner = partitioner;
@@ -114,23 +97,30 @@ public class MockProducer<K, V> implements Producer<K, V> {
 
     /**
      * Create a new mock producer with invented metadata the given autoComplete setting and key\value serializers.
-     *
+     * <p>
      * Equivalent to {@link #MockProducer(Cluster, boolean, Partitioner, Serializer, Serializer)} new MockProducer(Cluster.empty(), autoComplete, new DefaultPartitioner(), keySerializer, valueSerializer)}
      */
-    public MockProducer(final boolean autoComplete,
-                        final Serializer<K> keySerializer,
-                        final Serializer<V> valueSerializer) {
-        this(Cluster.empty(), autoComplete, new DefaultPartitioner(), keySerializer, valueSerializer);
+    @SuppressWarnings("deprecation")
+    public MockProducer(final boolean autoComplete, final Serializer<K> keySerializer, final Serializer<V> valueSerializer) {
+        this(Cluster.empty(), autoComplete, new org.apache.kafka.clients.producer.internals.DefaultPartitioner(), keySerializer, valueSerializer);
+    }
+
+    /**
+     * Create a new mock producer with invented metadata the given autoComplete setting and key\value serializers.
+     * <p>
+     * Equivalent to {@link #MockProducer(Cluster, boolean, Partitioner, Serializer, Serializer)} new MockProducer(cluster, autoComplete, new DefaultPartitioner(), keySerializer, valueSerializer)}
+     */
+    @SuppressWarnings("deprecation")
+    public MockProducer(final Cluster cluster, final boolean autoComplete, final Serializer<K> keySerializer, final Serializer<V> valueSerializer) {
+        this(cluster, autoComplete, new org.apache.kafka.clients.producer.internals.DefaultPartitioner(), keySerializer, valueSerializer);
     }
 
     /**
      * Create a new mock producer with invented metadata the given autoComplete setting, partitioner and key\value serializers.
-     *
+     * <p>
      * Equivalent to {@link #MockProducer(Cluster, boolean, Partitioner, Serializer, Serializer)} new MockProducer(Cluster.empty(), autoComplete, partitioner, keySerializer, valueSerializer)}
      */
-    public MockProducer(final boolean autoComplete,
-                        final Partitioner partitioner,
-                        final Serializer<K> keySerializer,
+    public MockProducer(final boolean autoComplete, final Partitioner partitioner, final Serializer<K> keySerializer,
                         final Serializer<V> valueSerializer) {
         this(Cluster.empty(), autoComplete, partitioner, keySerializer, valueSerializer);
     }
@@ -146,86 +136,84 @@ public class MockProducer<K, V> implements Producer<K, V> {
 
     @Override
     public void initTransactions() {
-		verifyProducerState();
-		if (this.transactionInitialized) {
-			throw new IllegalStateException("MockProducer has already been initialized for transactions.");
-		}
-		if (this.initTransactionException != null) {
-			throw this.initTransactionException;
-		}
-		this.transactionInitialized = true;
-		this.transactionInFlight = false;
-		this.transactionCommitted = false;
-		this.transactionAborted = false;
-		this.sentOffsets = false;
-	}
+        verifyProducerState();
+        if (this.transactionInitialized) {
+            throw new IllegalStateException("MockProducer has already been initialized for transactions.");
+        }
+        if (this.initTransactionException != null) {
+            throw this.initTransactionException;
+        }
+        this.transactionInitialized = true;
+        this.transactionInFlight = false;
+        this.transactionCommitted = false;
+        this.transactionAborted = false;
+        this.sentOffsets = false;
+    }
 
     @Override
     public void beginTransaction() throws ProducerFencedException {
-		verifyProducerState();
-		verifyTransactionsInitialized();
+        verifyProducerState();
+        verifyTransactionsInitialized();
 
-		if (this.beginTransactionException != null) {
-			throw this.beginTransactionException;
-		}
+        if (this.beginTransactionException != null) {
+            throw this.beginTransactionException;
+        }
 
-		if (transactionInFlight) {
-			throw new IllegalStateException("Transaction already started");
-		}
+        if (transactionInFlight) {
+            throw new IllegalStateException("Transaction already started");
+        }
 
-		this.transactionInFlight = true;
-		this.transactionCommitted = false;
-		this.transactionAborted = false;
-		this.sentOffsets = false;
-	}
+        this.transactionInFlight = true;
+        this.transactionCommitted = false;
+        this.transactionAborted = false;
+        this.sentOffsets = false;
+    }
+
+    @Deprecated
+    @Override
+    public void sendOffsetsToTransaction(Map<TopicPartition, OffsetAndMetadata> offsets, String consumerGroupId) throws ProducerFencedException {
+        Objects.requireNonNull(consumerGroupId);
+        sendOffsetsToTransaction(offsets, new ConsumerGroupMetadata(consumerGroupId));
+    }
 
     @Override
-    public void sendOffsetsToTransaction(Map<TopicPartition, OffsetAndMetadata> offsets,
-                                         String consumerGroupId) throws ProducerFencedException {
-		Objects.requireNonNull(consumerGroupId);
-		verifyProducerState();
-		verifyTransactionsInitialized();
-		verifyTransactionInFlight();
+    public void sendOffsetsToTransaction(Map<TopicPartition, OffsetAndMetadata> offsets, ConsumerGroupMetadata groupMetadata) throws ProducerFencedException {
+        Objects.requireNonNull(groupMetadata);
+        verifyProducerState();
+        verifyTransactionsInitialized();
+        verifyTransactionInFlight();
 
-		if (this.sendOffsetsToTransactionException != null) {
-			throw this.sendOffsetsToTransactionException;
-		}
+        if (this.sendOffsetsToTransactionException != null) {
+            throw this.sendOffsetsToTransactionException;
+        }
 
-		if (offsets.size() == 0) {
-			return;
-		}
-		Map<TopicPartition, OffsetAndMetadata> uncommittedOffsets =
-				this.uncommittedConsumerGroupOffsets.computeIfAbsent(consumerGroupId, k -> new HashMap<>());
-		uncommittedOffsets.putAll(offsets);
-		this.sentOffsets = true;
-	}
+        if (offsets.size() == 0) {
+            return;
+        }
+        Map<TopicPartition, OffsetAndMetadata> uncommittedOffsets = this.uncommittedConsumerGroupOffsets.computeIfAbsent(groupMetadata.groupId(), k -> new HashMap<>());
+        uncommittedOffsets.putAll(offsets);
+        this.sentOffsets = true;
+    }
 
-	@Override
-	public void sendOffsetsToTransaction(Map<TopicPartition, OffsetAndMetadata> offsets,
-										 ConsumerGroupMetadata groupMetadata) throws ProducerFencedException {
-		Objects.requireNonNull(groupMetadata);
-		sendOffsetsToTransaction(offsets, groupMetadata.groupId());
-	}
+    @Override
+    public void commitTransaction() throws ProducerFencedException {
+        verifyProducerState();
+        verifyTransactionsInitialized();
+        verifyTransactionInFlight();
 
-	@Override
-	public void commitTransaction() throws ProducerFencedException {
-		verifyProducerState();
-		verifyTransactionsInitialized();
-		verifyTransactionInFlight();
+        if (this.commitTransactionException != null) {
+            throw this.commitTransactionException;
+        }
 
-		if (this.commitTransactionException != null) {
-			throw this.commitTransactionException;
-		}
+        flush();
 
-		flush();
+        this.sent.addAll(this.uncommittedSends);
+        if (!this.uncommittedConsumerGroupOffsets.isEmpty())
+            this.consumerGroupOffsets.add(this.uncommittedConsumerGroupOffsets);
 
-		this.sent.addAll(this.uncommittedSends);
-		if (!this.uncommittedConsumerGroupOffsets.isEmpty())
-			this.consumerGroupOffsets.add(this.uncommittedConsumerGroupOffsets);
-
-		this.uncommittedSends.clear();
-		this.uncommittedConsumerGroupOffsets = new HashMap<>();
-		this.transactionCommitted = true;
+        this.uncommittedSends.clear();
+        this.uncommittedConsumerGroupOffsets = new HashMap<>();
+        this.transactionCommitted = true;
         this.transactionAborted = false;
         this.transactionInFlight = false;
 
@@ -234,21 +222,21 @@ public class MockProducer<K, V> implements Producer<K, V> {
 
     @Override
     public void abortTransaction() throws ProducerFencedException {
-		verifyProducerState();
-		verifyTransactionsInitialized();
-		verifyTransactionInFlight();
+        verifyProducerState();
+        verifyTransactionsInitialized();
+        verifyTransactionInFlight();
 
-		if (this.abortTransactionException != null) {
-			throw this.abortTransactionException;
-		}
+        if (this.abortTransactionException != null) {
+            throw this.abortTransactionException;
+        }
 
-		flush();
-		this.uncommittedSends.clear();
-		this.uncommittedConsumerGroupOffsets.clear();
-		this.transactionCommitted = false;
-		this.transactionAborted = true;
-		this.transactionInFlight = false;
-	}
+        flush();
+        this.uncommittedSends.clear();
+        this.uncommittedConsumerGroupOffsets.clear();
+        this.transactionCommitted = false;
+        this.transactionAborted = true;
+        this.transactionInFlight = false;
+    }
 
     private synchronized void verifyProducerState() {
         if (this.closed) {
@@ -265,15 +253,14 @@ public class MockProducer<K, V> implements Producer<K, V> {
         }
     }
 
-	private void verifyTransactionInFlight() {
-		if (!this.transactionInFlight) {
-			throw new IllegalStateException("There is no open transaction.");
-		}
-	}
+    private void verifyTransactionInFlight() {
+        if (!this.transactionInFlight) {
+            throw new IllegalStateException("There is no open transaction.");
+        }
+    }
 
     /**
      * Adds the record to the list of sent records. The {@link RecordMetadata} returned will be immediately satisfied.
-     * 
      * @see #history()
      */
     @Override
@@ -288,45 +275,43 @@ public class MockProducer<K, V> implements Producer<K, V> {
      */
     @Override
     public synchronized Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
-		if (this.closed) {
-			throw new IllegalStateException("MockProducer is already closed.");
-		}
+        if (this.closed) {
+            throw new IllegalStateException("MockProducer is already closed.");
+        }
 
-		if (this.producerFenced) {
-			throw new KafkaException("MockProducer is fenced.", new ProducerFencedException("Fenced"));
-		}
-		if (this.sendException != null) {
-			throw this.sendException;
-		}
+        if (this.producerFenced) {
+            throw new KafkaException("MockProducer is fenced.", new ProducerFencedException("Fenced"));
+        }
+        if (this.sendException != null) {
+            throw this.sendException;
+        }
 
-		int partition = 0;
-		if (!this.cluster.partitionsForTopic(record.topic()).isEmpty())
-			partition = partition(record, this.cluster);
-		else {
-			//just to throw ClassCastException if serializers are not the proper ones to serialize key/value
-			keySerializer.serialize(record.topic(), record.key());
-			valueSerializer.serialize(record.topic(), record.value());
-		}
+        int partition = 0;
+        if (!this.cluster.partitionsForTopic(record.topic()).isEmpty())
+            partition = partition(record, this.cluster);
+        else {
+            //just to throw ClassCastException if serializers are not the proper ones to serialize key/value
+            keySerializer.serialize(record.topic(), record.key());
+            valueSerializer.serialize(record.topic(), record.value());
+        }
 
-		TopicPartition topicPartition = new TopicPartition(record.topic(), partition);
-		ProduceRequestResult result = new ProduceRequestResult(topicPartition);
-		FutureRecordMetadata future = new FutureRecordMetadata(result, 0, RecordBatch.NO_TIMESTAMP,
-				0, 0, Time.SYSTEM);
-		long offset = nextOffset(topicPartition);
-		long baseOffset = Math.max(0, offset - Integer.MAX_VALUE);
-		int batchIndex = (int) Math.min(Integer.MAX_VALUE, offset);
-		Completion completion = new Completion(offset, new RecordMetadata(topicPartition, baseOffset, batchIndex,
-				RecordBatch.NO_TIMESTAMP, 0, 0), result, callback, topicPartition);
+        TopicPartition topicPartition = new TopicPartition(record.topic(), partition);
+        ProduceRequestResult result = new ProduceRequestResult(topicPartition);
+        FutureRecordMetadata future = new FutureRecordMetadata(result, 0, RecordBatch.NO_TIMESTAMP, 0, 0, Time.SYSTEM);
+        long offset = nextOffset(topicPartition);
+        long baseOffset = Math.max(0, offset - Integer.MAX_VALUE);
+        int batchIndex = (int) Math.min(Integer.MAX_VALUE, offset);
+        Completion completion = new Completion(offset, new RecordMetadata(topicPartition, baseOffset, batchIndex, RecordBatch.NO_TIMESTAMP, 0, 0), result, callback, topicPartition);
 
-		if (!this.transactionInFlight)
-			this.sent.add(record);
-		else
-			this.uncommittedSends.add(record);
+        if (!this.transactionInFlight)
+            this.sent.add(record);
+        else
+            this.uncommittedSends.add(record);
 
-		if (autoComplete)
-			completion.complete(null);
-		else
-			this.completions.addLast(completion);
+        if (autoComplete)
+            completion.complete(null);
+        else
+            this.completions.addLast(completion);
 
         return future;
     }
@@ -347,23 +332,23 @@ public class MockProducer<K, V> implements Producer<K, V> {
     }
 
     public synchronized void flush() {
-		verifyProducerState();
+        verifyProducerState();
 
-		if (this.flushException != null) {
-			throw this.flushException;
-		}
+        if (this.flushException != null) {
+            throw this.flushException;
+        }
 
-		while (!this.completions.isEmpty())
-			completeNext();
-	}
+        while (!this.completions.isEmpty())
+            completeNext();
+    }
 
     public List<PartitionInfo> partitionsFor(String topic) {
-		if (this.partitionsForException != null) {
-			throw this.partitionsForException;
-		}
+        if (this.partitionsForException != null) {
+            throw this.partitionsForException;
+        }
 
-		return this.cluster.partitionsForTopic(topic);
-	}
+        return this.cluster.partitionsForTopic(topic);
+    }
 
     public Map<MetricName, Metric> metrics() {
         return mockMetrics;
@@ -383,12 +368,12 @@ public class MockProducer<K, V> implements Producer<K, V> {
 
     @Override
     public void close(Duration timeout) {
-		if (this.closeException != null) {
-			throw this.closeException;
-		}
+        if (this.closeException != null) {
+            throw this.closeException;
+        }
 
-		this.closed = true;
-	}
+        this.closed = true;
+    }
 
     public boolean closed() {
         return this.closed;
@@ -425,46 +410,45 @@ public class MockProducer<K, V> implements Producer<K, V> {
     }
 
     public long commitCount() {
-		return this.commitCount;
-	}
+        return this.commitCount;
+    }
 
-	/**
-	 * Get the list of sent records since the last call to {@link #clear()}
-	 */
-	public synchronized List<ProducerRecord<K, V>> history() {
-		return new ArrayList<>(this.sent);
-	}
+    /**
+     * Get the list of sent records since the last call to {@link #clear()}
+     */
+    public synchronized List<ProducerRecord<K, V>> history() {
+        return new ArrayList<>(this.sent);
+    }
 
-	public synchronized List<ProducerRecord<K, V>> uncommittedRecords() {
-		return new ArrayList<>(this.uncommittedSends);
-	}
+    public synchronized List<ProducerRecord<K, V>> uncommittedRecords() {
+        return new ArrayList<>(this.uncommittedSends);
+    }
 
-	/**
-	 * Get the list of committed consumer group offsets since the last call to {@link #clear()}
-	 */
-	public synchronized List<Map<String, Map<TopicPartition, OffsetAndMetadata>>> consumerGroupOffsetsHistory() {
-		return new ArrayList<>(this.consumerGroupOffsets);
-	}
+    /**
+     * Get the list of committed consumer group offsets since the last call to {@link #clear()}
+     */
+    public synchronized List<Map<String, Map<TopicPartition, OffsetAndMetadata>>> consumerGroupOffsetsHistory() {
+        return new ArrayList<>(this.consumerGroupOffsets);
+    }
 
-	public synchronized Map<String, Map<TopicPartition, OffsetAndMetadata>> uncommittedOffsets() {
-		return this.uncommittedConsumerGroupOffsets;
-	}
+    public synchronized Map<String, Map<TopicPartition, OffsetAndMetadata>> uncommittedOffsets() {
+        return this.uncommittedConsumerGroupOffsets;
+    }
 
-	/**
-	 * Clear the stored history of sent records, consumer group offsets
-	 */
-	public synchronized void clear() {
-		this.sent.clear();
-		this.uncommittedSends.clear();
-		this.sentOffsets = false;
-		this.completions.clear();
-		this.consumerGroupOffsets.clear();
-		this.uncommittedConsumerGroupOffsets.clear();
-	}
+    /**
+     * Clear the stored history of sent records, consumer group offsets
+     */
+    public synchronized void clear() {
+        this.sent.clear();
+        this.uncommittedSends.clear();
+        this.sentOffsets = false;
+        this.completions.clear();
+        this.consumerGroupOffsets.clear();
+        this.uncommittedConsumerGroupOffsets.clear();
+    }
 
     /**
      * Complete the earliest uncompleted call successfully.
-     *
      * @return true if there was an uncompleted call to complete
      */
     public synchronized boolean completeNext() {
@@ -513,35 +497,31 @@ public class MockProducer<K, V> implements Producer<K, V> {
         private final RecordMetadata metadata;
         private final ProduceRequestResult result;
         private final Callback callback;
-		private final TopicPartition tp;
+        private final TopicPartition tp;
 
-		public Completion(long offset,
-						  RecordMetadata metadata,
-						  ProduceRequestResult result,
-						  Callback callback,
-						  TopicPartition tp) {
-			this.metadata = metadata;
-			this.offset = offset;
-			this.result = result;
-			this.callback = callback;
-			this.tp = tp;
-		}
+        public Completion(long offset, RecordMetadata metadata, ProduceRequestResult result, Callback callback, TopicPartition tp) {
+            this.metadata = metadata;
+            this.offset = offset;
+            this.result = result;
+            this.callback = callback;
+            this.tp = tp;
+        }
 
-		public void complete(RuntimeException e) {
-			if (e == null) {
-				result.set(offset, RecordBatch.NO_TIMESTAMP, null);
-			} else {
-				result.set(-1, RecordBatch.NO_TIMESTAMP, index -> e);
-			}
+        public void complete(RuntimeException e) {
+            if (e == null) {
+                result.set(offset, RecordBatch.NO_TIMESTAMP, null);
+            } else {
+                result.set(-1, RecordBatch.NO_TIMESTAMP, index -> e);
+            }
 
-			if (callback != null) {
-				if (e == null)
-					callback.onCompletion(metadata, null);
-				else
-					callback.onCompletion(new RecordMetadata(tp, -1, -1, RecordBatch.NO_TIMESTAMP, -1, -1), e);
-			}
-			result.done();
-		}
-	}
+            if (callback != null) {
+                if (e == null)
+                    callback.onCompletion(metadata, null);
+                else
+                    callback.onCompletion(new RecordMetadata(tp, -1, -1, RecordBatch.NO_TIMESTAMP, -1, -1), e);
+            }
+            result.done();
+        }
+    }
 
 }

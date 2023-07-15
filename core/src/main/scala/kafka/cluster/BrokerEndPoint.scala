@@ -16,12 +16,6 @@
  */
 package kafka.cluster
 
-import java.nio.ByteBuffer
-
-import kafka.api.ApiUtils._
-import org.apache.kafka.common.KafkaException
-import org.apache.kafka.common.utils.Utils._
-
 object BrokerEndPoint {
 
   private val uriParseExp = """\[?([0-9a-zA-Z\-%._:]*)\]?:([0-9]+)""".r
@@ -36,48 +30,16 @@ object BrokerEndPoint {
       case _ => None
     }
   }
-  
-  /**
-   * BrokerEndPoint URI is host:port or [ipv6_host]:port
-   * Note that unlike EndPoint (or listener) this URI has no security information.
-   */
-  def createBrokerEndPoint(brokerId: Int, connectionString: String): BrokerEndPoint = {
-    parseHostPort(connectionString).map { case (host, port) => new BrokerEndPoint(brokerId, host, port) }.getOrElse {
-      throw new KafkaException("Unable to parse " + connectionString + " to a broker endpoint")
-    }
-  }
-
-  def readFrom(buffer: ByteBuffer): BrokerEndPoint = {
-    val brokerId = buffer.getInt()
-    val host = readShortString(buffer)
-    val port = buffer.getInt()
-    BrokerEndPoint(brokerId, host, port)
-  }
 }
 
 /**
- * BrokerEndpoint用于连接特定的host:port对
- * 通常由客户端使用（或者连接其他broker的broker），并且没有包含有关连接上使用的安全协议范围
- * 客户端需要知道从配置中使用哪些协议范围
- * 可以在不需要协议的情况下雨客户端保持有线协议不变
+ * BrokerEndpoint is used to connect to specific host:port pair.
+ * It is typically used by clients (or brokers when connecting to other brokers)
+ * and contains no information about the security protocol used on the connection.
+ * Clients should know which security protocol to use from configuration.
+ * This allows us to keep the wire protocol with the clients unchanged where the protocol is not needed.
  */
 case class BrokerEndPoint(id: Int, host: String, port: Int) {
-  /**
-   * @return 连接串
-   */
-  def connectionString(): String = formatAddress(host, port)
-
-  def writeTo(buffer: ByteBuffer): Unit = {
-    buffer.putInt(id)
-    writeShortString(buffer, host)
-    buffer.putInt(port)
-  }
-
-  def sizeInBytes: Int =
-    4 + /* broker Id */
-    4 + /* port */
-    shortStringLength(host)
-
   override def toString: String = {
     s"BrokerEndPoint(id=$id, host=$host:$port)"
   }

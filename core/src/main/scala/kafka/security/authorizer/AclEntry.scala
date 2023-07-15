@@ -57,6 +57,7 @@ object AclEntry {
 
   /**
    * Parse JSON representation of ACLs
+   *
    * @param bytes of acls json string
    *
    *              <p>
@@ -102,6 +103,7 @@ object AclEntry {
       case ResourceType.CLUSTER => Set(CREATE, CLUSTER_ACTION, DESCRIBE_CONFIGS, ALTER_CONFIGS, IDEMPOTENT_WRITE, ALTER, DESCRIBE)
       case ResourceType.TRANSACTIONAL_ID => Set(DESCRIBE, WRITE)
       case ResourceType.DELEGATION_TOKEN => Set(DESCRIBE)
+      case ResourceType.USER => Set(CREATE_TOKENS, DESCRIBE_TOKENS)
       case _ => throw new IllegalArgumentException("Not a concrete resource type")
     }
   }

@@ -50,7 +50,7 @@ public class CreateTopicsResponse extends AbstractResponse {
 		this.data = data;
     }
 
-	@Override
+    @Override
     public CreateTopicsResponseData data() {
         return data;
     }
@@ -61,13 +61,16 @@ public class CreateTopicsResponse extends AbstractResponse {
     }
 
     @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
+    }
+
+    @Override
     public Map<Errors, Integer> errorCounts() {
-		HashMap<Errors, Integer> counts = new HashMap<>();
-		data.topics().forEach(result ->
-				updateErrorCounts(counts, Errors.forCode(result.errorCode()))
-		);
-		return counts;
-	}
+        HashMap<Errors, Integer> counts = new HashMap<>();
+        data.topics().forEach(result -> updateErrorCounts(counts, Errors.forCode(result.errorCode())));
+        return counts;
+    }
 
     public static CreateTopicsResponse parse(ByteBuffer buffer, short version) {
 		return new CreateTopicsResponse(new CreateTopicsResponseData(new ByteBufferAccessor(buffer), version));

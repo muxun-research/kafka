@@ -27,13 +27,7 @@ import org.apache.kafka.raft.generated.QuorumStateDataJsonConverter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.EOFException;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.OutputStreamWriter;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
@@ -44,7 +38,7 @@ import java.util.stream.Collectors;
 /**
  * Local file based quorum state store. It takes the JSON format of {@link QuorumStateData}
  * with an extra data version number as part of the data for easy deserialization.
- * <p>
+ *
  * Example format:
  * <pre>
  * {"clusterId":"",
@@ -55,115 +49,111 @@ import java.util.stream.Collectors;
  *   "currentVoters":[],
  *   "data_version":0}
  * </pre>
- */
+ * */
 public class FileBasedStateStore implements QuorumStateStore {
-	private static final Logger log = LoggerFactory.getLogger(FileBasedStateStore.class);
+    private static final Logger log = LoggerFactory.getLogger(FileBasedStateStore.class);
 
-	private final File stateFile;
+    private final File stateFile;
 
-	static final String DATA_VERSION = "data_version";
+    static final String DATA_VERSION = "data_version";
 
-	public FileBasedStateStore(final File stateFile) {
-		this.stateFile = stateFile;
-	}
+    public FileBasedStateStore(final File stateFile) {
+        this.stateFile = stateFile;
+    }
 
-	private QuorumStateData readStateFromFile(File file) throws IOException {
-		try (final BufferedReader reader = Files.newBufferedReader(file.toPath())) {
-			final String line = reader.readLine();
-			if (line == null) {
-				throw new EOFException("File ended prematurely.");
-			}
+    private QuorumStateData readStateFromFile(File file) {
+        try (final BufferedReader reader = Files.newBufferedReader(file.toPath())) {
+            final String line = reader.readLine();
+            if (line == null) {
+                throw new EOFException("File ended prematurely.");
+            }
 
-			final ObjectMapper objectMapper = new ObjectMapper();
-			JsonNode readNode = objectMapper.readTree(line);
+            final ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode readNode = objectMapper.readTree(line);
 
-			if (!(readNode instanceof ObjectNode)) {
-				throw new IOException("Deserialized node " + readNode +
-						" is not an object node");
-			}
-			final ObjectNode dataObject = (ObjectNode) readNode;
+            if (!(readNode instanceof ObjectNode)) {
+                throw new IOException("Deserialized node " + readNode + " is not an object node");
+            }
+            final ObjectNode dataObject = (ObjectNode) readNode;
 
-			JsonNode dataVersionNode = dataObject.get(DATA_VERSION);
-			if (dataVersionNode == null) {
-				throw new IOException("Deserialized node " + readNode +
-						" does not have " + DATA_VERSION + " field");
-			}
+            JsonNode dataVersionNode = dataObject.get(DATA_VERSION);
+            if (dataVersionNode == null) {
+                throw new IOException("Deserialized node " + readNode + " does not have " + DATA_VERSION + " field");
+            }
 
-			final short dataVersion = dataVersionNode.shortValue();
-			return QuorumStateDataJsonConverter.read(dataObject, dataVersion);
-		}
-	}
+            final short dataVersion = dataVersionNode.shortValue();
+            return QuorumStateDataJsonConverter.read(dataObject, dataVersion);
+        } catch (IOException e) {
+            throw new UncheckedIOException(String.format("Error while reading the Quorum status from the file %s", file), e);
+        }
+    }
 
-	/**
-	 * Reads the election state from local file.
-	 */
-	@Override
-	public ElectionState readElectionState() throws IOException {
-		if (!stateFile.exists()) {
-			return null;
-		}
+    /**
+     * Reads the election state from local file.
+     */
+    @Override
+    public ElectionState readElectionState() {
+        if (!stateFile.exists()) {
+            return null;
+        }
 
-		QuorumStateData data = readStateFromFile(stateFile);
+        QuorumStateData data = readStateFromFile(stateFile);
 
-		return new ElectionState(data.leaderEpoch(),
-				data.leaderId() == UNKNOWN_LEADER_ID ? OptionalInt.empty() :
-						OptionalInt.of(data.leaderId()),
-				data.votedId() == NOT_VOTED ? OptionalInt.empty() :
-						OptionalInt.of(data.votedId()),
-				data.currentVoters()
-						.stream().map(Voter::voterId).collect(Collectors.toSet()));
-	}
+        return new ElectionState(data.leaderEpoch(), data.leaderId() == UNKNOWN_LEADER_ID ? OptionalInt.empty() : OptionalInt.of(data.leaderId()), data.votedId() == NOT_VOTED ? OptionalInt.empty() : OptionalInt.of(data.votedId()), data.currentVoters().stream().map(Voter::voterId).collect(Collectors.toSet()));
+    }
 
-	@Override
-	public void writeElectionState(ElectionState latest) throws IOException {
-		QuorumStateData data = new QuorumStateData()
-				.setLeaderEpoch(latest.epoch)
-				.setVotedId(latest.hasVoted() ? latest.votedId() : NOT_VOTED)
-				.setLeaderId(latest.hasLeader() ? latest.leaderId() : UNKNOWN_LEADER_ID)
-				.setCurrentVoters(voters(latest.voters()));
-		writeElectionStateToFile(stateFile, data);
-	}
+    @Override
+    public void writeElectionState(ElectionState latest) {
+        QuorumStateData data = new QuorumStateData().setLeaderEpoch(latest.epoch).setVotedId(latest.hasVoted() ? latest.votedId() : NOT_VOTED).setLeaderId(latest.hasLeader() ? latest.leaderId() : UNKNOWN_LEADER_ID).setCurrentVoters(voters(latest.voters()));
+        writeElectionStateToFile(stateFile, data);
+    }
 
-	private List<Voter> voters(Set<Integer> votersId) {
-		return votersId.stream().map(
-				voterId -> new Voter().setVoterId(voterId)).collect(Collectors.toList());
-	}
+    private List<Voter> voters(Set<Integer> votersId) {
+        return votersId.stream().map(voterId -> new Voter().setVoterId(voterId)).collect(Collectors.toList());
+    }
 
-	private void writeElectionStateToFile(final File stateFile, QuorumStateData state) throws IOException {
-		final File temp = new File(stateFile.getAbsolutePath() + ".tmp");
-		Files.deleteIfExists(temp.toPath());
+    private void writeElectionStateToFile(final File stateFile, QuorumStateData state) {
+        final File temp = new File(stateFile.getAbsolutePath() + ".tmp");
+        deleteFileIfExists(temp);
 
-		log.trace("Writing tmp quorum state {}", temp.getAbsolutePath());
+        log.trace("Writing tmp quorum state {}", temp.getAbsolutePath());
 
-		try (final FileOutputStream fileOutputStream = new FileOutputStream(temp);
-			 final BufferedWriter writer = new BufferedWriter(
-					 new OutputStreamWriter(fileOutputStream, StandardCharsets.UTF_8))) {
-			short version = state.highestSupportedVersion();
+        try (final FileOutputStream fileOutputStream = new FileOutputStream(temp); final BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(fileOutputStream, StandardCharsets.UTF_8))) {
+            short version = state.highestSupportedVersion();
 
-			ObjectNode jsonState = (ObjectNode) QuorumStateDataJsonConverter.write(state, version);
-			jsonState.set(DATA_VERSION, new ShortNode(version));
-			writer.write(jsonState.toString());
-			writer.flush();
-			fileOutputStream.getFD().sync();
-			Utils.atomicMoveWithFallback(temp.toPath(), stateFile.toPath());
-		} finally {
-			// cleanup the temp file when the write finishes (either success or fail).
-			Files.deleteIfExists(temp.toPath());
-		}
-	}
+            ObjectNode jsonState = (ObjectNode) QuorumStateDataJsonConverter.write(state, version);
+            jsonState.set(DATA_VERSION, new ShortNode(version));
+            writer.write(jsonState.toString());
+            writer.flush();
+            fileOutputStream.getFD().sync();
+            Utils.atomicMoveWithFallback(temp.toPath(), stateFile.toPath());
+        } catch (IOException e) {
+            throw new UncheckedIOException(String.format("Error while writing the Quorum status from the file %s", stateFile.getAbsolutePath()), e);
+        } finally {
+            // cleanup the temp file when the write finishes (either success or fail).
+            deleteFileIfExists(temp);
+        }
+    }
 
-	/**
-	 * Clear state store by deleting the local quorum state file
-	 * @throws IOException if there is any IO exception during delete
-	 */
-	@Override
-	public void clear() throws IOException {
-		Files.deleteIfExists(stateFile.toPath());
-		Files.deleteIfExists(new File(stateFile.getAbsolutePath() + ".tmp").toPath());
-	}
+    /**
+     * Clear state store by deleting the local quorum state file
+     */
+    @Override
+    public void clear() {
+        deleteFileIfExists(stateFile);
+        deleteFileIfExists(new File(stateFile.getAbsolutePath() + ".tmp"));
+    }
 
-	@Override
-	public String toString() {
-		return "Quorum state filepath: " + stateFile.getAbsolutePath();
-	}
+    @Override
+    public String toString() {
+        return "Quorum state filepath: " + stateFile.getAbsolutePath();
+    }
+
+    private void deleteFileIfExists(File file) {
+        try {
+            Files.deleteIfExists(file.toPath());
+        } catch (IOException e) {
+            throw new UncheckedIOException(String.format("Error while deleting file %s", file.getAbsoluteFile()), e);
+        }
+    }
 }

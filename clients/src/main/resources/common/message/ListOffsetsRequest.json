@@ -33,7 +33,11 @@
   // Version 5 is the same as version 4.
   //
   // Version 6 enables flexible versions.
-  "validVersions": "0-6",
+  //
+  // Version 7 enables listing offsets by max timestamp (KIP-734).
+  //
+  // Version 8 enables listing offsets by local log start offset (KIP-405).
+  "validVersions": "0-8",
   "flexibleVersions": "6+",
   "fields": [
     {
@@ -41,7 +45,7 @@
       "type": "int32",
       "versions": "0+",
       "entityType": "brokerId",
-      "about": "The broker ID of the requestor, or -1 if this request is being made by a normal consumer."
+      "about": "The broker ID of the requester, or -1 if this request is being made by a normal consumer."
     },
     {
       "name": "IsolationLevel",

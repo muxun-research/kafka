@@ -20,36 +20,43 @@ package org.apache.kafka.streams.kstream.internals.foreignkeyjoin;
 import java.util.Objects;
 
 public class CombinedKey<KF, KP> {
-	private final KF foreignKey;
-	private final KP primaryKey;
+    private final KF foreignKey;
+    private final KP primaryKey;
 
-	CombinedKey(final KF foreignKey, final KP primaryKey) {
-		Objects.requireNonNull(foreignKey, "foreignKey can't be null");
-		Objects.requireNonNull(primaryKey, "primaryKey can't be null");
-		this.foreignKey = foreignKey;
-		this.primaryKey = primaryKey;
-	}
+    CombinedKey(final KF foreignKey, final KP primaryKey) {
+        Objects.requireNonNull(foreignKey, "foreignKey can't be null");
+        Objects.requireNonNull(primaryKey, "primaryKey can't be null");
+        this.foreignKey = foreignKey;
+        this.primaryKey = primaryKey;
+    }
 
-	public KF getForeignKey() {
-		return foreignKey;
-	}
+    public KF getForeignKey() {
+        return foreignKey;
+    }
 
-	public KP getPrimaryKey() {
-		return primaryKey;
-	}
+    public KP getPrimaryKey() {
+        return primaryKey;
+    }
 
-	public boolean equals(final KF foreignKey, final KP primaryKey) {
-		if (this.primaryKey == null) {
-			return false;
-		}
-		return this.foreignKey.equals(foreignKey) && this.primaryKey.equals(primaryKey);
-	}
+    @Override
+    public int hashCode() {
+        return Objects.hash(foreignKey, primaryKey);
+    }
 
-	@Override
-	public String toString() {
-		return "CombinedKey{" +
-				"foreignKey=" + foreignKey +
-				", primaryKey=" + primaryKey +
-				'}';
-	}
+    @Override
+    public boolean equals(final Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        final CombinedKey<?, ?> that = (CombinedKey<?, ?>) o;
+        return Objects.equals(foreignKey, that.foreignKey) && Objects.equals(primaryKey, that.primaryKey);
+    }
+
+    @Override
+    public String toString() {
+        return "CombinedKey{" + "foreignKey=" + foreignKey + ", primaryKey=" + primaryKey + '}';
+    }
 }

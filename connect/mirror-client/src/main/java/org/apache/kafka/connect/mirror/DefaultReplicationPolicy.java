@@ -28,47 +28,75 @@ import java.util.regex.Pattern;
  */
 public class DefaultReplicationPolicy implements ReplicationPolicy, Configurable {
 
-	private static final Logger log = LoggerFactory.getLogger(DefaultReplicationPolicy.class);
+    private static final Logger log = LoggerFactory.getLogger(DefaultReplicationPolicy.class);
 
-	// In order to work with various metrics stores, we allow custom separators.
-	public static final String SEPARATOR_CONFIG = MirrorClientConfig.REPLICATION_POLICY_SEPARATOR;
-	public static final String SEPARATOR_DEFAULT = ".";
+    // In order to work with various metrics stores, we allow custom separators.
+    public static final String SEPARATOR_CONFIG = MirrorClientConfig.REPLICATION_POLICY_SEPARATOR;
+    public static final String SEPARATOR_DEFAULT = ".";
 
-	private String separator = SEPARATOR_DEFAULT;
-	private Pattern separatorPattern = Pattern.compile(Pattern.quote(SEPARATOR_DEFAULT));
+    private String separator = SEPARATOR_DEFAULT;
+    private Pattern separatorPattern = Pattern.compile(Pattern.quote(SEPARATOR_DEFAULT));
 
-	@Override
-	public void configure(Map<String, ?> props) {
-		if (props.containsKey(SEPARATOR_CONFIG)) {
-			separator = (String) props.get(SEPARATOR_CONFIG);
-			log.info("Using custom remote topic separator: '{}'", separator);
-			separatorPattern = Pattern.compile(Pattern.quote(separator));
-		}
-	}
+    @Override
+    public void configure(Map<String, ?> props) {
+        if (props.containsKey(SEPARATOR_CONFIG)) {
+            separator = (String) props.get(SEPARATOR_CONFIG);
+            log.info("Using custom remote topic separator: '{}'", separator);
+            separatorPattern = Pattern.compile(Pattern.quote(separator));
+        }
+    }
 
-	@Override
-	public String formatRemoteTopic(String sourceClusterAlias, String topic) {
-		return sourceClusterAlias + separator + topic;
-	}
+    @Override
+    public String formatRemoteTopic(String sourceClusterAlias, String topic) {
+        return sourceClusterAlias + separator + topic;
+    }
 
-	@Override
-	public String topicSource(String topic) {
-		String[] parts = separatorPattern.split(topic);
-		if (parts.length < 2) {
-			// this is not a remote topic
-			return null;
-		} else {
-			return parts[0];
-		}
-	}
+    @Override
+    public String topicSource(String topic) {
+        String[] parts = separatorPattern.split(topic);
+        if (parts.length < 2) {
+            // this is not a remote topic
+            return null;
+        } else {
+            return parts[0];
+        }
+    }
 
-	@Override
-	public String upstreamTopic(String topic) {
-		String source = topicSource(topic);
-		if (source == null) {
-			return null;
-		} else {
-			return topic.substring(source.length() + separator.length());
-		}
-	}
+    @Override
+    public String upstreamTopic(String topic) {
+        String source = topicSource(topic);
+        if (source == null) {
+            return null;
+        } else {
+            return topic.substring(source.length() + separator.length());
+        }
+    }
+
+    private String internalSuffix() {
+        return separator + "internal";
+    }
+
+    private String checkpointsTopicSuffix() {
+        return separator + "checkpoints" + internalSuffix();
+    }
+
+    @Override
+    public String offsetSyncsTopic(String clusterAlias) {
+        return "mm2-offset-syncs" + separator + clusterAlias + internalSuffix();
+    }
+
+    @Override
+    public String checkpointsTopic(String clusterAlias) {
+        return clusterAlias + checkpointsTopicSuffix();
+    }
+
+    @Override
+    public boolean isCheckpointsTopic(String topic) {
+        return topic.endsWith(checkpointsTopicSuffix());
+    }
+
+    @Override
+    public boolean isMM2InternalTopic(String topic) {
+        return topic.endsWith(internalSuffix());
+    }
 }

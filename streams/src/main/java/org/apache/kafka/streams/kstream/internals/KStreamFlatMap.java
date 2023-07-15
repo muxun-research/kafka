@@ -23,27 +23,29 @@ import org.apache.kafka.streams.processor.api.Processor;
 import org.apache.kafka.streams.processor.api.ProcessorSupplier;
 import org.apache.kafka.streams.processor.api.Record;
 
+import java.util.Objects;
+
 class KStreamFlatMap<KIn, VIn, KOut, VOut> implements ProcessorSupplier<KIn, VIn, KOut, VOut> {
 
-	private final KeyValueMapper<? super KIn, ? super VIn, ? extends Iterable<? extends KeyValue<? extends KOut, ? extends VOut>>> mapper;
+    private final KeyValueMapper<? super KIn, ? super VIn, ? extends Iterable<? extends KeyValue<? extends KOut, ? extends VOut>>> mapper;
 
-	KStreamFlatMap(final KeyValueMapper<? super KIn, ? super VIn, ? extends Iterable<? extends KeyValue<? extends KOut, ? extends VOut>>> mapper) {
-		this.mapper = mapper;
-	}
+    KStreamFlatMap(final KeyValueMapper<? super KIn, ? super VIn, ? extends Iterable<? extends KeyValue<? extends KOut, ? extends VOut>>> mapper) {
+        this.mapper = mapper;
+    }
 
-	@Override
-	public Processor<KIn, VIn, KOut, VOut> get() {
-		return new KStreamFlatMapProcessor();
-	}
+    @Override
+    public Processor<KIn, VIn, KOut, VOut> get() {
+        return new KStreamFlatMapProcessor();
+    }
 
-	private class KStreamFlatMapProcessor extends ContextualProcessor<KIn, VIn, KOut, VOut> {
-		@Override
-		public void process(final Record<KIn, VIn> record) {
-			final Iterable<? extends KeyValue<? extends KOut, ? extends VOut>> newKeyValues =
-					mapper.apply(record.key(), record.value());
-			for (final KeyValue<? extends KOut, ? extends VOut> newPair : newKeyValues) {
-				context().forward(record.withKey(newPair.key).withValue(newPair.value));
-			}
-		}
-	}
+    private class KStreamFlatMapProcessor extends ContextualProcessor<KIn, VIn, KOut, VOut> {
+        @Override
+        public void process(final Record<KIn, VIn> record) {
+            final Iterable<? extends KeyValue<? extends KOut, ? extends VOut>> newKeyValues = mapper.apply(record.key(), record.value());
+            Objects.requireNonNull(newKeyValues, "The provided KeyValueMapper returned null which is not allowed.");
+            for (final KeyValue<? extends KOut, ? extends VOut> newPair : newKeyValues) {
+                context().forward(record.withKey(newPair.key).withValue(newPair.value));
+            }
+        }
+    }
 }

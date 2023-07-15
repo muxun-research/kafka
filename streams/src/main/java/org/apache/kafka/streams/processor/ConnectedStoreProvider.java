@@ -17,11 +17,7 @@
 package org.apache.kafka.streams.processor;
 
 import org.apache.kafka.streams.Topology;
-import org.apache.kafka.streams.kstream.KStream;
-import org.apache.kafka.streams.kstream.Named;
-import org.apache.kafka.streams.kstream.TransformerSupplier;
-import org.apache.kafka.streams.kstream.ValueTransformerSupplier;
-import org.apache.kafka.streams.kstream.ValueTransformerWithKeySupplier;
+import org.apache.kafka.streams.kstream.*;
 import org.apache.kafka.streams.state.StoreBuilder;
 
 import java.util.Set;
@@ -90,8 +86,8 @@ import java.util.Set;
  * }
  * }</pre>
  * @see Topology#addProcessor(String, org.apache.kafka.streams.processor.api.ProcessorSupplier, String...)
- * @see KStream#process(ProcessorSupplier, String...)
- * @see KStream#process(ProcessorSupplier, Named, String...)
+ * @see KStream#process(org.apache.kafka.streams.processor.api.ProcessorSupplier, String...)
+ * @see KStream#process(org.apache.kafka.streams.processor.api.ProcessorSupplier, Named, String...)
  * @see KStream#transform(TransformerSupplier, String...)
  * @see KStream#transform(TransformerSupplier, Named, String...)
  * @see KStream#transformValues(ValueTransformerSupplier, String...)

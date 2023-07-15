@@ -109,16 +109,18 @@ public class OffsetCommitRequest extends AbstractRequest {
         return responseTopicData;
     }
 
-	@Override
-	public OffsetCommitResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-		List<OffsetCommitResponseTopic>
-				responseTopicData = getErrorResponseTopics(data.topics(), Errors.forException(e));
-		return new OffsetCommitResponse(new OffsetCommitResponseData()
-				.setTopics(responseTopicData)
-				.setThrottleTimeMs(throttleTimeMs));
-	}
+    @Override
+    public OffsetCommitResponse getErrorResponse(int throttleTimeMs, Throwable e) {
+        List<OffsetCommitResponseTopic> responseTopicData = getErrorResponseTopics(data.topics(), Errors.forException(e));
+        return new OffsetCommitResponse(new OffsetCommitResponseData().setTopics(responseTopicData).setThrottleTimeMs(throttleTimeMs));
+    }
+
+    @Override
+    public OffsetCommitResponse getErrorResponse(Throwable e) {
+        return getErrorResponse(AbstractResponse.DEFAULT_THROTTLE_TIME, e);
+    }
 
     public static OffsetCommitRequest parse(ByteBuffer buffer, short version) {
-		return new OffsetCommitRequest(new OffsetCommitRequestData(new ByteBufferAccessor(buffer), version), version);
+        return new OffsetCommitRequest(new OffsetCommitRequestData(new ByteBufferAccessor(buffer), version), version);
     }
 }

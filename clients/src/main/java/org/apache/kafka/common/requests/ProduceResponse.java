@@ -24,18 +24,14 @@ import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.record.RecordBatch;
 
 import java.nio.ByteBuffer;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
  * This wrapper supports both v0 and v8 of ProduceResponse.
- * <p>
+ *
  * Possible error code:
- * <p>
+ *
  * {@link Errors#CORRUPT_MESSAGE}
  * {@link Errors#UNKNOWN_TOPIC_OR_PARTITION}
  * {@link Errors#NOT_LEADER_OR_FOLLOWER}
@@ -53,187 +49,190 @@ import java.util.stream.Collectors;
  * {@link Errors#INVALID_RECORD}
  */
 public class ProduceResponse extends AbstractResponse {
-	public static final long INVALID_OFFSET = -1L;
-	private final ProduceResponseData data;
+    public static final long INVALID_OFFSET = -1L;
+    private final ProduceResponseData data;
 
-	public ProduceResponse(ProduceResponseData produceResponseData) {
-		super(ApiKeys.PRODUCE);
-		this.data = produceResponseData;
-	}
+    public ProduceResponse(ProduceResponseData produceResponseData) {
+        super(ApiKeys.PRODUCE);
+        this.data = produceResponseData;
+    }
 
-	/**
-	 * Constructor for Version 0
-	 * @param responses Produced data grouped by topic-partition
-	 */
-	@Deprecated
-	public ProduceResponse(Map<TopicPartition, PartitionResponse> responses) {
-		this(responses, DEFAULT_THROTTLE_TIME);
-	}
+    /**
+     * Constructor for Version 0
+     * @param responses Produced data grouped by topic-partition
+     */
+    @Deprecated
+    public ProduceResponse(Map<TopicPartition, PartitionResponse> responses) {
+        this(responses, DEFAULT_THROTTLE_TIME);
+    }
 
-	/**
-	 * Constructor for the latest version
-	 * @param responses      Produced data grouped by topic-partition
-	 * @param throttleTimeMs Time in milliseconds the response was throttled
-	 */
-	@Deprecated
-	public ProduceResponse(Map<TopicPartition, PartitionResponse> responses, int throttleTimeMs) {
-		this(toData(responses, throttleTimeMs));
-	}
+    /**
+     * Constructor for the latest version
+     * @param responses      Produced data grouped by topic-partition
+     * @param throttleTimeMs Time in milliseconds the response was throttled
+     */
+    @Deprecated
+    public ProduceResponse(Map<TopicPartition, PartitionResponse> responses, int throttleTimeMs) {
+        this(toData(responses, throttleTimeMs));
+    }
 
-	private static ProduceResponseData toData(Map<TopicPartition, PartitionResponse> responses, int throttleTimeMs) {
-		ProduceResponseData data = new ProduceResponseData().setThrottleTimeMs(throttleTimeMs);
-		responses.forEach((tp, response) -> {
-			ProduceResponseData.TopicProduceResponse tpr = data.responses().find(tp.topic());
-			if (tpr == null) {
-				tpr = new ProduceResponseData.TopicProduceResponse().setName(tp.topic());
-				data.responses().add(tpr);
-			}
-			tpr.partitionResponses()
-					.add(new ProduceResponseData.PartitionProduceResponse()
-							.setIndex(tp.partition())
-							.setBaseOffset(response.baseOffset)
-							.setLogStartOffset(response.logStartOffset)
-							.setLogAppendTimeMs(response.logAppendTime)
-							.setErrorMessage(response.errorMessage)
-							.setErrorCode(response.error.code())
-							.setRecordErrors(response.recordErrors
-									.stream()
-									.map(e -> new ProduceResponseData.BatchIndexAndErrorMessage()
-											.setBatchIndex(e.batchIndex)
-											.setBatchIndexErrorMessage(e.message))
-									.collect(Collectors.toList())));
-		});
-		return data;
-	}
+    private static ProduceResponseData toData(Map<TopicPartition, PartitionResponse> responses, int throttleTimeMs) {
+        ProduceResponseData data = new ProduceResponseData().setThrottleTimeMs(throttleTimeMs);
+        responses.forEach((tp, response) -> {
+            ProduceResponseData.TopicProduceResponse tpr = data.responses().find(tp.topic());
+            if (tpr == null) {
+                tpr = new ProduceResponseData.TopicProduceResponse().setName(tp.topic());
+                data.responses().add(tpr);
+            }
+            tpr.partitionResponses().add(new ProduceResponseData.PartitionProduceResponse().setIndex(tp.partition()).setBaseOffset(response.baseOffset).setLogStartOffset(response.logStartOffset).setLogAppendTimeMs(response.logAppendTime).setErrorMessage(response.errorMessage).setErrorCode(response.error.code()).setRecordErrors(response.recordErrors.stream().map(e -> new ProduceResponseData.BatchIndexAndErrorMessage().setBatchIndex(e.batchIndex).setBatchIndexErrorMessage(e.message)).collect(Collectors.toList())));
+        });
+        return data;
+    }
 
-	@Override
-	public ProduceResponseData data() {
-		return this.data;
+    @Override
+    public ProduceResponseData data() {
+        return this.data;
     }
 
     @Override
     public int throttleTimeMs() {
-		return this.data.throttleTimeMs();
+        return this.data.throttleTimeMs();
+    }
+
+    @Override
+    public void maybeSetThrottleTimeMs(int throttleTimeMs) {
+        data.setThrottleTimeMs(throttleTimeMs);
     }
 
     @Override
     public Map<Errors, Integer> errorCounts() {
         Map<Errors, Integer> errorCounts = new HashMap<>();
-		data.responses().forEach(t -> t.partitionResponses().forEach(p -> updateErrorCounts(errorCounts, Errors.forCode(p.errorCode()))));
+        data.responses().forEach(t -> t.partitionResponses().forEach(p -> updateErrorCounts(errorCounts, Errors.forCode(p.errorCode()))));
         return errorCounts;
-	}
+    }
 
-	public static final class PartitionResponse {
-		public Errors error;
-		public long baseOffset;
-		public long logAppendTime;
-		public long logStartOffset;
-		public List<RecordError> recordErrors;
-		public String errorMessage;
+    public static final class PartitionResponse {
+        public Errors error;
+        public long baseOffset;
+        public long lastOffset;
+        public long logAppendTime;
+        public long logStartOffset;
+        public List<RecordError> recordErrors;
+        public String errorMessage;
 
-		public PartitionResponse(Errors error) {
-			this(error, INVALID_OFFSET, RecordBatch.NO_TIMESTAMP, INVALID_OFFSET);
-		}
+        public PartitionResponse(Errors error) {
+            this(error, INVALID_OFFSET, RecordBatch.NO_TIMESTAMP, INVALID_OFFSET);
+        }
 
-		public PartitionResponse(Errors error, String errorMessage) {
-			this(error, INVALID_OFFSET, RecordBatch.NO_TIMESTAMP, INVALID_OFFSET, Collections.emptyList(), errorMessage);
-		}
+        public PartitionResponse(Errors error, String errorMessage) {
+            this(error, INVALID_OFFSET, RecordBatch.NO_TIMESTAMP, INVALID_OFFSET, Collections.emptyList(), errorMessage);
+        }
 
-		public PartitionResponse(Errors error, long baseOffset, long logAppendTime, long logStartOffset) {
-			this(error, baseOffset, logAppendTime, logStartOffset, Collections.emptyList(), null);
-		}
+        public PartitionResponse(Errors error, long baseOffset, long logAppendTime, long logStartOffset) {
+            this(error, baseOffset, logAppendTime, logStartOffset, Collections.emptyList(), null);
+        }
 
-		public PartitionResponse(Errors error, long baseOffset, long logAppendTime, long logStartOffset, List<RecordError> recordErrors) {
-			this(error, baseOffset, logAppendTime, logStartOffset, recordErrors, null);
-		}
+        public PartitionResponse(Errors error, long baseOffset, long logAppendTime, long logStartOffset, List<RecordError> recordErrors) {
+            this(error, baseOffset, logAppendTime, logStartOffset, recordErrors, null);
+        }
 
-		public PartitionResponse(Errors error, long baseOffset, long logAppendTime, long logStartOffset, List<RecordError> recordErrors, String errorMessage) {
-			this.error = error;
-			this.baseOffset = baseOffset;
-			this.logAppendTime = logAppendTime;
-			this.logStartOffset = logStartOffset;
-			this.recordErrors = recordErrors;
-			this.errorMessage = errorMessage;
-		}
+        public PartitionResponse(Errors error, long baseOffset, long logAppendTime, long logStartOffset, List<RecordError> recordErrors, String errorMessage) {
+            this(error, baseOffset, INVALID_OFFSET, logAppendTime, logStartOffset, recordErrors, errorMessage);
+        }
 
-		@Override
-		public boolean equals(Object o) {
-			if (this == o) return true;
-			if (o == null || getClass() != o.getClass()) return false;
-			PartitionResponse that = (PartitionResponse) o;
-			return baseOffset == that.baseOffset &&
-					logAppendTime == that.logAppendTime &&
-					logStartOffset == that.logStartOffset &&
-					error == that.error &&
-					Objects.equals(recordErrors, that.recordErrors) &&
-					Objects.equals(errorMessage, that.errorMessage);
-		}
+        public PartitionResponse(Errors error, long baseOffset, long lastOffset, long logAppendTime, long logStartOffset, List<RecordError> recordErrors, String errorMessage) {
+            this.error = error;
+            this.baseOffset = baseOffset;
+            this.lastOffset = lastOffset;
+            this.logAppendTime = logAppendTime;
+            this.logStartOffset = logStartOffset;
+            this.recordErrors = recordErrors;
+            this.errorMessage = errorMessage;
+        }
 
-		@Override
-		public int hashCode() {
-			return Objects.hash(error, baseOffset, logAppendTime, logStartOffset, recordErrors, errorMessage);
-		}
+        @Override
+        public boolean equals(Object o) {
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
+            PartitionResponse that = (PartitionResponse) o;
+            return baseOffset == that.baseOffset && lastOffset == that.lastOffset && logAppendTime == that.logAppendTime && logStartOffset == that.logStartOffset && error == that.error && Objects.equals(recordErrors, that.recordErrors) && Objects.equals(errorMessage, that.errorMessage);
+        }
 
-		@Override
-		public String toString() {
-			StringBuilder b = new StringBuilder();
-			b.append('{');
-			b.append("error: ");
-			b.append(error);
-			b.append(",offset: ");
-			b.append(baseOffset);
-			b.append(",logAppendTime: ");
-			b.append(logAppendTime);
-			b.append(", logStartOffset: ");
-			b.append(logStartOffset);
-			b.append(", recordErrors: ");
-			b.append(recordErrors);
-			b.append(", errorMessage: ");
-			if (errorMessage != null) {
-				b.append(errorMessage);
-			} else {
-				b.append("null");
-			}
-			b.append('}');
-			return b.toString();
-		}
-	}
+        @Override
+        public int hashCode() {
+            return Objects.hash(error, baseOffset, lastOffset, logAppendTime, logStartOffset, recordErrors, errorMessage);
+        }
 
-	public static final class RecordError {
-		public final int batchIndex;
-		public final String message;
+        @Override
+        public String toString() {
+            StringBuilder b = new StringBuilder();
+            b.append('{');
+            b.append("error: ");
+            b.append(error);
+            b.append(",offset: ");
+            b.append(baseOffset);
+            b.append(",lastOffset: ");
+            b.append(lastOffset);
+            b.append(",logAppendTime: ");
+            b.append(logAppendTime);
+            b.append(", logStartOffset: ");
+            b.append(logStartOffset);
+            b.append(", recordErrors: ");
+            b.append(recordErrors);
+            b.append(", errorMessage: ");
+            if (errorMessage != null) {
+                b.append(errorMessage);
+            } else {
+                b.append("null");
+            }
+            b.append('}');
+            return b.toString();
+        }
+    }
 
-		public RecordError(int batchIndex, String message) {
-			this.batchIndex = batchIndex;
-			this.message = message;
-		}
+    public static final class RecordError {
+        public final int batchIndex;
+        public final String message;
 
-		public RecordError(int batchIndex) {
-			this.batchIndex = batchIndex;
-			this.message = null;
-		}
+        public RecordError(int batchIndex, String message) {
+            this.batchIndex = batchIndex;
+            this.message = message;
+        }
 
-		@Override
-		public boolean equals(Object o) {
-			if (this == o) return true;
-			if (o == null || getClass() != o.getClass()) return false;
-			RecordError that = (RecordError) o;
-			return batchIndex == that.batchIndex &&
-					Objects.equals(message, that.message);
-		}
+        public RecordError(int batchIndex) {
+            this.batchIndex = batchIndex;
+            this.message = null;
+        }
 
-		@Override
-		public int hashCode() {
-			return Objects.hash(batchIndex, message);
-		}
-	}
+        @Override
+        public boolean equals(Object o) {
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
+            RecordError that = (RecordError) o;
+            return batchIndex == that.batchIndex && Objects.equals(message, that.message);
+        }
 
-	public static ProduceResponse parse(ByteBuffer buffer, short version) {
-		return new ProduceResponse(new ProduceResponseData(new ByteBufferAccessor(buffer), version));
-	}
+        @Override
+        public int hashCode() {
+            return Objects.hash(batchIndex, message);
+        }
 
-	@Override
-	public boolean shouldClientThrottle(short version) {
-		return version >= 6;
+        @Override
+        public String toString() {
+            return "RecordError(" + "batchIndex=" + batchIndex + ", message=" + ((message == null) ? "null" : "'" + message + "'") + ")";
+        }
+    }
+
+    public static ProduceResponse parse(ByteBuffer buffer, short version) {
+        return new ProduceResponse(new ProduceResponseData(new ByteBufferAccessor(buffer), version));
+    }
+
+    @Override
+    public boolean shouldClientThrottle(short version) {
+        return version >= 6;
     }
 }

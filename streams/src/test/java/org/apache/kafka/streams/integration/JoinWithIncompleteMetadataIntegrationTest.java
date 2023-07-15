@@ -16,9 +16,6 @@
  */
 package org.apache.kafka.streams.integration;
 
-import java.io.IOException;
-import java.util.Properties;
-
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreamsWrapper;
@@ -31,87 +28,87 @@ import org.apache.kafka.streams.kstream.KTable;
 import org.apache.kafka.streams.kstream.ValueJoiner;
 import org.apache.kafka.test.IntegrationTest;
 import org.apache.kafka.test.TestUtils;
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.*;
 import org.junit.experimental.categories.Category;
 import org.junit.rules.TemporaryFolder;
+import org.junit.rules.Timeout;
+
+import java.io.IOException;
+import java.util.Properties;
 
 import static org.junit.Assert.assertTrue;
 
 @Category({IntegrationTest.class})
 public class JoinWithIncompleteMetadataIntegrationTest {
-	public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(1);
+    @Rule
+    public Timeout globalTimeout = Timeout.seconds(600);
 
-	@BeforeClass
-	public static void startCluster() throws IOException {
-		CLUSTER.start();
-		STREAMS_CONFIG.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-		STREAMS_CONFIG.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, CLUSTER.bootstrapServers());
-		STREAMS_CONFIG.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.Long().getClass());
-		STREAMS_CONFIG.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
-		STREAMS_CONFIG.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, COMMIT_INTERVAL);
-	}
+    public static final EmbeddedKafkaCluster CLUSTER = new EmbeddedKafkaCluster(1);
 
-	@AfterClass
-	public static void closeCluster() {
-		CLUSTER.stop();
-	}
+    @BeforeClass
+    public static void startCluster() throws IOException {
+        CLUSTER.start();
+        STREAMS_CONFIG.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        STREAMS_CONFIG.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, CLUSTER.bootstrapServers());
+        STREAMS_CONFIG.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.Long().getClass());
+        STREAMS_CONFIG.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
+        STREAMS_CONFIG.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, COMMIT_INTERVAL);
+    }
+
+    @AfterClass
+    public static void closeCluster() {
+        CLUSTER.stop();
+    }
 
 
-	@Rule
-	public final TemporaryFolder testFolder = new TemporaryFolder(TestUtils.tempDirectory());
+    @Rule
+    public final TemporaryFolder testFolder = new TemporaryFolder(TestUtils.tempDirectory());
 
-	private static final String APP_ID = "join-incomplete-metadata-integration-test";
-	private static final Long COMMIT_INTERVAL = 100L;
-	static final Properties STREAMS_CONFIG = new Properties();
-	static final String INPUT_TOPIC_RIGHT = "inputTopicRight";
-	static final String NON_EXISTENT_INPUT_TOPIC_LEFT = "inputTopicLeft-not-exist";
-	static final String OUTPUT_TOPIC = "outputTopic";
+    private static final String APP_ID = "join-incomplete-metadata-integration-test";
+    private static final Long COMMIT_INTERVAL = 100L;
+    static final Properties STREAMS_CONFIG = new Properties();
+    static final String INPUT_TOPIC_RIGHT = "inputTopicRight";
+    static final String NON_EXISTENT_INPUT_TOPIC_LEFT = "inputTopicLeft-not-exist";
+    static final String OUTPUT_TOPIC = "outputTopic";
 
-	StreamsBuilder builder;
-	final ValueJoiner<String, String, String> valueJoiner = (value1, value2) -> value1 + "-" + value2;
-	private KTable<Long, String> rightTable;
+    StreamsBuilder builder;
+    final ValueJoiner<String, String, String> valueJoiner = (value1, value2) -> value1 + "-" + value2;
+    private KTable<Long, String> rightTable;
 
-	@Before
-	public void prepareTopology() throws InterruptedException {
-		CLUSTER.createTopics(INPUT_TOPIC_RIGHT, OUTPUT_TOPIC);
-		STREAMS_CONFIG.put(StreamsConfig.STATE_DIR_CONFIG, testFolder.getRoot().getPath());
+    @Before
+    public void prepareTopology() throws InterruptedException {
+        CLUSTER.createTopics(INPUT_TOPIC_RIGHT, OUTPUT_TOPIC);
+        STREAMS_CONFIG.put(StreamsConfig.STATE_DIR_CONFIG, testFolder.getRoot().getPath());
 
-		builder = new StreamsBuilder();
-		rightTable = builder.table(INPUT_TOPIC_RIGHT);
-	}
+        builder = new StreamsBuilder();
+        rightTable = builder.table(INPUT_TOPIC_RIGHT);
+    }
 
-	@After
-	public void cleanup() throws InterruptedException {
-		CLUSTER.deleteAllTopicsAndWait(120000);
-	}
+    @After
+    public void cleanup() throws InterruptedException {
+        CLUSTER.deleteAllTopicsAndWait(120000);
+    }
 
-	@Test
-	public void testShouldAutoShutdownOnJoinWithIncompleteMetadata() throws InterruptedException {
-		STREAMS_CONFIG.put(StreamsConfig.APPLICATION_ID_CONFIG, APP_ID);
-		STREAMS_CONFIG.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, CLUSTER.bootstrapServers());
+    @Test
+    public void testShouldAutoShutdownOnJoinWithIncompleteMetadata() throws InterruptedException {
+        STREAMS_CONFIG.put(StreamsConfig.APPLICATION_ID_CONFIG, APP_ID);
+        STREAMS_CONFIG.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, CLUSTER.bootstrapServers());
 
-		final KStream<Long, String> notExistStream = builder.stream(NON_EXISTENT_INPUT_TOPIC_LEFT);
+        final KStream<Long, String> notExistStream = builder.stream(NON_EXISTENT_INPUT_TOPIC_LEFT);
 
-		final KTable<Long, String> aggregatedTable = notExistStream.leftJoin(rightTable, valueJoiner)
-				.groupBy((key, value) -> key)
-				.reduce((value1, value2) -> value1 + value2);
+        final KTable<Long, String> aggregatedTable = notExistStream.leftJoin(rightTable, valueJoiner).groupBy((key, value) -> key).reduce((value1, value2) -> value1 + value2);
 
-		// Write the (continuously updating) results to the output topic.
-		aggregatedTable.toStream().to(OUTPUT_TOPIC);
+        // Write the (continuously updating) results to the output topic.
+        aggregatedTable.toStream().to(OUTPUT_TOPIC);
 
-		final KafkaStreamsWrapper streams = new KafkaStreamsWrapper(builder.build(), STREAMS_CONFIG);
-		final IntegrationTestUtils.StateListenerStub listener = new IntegrationTestUtils.StateListenerStub();
-		streams.setStreamThreadStateListener(listener);
-		streams.start();
+        final KafkaStreamsWrapper streams = new KafkaStreamsWrapper(builder.build(), STREAMS_CONFIG);
+        final IntegrationTestUtils.StateListenerStub listener = new IntegrationTestUtils.StateListenerStub();
+        streams.setStreamThreadStateListener(listener);
+        streams.start();
 
-		TestUtils.waitForCondition(listener::transitToPendingShutdownSeen, "Did not seen thread state transited to PENDING_SHUTDOWN");
+        TestUtils.waitForCondition(listener::transitToPendingShutdownSeen, "Did not seen thread state transited to PENDING_SHUTDOWN");
 
-		streams.close();
-		assertTrue(listener.transitToPendingShutdownSeen());
-	}
+        streams.close();
+        assertTrue(listener.transitToPendingShutdownSeen());
+    }
 }
