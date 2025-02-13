@@ -35,6 +35,7 @@ import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.TimestampedWindowStore;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
+
 import org.slf4j.Logger;
 
 import static org.apache.kafka.streams.StreamsConfig.InternalConfig.EMIT_INTERVAL_MS_KSTREAMS_WINDOWED_AGGREGATION;
@@ -171,9 +172,9 @@ public abstract class AbstractKStreamTimeWindowAggregateProcessor<KIn, VIn, VAgg
     }
 
     // upper and lower bound are inclusive; the bounds could be negative in which case we would skip range fetching and emitting
-    abstract protected long emitRangeLowerBound(final long windowCloseTime);
+    protected abstract long emitRangeLowerBound(final long windowCloseTime);
 
-    abstract protected long emitRangeUpperBound(final long windowCloseTime);
+    protected abstract long emitRangeUpperBound(final long windowCloseTime);
 
-    abstract protected boolean shouldRangeFetch(final long emitRangeLowerBound, final long emitRangeUpperBound);
+    protected abstract boolean shouldRangeFetch(final long emitRangeLowerBound, final long emitRangeUpperBound);
 }

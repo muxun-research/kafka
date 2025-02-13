@@ -29,6 +29,7 @@ public interface StreamsMetrics {
 
     /**
      * Get read-only handle on global metrics registry.
+     *
      * @return Map of all metrics.
      */
     Map<MetricName, ? extends Metric> metrics();
@@ -41,25 +42,30 @@ public interface StreamsMetrics {
      * <li>invocation rate (num.operations / seconds)</li>
      * <li>total invocation count</li>
      * </ol>
-     * Whenever a user records this sensor via {@link Sensor#record(double)} etc, it will be counted as one invocation
+     * Whenever a user records this sensor via {@link Sensor#record(double)} etc., it will be counted as one invocation
      * of the operation, and hence the rate / count metrics will be updated accordingly; and the recorded latency value
      * will be used to update the average / max latency as well.
-     * <p>
-     * Note that you can add more metrics to this sensor after you created it, which can then be updated upon
+     *
+     * <p>Note that you can add more metrics to this sensor after you created it, which can then be updated upon
      * {@link Sensor#record(double)} calls.
-     * <p>
-     * The added sensor and its metrics can be removed with {@link #removeSensor(Sensor) removeSensor()}.
-     * @param scopeName      name of the scope, which will be used as part of the metric type, e.g.: "stream-[scope]-metrics".
-     * @param entityName     name of the entity, which will be used as part of the metric tags, e.g.: "[scope]-id" = "[entity]".
-     * @param operationName  name of the operation, which will be used as the name of the metric, e.g.: "[operation]-latency-avg".
-     * @param recordingLevel the recording level (e.g., INFO or DEBUG) for this sensor.
-     * @param tags           additional tags of the sensor
+     *
+     * <p>The added sensor and its metrics can be removed with {@link #removeSensor(Sensor) removeSensor()}.
+     *
+     * @param scopeName          name of the scope, which will be used as part of the metric type, e.g.: "stream-[scope]-metrics".
+     * @param entityName         name of the entity, which will be used as part of the metric tags, e.g.: "[scope]-id" = "[entity]".
+     * @param operationName      name of the operation, which will be used as the name of the metric, e.g.: "[operation]-latency-avg".
+     * @param recordingLevel     the recording level (e.g., INFO or DEBUG) for this sensor.
+     * @param tags               additional tags of the sensor
      * @return The added sensor.
      * @see #addRateTotalSensor(String, String, String, Sensor.RecordingLevel, String...)
      * @see #removeSensor(Sensor)
      * @see #addSensor(String, Sensor.RecordingLevel, Sensor...)
      */
-    Sensor addLatencyRateTotalSensor(final String scopeName, final String entityName, final String operationName, final Sensor.RecordingLevel recordingLevel, final String... tags);
+    Sensor addLatencyRateTotalSensor(final String scopeName,
+                                     final String entityName,
+                                     final String operationName,
+                                     final Sensor.RecordingLevel recordingLevel,
+                                     final String... tags);
 
     /**
      * Add a rate and a total sensor for a specific operation, which will include the following metrics:
@@ -67,24 +73,29 @@ public interface StreamsMetrics {
      * <li>invocation rate (num.operations / time unit)</li>
      * <li>total invocation count</li>
      * </ol>
-     * Whenever a user records this sensor via {@link Sensor#record(double)} etc,
+     * Whenever a user records this sensor via {@link Sensor#record(double)} etc.,
      * it will be counted as one invocation of the operation, and hence the rate / count metrics will be updated accordingly.
-     * <p>
-     * Note that you can add more metrics to this sensor after you created it, which can then be updated upon
+     *
+     * <p>Note that you can add more metrics to this sensor after you created it, which can then be updated upon
      * {@link Sensor#record(double)} calls.
-     * <p>
-     * The added sensor and its metrics can be removed with {@link #removeSensor(Sensor) removeSensor()}.
-     * @param scopeName      name of the scope, which will be used as part of the metrics type, e.g.: "stream-[scope]-metrics".
-     * @param entityName     name of the entity, which will be used as part of the metric tags, e.g.: "[scope]-id" = "[entity]".
-     * @param operationName  name of the operation, which will be used as the name of the metric, e.g.: "[operation]-total".
-     * @param recordingLevel the recording level (e.g., INFO or DEBUG) for this sensor.
-     * @param tags           additional tags of the sensor
+     *
+     * <p>The added sensor and its metrics can be removed with {@link #removeSensor(Sensor) removeSensor()}.
+     *
+     * @param scopeName          name of the scope, which will be used as part of the metrics type, e.g.: "stream-[scope]-metrics".
+     * @param entityName         name of the entity, which will be used as part of the metric tags, e.g.: "[scope]-id" = "[entity]".
+     * @param operationName      name of the operation, which will be used as the name of the metric, e.g.: "[operation]-total".
+     * @param recordingLevel     the recording level (e.g., INFO or DEBUG) for this sensor.
+     * @param tags               additional tags of the sensor
      * @return The added sensor.
      * @see #addLatencyRateTotalSensor(String, String, String, Sensor.RecordingLevel, String...)
      * @see #removeSensor(Sensor)
      * @see #addSensor(String, Sensor.RecordingLevel, Sensor...)
      */
-    Sensor addRateTotalSensor(final String scopeName, final String entityName, final String operationName, final Sensor.RecordingLevel recordingLevel, final String... tags);
+    Sensor addRateTotalSensor(final String scopeName,
+                              final String entityName,
+                              final String operationName,
+                              final Sensor.RecordingLevel recordingLevel,
+                              final String... tags);
 
     /**
      * Generic method to create a sensor.
@@ -93,6 +104,7 @@ public interface StreamsMetrics {
      * or {@link #addLatencyRateTotalSensor(String, String, String, Sensor.RecordingLevel, String...) addLatencyRateTotalSensor()}
      * to ensure metric name well-formedness and conformity with the rest of the Kafka Streams code base.
      * However, if the above two methods are not sufficient, this method can also be used.
+     *
      * @param name           name of the sensor.
      * @param recordingLevel the recording level (e.g., INFO or DEBUG) for this sensor
      * @return The added sensor.
@@ -100,7 +112,8 @@ public interface StreamsMetrics {
      * @see #addLatencyRateTotalSensor(String, String, String, Sensor.RecordingLevel, String...)
      * @see #removeSensor(Sensor)
      */
-    Sensor addSensor(final String name, final Sensor.RecordingLevel recordingLevel);
+    Sensor addSensor(final String name,
+                     final Sensor.RecordingLevel recordingLevel);
 
     /**
      * Generic method to create a sensor with parent sensors.
@@ -109,6 +122,7 @@ public interface StreamsMetrics {
      * or {@link #addLatencyRateTotalSensor(String, String, String, Sensor.RecordingLevel, String...) addLatencyRateTotalSensor()}
      * to ensure metric name well-formedness and conformity with the rest of the Kafka Streams code base.
      * However, if the above two methods are not sufficient, this method can also be used.
+     *
      * @param name           name of the sensor
      * @param recordingLevel the recording level (e.g., INFO or DEBUG) for this sensor
      * @return The added sensor.
@@ -116,7 +130,9 @@ public interface StreamsMetrics {
      * @see #addLatencyRateTotalSensor(String, String, String, Sensor.RecordingLevel, String...)
      * @see #removeSensor(Sensor)
      */
-    Sensor addSensor(final String name, final Sensor.RecordingLevel recordingLevel, final Sensor... parents);
+    Sensor addSensor(final String name,
+                     final Sensor.RecordingLevel recordingLevel,
+                     final Sensor... parents);
 
     /**
      * Remove a sensor.
@@ -124,5 +140,3 @@ public interface StreamsMetrics {
      */
     void removeSensor(final Sensor sensor);
 }
-
-

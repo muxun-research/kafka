@@ -24,6 +24,7 @@ import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicIdPartition;
 import org.apache.kafka.server.log.remote.metadata.storage.serialization.RemoteLogMetadataSerde;
 import org.apache.kafka.server.log.remote.storage.RemoteLogMetadata;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,7 +34,7 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * This class is responsible for publishing messages into the remote log metadata topic partitions.
- * <p>
+ *
  * Caller of this class should take care of not sending messages once the closing of this instance is initiated.
  */
 public class ProducerManager implements Closeable {
@@ -44,7 +45,8 @@ public class ProducerManager implements Closeable {
     private final RemoteLogMetadataTopicPartitioner topicPartitioner;
     private final TopicBasedRemoteLogMetadataManagerConfig rlmmConfig;
 
-    public ProducerManager(TopicBasedRemoteLogMetadataManagerConfig rlmmConfig, RemoteLogMetadataTopicPartitioner rlmmTopicPartitioner) {
+    public ProducerManager(TopicBasedRemoteLogMetadataManagerConfig rlmmConfig,
+                           RemoteLogMetadataTopicPartitioner rlmmTopicPartitioner) {
         this.rlmmConfig = rlmmConfig;
         this.producer = new KafkaProducer<>(rlmmConfig.producerProperties());
         topicPartitioner = rlmmTopicPartitioner;
@@ -53,32 +55,33 @@ public class ProducerManager implements Closeable {
     /**
      * Returns {@link CompletableFuture} which will complete only after publishing of the given {@code remoteLogMetadata}
      * is considered complete.
+     *
      * @param remoteLogMetadata RemoteLogMetadata to be published
      * @return
      */
-    public CompletableFuture<RecordMetadata> publishMessage(RemoteLogMetadata remoteLogMetadata) {
+    CompletableFuture<RecordMetadata> publishMessage(RemoteLogMetadata remoteLogMetadata) {
         CompletableFuture<RecordMetadata> future = new CompletableFuture<>();
 
         TopicIdPartition topicIdPartition = remoteLogMetadata.topicIdPartition();
         int metadataPartitionNum = topicPartitioner.metadataPartition(topicIdPartition);
-        log.debug("Publishing metadata message of partition:[{}] into metadata topic partition:[{}] with payload: [{}]", topicIdPartition, metadataPartitionNum, remoteLogMetadata);
+        log.debug("Publishing metadata message of partition:[{}] into metadata topic partition:[{}] with payload: [{}]",
+                  topicIdPartition, metadataPartitionNum, remoteLogMetadata);
         if (metadataPartitionNum >= rlmmConfig.metadataTopicPartitionsCount()) {
             // This should never occur as long as metadata partitions always remain the same.
-            throw new KafkaException("Chosen partition no " + metadataPartitionNum + " must be less than the partition count: " + rlmmConfig.metadataTopicPartitionsCount());
+            throw new KafkaException("Chosen partition no " + metadataPartitionNum +
+                                             " must be less than the partition count: " + rlmmConfig.metadataTopicPartitionsCount());
         }
 
         try {
-            Callback callback = new Callback() {
-                @Override
-                public void onCompletion(RecordMetadata metadata, Exception exception) {
-                    if (exception != null) {
-                        future.completeExceptionally(exception);
-                    } else {
-                        future.complete(metadata);
-                    }
+            Callback callback = (metadata, exception) -> {
+                if (exception != null) {
+                    future.completeExceptionally(exception);
+                } else {
+                    future.complete(metadata);
                 }
             };
-            producer.send(new ProducerRecord<>(rlmmConfig.remoteLogMetadataTopicName(), metadataPartitionNum, null, serde.serialize(remoteLogMetadata)), callback);
+            producer.send(new ProducerRecord<>(rlmmConfig.remoteLogMetadataTopicName(), metadataPartitionNum, null,
+                                               serde.serialize(remoteLogMetadata)), callback);
         } catch (Exception ex) {
             future.completeExceptionally(ex);
         }

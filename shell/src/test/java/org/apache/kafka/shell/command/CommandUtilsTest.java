@@ -27,11 +27,25 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @Timeout(value = 5, unit = MINUTES)
 public class CommandUtilsTest {
-	@Test
-	public void testSplitPath() {
-		assertEquals(Arrays.asList("alpha", "beta"),
-				CommandUtils.splitPath("/alpha/beta"));
-		assertEquals(Arrays.asList("alpha", "beta"),
-				CommandUtils.splitPath("//alpha/beta/"));
-	}
+    @Test
+    public void testSplitPath() {
+        assertEquals(Arrays.asList("alpha", "beta"),
+            CommandUtils.splitPath("/alpha/beta"));
+        assertEquals(Arrays.asList("alpha", "beta"),
+            CommandUtils.splitPath("//alpha/beta/"));
+    }
+
+    @Test
+    public void testStripDotPathComponents() {
+
+        //double dots
+        assertEquals(Arrays.asList("keep", "keep2"), CommandUtils.stripDotPathComponents(Arrays.asList("..", "keep", "keep2")));
+        //single dots
+        assertEquals(Arrays.asList("keep", "keep2"), CommandUtils.stripDotPathComponents(Arrays.asList(".", "keep", "keep2")));
+
+        assertEquals(Arrays.asList(".keep", "keep2"), CommandUtils.stripDotPathComponents(Arrays.asList(".", ".keep", "keep2")));
+
+        assertEquals(Arrays.asList(".keep", "keep2"), CommandUtils.stripDotPathComponents(Arrays.asList("..", ".keep", "keep2")));
+
+    }
 }

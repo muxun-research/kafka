@@ -26,64 +26,64 @@ import java.util.stream.Collectors;
 
 
 class ControllerResult<T> {
-	private final List<ApiMessageAndVersion> records;
-	private final T response;
-	private final boolean isAtomic;
+    private final List<ApiMessageAndVersion> records;
+    private final T response;
+    private final boolean isAtomic;
 
-	protected ControllerResult(List<ApiMessageAndVersion> records, T response, boolean isAtomic) {
-		Objects.requireNonNull(records);
-		this.records = records;
-		this.response = response;
-		this.isAtomic = isAtomic;
-	}
+    protected ControllerResult(List<ApiMessageAndVersion> records, T response, boolean isAtomic) {
+        Objects.requireNonNull(records);
+        this.records = records;
+        this.response = response;
+        this.isAtomic = isAtomic;
+    }
 
-	public List<ApiMessageAndVersion> records() {
-		return records;
-	}
+    public List<ApiMessageAndVersion> records() {
+        return records;
+    }
 
-	public T response() {
-		return response;
-	}
+    public T response() {
+        return response;
+    }
 
-	public boolean isAtomic() {
-		return isAtomic;
-	}
+    public boolean isAtomic() {
+        return isAtomic;
+    }
 
-	@Override
-	public boolean equals(Object o) {
-		if (o == null || (!o.getClass().equals(getClass()))) {
-			return false;
-		}
-		ControllerResult other = (ControllerResult) o;
-		return records.equals(other.records) &&
-				Objects.equals(response, other.response) &&
-				Objects.equals(isAtomic, other.isAtomic);
-	}
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || (!o.getClass().equals(getClass()))) {
+            return false;
+        }
+        ControllerResult other = (ControllerResult) o;
+        return records.equals(other.records) &&
+            Objects.equals(response, other.response) &&
+            Objects.equals(isAtomic, other.isAtomic);
+    }
 
-	@Override
-	public int hashCode() {
-		return Objects.hash(records, response, isAtomic);
-	}
+    @Override
+    public int hashCode() {
+        return Objects.hash(records, response, isAtomic);
+    }
 
-	@Override
-	public String toString() {
-		return String.format(
-				"ControllerResult(records=%s, response=%s, isAtomic=%s)",
-				String.join(",", records.stream().map(ApiMessageAndVersion::toString).collect(Collectors.toList())),
-				response,
-				isAtomic
-		);
-	}
+    @Override
+    public String toString() {
+        return String.format(
+            "ControllerResult(records=%s, response=%s, isAtomic=%s)",
+            records.stream().map(ApiMessageAndVersion::toString).collect(Collectors.joining(",")),
+            response,
+            isAtomic
+        );
+    }
 
-	public ControllerResult<T> withoutRecords() {
-		return new ControllerResult<>(Collections.emptyList(), response, false);
-	}
+    public ControllerResult<T> withoutRecords() {
+        return new ControllerResult<>(Collections.emptyList(), response, false);
+    }
 
-	public static <T> ControllerResult<T> atomicOf(List<ApiMessageAndVersion> records, T response) {
-		return new ControllerResult<>(records, response, true);
-	}
+    public static <T> ControllerResult<T> atomicOf(List<ApiMessageAndVersion> records, T response) {
+        return new ControllerResult<>(records, response, true);
+    }
 
-	public static <T> ControllerResult<T> of(List<ApiMessageAndVersion> records, T response) {
-		return new ControllerResult<>(records, response, false);
-	}
+    public static <T> ControllerResult<T> of(List<ApiMessageAndVersion> records, T response) {
+        return new ControllerResult<>(records, response, false);
+    }
 }

@@ -28,14 +28,20 @@ public class FinalizedVersionRange {
 
     /**
      * Raises an exception unless the following condition is met:
-     * minVersionLevel >= 1 and maxVersionLevel >= 1 and maxVersionLevel >= minVersionLevel.
-     * @param minVersionLevel The minimum version level value.
-     * @param maxVersionLevel The maximum version level value.
-     * @throws IllegalArgumentException Raised when the condition described above is not met.
+     * {@code minVersionLevel >= 1} and {@code maxVersionLevel >= 1} and {@code maxVersionLevel >= minVersionLevel}.
+     *
+     * @param minVersionLevel   The minimum version level value.
+     * @param maxVersionLevel   The maximum version level value.
+     *
+     * @throws IllegalArgumentException   Raised when the condition described above is not met.
      */
-    FinalizedVersionRange(final short minVersionLevel, final short maxVersionLevel) {
+    public FinalizedVersionRange(final short minVersionLevel, final short maxVersionLevel) {
         if (minVersionLevel < 0 || maxVersionLevel < 0 || maxVersionLevel < minVersionLevel) {
-            throw new IllegalArgumentException(String.format("Expected minVersionLevel >= 0, maxVersionLevel >= 0 and" + " maxVersionLevel >= minVersionLevel, but received" + " minVersionLevel: %d, maxVersionLevel: %d", minVersionLevel, maxVersionLevel));
+            throw new IllegalArgumentException(
+                String.format(
+                    "Expected minVersionLevel >= 0, maxVersionLevel >= 0 and" +
+                    " maxVersionLevel >= minVersionLevel, but received" +
+                    " minVersionLevel: %d, maxVersionLevel: %d", minVersionLevel, maxVersionLevel));
         }
         this.minVersionLevel = minVersionLevel;
         this.maxVersionLevel = maxVersionLevel;
@@ -59,7 +65,8 @@ public class FinalizedVersionRange {
         }
 
         final FinalizedVersionRange that = (FinalizedVersionRange) other;
-        return this.minVersionLevel == that.minVersionLevel && this.maxVersionLevel == that.maxVersionLevel;
+        return this.minVersionLevel == that.minVersionLevel &&
+            this.maxVersionLevel == that.maxVersionLevel;
     }
 
     @Override
@@ -69,6 +76,9 @@ public class FinalizedVersionRange {
 
     @Override
     public String toString() {
-        return String.format("FinalizedVersionRange[min_version_level:%d, max_version_level:%d]", minVersionLevel, maxVersionLevel);
+        return String.format(
+            "FinalizedVersionRange[min_version_level:%d, max_version_level:%d]",
+            minVersionLevel,
+            maxVersionLevel);
     }
 }

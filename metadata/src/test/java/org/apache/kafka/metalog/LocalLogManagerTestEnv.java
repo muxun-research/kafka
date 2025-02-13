@@ -25,8 +25,10 @@ import org.apache.kafka.metalog.LocalLogManager.LocalRecordBatch;
 import org.apache.kafka.metalog.LocalLogManager.SharedLogData;
 import org.apache.kafka.raft.LeaderAndEpoch;
 import org.apache.kafka.server.common.ApiMessageAndVersion;
+import org.apache.kafka.server.common.KRaftVersion;
 import org.apache.kafka.snapshot.RawSnapshotReader;
 import org.apache.kafka.test.TestUtils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,7 +42,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 public class LocalLogManagerTestEnv implements AutoCloseable {
-    private static final Logger log = LoggerFactory.getLogger(LocalLogManagerTestEnv.class);
+    private static final Logger log =
+        LoggerFactory.getLogger(LocalLogManagerTestEnv.class);
 
     private final String clusterId;
 
@@ -68,8 +71,8 @@ public class LocalLogManagerTestEnv implements AutoCloseable {
     public static class Builder {
         private final int numManagers;
         private Optional<RawSnapshotReader> snapshotReader = Optional.empty();
-        private Consumer<SharedLogData> sharedLogDataInitializer = __ -> {
-        };
+        private Consumer<SharedLogData> sharedLogDataInitializer = __ -> { };
+        private KRaftVersion lastKRaftVersion = KRaftVersion.KRAFT_VERSION_0;
 
         public Builder(int numManagers) {
             this.numManagers = numManagers;
@@ -85,8 +88,20 @@ public class LocalLogManagerTestEnv implements AutoCloseable {
             return this;
         }
 
+        /**
+         * Used to mock the latest KRaft version that would be returned from RaftClient.kraftVersion()
+         */
+        public Builder setLastKRaftVersion(KRaftVersion kraftVersion) {
+            this.lastKRaftVersion = kraftVersion;
+            return this;
+        }
+
         public LocalLogManagerTestEnv build() {
-            return new LocalLogManagerTestEnv(numManagers, snapshotReader, sharedLogDataInitializer);
+            return new LocalLogManagerTestEnv(
+                numManagers,
+                snapshotReader,
+                sharedLogDataInitializer,
+                lastKRaftVersion);
         }
 
         public LocalLogManagerTestEnv buildWithMockListeners() {
@@ -107,7 +122,12 @@ public class LocalLogManagerTestEnv implements AutoCloseable {
         }
     }
 
-    private LocalLogManagerTestEnv(int numManagers, Optional<RawSnapshotReader> snapshotReader, Consumer<SharedLogData> sharedLogDataInitializer) {
+    private LocalLogManagerTestEnv(
+        int numManagers,
+        Optional<RawSnapshotReader> snapshotReader,
+        Consumer<SharedLogData> sharedLogDataInitializer,
+        KRaftVersion lastKRaftVersion
+    ) {
         clusterId = Uuid.randomUuid().toString();
         dir = TestUtils.tempDirectory();
         shared = new SharedLogData(snapshotReader);
@@ -115,10 +135,12 @@ public class LocalLogManagerTestEnv implements AutoCloseable {
         List<LocalLogManager> newLogManagers = new ArrayList<>(numManagers);
         try {
             for (int nodeId = 0; nodeId < numManagers; nodeId++) {
-                newLogManagers.add(new LocalLogManager(new LogContext(String.format("[LocalLogManager %d] ", nodeId)), nodeId, shared, String.format("LocalLogManager-%d_", nodeId)));
-            }
-            for (LocalLogManager logManager : newLogManagers) {
-                logManager.initialize();
+                newLogManagers.add(new LocalLogManager(
+                    new LogContext(String.format("[LocalLogManager %d] ", nodeId)),
+                    nodeId,
+                    shared,
+                    String.format("LocalLogManager-%d_", nodeId),
+                    lastKRaftVersion));
             }
         } catch (Throwable t) {
             for (LocalLogManager logManager : newLogManagers) {
@@ -139,7 +161,8 @@ public class LocalLogManagerTestEnv implements AutoCloseable {
     /**
      * Append some records to the log. This method is meant to be called before the
      * controllers are started, to simulate a pre-existing metadata log.
-     * @param records The records to be appended. Will be added in a single batch.
+     *
+     * @param records   The records to be appended. Will be added in a single batch.
      */
     public void appendInitialRecords(List<ApiMessageAndVersion> records) {
         int initialLeaderEpoch = 1;
@@ -169,7 +192,8 @@ public class LocalLogManagerTestEnv implements AutoCloseable {
                 int nodeId = logManager.nodeId().getAsInt();
                 if (leader.isLeader(nodeId)) {
                     if (result != null) {
-                        throw new RuntimeException("node " + nodeId + " thinks it's the leader, but so does " + result.leaderId());
+                        throw new RuntimeException("node " + nodeId +
+                            " thinks it's the leader, but so does " + result.leaderId());
                     }
                     result = leader;
                 }
@@ -184,6 +208,15 @@ public class LocalLogManagerTestEnv implements AutoCloseable {
 
     public List<LocalLogManager> logManagers() {
         return logManagers;
+    }
+
+    public Optional<LocalLogManager> activeLogManager() {
+        OptionalInt leader = shared.leaderAndEpoch().leaderId();
+        if (leader.isPresent()) {
+            return Optional.of(logManagers.get(leader.getAsInt()));
+        } else {
+            return Optional.empty();
+        }
     }
 
     public RawSnapshotReader waitForSnapshot(long committedOffset) throws InterruptedException {

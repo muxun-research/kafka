@@ -30,22 +30,27 @@ import java.util.Objects;
 
 /**
  * Represents the topics in the metadata image.
- * <p>
+ *
  * This class is thread-safe.
  */
 public final class TopicsImage {
-    public static final TopicsImage EMPTY = new TopicsImage(ImmutableMap.empty(), ImmutableMap.empty());
+    public static final TopicsImage EMPTY =  new TopicsImage(ImmutableMap.empty(), ImmutableMap.empty());
 
     private final ImmutableMap<Uuid, TopicImage> topicsById;
     private final ImmutableMap<String, TopicImage> topicsByName;
 
-    public TopicsImage(ImmutableMap<Uuid, TopicImage> topicsById, ImmutableMap<String, TopicImage> topicsByName) {
+    public TopicsImage(
+        ImmutableMap<Uuid, TopicImage> topicsById,
+        ImmutableMap<String, TopicImage> topicsByName
+    ) {
         this.topicsById = topicsById;
         this.topicsByName = topicsByName;
     }
 
     public TopicsImage including(TopicImage topic) {
-        return new TopicsImage(this.topicsById.updated(topic.id(), topic), this.topicsByName.updated(topic.name(), topic));
+        return new TopicsImage(
+            this.topicsById.updated(topic.id(), topic),
+            this.topicsByName.updated(topic.name(), topic));
     }
 
     public boolean isEmpty() {
@@ -62,8 +67,7 @@ public final class TopicsImage {
 
     public PartitionRegistration getPartition(Uuid id, int partitionId) {
         TopicImage topicImage = topicsById.get(id);
-        if (topicImage == null)
-            return null;
+        if (topicImage == null) return null;
         return topicImage.partitions().get(partitionId);
     }
 
@@ -83,10 +87,9 @@ public final class TopicsImage {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof TopicsImage))
-            return false;
-        TopicsImage other = (TopicsImage) o;
-        return topicsById.equals(other.topicsById) && topicsByName.equals(other.topicsByName);
+        if (!(o instanceof TopicsImage other)) return false;
+        return topicsById.equals(other.topicsById) &&
+            topicsByName.equals(other.topicsByName);
     }
 
     @Override
@@ -96,20 +99,20 @@ public final class TopicsImage {
 
     /**
      * Expose a view of this TopicsImage as a map from topic names to IDs.
-     * <p>
+     *
      * Like TopicsImage itself, this map is immutable.
      */
     public Map<String, Uuid> topicNameToIdView() {
-        return new TranslatedValueMapView<>(topicsByName, image -> image.id());
+        return new TranslatedValueMapView<>(topicsByName, TopicImage::id);
     }
 
     /**
      * Expose a view of this TopicsImage as a map from IDs to names.
-     * <p>
+     *
      * Like TopicsImage itself, this map is immutable.
      */
     public Map<Uuid, String> topicIdToNameView() {
-        return new TranslatedValueMapView<>(topicsById, image -> image.name());
+        return new TranslatedValueMapView<>(topicsById, TopicImage::name);
     }
 
     @Override

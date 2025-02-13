@@ -17,6 +17,7 @@
 package org.apache.kafka.connect.mirror;
 
 import org.apache.kafka.common.Configurable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,18 +25,25 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * Defines remote topics like "us-west.topic1". The separator is customizable and defaults to a period.
+ * Default implementation of {@link ReplicationPolicy} which prepends the source cluster alias to
+ * remote topic names.
+ * For example, if the source cluster alias is "us-west", topics created in the target cluster will be named
+ * us-west.&lt;TOPIC&gt;. The separator is customizable by setting {@link #SEPARATOR_CONFIG} and defaults to a period.
  */
 public class DefaultReplicationPolicy implements ReplicationPolicy, Configurable {
-
+    
     private static final Logger log = LoggerFactory.getLogger(DefaultReplicationPolicy.class);
 
     // In order to work with various metrics stores, we allow custom separators.
     public static final String SEPARATOR_CONFIG = MirrorClientConfig.REPLICATION_POLICY_SEPARATOR;
     public static final String SEPARATOR_DEFAULT = ".";
 
+    public static final String INTERNAL_TOPIC_SEPARATOR_ENABLED_CONFIG = MirrorClientConfig.INTERNAL_TOPIC_SEPARATOR_ENABLED;
+    public static final Boolean INTERNAL_TOPIC_SEPARATOR_ENABLED_DEFAULT = true;
+
     private String separator = SEPARATOR_DEFAULT;
     private Pattern separatorPattern = Pattern.compile(Pattern.quote(SEPARATOR_DEFAULT));
+    private boolean isInternalTopicSeparatorEnabled = true;
 
     @Override
     public void configure(Map<String, ?> props) {
@@ -43,6 +51,13 @@ public class DefaultReplicationPolicy implements ReplicationPolicy, Configurable
             separator = (String) props.get(SEPARATOR_CONFIG);
             log.info("Using custom remote topic separator: '{}'", separator);
             separatorPattern = Pattern.compile(Pattern.quote(separator));
+
+            if (props.containsKey(INTERNAL_TOPIC_SEPARATOR_ENABLED_CONFIG)) {
+                isInternalTopicSeparatorEnabled = Boolean.parseBoolean(props.get(INTERNAL_TOPIC_SEPARATOR_ENABLED_CONFIG).toString());
+                if (!isInternalTopicSeparatorEnabled) {
+                    log.warn("Disabling custom topic separator for internal topics; will use '.' instead of '{}'", separator);
+                }
+            }
         }
     }
 
@@ -72,17 +87,20 @@ public class DefaultReplicationPolicy implements ReplicationPolicy, Configurable
         }
     }
 
+    private String internalSeparator() {
+        return isInternalTopicSeparatorEnabled ? separator : ".";
+    }
     private String internalSuffix() {
-        return separator + "internal";
+        return internalSeparator() + "internal";
     }
 
     private String checkpointsTopicSuffix() {
-        return separator + "checkpoints" + internalSuffix();
+        return internalSeparator() + "checkpoints" + internalSuffix();
     }
 
     @Override
     public String offsetSyncsTopic(String clusterAlias) {
-        return "mm2-offset-syncs" + separator + clusterAlias + internalSuffix();
+        return "mm2-offset-syncs" + internalSeparator() + clusterAlias + internalSuffix();
     }
 
     @Override
@@ -92,11 +110,11 @@ public class DefaultReplicationPolicy implements ReplicationPolicy, Configurable
 
     @Override
     public boolean isCheckpointsTopic(String topic) {
-        return topic.endsWith(checkpointsTopicSuffix());
+        return  topic.endsWith(checkpointsTopicSuffix());
     }
 
     @Override
     public boolean isMM2InternalTopic(String topic) {
-        return topic.endsWith(internalSuffix());
+        return  topic.startsWith("mm2") && topic.endsWith(internalSuffix()) || isCheckpointsTopic(topic);
     }
 }

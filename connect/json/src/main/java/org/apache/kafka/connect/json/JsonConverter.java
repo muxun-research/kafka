@@ -16,31 +16,46 @@
  */
 package org.apache.kafka.connect.json;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.kafka.common.cache.Cache;
 import org.apache.kafka.common.cache.LRUCache;
 import org.apache.kafka.common.cache.SynchronizedCache;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.errors.SerializationException;
+import org.apache.kafka.common.utils.AppInfoParser;
 import org.apache.kafka.common.utils.Utils;
+import org.apache.kafka.connect.components.Versioned;
+import org.apache.kafka.connect.data.ConnectSchema;
 import org.apache.kafka.connect.data.Date;
-import org.apache.kafka.connect.data.*;
+import org.apache.kafka.connect.data.Decimal;
+import org.apache.kafka.connect.data.Field;
+import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.SchemaAndValue;
+import org.apache.kafka.connect.data.SchemaBuilder;
+import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.connect.data.Time;
+import org.apache.kafka.connect.data.Timestamp;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.storage.Converter;
 import org.apache.kafka.connect.storage.ConverterType;
 import org.apache.kafka.connect.storage.HeaderConverter;
 import org.apache.kafka.connect.storage.StringConverterConfig;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
-import java.util.*;
-
-import static org.apache.kafka.common.utils.Utils.mkSet;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Implementation of {@link Converter} and {@link HeaderConverter} that uses JSON to store schemas and objects. By
@@ -49,7 +64,7 @@ import static org.apache.kafka.common.utils.Utils.mkSet;
  * <p>
  * This implementation currently does nothing with the topic names or header keys.
  */
-public class JsonConverter implements Converter, HeaderConverter {
+public class JsonConverter implements Converter, HeaderConverter, Versioned {
 
     private static final Map<Schema.Type, JsonToConnectTypeConverter> TO_CONNECT_CONVERTERS = new EnumMap<>(Schema.Type.class);
 
@@ -101,7 +116,8 @@ public class JsonConverter implements Converter, HeaderConverter {
                         throw new DataException("Found invalid map entry instead of array tuple: " + entry.getNodeType());
                     if (entry.size() != 2)
                         throw new DataException("Found invalid map entry, expected length 2 but found :" + entry.size());
-                    result.put(convertToConnect(keySchema, entry.get(0), config), convertToConnect(valueSchema, entry.get(1), config));
+                    result.put(convertToConnect(keySchema, entry.get(0), config),
+                            convertToConnect(valueSchema, entry.get(1), config));
                 }
             }
             return result;
@@ -127,16 +143,15 @@ public class JsonConverter implements Converter, HeaderConverter {
     // names specified in the field
     private static final HashMap<String, LogicalTypeConverter> LOGICAL_CONVERTERS = new HashMap<>();
 
-    private static final JsonNodeFactory JSON_NODE_FACTORY = JsonNodeFactory.withExactBigDecimals(true);
+    private static final JsonNodeFactory JSON_NODE_FACTORY = new JsonNodeFactory(true);
 
     static {
         LOGICAL_CONVERTERS.put(Decimal.LOGICAL_NAME, new LogicalTypeConverter() {
             @Override
             public JsonNode toJson(final Schema schema, final Object value, final JsonConverterConfig config) {
-                if (!(value instanceof BigDecimal))
+                if (!(value instanceof BigDecimal decimal))
                     throw new DataException("Invalid type for Decimal, expected BigDecimal but was " + value.getClass());
 
-                final BigDecimal decimal = (BigDecimal) value;
                 switch (config.decimalFormat()) {
                     case NUMERIC:
                         return JSON_NODE_FACTORY.numberNode(decimal);
@@ -149,8 +164,7 @@ public class JsonConverter implements Converter, HeaderConverter {
 
             @Override
             public Object toConnect(final Schema schema, final JsonNode value) {
-                if (value.isNumber())
-                    return value.decimalValue();
+                if (value.isNumber()) return value.decimalValue();
                 if (value.isBinary() || value.isTextual()) {
                     try {
                         return Decimal.toLogical(schema, value.binaryValue());
@@ -220,12 +234,32 @@ public class JsonConverter implements Converter, HeaderConverter {
     private final JsonDeserializer deserializer;
 
     public JsonConverter() {
-        serializer = new JsonSerializer(mkSet(), JSON_NODE_FACTORY);
+        this(true);
+    }
 
-        deserializer = new JsonDeserializer(mkSet(
+    /**
+     * Creates a JsonConvert initializing serializer and deserializer.
+     *
+     * @param enableBlackbird permits to enable/disable the registration of Jackson Blackbird module.
+     * <p>
+     * NOTE: This is visible only for testing
+     */
+    public JsonConverter(boolean enableBlackbird) {
+        serializer = new JsonSerializer(
+            Set.of(),
+            JSON_NODE_FACTORY,
+            enableBlackbird
+        );
+
+        deserializer = new JsonDeserializer(
+            Set.of(
                 // this ensures that the JsonDeserializer maintains full precision on
                 // floating point numbers that cannot fit into float64
-                DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS), JSON_NODE_FACTORY);
+                DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS
+            ),
+            JSON_NODE_FACTORY,
+            enableBlackbird
+        );
     }
 
     // visible for testing
@@ -236,6 +270,11 @@ public class JsonConverter implements Converter, HeaderConverter {
     // visible for testing
     long sizeOfToConnectSchemaCache() {
         return toConnectSchemaCache.size();
+    }
+
+    @Override
+    public String version() {
+        return AppInfoParser.getVersion();
     }
 
     @Override
@@ -307,7 +346,8 @@ public class JsonConverter implements Converter, HeaderConverter {
         }
 
         if (config.schemasEnabled() && (!jsonValue.isObject() || jsonValue.size() != 2 || !jsonValue.has(JsonSchema.ENVELOPE_SCHEMA_FIELD_NAME) || !jsonValue.has(JsonSchema.ENVELOPE_PAYLOAD_FIELD_NAME)))
-            throw new DataException("JsonConverter with schemas.enable requires \"schema\" and \"payload\" fields and may not contain additional fields." + " If you are trying to deserialize plain JSON data, set schemas.enable=false in your converter configuration.");
+            throw new DataException("JsonConverter with schemas.enable requires \"schema\" and \"payload\" fields and may not contain additional fields." +
+                    " If you are trying to deserialize plain JSON data, set schemas.enable=false in your converter configuration.");
 
         // The deserialized data should either be an envelope object containing the schema and the payload or the schema
         // was stripped during serialization and we need to fill in an all-encompassing schema.
@@ -319,7 +359,10 @@ public class JsonConverter implements Converter, HeaderConverter {
         }
 
         Schema schema = asConnectSchema(jsonValue.get(JsonSchema.ENVELOPE_SCHEMA_FIELD_NAME));
-        return new SchemaAndValue(schema, convertToConnect(schema, jsonValue.get(JsonSchema.ENVELOPE_PAYLOAD_FIELD_NAME), config));
+        return new SchemaAndValue(
+                schema,
+                convertToConnect(schema, jsonValue.get(JsonSchema.ENVELOPE_PAYLOAD_FIELD_NAME), config)
+        );
     }
 
     public ObjectNode asJsonSchema(Schema schema) {
@@ -521,7 +564,7 @@ public class JsonConverter implements Converter, HeaderConverter {
      * Convert this object, in the {@link org.apache.kafka.connect.data} format, into a JSON object with an envelope
      * object containing schema and payload fields.
      * @param schema the schema for the data
-     * @param value  the value
+     * @param value the value
      * @return JsonNode-encoded version
      */
     private JsonNode convertToJsonWithEnvelope(Schema schema, Object value) {
@@ -660,7 +703,7 @@ public class JsonConverter implements Converter, HeaderConverter {
                     return schema.defaultValue(); // any logical type conversions should already have been applied
                 if (schema.isOptional())
                     return null;
-                throw new DataException("Invalid null value for required " + schemaType + " field");
+                throw new DataException("Invalid null value for required " + schemaType +  " field");
             }
         } else {
             switch (jsonValue.getNodeType()) {
@@ -714,7 +757,6 @@ public class JsonConverter implements Converter, HeaderConverter {
 
     private interface LogicalTypeConverter {
         JsonNode toJson(Schema schema, Object value, JsonConverterConfig config);
-
         Object toConnect(Schema schema, JsonNode value);
     }
 }

@@ -19,10 +19,12 @@ package org.apache.kafka.raft;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Timer;
+
 import org.slf4j.Logger;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -30,127 +32,148 @@ import java.util.Set;
  * is shutting down or because it has encountered a soft failure of some sort.
  * No writes are accepted in this state and we are not permitted to vote for
  * any other candidate in this epoch.
- * <p>
+ *
  * A resigned leader may initiate a new election by sending `EndQuorumEpoch`
  * requests to all of the voters. This state tracks delivery of this request
  * in order to prevent unnecessary retries.
- * <p>
+ *
  * A voter will remain in the `Resigned` state until we either learn about
  * another election, or our own election timeout expires and we become a
  * Candidate.
  */
 public class ResignedState implements EpochState {
-	private final int localId;
-	private final int epoch;
-	private final Set<Integer> voters;
-	private final long electionTimeoutMs;
-	private final Set<Integer> unackedVoters;
-	private final Timer electionTimer;
-	private final List<Integer> preferredSuccessors;
-	private final Logger log;
+    private final int localId;
+    private final int epoch;
+    private final Endpoints endpoints;
+    private final Set<Integer> voters;
+    private final long electionTimeoutMs;
+    private final Set<Integer> unackedVoters;
+    private final Timer electionTimer;
+    private final List<ReplicaKey> preferredSuccessors;
+    private final Logger log;
 
-	public ResignedState(
-			Time time,
-			int localId,
-			int epoch,
-			Set<Integer> voters,
-			long electionTimeoutMs,
-			List<Integer> preferredSuccessors,
-			LogContext logContext
-	) {
-		this.localId = localId;
-		this.epoch = epoch;
-		this.voters = voters;
-		this.unackedVoters = new HashSet<>(voters);
-		this.unackedVoters.remove(localId);
-		this.electionTimeoutMs = electionTimeoutMs;
-		this.electionTimer = time.timer(electionTimeoutMs);
-		this.preferredSuccessors = preferredSuccessors;
-		this.log = logContext.logger(ResignedState.class);
-	}
+    public ResignedState(
+        Time time,
+        int localId,
+        int epoch,
+        Set<Integer> voters,
+        long electionTimeoutMs,
+        List<ReplicaKey> preferredSuccessors,
+        Endpoints endpoints,
+        LogContext logContext
+    ) {
+        this.localId = localId;
+        this.epoch = epoch;
+        this.voters = voters;
+        this.unackedVoters = new HashSet<>(voters);
+        this.unackedVoters.remove(localId);
+        this.electionTimeoutMs = electionTimeoutMs;
+        this.electionTimer = time.timer(electionTimeoutMs);
+        this.preferredSuccessors = preferredSuccessors;
+        this.endpoints = endpoints;
+        this.log = logContext.logger(ResignedState.class);
+    }
 
-	@Override
-	public ElectionState election() {
-		return ElectionState.withElectedLeader(epoch, localId, voters);
-	}
+    @Override
+    public ElectionState election() {
+        return ElectionState.withElectedLeader(epoch, localId, Optional.empty(), voters);
+    }
 
-	@Override
-	public int epoch() {
-		return epoch;
-	}
+    @Override
+    public int epoch() {
+        return epoch;
+    }
 
-	/**
-	 * Get the set of voters which have yet to acknowledge the resignation.
-	 * This node will send `EndQuorumEpoch` requests to this set until these
-	 * voters acknowledge the request or we transition to another state.
-	 * @return the set of unacknowledged voters
-	 */
-	public Set<Integer> unackedVoters() {
-		return unackedVoters;
-	}
+    @Override
+    public Endpoints leaderEndpoints() {
+        return endpoints;
+    }
 
-	/**
-	 * Invoked after receiving a successful `EndQuorumEpoch` response. This
-	 * is in order to prevent unnecessary retries.
-	 * @param voterId the ID of the voter that send the successful response
-	 */
-	public void acknowledgeResignation(int voterId) {
-		if (!voters.contains(voterId)) {
-			throw new IllegalArgumentException("Attempt to acknowledge delivery of `EndQuorumEpoch` " +
-					"by a non-voter " + voterId);
-		}
-		unackedVoters.remove(voterId);
-	}
+    /**
+     * Get the set of voters which have yet to acknowledge the resignation.
+     * This node will send `EndQuorumEpoch` requests to this set until these
+     * voters acknowledge the request or we transition to another state.
+     *
+     * @return the set of unacknowledged voters
+     */
+    public Set<Integer> unackedVoters() {
+        return unackedVoters;
+    }
 
-	/**
-	 * Check whether the timeout has expired.
-	 * @param currentTimeMs current time in milliseconds
-	 * @return true if the timeout has expired, false otherwise
-	 */
-	public boolean hasElectionTimeoutExpired(long currentTimeMs) {
-		electionTimer.update(currentTimeMs);
-		return electionTimer.isExpired();
-	}
+    /**
+     * Invoked after receiving a successful `EndQuorumEpoch` response. This
+     * is in order to prevent unnecessary retries.
+     *
+     * @param voterId the ID of the voter that send the successful response
+     */
+    public void acknowledgeResignation(int voterId) {
+        if (!voters.contains(voterId)) {
+            throw new IllegalArgumentException("Attempt to acknowledge delivery of `EndQuorumEpoch` " +
+                "by a non-voter " + voterId);
+        }
+        unackedVoters.remove(voterId);
+    }
 
-	/**
-	 * Check the time remaining until the timeout expires.
-	 * @param currentTimeMs current time in milliseconds
-	 * @return the duration in milliseconds from the current time before the timeout expires
-	 */
-	public long remainingElectionTimeMs(long currentTimeMs) {
-		electionTimer.update(currentTimeMs);
-		return electionTimer.remainingMs();
-	}
+    /**
+     * Check whether the timeout has expired.
+     *
+     * @param currentTimeMs current time in milliseconds
+     * @return true if the timeout has expired, false otherwise
+     */
+    public boolean hasElectionTimeoutExpired(long currentTimeMs) {
+        electionTimer.update(currentTimeMs);
+        return electionTimer.isExpired();
+    }
 
-	public List<Integer> preferredSuccessors() {
-		return preferredSuccessors;
-	}
+    /**
+     * Check the time remaining until the timeout expires.
+     *
+     * @param currentTimeMs current time in milliseconds
+     * @return the duration in milliseconds from the current time before the timeout expires
+     */
+    public long remainingElectionTimeMs(long currentTimeMs) {
+        electionTimer.update(currentTimeMs);
+        return electionTimer.remainingMs();
+    }
 
-	@Override
-	public boolean canGrantVote(int candidateId, boolean isLogUpToDate) {
-		log.debug("Rejecting vote request from candidate {} since we have resigned as candidate/leader in epoch {}",
-				candidateId, epoch);
-		return false;
-	}
+    public List<ReplicaKey> preferredSuccessors() {
+        return preferredSuccessors;
+    }
 
-	@Override
-	public String name() {
-		return "Resigned";
-	}
+    @Override
+    public boolean canGrantVote(ReplicaKey replicaKey, boolean isLogUpToDate, boolean isPreVote) {
+        if (isPreVote && isLogUpToDate) {
+            return true;
+        }
+        log.debug(
+            "Rejecting Vote request (preVote={}) from replica ({}) since we are in ResignedState in epoch {} " +
+                "and the replica's log is up-to-date={}",
+            isPreVote,
+            replicaKey,
+            epoch,
+            isLogUpToDate
+        );
 
-	@Override
-	public String toString() {
-		return "ResignedState(" +
-				"localId=" + localId +
-				", epoch=" + epoch +
-				", voters=" + voters +
-				", electionTimeoutMs=" + electionTimeoutMs +
-				", unackedVoters=" + unackedVoters +
-				", preferredSuccessors=" + preferredSuccessors +
-				')';
-	}
+        return false;
+    }
 
-	@Override
-	public void close() {
-	}
+    @Override
+    public String name() {
+        return "Resigned";
+    }
+
+    @Override
+    public String toString() {
+        return "ResignedState(" +
+            "localId=" + localId +
+            ", epoch=" + epoch +
+            ", voters=" + voters +
+            ", electionTimeoutMs=" + electionTimeoutMs +
+            ", unackedVoters=" + unackedVoters +
+            ", preferredSuccessors=" + preferredSuccessors +
+            ')';
+    }
+
+    @Override
+    public void close() {}
 }

@@ -124,12 +124,13 @@ public class FileRecords extends AbstractRecords implements Closeable {
     /**
      * Return a slice of records from this instance, which is a view into this set starting from the given position
      * and with the given size limit.
-     * <p>
+     *
      * If the size is beyond the end of the file, the end will be based on the size of the file at the time of the read.
-     * <p>
+     *
      * If this message set is already sliced, the position will be taken relative to that slicing.
+     *
      * @param position The start position to begin the read from
-     * @param size     The number of bytes after the start position to include
+     * @param size The number of bytes after the start position to include
      * @return A sliced wrapper on this message set limited based on the given position and size
      */
     public FileRecords slice(int position, int size) throws IOException {
@@ -141,11 +142,12 @@ public class FileRecords extends AbstractRecords implements Closeable {
     /**
      * Return a slice of records from this instance, the difference with {@link FileRecords#slice(int, int)} is
      * that the position is not necessarily on an offset boundary.
-     * <p>
+     *
      * This method is reserved for cases where offset alignment is not necessary, such as in the replication of raft
      * snapshots.
+     *
      * @param position The start position to begin the read from
-     * @param size     The number of bytes after the start position to include
+     * @param size The number of bytes after the start position to include
      * @return A unaligned slice of records on this message set limited based on the given position and size
      */
     public UnalignedFileRecords sliceUnaligned(int position, int size) {
@@ -159,7 +161,9 @@ public class FileRecords extends AbstractRecords implements Closeable {
 
         if (position < 0)
             throw new IllegalArgumentException("Invalid position: " + position + " in read from " + this);
-        if (position > currentSizeInBytes - start)
+        // position should always be relative to the start of the file hence compare with file size
+        // to verify if the position is within the file.
+        if (position > currentSizeInBytes)
             throw new IllegalArgumentException("Slice from position " + position + " exceeds end position of " + this);
         if (size < 0)
             throw new IllegalArgumentException("Invalid size: " + size + " in read from " + this);
@@ -180,7 +184,8 @@ public class FileRecords extends AbstractRecords implements Closeable {
      */
     public int append(MemoryRecords records) throws IOException {
         if (records.sizeInBytes() > Integer.MAX_VALUE - size.get())
-            throw new IllegalArgumentException("Append of size " + records.sizeInBytes() + " bytes is too large for segment with current file position at " + size.get());
+            throw new IllegalArgumentException("Append of size " + records.sizeInBytes() +
+                    " bytes is too large for segment with current file position at " + size.get());
 
         int written = records.writeFullyTo(channel);
         size.getAndAdd(written);
@@ -281,7 +286,7 @@ public class FileRecords extends AbstractRecords implements Closeable {
             // are not enough available bytes in the response to read it fully. Note that this is
             // only possible prior to KIP-74, after which the broker was changed to always return at least
             // one full record batch, even if it requires exceeding the max fetch size requested by the client.
-            return new ConvertedRecords<>(this, RecordConversionStats.EMPTY);
+            return new ConvertedRecords<>(this, RecordValidationStats.EMPTY);
         } else {
             return convertedRecords;
         }
@@ -292,7 +297,9 @@ public class FileRecords extends AbstractRecords implements Closeable {
         long newSize = Math.min(channel.size(), end) - start;
         int oldSize = sizeInBytes();
         if (newSize < oldSize)
-            throw new KafkaException(String.format("Size of FileRecords %s has been truncated during write: old size %d, new size %d", file.getAbsolutePath(), oldSize, newSize));
+            throw new KafkaException(String.format(
+                    "Size of FileRecords %s has been truncated during write: old size %d, new size %d",
+                    file.getAbsolutePath(), oldSize, newSize));
 
         long position = start + offset;
         int count = Math.min(length, oldSize - offset);
@@ -301,17 +308,18 @@ public class FileRecords extends AbstractRecords implements Closeable {
     }
 
     /**
-     * Search forward for the file position of the last offset that is greater than or equal to the target offset
-     * and return its physical position and the size of the message (including log overhead) at the returned offset. If
-     * no such offsets are found, return null.
-     * @param targetOffset     The offset to search for.
+     * Search forward for the file position of the message batch whose last offset that is greater
+     * than or equal to the target offset. If no such batch is found, return null.
+     *
+     * @param targetOffset The offset to search for.
      * @param startingPosition The starting position in the file to begin searching from.
+     * @return the batch's base offset, its physical position, and its size (including log overhead)
      */
     public LogOffsetPosition searchForOffsetWithSize(long targetOffset, int startingPosition) {
         for (FileChannelRecordBatch batch : batchesFrom(startingPosition)) {
             long offset = batch.lastOffset();
             if (offset >= targetOffset)
-                return new LogOffsetPosition(offset, batch.position(), batch.sizeInBytes());
+                return new LogOffsetPosition(batch.baseOffset(), batch.position(), batch.sizeInBytes());
         }
         return null;
     }
@@ -349,18 +357,18 @@ public class FileRecords extends AbstractRecords implements Closeable {
      */
     public TimestampAndOffset largestTimestampAfter(int startingPosition) {
         long maxTimestamp = RecordBatch.NO_TIMESTAMP;
-        long offsetOfMaxTimestamp = -1L;
+        long shallowOffsetOfMaxTimestamp = -1L;
         int leaderEpochOfMaxTimestamp = RecordBatch.NO_PARTITION_LEADER_EPOCH;
 
         for (RecordBatch batch : batchesFrom(startingPosition)) {
             long timestamp = batch.maxTimestamp();
             if (timestamp > maxTimestamp) {
                 maxTimestamp = timestamp;
-                offsetOfMaxTimestamp = batch.lastOffset();
+                shallowOffsetOfMaxTimestamp = batch.lastOffset();
                 leaderEpochOfMaxTimestamp = batch.partitionLeaderEpoch();
             }
         }
-        return new TimestampAndOffset(maxTimestamp, offsetOfMaxTimestamp,
+        return new TimestampAndOffset(maxTimestamp, shallowOffsetOfMaxTimestamp,
                 maybeLeaderEpoch(leaderEpochOfMaxTimestamp));
     }
 
@@ -382,7 +390,11 @@ public class FileRecords extends AbstractRecords implements Closeable {
 
     @Override
     public String toString() {
-        return "FileRecords(size=" + sizeInBytes() + ", file=" + file + ", start=" + start + ", end=" + end + ")";
+        return "FileRecords(size=" + sizeInBytes() +
+                ", file=" + file +
+                ", start=" + start +
+                ", end=" + end +
+                ")";
     }
 
     /**

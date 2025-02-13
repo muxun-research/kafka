@@ -16,19 +16,12 @@
  */
 package org.apache.kafka.connect.integration;
 
-import org.apache.http.HttpHost;
-import org.apache.http.HttpRequest;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpPost;
-import org.apache.http.entity.StringEntity;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.common.config.types.Password;
-import org.apache.kafka.common.network.Mode;
+import org.apache.kafka.common.network.ConnectionMode;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.connect.runtime.Herder;
+import org.apache.kafka.connect.runtime.MockConnectMetrics;
 import org.apache.kafka.connect.runtime.WorkerConfig;
 import org.apache.kafka.connect.runtime.distributed.DistributedConfig;
 import org.apache.kafka.connect.runtime.distributed.NotLeaderException;
@@ -41,36 +34,55 @@ import org.apache.kafka.connect.runtime.rest.entities.ConnectorInfo;
 import org.apache.kafka.connect.runtime.rest.entities.ConnectorType;
 import org.apache.kafka.connect.runtime.rest.util.SSLUtils;
 import org.apache.kafka.connect.util.Callback;
-import org.apache.kafka.test.IntegrationTest;
 import org.apache.kafka.test.TestSslUtils;
 import org.apache.kafka.test.TestUtils;
+
+import org.apache.http.HttpHost;
+import org.apache.http.HttpRequest;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.experimental.categories.Category;
-import org.junit.runner.RunWith;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
-import org.mockito.junit.MockitoJUnitRunner;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
-import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+
+import javax.net.ssl.SSLContext;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.when;
 
-@RunWith(MockitoJUnitRunner.StrictStubs.class)
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)
 @SuppressWarnings("unchecked")
-@Category(IntegrationTest.class)
+@Tag("integration")
 public class RestForwardingIntegrationTest {
 
     private Map<String, Object> sslConfig;
@@ -83,23 +95,30 @@ public class RestForwardingIntegrationTest {
     @Mock
     private Herder leaderHerder;
 
-    private SslContextFactory factory;
+    private SslContextFactory.Client factory;
     private CloseableHttpClient httpClient;
     private Collection<CloseableHttpResponse> responses;
 
-    @Before
+    @BeforeEach
     public void setUp() throws IOException, GeneralSecurityException {
-        sslConfig = TestSslUtils.createSslConfig(false, true, Mode.SERVER, TestUtils.tempFile(), "testCert");
+        sslConfig = TestSslUtils.createSslConfig(false, true, ConnectionMode.SERVER, TestUtils.tempFile(), "testCert");
         responses = new ArrayList<>();
     }
 
-    @After
+    @AfterEach
     public void tearDown() throws IOException {
-        for (CloseableHttpResponse response : responses) {
+        for (CloseableHttpResponse response: responses) {
             response.close();
         }
         AtomicReference<Throwable> firstException = new AtomicReference<>();
-        Utils.closeAllQuietly(firstException, "clientsAndServers", httpClient, followerServer != null ? followerServer::stop : null, leaderServer != null ? leaderServer::stop : null, factory != null ? factory::stop : null);
+        Utils.closeAllQuietly(
+                firstException,
+                "clientsAndServers",
+                httpClient,
+                followerServer != null ? followerServer::stop : null,
+                leaderServer != null ? leaderServer::stop : null,
+                factory != null ? factory::stop : null
+        );
         if (firstException.get() != null) {
             throw new RuntimeException("Unable to cleanly close resources", firstException.get());
         }
@@ -150,6 +169,7 @@ public class RestForwardingIntegrationTest {
         followerServer = new ConnectRestServer(null, followerClient, followerConfig.originals());
         followerServer.initializeServer();
         when(followerHerder.plugins()).thenReturn(plugins);
+        doReturn(new MockConnectMetrics()).when(followerHerder).connectMetrics();
         followerServer.initializeResources(followerHerder);
 
         // Leader worker setup
@@ -157,13 +177,16 @@ public class RestForwardingIntegrationTest {
         leaderServer = new ConnectRestServer(null, leaderClient, leaderConfig.originals());
         leaderServer.initializeServer();
         when(leaderHerder.plugins()).thenReturn(plugins);
+        doReturn(new MockConnectMetrics()).when(leaderHerder).connectMetrics();
         leaderServer.initializeResources(leaderHerder);
 
         // External client setup
         factory = SSLUtils.createClientSideSslContextFactory(followerConfig);
         factory.start();
         SSLContext ssl = factory.getSslContext();
-        httpClient = HttpClients.custom().setSSLContext(ssl).build();
+        httpClient = HttpClients.custom()
+                .setSSLContext(ssl)
+                .build();
 
         // Follower will forward to the leader
         URI leaderUrl = leaderServer.advertisedUrl();
@@ -172,7 +195,8 @@ public class RestForwardingIntegrationTest {
         doAnswer(invocation -> {
             followerCallbackCaptor.getValue().onCompletion(forwardException, null);
             return null;
-        }).when(followerHerder).putConnectorConfig(any(), any(), anyBoolean(), followerCallbackCaptor.capture());
+        }).when(followerHerder)
+                .putConnectorConfig(any(), any(), isNull(), anyBoolean(), followerCallbackCaptor.capture());
 
         // Leader will reply
         ConnectorInfo connectorInfo = new ConnectorInfo("blah", Collections.emptyMap(), Collections.emptyList(), ConnectorType.SOURCE);
@@ -181,12 +205,16 @@ public class RestForwardingIntegrationTest {
         doAnswer(invocation -> {
             leaderCallbackCaptor.getValue().onCompletion(null, leaderAnswer);
             return null;
-        }).when(leaderHerder).putConnectorConfig(any(), any(), anyBoolean(), leaderCallbackCaptor.capture());
+        }).when(leaderHerder)
+                .putConnectorConfig(any(), any(), isNull(), anyBoolean(), leaderCallbackCaptor.capture());
 
         // Client makes request to the follower
         URI followerUrl = followerServer.advertisedUrl();
         HttpPost request = new HttpPost("/connectors");
-        String jsonBody = "{" + "\"name\": \"blah\"," + "\"config\": {}" + "}";
+        String jsonBody = "{" +
+                "\"name\": \"blah\"," +
+                "\"config\": {}" +
+                "}";
         StringEntity entity = new StringEntity(jsonBody, StandardCharsets.UTF_8.name());
         entity.setContentType("application/json");
         request.setEntity(entity);

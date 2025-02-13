@@ -20,7 +20,11 @@ import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.producer.*;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.Producer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
@@ -37,22 +41,42 @@ import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.DataException;
-import org.apache.kafka.connect.runtime.*;
+import org.apache.kafka.connect.runtime.Herder;
+import org.apache.kafka.connect.runtime.RestartRequest;
+import org.apache.kafka.connect.runtime.SessionKey;
+import org.apache.kafka.connect.runtime.TargetState;
+import org.apache.kafka.connect.runtime.WorkerConfig;
+import org.apache.kafka.connect.runtime.WorkerConfigTransformer;
 import org.apache.kafka.connect.runtime.distributed.ConnectProtocolCompatibility;
 import org.apache.kafka.connect.runtime.distributed.DistributedConfig;
 import org.apache.kafka.connect.util.Callback;
-import org.apache.kafka.connect.util.*;
+import org.apache.kafka.connect.util.ConnectUtils;
+import org.apache.kafka.connect.util.ConnectorTaskId;
+import org.apache.kafka.connect.util.KafkaBasedLog;
+import org.apache.kafka.connect.util.TopicAdmin;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.crypto.spec.SecretKeySpec;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
+
+import javax.crypto.spec.SecretKeySpec;
 
 import static org.apache.kafka.connect.runtime.TargetState.PAUSED;
 import static org.apache.kafka.connect.runtime.TargetState.STOPPED;
@@ -168,7 +192,7 @@ import static org.apache.kafka.connect.util.ConnectUtils.className;
  * rebalance must be deferred.
  * </p>
  */
-public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore implements ConfigBackingStore {
+public final class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore implements ConfigBackingStore {
     private static final Logger log = LoggerFactory.getLogger(KafkaConfigBackingStore.class);
 
     public static final String TARGET_STATE_PREFIX = "target-state-";
@@ -207,15 +231,30 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
     // isn't ideal, we use this approach because it avoids any potential problems with schema evolution or
     // converter/serializer changes causing keys to change. We need to absolutely ensure that the keys remain precisely
     // the same.
-    public static final Schema CONNECTOR_CONFIGURATION_V0 = SchemaBuilder.struct().field("properties", SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.OPTIONAL_STRING_SCHEMA).build()).build();
+    public static final Schema CONNECTOR_CONFIGURATION_V0 = SchemaBuilder.struct()
+            .field("properties", SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.OPTIONAL_STRING_SCHEMA).build())
+            .build();
     public static final Schema TASK_CONFIGURATION_V0 = CONNECTOR_CONFIGURATION_V0;
-    public static final Schema CONNECTOR_TASKS_COMMIT_V0 = SchemaBuilder.struct().field("tasks", Schema.INT32_SCHEMA).build();
-    public static final Schema TARGET_STATE_V0 = SchemaBuilder.struct().field("state", Schema.STRING_SCHEMA).build();
-    public static final Schema TARGET_STATE_V1 = SchemaBuilder.struct().field("state", Schema.STRING_SCHEMA).field("state.v2", Schema.OPTIONAL_STRING_SCHEMA).build();
-    public static final Schema TASK_COUNT_RECORD_V0 = SchemaBuilder.struct().field("task-count", Schema.INT32_SCHEMA).build();
+    public static final Schema CONNECTOR_TASKS_COMMIT_V0 = SchemaBuilder.struct()
+            .field("tasks", Schema.INT32_SCHEMA)
+            .build();
+    public static final Schema TARGET_STATE_V0 = SchemaBuilder.struct()
+            .field("state", Schema.STRING_SCHEMA)
+            .build();
+    public static final Schema TARGET_STATE_V1 = SchemaBuilder.struct()
+            .field("state", Schema.STRING_SCHEMA)
+            .field("state.v2", Schema.OPTIONAL_STRING_SCHEMA)
+            .build();
+    public static final Schema TASK_COUNT_RECORD_V0 = SchemaBuilder.struct()
+            .field("task-count", Schema.INT32_SCHEMA)
+            .build();
     // The key is logically a byte array, but we can't use the JSON converter to (de-)serialize that without a schema.
     // So instead, we base 64-encode it before serializing and decode it after deserializing.
-    public static final Schema SESSION_KEY_V0 = SchemaBuilder.struct().field("key", Schema.STRING_SCHEMA).field("algorithm", Schema.STRING_SCHEMA).field("creation-timestamp", Schema.INT64_SCHEMA).build();
+    public static final Schema SESSION_KEY_V0 = SchemaBuilder.struct()
+            .field("key", Schema.STRING_SCHEMA)
+            .field("algorithm", Schema.STRING_SCHEMA)
+            .field("creation-timestamp", Schema.INT64_SCHEMA)
+            .build();
 
     public static final String RESTART_PREFIX = "restart-connector-";
 
@@ -227,7 +266,18 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
     public static final boolean INCLUDE_TASKS_DEFAULT = false;
     public static final String ONLY_FAILED_FIELD_NAME = "only-failed";
     public static final String INCLUDE_TASKS_FIELD_NAME = "include-tasks";
-    public static final Schema RESTART_REQUEST_V0 = SchemaBuilder.struct().field(INCLUDE_TASKS_FIELD_NAME, Schema.BOOLEAN_SCHEMA).field(ONLY_FAILED_FIELD_NAME, Schema.BOOLEAN_SCHEMA).build();
+    public static final Schema RESTART_REQUEST_V0 = SchemaBuilder.struct()
+            .field(INCLUDE_TASKS_FIELD_NAME, Schema.BOOLEAN_SCHEMA)
+            .field(ONLY_FAILED_FIELD_NAME, Schema.BOOLEAN_SCHEMA)
+            .build();
+
+    public static final String LOGGER_CLUSTER_PREFIX = "logger-cluster-";
+    public static String LOGGER_CLUSTER_KEY(String namespace) {
+        return LOGGER_CLUSTER_PREFIX + namespace;
+    }
+    public static final Schema LOGGER_LEVEL_V0 = SchemaBuilder.struct()
+            .field("level", Schema.STRING_SCHEMA)
+            .build();
 
     // Visible for testing
     static final long READ_WRITE_TOTAL_TIMEOUT_MS = 30000;
@@ -244,14 +294,13 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
     private final String topic;
     // Data is passed to the log already serialized. We use a converter to handle translating to/from generic Connect
     // format to serialized form
-    private final KafkaBasedLog<String, byte[]> configLog;
+    private KafkaBasedLog<String, byte[]> configLog;
     // Connector -> # of tasks
     final Map<String, Integer> connectorTaskCounts = new HashMap<>();
     // Connector and task configs: name or id -> config map
     final Map<String, Map<String, String>> connectorConfigs = new HashMap<>();
     final Map<ConnectorTaskId, Map<String, String>> taskConfigs = new HashMap<>();
     private final Supplier<TopicAdmin> topicAdminSupplier;
-    private SharedTopicAdmin ownTopicAdmin;
     private final String clientId;
 
     // Set of connectors where we saw a task commit with an incomplete set of task config updates, indicating the data
@@ -271,6 +320,7 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
 
     final Map<String, Integer> connectorTaskCountRecords = new HashMap<>();
     final Map<String, Integer> connectorTaskConfigGenerations = new HashMap<>();
+    final Map<String, AppliedConnectorConfig> appliedConnectorConfigs = new HashMap<>();
     final Set<String> connectorsPendingFencing = new HashSet<>();
 
     private final WorkerConfigTransformer configTransformer;
@@ -280,9 +330,9 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
     private final Map<String, Object> fencableProducerProps;
     private final Time time;
 
-    @Deprecated
-    public KafkaConfigBackingStore(Converter converter, DistributedConfig config, WorkerConfigTransformer configTransformer) {
-        this(converter, config, configTransformer, null, "connect-distributed-");
+    //VisibleForTesting
+    void setConfigLog(KafkaBasedLog<String, byte[]> configLog) {
+        this.configLog = configLog;
     }
 
     public KafkaConfigBackingStore(Converter converter, DistributedConfig config, WorkerConfigTransformer configTransformer, Supplier<TopicAdmin> adminSupplier, String clientIdBase) {
@@ -310,7 +360,7 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
 
         this.usesFencableWriter = config.transactionalLeaderEnabled();
         this.topic = config.getString(DistributedConfig.CONFIG_TOPIC_CONFIG);
-        if (this.topic == null || this.topic.trim().length() == 0)
+        if (this.topic == null || this.topic.trim().isEmpty())
             throw new ConfigException("Must specify topic for connector configuration.");
 
         configLog = setupAndCreateKafkaBasedLog(this.topic, config);
@@ -330,12 +380,20 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
         try {
             configLog.start();
         } catch (UnsupportedVersionException e) {
-            throw new ConnectException("Enabling exactly-once support for source connectors requires a Kafka broker version that allows " + "admin clients to read consumer offsets. Please either disable the worker's exactly-once " + "support for source connectors, or use a newer Kafka broker version.", e);
+            throw new ConnectException(
+                    "Enabling exactly-once support for source connectors requires a Kafka broker version that allows "
+                            + "admin clients to read consumer offsets. Please either disable the worker's exactly-once "
+                            + "support for source connectors, or use a newer Kafka broker version.",
+                    e
+            );
         }
 
         int partitionCount = configLog.partitionCount();
         if (partitionCount > 1) {
-            String msg = String.format("Topic '%s' supplied via the '%s' property is required " + "to have a single partition in order to guarantee consistency of " + "connector configurations, but found %d partitions.", topic, DistributedConfig.CONFIG_TOPIC_CONFIG, partitionCount);
+            String msg = String.format("Topic '%s' supplied via the '%s' property is required "
+                    + "to have a single partition in order to guarantee consistency of "
+                    + "connector configurations, but found %d partitions.",
+                    topic, DistributedConfig.CONFIG_TOPIC_CONFIG, partitionCount);
             throw new ConfigException(msg);
         }
 
@@ -348,7 +406,6 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
         log.info("Closing KafkaConfigBackingStore");
 
         relinquishWritePrivileges();
-        Utils.closeQuietly(ownTopicAdmin, "admin for config topic");
         Utils.closeQuietly(configLog::stop, "KafkaBasedLog for config topic");
 
         log.info("Closed KafkaConfigBackingStore");
@@ -387,8 +444,16 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
         // We can set this to 5 instead of 1 without risking reordering because we are using an idempotent producer
         result.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
 
-        ConnectUtils.ensureProperty(result, ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true", "for the worker's config topic producer when exactly-once source support is enabled or in preparation to be enabled", false);
-        ConnectUtils.ensureProperty(result, ProducerConfig.TRANSACTIONAL_ID_CONFIG, workerConfig.transactionalProducerId(), "for the worker's config topic producer when exactly-once source support is enabled or in preparation to be enabled", true);
+        ConnectUtils.ensureProperty(
+                result, ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true",
+                "for the worker's config topic producer when exactly-once source support is enabled or in preparation to be enabled",
+                false
+        );
+        ConnectUtils.ensureProperty(
+                result, ProducerConfig.TRANSACTIONAL_ID_CONFIG, workerConfig.transactionalProducerId(),
+                "for the worker's config topic producer when exactly-once source support is enabled or in preparation to be enabled",
+                true
+        );
 
         return result;
     }
@@ -406,7 +471,20 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
         synchronized (lock) {
             // Only a shallow copy is performed here; in order to avoid accidentally corrupting the worker's view
             // of the config topic, any nested structures should be copied before making modifications
-            return new ClusterConfigState(offset, sessionKey, new HashMap<>(connectorTaskCounts), new HashMap<>(connectorConfigs), new HashMap<>(connectorTargetStates), new HashMap<>(taskConfigs), new HashMap<>(connectorTaskCountRecords), new HashMap<>(connectorTaskConfigGenerations), new HashSet<>(connectorsPendingFencing), new HashSet<>(inconsistent), configTransformer);
+            return new ClusterConfigState(
+                    offset,
+                    sessionKey,
+                    new HashMap<>(connectorTaskCounts),
+                    new HashMap<>(connectorConfigs),
+                    new HashMap<>(connectorTargetStates),
+                    new HashMap<>(taskConfigs),
+                    new HashMap<>(connectorTaskCountRecords),
+                    new HashMap<>(connectorTaskConfigGenerations),
+                    new HashMap<>(appliedConnectorConfigs),
+                    new HashSet<>(connectorsPendingFencing),
+                    new HashSet<>(inconsistent),
+                    configTransformer
+            );
         }
     }
 
@@ -418,25 +496,34 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
     }
 
     /**
-     * Write this connector configuration to persistent storage and wait until it has been acknowledged and read back by
-     * tailing the Kafka log with a consumer. {@link #claimWritePrivileges()} must be successfully invoked before calling
+     * Write this connector configuration (and optionally a target state) to persistent storage and wait until it has been acknowledged and read
+     * back by tailing the Kafka log with a consumer. {@link #claimWritePrivileges()} must be successfully invoked before calling
      * this method if the worker is configured to use a fencable producer for writes to the config topic.
+     *
      * @param connector  name of the connector to write data for
      * @param properties the configuration to write
-     * @throws IllegalStateException    if {@link #claimWritePrivileges()} is required, but was not successfully invoked before
-     *                                  this method was called
+     * @param targetState the desired target state for the connector; may be {@code null} if no target state change is desired. Note that the default
+     *                    target state is {@link TargetState#STARTED} if no target state exists previously
+     * @throws IllegalStateException if {@link #claimWritePrivileges()} is required, but was not successfully invoked before
+     * this method was called
      * @throws PrivilegedWriteException if the worker is configured to use a fencable producer for writes to the config topic
-     *                                  and the write fails
+     * and the write fails
      */
     @Override
-    public void putConnectorConfig(String connector, Map<String, String> properties) {
+    public void putConnectorConfig(String connector, Map<String, String> properties, TargetState targetState) {
         log.debug("Writing connector configuration for connector '{}'", connector);
         Struct connectConfig = new Struct(CONNECTOR_CONFIGURATION_V0);
         connectConfig.put("properties", properties);
         byte[] serializedConfig = converter.fromConnectData(topic, CONNECTOR_CONFIGURATION_V0, connectConfig);
         try {
             Timer timer = time.timer(READ_WRITE_TOTAL_TIMEOUT_MS);
-            sendPrivileged(CONNECTOR_KEY(connector), serializedConfig, timer);
+            List<ProducerKeyValue> keyValues = new ArrayList<>();
+            if (targetState != null) {
+                log.debug("Writing target state {} for connector {}", targetState, connector);
+                keyValues.add(new ProducerKeyValue(TARGET_STATE_KEY(connector), serializeTargetState(targetState)));
+            }
+            keyValues.add(new ProducerKeyValue(CONNECTOR_KEY(connector), serializedConfig));
+            sendPrivileged(keyValues, timer);
             configLog.readToEnd().get(timer.remainingMs(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException | ExecutionException | TimeoutException e) {
             log.error("Failed to write connector configuration to Kafka: ", e);
@@ -458,7 +545,10 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
         log.debug("Removing connector configuration for connector '{}'", connector);
         try {
             Timer timer = time.timer(READ_WRITE_TOTAL_TIMEOUT_MS);
-            List<ProducerKeyValue> keyValues = Arrays.asList(new ProducerKeyValue(CONNECTOR_KEY(connector), null), new ProducerKeyValue(TARGET_STATE_KEY(connector), null));
+            List<ProducerKeyValue> keyValues = Arrays.asList(
+                    new ProducerKeyValue(CONNECTOR_KEY(connector), null),
+                    new ProducerKeyValue(TARGET_STATE_KEY(connector), null)
+            );
             sendPrivileged(keyValues, timer);
 
             configLog.readToEnd().get(timer.remainingMs(), TimeUnit.MILLISECONDS);
@@ -506,7 +596,7 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
         // Send all the individual updates
         int index = 0;
         List<ProducerKeyValue> keyValues = new ArrayList<>();
-        for (Map<String, String> taskConfig : configs) {
+        for (Map<String, String> taskConfig: configs) {
             Struct connectConfig = new Struct(TASK_CONFIGURATION_V0);
             connectConfig.put("properties", taskConfig);
             byte[] serializedConfig = converter.fromConnectData(topic, TASK_CONFIGURATION_V0, connectConfig);
@@ -560,22 +650,26 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
      * Write a new {@link TargetState} for the connector. Note that {@link #claimWritePrivileges()} does not need to be
      * invoked before invoking this method.
      * @param connector the name of the connector
-     * @param state     the desired target state for the connector
+     * @param state the desired target state for the connector
      */
     @Override
     public void putTargetState(String connector, TargetState state) {
-        Struct connectTargetState = new Struct(TARGET_STATE_V1);
-        // Older workers don't support the STOPPED state; fall back on PAUSED
-        connectTargetState.put("state", state == STOPPED ? PAUSED.name() : state.name());
-        connectTargetState.put("state.v2", state.name());
-        byte[] serializedTargetState = converter.fromConnectData(topic, TARGET_STATE_V1, connectTargetState);
         log.debug("Writing target state {} for connector {}", state, connector);
         try {
-            configLog.sendWithReceipt(TARGET_STATE_KEY(connector), serializedTargetState).get(READ_WRITE_TOTAL_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            configLog.sendWithReceipt(TARGET_STATE_KEY(connector), serializeTargetState(state))
+                .get(READ_WRITE_TOTAL_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         } catch (InterruptedException | ExecutionException | TimeoutException e) {
             log.error("Failed to write target state to Kafka", e);
             throw new ConnectException("Error writing target state to Kafka", e);
         }
+    }
+
+    private byte[] serializeTargetState(TargetState state) {
+        Struct connectTargetState = new Struct(TARGET_STATE_V1);
+        // Older workers don't support the STOPPED state; fall back on PAUSED
+        connectTargetState.put("state", state == STOPPED ? PAUSED.name() : state.name());
+        connectTargetState.put("state.v2", state.name());
+        return converter.fromConnectData(topic, TARGET_STATE_V1, connectTargetState);
     }
 
     /**
@@ -584,10 +678,10 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
      * if the worker is configured to use a fencable producer for writes to the config topic.
      * @param connector name of the connector
      * @param taskCount number of tasks used by the connector
-     * @throws IllegalStateException    if {@link #claimWritePrivileges()} is required, but was not successfully invoked before
-     *                                  this method was called
+     * @throws IllegalStateException if {@link #claimWritePrivileges()} is required, but was not successfully invoked before
+     * this method was called
      * @throws PrivilegedWriteException if the worker is configured to use a fencable producer for writes to the config topic
-     *                                  and the write fails
+     * and the write fails
      */
     @Override
     public void putTaskCountRecord(String connector, int taskCount) {
@@ -610,10 +704,10 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
      * with a consumer. {@link #claimWritePrivileges()} must be successfully invoked before calling this method if the worker
      * is configured to use a fencable producer for writes to the config topic.
      * @param sessionKey the session key to distributed
-     * @throws IllegalStateException    if {@link #claimWritePrivileges()} is required, but was not successfully invoked before
-     *                                  this method was called
+     * @throws IllegalStateException if {@link #claimWritePrivileges()} is required, but was not successfully invoked before
+     * this method was called
      * @throws PrivilegedWriteException if the worker is configured to use a fencable producer for writes to the config topic
-     *                                  and the write fails
+     * and the write fails
      */
     @Override
     public void putSessionKey(SessionKey sessionKey) {
@@ -657,6 +751,20 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
         }
     }
 
+    @Override
+    public void putLoggerLevel(String namespace, String level) {
+        log.debug("Writing level {} for logging namespace {} to Kafka", level, namespace);
+        Struct value = new Struct(LOGGER_LEVEL_V0);
+        value.put("level", level);
+        byte[] serializedValue = converter.fromConnectData(topic, value.schema(), value);
+        try {
+            configLog.sendWithReceipt(LOGGER_CLUSTER_KEY(namespace), serializedValue).get(READ_WRITE_TOTAL_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException | ExecutionException | TimeoutException e) {
+            log.error("Failed to write logger level to Kafka", e);
+            throw new ConnectException("Error writing logger level to Kafka", e);
+        }
+    }
+
     // package private for testing
     KafkaBasedLog<String, byte[]> setupAndCreateKafkaBasedLog(String topic, final WorkerConfig config) {
         String clusterId = config.kafkaClusterId();
@@ -671,31 +779,34 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
         consumerProps.put(CommonClientConfigs.CLIENT_ID_CONFIG, clientId);
         ConnectUtils.addMetricsContextProperties(consumerProps, config, clusterId);
         if (config.exactlyOnceSourceEnabled()) {
-            ConnectUtils.ensureProperty(consumerProps, ConsumerConfig.ISOLATION_LEVEL_CONFIG, IsolationLevel.READ_COMMITTED.name().toLowerCase(Locale.ROOT), "for the worker's config topic consumer when exactly-once source support is enabled", true);
+            ConnectUtils.ensureProperty(
+                    consumerProps, ConsumerConfig.ISOLATION_LEVEL_CONFIG, IsolationLevel.READ_COMMITTED.toString(),
+                    "for the worker's config topic consumer when exactly-once source support is enabled",
+                    true
+            );
         }
 
         Map<String, Object> adminProps = new HashMap<>(originals);
         ConnectUtils.addMetricsContextProperties(adminProps, config, clusterId);
         adminProps.put(CommonClientConfigs.CLIENT_ID_CONFIG, clientId);
-        Supplier<TopicAdmin> adminSupplier;
-        if (topicAdminSupplier != null) {
-            adminSupplier = topicAdminSupplier;
-        } else {
-            // Create our own topic admin supplier that we'll close when we're stopped
-            ownTopicAdmin = new SharedTopicAdmin(adminProps);
-            adminSupplier = ownTopicAdmin;
-        }
-        Map<String, Object> topicSettings = config instanceof DistributedConfig ? ((DistributedConfig) config).configStorageTopicSettings() : Collections.emptyMap();
-        NewTopic topicDescription = TopicAdmin.defineTopic(topic).config(topicSettings) // first so that we override user-supplied settings as needed
-                .compacted().partitions(1).replicationFactor(config.getShort(DistributedConfig.CONFIG_STORAGE_REPLICATION_FACTOR_CONFIG)).build();
 
-        return createKafkaBasedLog(topic, producerProps, consumerProps, new ConsumeCallback(), topicDescription, adminSupplier, config, time);
+        Map<String, Object> topicSettings = config instanceof DistributedConfig
+                                            ? ((DistributedConfig) config).configStorageTopicSettings()
+                                            : Collections.emptyMap();
+        NewTopic topicDescription = TopicAdmin.defineTopic(topic)
+                .config(topicSettings) // first so that we override user-supplied settings as needed
+                .compacted()
+                .partitions(1)
+                .replicationFactor(config.getShort(DistributedConfig.CONFIG_STORAGE_REPLICATION_FACTOR_CONFIG))
+                .build();
+
+        return createKafkaBasedLog(topic, producerProps, consumerProps, new ConsumeCallback(), topicDescription, topicAdminSupplier, config, time);
     }
 
     /**
      * Send a single record to the config topic synchronously. Note that {@link #claimWritePrivileges()} must be
      * successfully invoked before calling this method if this store is configured to use a fencable writer.
-     * @param key   the record key
+     * @param key the record key
      * @param value the record value
      * @param timer Timer bounding how long this method can block. The timer is updated before the method returns.
      */
@@ -707,12 +818,14 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
      * Send one or more records to the config topic synchronously. Note that {@link #claimWritePrivileges()} must be
      * successfully invoked before calling this method if this store is configured to use a fencable writer.
      * @param keyValues the list of producer record key/value pairs
-     * @param timer     Timer bounding how long this method can block. The timer is updated before the method returns.
+     * @param timer Timer bounding how long this method can block. The timer is updated before the method returns.
      */
     private void sendPrivileged(List<ProducerKeyValue> keyValues, Timer timer) throws ExecutionException, InterruptedException, TimeoutException {
         if (!usesFencableWriter) {
             List<Future<RecordMetadata>> producerFutures = new ArrayList<>();
-            keyValues.forEach(keyValue -> producerFutures.add(configLog.sendWithReceipt(keyValue.key, keyValue.value)));
+            keyValues.forEach(
+                    keyValue -> producerFutures.add(configLog.sendWithReceipt(keyValue.key, keyValue.value))
+            );
 
             timer.update();
             for (Future<RecordMetadata> future : producerFutures) {
@@ -729,7 +842,9 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
 
         try {
             fencableProducer.beginTransaction();
-            keyValues.forEach(keyValue -> fencableProducer.send(new ProducerRecord<>(topic, keyValue.key, keyValue.value)));
+            keyValues.forEach(
+                    keyValue -> fencableProducer.send(new ProducerRecord<>(topic, keyValue.key, keyValue.value))
+            );
             fencableProducer.commitTransaction();
             timer.update();
         } catch (Exception e) {
@@ -812,6 +927,9 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
                 processTaskCountRecord(connectorName, value);
             } else if (record.key().equals(SESSION_KEY_KEY)) {
                 processSessionKeyRecord(value);
+            } else if (record.key().startsWith(LOGGER_CLUSTER_PREFIX)) {
+                String loggingNamespace = record.key().substring(LOGGER_CLUSTER_PREFIX.length());
+                processLoggerLevelRecord(loggingNamespace, value);
             } else {
                 log.error("Discarding config update record with invalid key: {}", record.key());
             }
@@ -838,10 +956,12 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
                     log.error("Ignoring target state for connector '{}' because it is in the wrong format: {}", connectorName, className(value.value()));
                     return;
                 }
-                @SuppressWarnings("unchecked") Map<String, Object> valueMap = (Map<String, Object>) value.value();
+                @SuppressWarnings("unchecked")
+                Map<String, Object> valueMap = (Map<String, Object>) value.value();
                 Object targetState = valueMap.get("state.v2");
                 if (targetState != null && !(targetState instanceof String)) {
-                    log.error("Invalid data for target state for connector '{}': 'state.v2' field should be a String but is {}", connectorName, className(targetState));
+                    log.error("Invalid data for target state for connector '{}': 'state.v2' field should be a String but is {}",
+                            connectorName, className(targetState));
                     // We don't return here; it's still possible that there's a value we can use in the older state field
                     targetState = null;
                 }
@@ -849,7 +969,8 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
                     // This record may have been written by an older worker; fall back on the older state field
                     targetState = valueMap.get("state");
                     if (!(targetState instanceof String)) {
-                        log.error("Invalid data for target state for connector '{}': 'state' field should be a String but is {}", connectorName, className(targetState));
+                        log.error("Invalid data for target state for connector '{}': 'state' field should be a String but is {}",
+                                connectorName, className(targetState));
                         return;
                     }
                 }
@@ -868,7 +989,9 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
 
         // Note that we do not notify the update listener if the target state has been removed.
         // Instead we depend on the removal callback of the connector config itself to notify the worker.
-        if (started && !removed && stateChanged)
+        // We also don't notify the update listener if the connector doesn't exist yet - a scenario that can
+        // occur if an explicit initial target state is specified in the connector creation request.
+        if (started && !removed && stateChanged && connectorConfigs.containsKey(connectorName))
             updateListener.onConnectorTargetStateChange(connectorName);
     }
 
@@ -877,11 +1000,8 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
         synchronized (lock) {
             if (value.value() == null) {
                 // Connector deletion will be written as a null value
+                processConnectorRemoval(connectorName);
                 log.info("Successfully processed removal of connector '{}'", connectorName);
-                connectorConfigs.remove(connectorName);
-                connectorTaskCounts.remove(connectorName);
-                taskConfigs.keySet().removeIf(taskId -> taskId.connector().equals(connectorName));
-                deferredTaskUpdates.remove(connectorName);
                 removed = true;
             } else {
                 // Connector configs can be applied and callbacks invoked immediately
@@ -889,13 +1009,16 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
                     log.error("Ignoring configuration for connector '{}' because it is in the wrong format: {}", connectorName, className(value.value()));
                     return;
                 }
-                @SuppressWarnings("unchecked") Object newConnectorConfig = ((Map<String, Object>) value.value()).get("properties");
+                @SuppressWarnings("unchecked")
+                Object newConnectorConfig = ((Map<String, Object>) value.value()).get("properties");
                 if (!(newConnectorConfig instanceof Map)) {
-                    log.error("Invalid data for config for connector '{}': 'properties' field should be a Map but is {}", connectorName, className(newConnectorConfig));
+                    log.error("Invalid data for config for connector '{}': 'properties' field should be a Map but is {}",
+                            connectorName, className(newConnectorConfig));
                     return;
                 }
                 log.debug("Updating configuration for connector '{}'", connectorName);
-                @SuppressWarnings("unchecked") Map<String, String> stringsConnectorConfig = (Map<String, String>) newConnectorConfig;
+                @SuppressWarnings("unchecked")
+                Map<String, String> stringsConnectorConfig = (Map<String, String>) newConnectorConfig;
                 connectorConfigs.put(connectorName, stringsConnectorConfig);
 
                 // Set the initial state of the connector to STARTED, which ensures that any connectors
@@ -923,7 +1046,8 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
                 return;
             }
 
-            @SuppressWarnings("unchecked") Object newTaskConfig = ((Map<String, Object>) value.value()).get("properties");
+            @SuppressWarnings("unchecked")
+            Object newTaskConfig = ((Map<String, Object>) value.value()).get("properties");
             if (!(newTaskConfig instanceof Map)) {
                 log.error("Invalid data for config of task {} 'properties' field should be a Map but is {}", taskId, className(newTaskConfig));
                 return;
@@ -931,7 +1055,8 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
 
             Map<ConnectorTaskId, Map<String, String>> deferred = deferredTaskUpdates.computeIfAbsent(taskId.connector(), k -> new HashMap<>());
             log.debug("Storing new config for task {}; this will wait for a commit message before the new config will take effect.", taskId);
-            @SuppressWarnings("unchecked") Map<String, String> stringsTaskConfig = (Map<String, String>) newTaskConfig;
+            @SuppressWarnings("unchecked")
+            Map<String, String> stringsTaskConfig = (Map<String, String>) newTaskConfig;
             deferred.put(taskId, stringsTaskConfig);
         }
     }
@@ -939,6 +1064,22 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
     private void processTasksCommitRecord(String connectorName, SchemaAndValue value) {
         List<ConnectorTaskId> updatedTasks = new ArrayList<>();
         synchronized (lock) {
+            // Edge case: connector was deleted before these task configs were published,
+            // but compaction took place and both the original connector config and the
+            // tombstone message for it have been removed from the config topic
+            // We should ignore these task configs
+            Map<String, String> appliedConnectorConfig = connectorConfigs.get(connectorName);
+            if (appliedConnectorConfig == null) {
+                processConnectorRemoval(connectorName);
+                log.debug(
+                        "Ignoring task configs for connector {}; it appears that the connector was deleted previously "
+                            + "and that log compaction has since removed any trace of its previous configurations "
+                            + "from the config topic",
+                        connectorName
+                );
+                return;
+            }
+
             // Apply any outstanding deferred task updates for the given connector. Note that just because we
             // encounter a commit message does not mean it will result in consistent output. In particular due to
             // compaction, there may be cases where . For example if we have the following sequence of writes:
@@ -966,7 +1107,8 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
             }
             Map<ConnectorTaskId, Map<String, String>> deferred = deferredTaskUpdates.get(connectorName);
 
-            @SuppressWarnings("unchecked") int newTaskCount = intValue(((Map<String, Object>) value.value()).get("tasks"));
+            @SuppressWarnings("unchecked")
+            int newTaskCount = intValue(((Map<String, Object>) value.value()).get("tasks"));
 
             // Validate the configs we're supposed to update to ensure we're getting a complete configuration
             // update of all tasks that are expected based on the number of tasks in the commit message.
@@ -985,6 +1127,11 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
                     connectorTaskConfigGenerations.compute(connectorName, (ignored, generation) -> generation != null ? generation + 1 : 0);
                 }
                 inconsistent.remove(connectorName);
+
+                appliedConnectorConfigs.put(
+                        connectorName,
+                        new AppliedConnectorConfig(appliedConnectorConfig)
+                );
             }
             // Always clear the deferred entries, even if we didn't apply them. If they represented an inconsistent
             // update, then we need to see a completely fresh set of configs after this commit message, so we don't
@@ -1034,14 +1181,15 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
 
     private void processTaskCountRecord(String connectorName, SchemaAndValue value) {
         if (!(value.value() instanceof Map)) {
-            log.error("Ignoring task count record for connector '{}' because it is in the wrong format: {}", connectorName, className(value.value()));
+            log.error("Ignoring task count record for connector '{}' because it is in the wrong format: {}",  connectorName, className(value.value()));
             return;
         }
-        @SuppressWarnings("unchecked") int taskCount = intValue(((Map<String, Object>) value.value()).get("task-count"));
+        @SuppressWarnings("unchecked")
+        int taskCount = intValue(((Map<String, Object>) value.value()).get("task-count"));
 
         log.debug("Setting task count record for connector '{}' to {}", connectorName, taskCount);
         connectorTaskCountRecords.put(connectorName, taskCount);
-        // If a task count record appears after the latest task configs, the connectors doesn't need a round of zombie
+        // If a task count record appears after the latest task configs, the connector doesn't need a round of zombie
         // fencing before it can start tasks with the latest configs
         connectorsPendingFencing.remove(connectorName);
     }
@@ -1056,7 +1204,8 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
             return;
         }
 
-        @SuppressWarnings("unchecked") Map<String, Object> valueAsMap = (Map<String, Object>) value.value();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> valueAsMap = (Map<String, Object>) value.value();
 
         Object sessionKey = valueAsMap.get("key");
         if (!(sessionKey instanceof String)) {
@@ -1076,12 +1225,52 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
             log.error("Invalid data for session key 'creation-timestamp' field should be a long but it is {}", className(creationTimestamp));
             return;
         }
-        KafkaConfigBackingStore.this.sessionKey = new SessionKey(new SecretKeySpec(key, (String) keyAlgorithm),
+        KafkaConfigBackingStore.this.sessionKey = new SessionKey(
+                new SecretKeySpec(key, (String) keyAlgorithm),
                 (long) creationTimestamp
         );
 
         if (started)
             updateListener.onSessionKeyUpdate(KafkaConfigBackingStore.this.sessionKey);
+    }
+
+    private void processLoggerLevelRecord(String namespace, SchemaAndValue value) {
+        if (value.value() == null) {
+            log.error("Ignoring logging level for namespace {} because it is unexpectedly null", namespace);
+            return;
+        }
+        if (!(value.value() instanceof Map)) {
+            log.error("Ignoring logging level for namespace {} because the value is not a Map but is {}", namespace, className(value.value()));
+            return;
+        }
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> valueAsMap = (Map<String, Object>) value.value();
+
+        Object level = valueAsMap.get("level");
+        if (!(level instanceof String)) {
+            log.error("Invalid data for logging level key 'level' field with namespace {}; should be a String but it is {}", namespace, className(level));
+            return;
+        }
+
+        if (started) {
+            updateListener.onLoggingLevelUpdate(namespace, (String) level);
+        } else {
+            // TRACE level since there may be many of these records in the config topic
+            log.trace(
+                    "Ignoring old logging level {} for namespace {} that was writen to the config topic before this worker completed startup",
+                    level,
+                    namespace
+            );
+        }
+    }
+
+    private void processConnectorRemoval(String connectorName) {
+        connectorConfigs.remove(connectorName);
+        connectorTaskCounts.remove(connectorName);
+        taskConfigs.keySet().removeIf(taskId -> taskId.connector().equals(connectorName));
+        deferredTaskUpdates.remove(connectorName);
+        appliedConnectorConfigs.remove(connectorName);
     }
 
     private ConnectorTaskId parseTaskId(String key) {
@@ -1090,7 +1279,7 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
 
         try {
             int taskNum = Integer.parseInt(parts[parts.length - 1]);
-            String connectorName = Utils.join(Arrays.copyOfRange(parts, 1, parts.length - 1), "-");
+            String connectorName = String.join("-", Arrays.copyOfRange(parts, 1, parts.length - 1));
             return new ConnectorTaskId(connectorName, taskNum);
         } catch (NumberFormatException e) {
             return null;
@@ -1154,5 +1343,5 @@ public class KafkaConfigBackingStore extends KafkaTopicBasedBackingStore impleme
         else
             throw new ConnectException("Expected integer value to be either Integer or Long");
     }
-}
 
+}

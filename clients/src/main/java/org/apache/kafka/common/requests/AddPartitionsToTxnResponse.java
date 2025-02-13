@@ -18,7 +18,11 @@ package org.apache.kafka.common.requests;
 
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.message.AddPartitionsToTxnResponseData;
-import org.apache.kafka.common.message.AddPartitionsToTxnResponseData.*;
+import org.apache.kafka.common.message.AddPartitionsToTxnResponseData.AddPartitionsToTxnPartitionResult;
+import org.apache.kafka.common.message.AddPartitionsToTxnResponseData.AddPartitionsToTxnPartitionResultCollection;
+import org.apache.kafka.common.message.AddPartitionsToTxnResponseData.AddPartitionsToTxnResult;
+import org.apache.kafka.common.message.AddPartitionsToTxnResponseData.AddPartitionsToTxnTopicResult;
+import org.apache.kafka.common.message.AddPartitionsToTxnResponseData.AddPartitionsToTxnTopicResultCollection;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
@@ -31,17 +35,17 @@ import java.util.Map;
 
 /**
  * Possible error codes:
- * <p>
- * - {@link Errors#NOT_COORDINATOR}
- * - {@link Errors#COORDINATOR_NOT_AVAILABLE}
- * - {@link Errors#COORDINATOR_LOAD_IN_PROGRESS}
- * - {@link Errors#INVALID_TXN_STATE}
- * - {@link Errors#INVALID_PRODUCER_ID_MAPPING}
- * - {@link Errors#INVALID_PRODUCER_EPOCH} // for version <=1
- * - {@link Errors#PRODUCER_FENCED}
- * - {@link Errors#TOPIC_AUTHORIZATION_FAILED}
- * - {@link Errors#TRANSACTIONAL_ID_AUTHORIZATION_FAILED}
- * - {@link Errors#UNKNOWN_TOPIC_OR_PARTITION}
+ *
+ *   - {@link Errors#NOT_COORDINATOR}
+ *   - {@link Errors#COORDINATOR_NOT_AVAILABLE}
+ *   - {@link Errors#COORDINATOR_LOAD_IN_PROGRESS}
+ *   - {@link Errors#INVALID_TXN_STATE}
+ *   - {@link Errors#INVALID_PRODUCER_ID_MAPPING}
+ *   - {@link Errors#INVALID_PRODUCER_EPOCH} // for version <=1
+ *   - {@link Errors#PRODUCER_FENCED}
+ *   - {@link Errors#TOPIC_AUTHORIZATION_FAILED}
+ *   - {@link Errors#TRANSACTIONAL_ID_AUTHORIZATION_FAILED}
+ *   - {@link Errors#UNKNOWN_TOPIC_OR_PARTITION}
  */
 public class AddPartitionsToTxnResponse extends AbstractResponse {
 
@@ -74,7 +78,7 @@ public class AddPartitionsToTxnResponse extends AbstractResponse {
         for (AddPartitionsToTxnResult result : this.data.resultsByTransaction()) {
             errorsMap.put(result.transactionalId(), errorsForTransaction(result.topicResults()));
         }
-
+        
         return errorsMap;
     }
 
@@ -85,9 +89,14 @@ public class AddPartitionsToTxnResponse extends AbstractResponse {
             TopicPartition topicPartition = entry.getKey();
             String topicName = topicPartition.topic();
 
-            AddPartitionsToTxnPartitionResult partitionResult = new AddPartitionsToTxnPartitionResult().setPartitionErrorCode(entry.getValue().code()).setPartitionIndex(topicPartition.partition());
+            AddPartitionsToTxnPartitionResult partitionResult =
+                    new AddPartitionsToTxnPartitionResult()
+                        .setPartitionErrorCode(entry.getValue().code())
+                        .setPartitionIndex(topicPartition.partition());
 
-            AddPartitionsToTxnPartitionResultCollection partitionResultCollection = resultMap.getOrDefault(topicName, new AddPartitionsToTxnPartitionResultCollection());
+            AddPartitionsToTxnPartitionResultCollection partitionResultCollection = resultMap.getOrDefault(
+                    topicName, new AddPartitionsToTxnPartitionResultCollection()
+            );
 
             partitionResultCollection.add(partitionResult);
             resultMap.put(topicName, partitionResultCollection);
@@ -95,7 +104,9 @@ public class AddPartitionsToTxnResponse extends AbstractResponse {
 
         AddPartitionsToTxnTopicResultCollection topicCollection = new AddPartitionsToTxnTopicResultCollection();
         for (Map.Entry<String, AddPartitionsToTxnPartitionResultCollection> entry : resultMap.entrySet()) {
-            topicCollection.add(new AddPartitionsToTxnTopicResult().setName(entry.getKey()).setResultsByPartition(entry.getValue()));
+            topicCollection.add(new AddPartitionsToTxnTopicResult()
+                .setName(entry.getKey())
+                .setResultsByPartition(entry.getValue()));
         }
         return topicCollection;
     }
@@ -112,7 +123,8 @@ public class AddPartitionsToTxnResponse extends AbstractResponse {
         Map<TopicPartition, Errors> topicResults = new HashMap<>();
         for (AddPartitionsToTxnTopicResult topicResult : topicCollection) {
             for (AddPartitionsToTxnPartitionResult partitionResult : topicResult.resultsByPartition()) {
-                topicResults.put(new TopicPartition(topicResult.name(), partitionResult.partitionIndex()), Errors.forCode(partitionResult.partitionErrorCode()));
+                topicResults.put(
+                    new TopicPartition(topicResult.name(), partitionResult.partitionIndex()), Errors.forCode(partitionResult.partitionErrorCode()));
             }
         }
         return topicResults;
@@ -126,8 +138,10 @@ public class AddPartitionsToTxnResponse extends AbstractResponse {
         if (this.data.resultsByTopicV3AndBelow().isEmpty()) {
             allErrors.add(Errors.forCode(data.errorCode()));
         }
-
-        errors().forEach((txnId, errors) -> allErrors.addAll(errors.values()));
+        
+        errors().forEach((txnId, errors) -> 
+            allErrors.addAll(errors.values())
+        );
         return errorCounts(allErrors);
     }
 

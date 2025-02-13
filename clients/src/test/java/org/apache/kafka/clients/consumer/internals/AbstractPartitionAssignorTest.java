@@ -23,15 +23,26 @@ import org.apache.kafka.common.Node;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.utils.Utils;
+
 import org.junit.jupiter.api.Test;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Optional;
+import java.util.Random;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.kafka.clients.consumer.internals.AbstractStickyAssignor.DEFAULT_GENERATION;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class AbstractPartitionAssignorTest {
 
@@ -40,7 +51,9 @@ public class AbstractPartitionAssignorTest {
     public static final String[] ALL_RACKS = {"a", "b", "c", "d", "e", "f"};
 
     public enum RackConfig {
-        NO_BROKER_RACK, NO_CONSUMER_RACK, BROKER_AND_CONSUMER_RACK
+        NO_BROKER_RACK,
+        NO_CONSUMER_RACK,
+        BROKER_AND_CONSUMER_RACK
     }
 
     @Test
@@ -102,32 +115,32 @@ public class AbstractPartitionAssignorTest {
     @Test
     public void testUseRackAwareAssignment() {
         AbstractPartitionAssignor assignor = new RangeAssignor();
-        String[] racks = new String[]{"a", "b", "c"};
-        Set<String> allRacks = Utils.mkSet(racks);
-        Set<String> twoRacks = Utils.mkSet("a", "b");
+        String[] racks = new String[] {"a", "b", "c"};
+        Set<String> allRacks = Set.of(racks);
+        Set<String> twoRacks = Set.of("a", "b");
         Map<TopicPartition, Set<String>> partitionsOnAllRacks = new HashMap<>();
         Map<TopicPartition, Set<String>> partitionsOnSubsetOfRacks = new HashMap<>();
         for (int i = 0; i < 10; i++) {
             TopicPartition tp = new TopicPartition("topic", i);
             partitionsOnAllRacks.put(tp, allRacks);
-            partitionsOnSubsetOfRacks.put(tp, Utils.mkSet(racks[i % racks.length]));
+            partitionsOnSubsetOfRacks.put(tp, Set.of(racks[i % racks.length]));
         }
         assertFalse(assignor.useRackAwareAssignment(Collections.emptySet(), Collections.emptySet(), partitionsOnAllRacks));
         assertFalse(assignor.useRackAwareAssignment(Collections.emptySet(), allRacks, partitionsOnAllRacks));
         assertFalse(assignor.useRackAwareAssignment(allRacks, Collections.emptySet(), Collections.emptyMap()));
-        assertFalse(assignor.useRackAwareAssignment(Utils.mkSet("d"), allRacks, partitionsOnAllRacks));
+        assertFalse(assignor.useRackAwareAssignment(Set.of("d"), allRacks, partitionsOnAllRacks));
         assertFalse(assignor.useRackAwareAssignment(allRacks, allRacks, partitionsOnAllRacks));
         assertFalse(assignor.useRackAwareAssignment(twoRacks, allRacks, partitionsOnAllRacks));
-        assertFalse(assignor.useRackAwareAssignment(Utils.mkSet("a", "d"), allRacks, partitionsOnAllRacks));
+        assertFalse(assignor.useRackAwareAssignment(Set.of("a", "d"), allRacks, partitionsOnAllRacks));
         assertTrue(assignor.useRackAwareAssignment(allRacks, allRacks, partitionsOnSubsetOfRacks));
         assertTrue(assignor.useRackAwareAssignment(twoRacks, allRacks, partitionsOnSubsetOfRacks));
-        assertTrue(assignor.useRackAwareAssignment(Utils.mkSet("a", "d"), allRacks, partitionsOnSubsetOfRacks));
+        assertTrue(assignor.useRackAwareAssignment(Set.of("a", "d"), allRacks, partitionsOnSubsetOfRacks));
 
         assignor.preferRackAwareLogic = true;
         assertFalse(assignor.useRackAwareAssignment(Collections.emptySet(), Collections.emptySet(), partitionsOnAllRacks));
         assertFalse(assignor.useRackAwareAssignment(Collections.emptySet(), allRacks, partitionsOnAllRacks));
         assertFalse(assignor.useRackAwareAssignment(allRacks, Collections.emptySet(), Collections.emptyMap()));
-        assertFalse(assignor.useRackAwareAssignment(Utils.mkSet("d"), allRacks, partitionsOnAllRacks));
+        assertFalse(assignor.useRackAwareAssignment(Set.of("d"), allRacks, partitionsOnAllRacks));
         assertTrue(assignor.useRackAwareAssignment(allRacks, allRacks, partitionsOnAllRacks));
         assertTrue(assignor.useRackAwareAssignment(twoRacks, allRacks, partitionsOnAllRacks));
         assertTrue(assignor.useRackAwareAssignment(allRacks, allRacks, partitionsOnSubsetOfRacks));
@@ -145,12 +158,29 @@ public class AbstractPartitionAssignorTest {
         return Arrays.asList(new String[numRacks]);
     }
 
-    public static void verifyRackAssignment(AbstractPartitionAssignor assignor, Map<String, Integer> numPartitionsPerTopic, int replicationFactor, List<String> brokerRacks, List<String> consumerRacks, List<List<String>> consumerTopics, List<String> expectedAssignments, int numPartitionsWithRackMismatch) {
-        verifyRackAssignment(assignor, numPartitionsPerTopic, replicationFactor, brokerRacks, consumerRacks, consumerTopics, Collections.emptyList(), expectedAssignments, numPartitionsWithRackMismatch);
+    public static void verifyRackAssignment(AbstractPartitionAssignor assignor,
+                                            Map<String, Integer> numPartitionsPerTopic,
+                                            int replicationFactor,
+                                            List<String> brokerRacks,
+                                            List<String> consumerRacks,
+                                            List<List<String>> consumerTopics,
+                                            List<String> expectedAssignments,
+                                            int numPartitionsWithRackMismatch) {
+        verifyRackAssignment(assignor, numPartitionsPerTopic, replicationFactor,
+                brokerRacks, consumerRacks, consumerTopics, Collections.emptyList(),
+                expectedAssignments, numPartitionsWithRackMismatch);
 
     }
 
-    public static void verifyRackAssignment(AbstractPartitionAssignor assignor, Map<String, Integer> numPartitionsPerTopic, int replicationFactor, List<String> brokerRacks, List<String> consumerRacks, List<List<String>> consumerTopics, List<String> consumerOwnedPartitions, List<String> expectedAssignments, int numPartitionsWithRackMismatch) {
+    public static void verifyRackAssignment(AbstractPartitionAssignor assignor,
+                                            Map<String, Integer> numPartitionsPerTopic,
+                                            int replicationFactor,
+                                            List<String> brokerRacks,
+                                            List<String> consumerRacks,
+                                            List<List<String>> consumerTopics,
+                                            List<String> consumerOwnedPartitions,
+                                            List<String> expectedAssignments,
+                                            int numPartitionsWithRackMismatch) {
         List<String> consumers = IntStream.range(0, consumerRacks.size()).mapToObj(i -> "consumer" + i).collect(Collectors.toList());
         List<Subscription> subscriptions = subscriptions(consumerTopics, consumerRacks, consumerOwnedPartitions);
         Map<String, List<PartitionInfo>> partitionsPerTopic = partitionsPerTopic(numPartitionsPerTopic, replicationFactor, brokerRacks);
@@ -164,7 +194,8 @@ public class AbstractPartitionAssignorTest {
             expectedAssignment.put(consumers.get(i), expectedAssignments.get(i));
 
         Map<String, List<TopicPartition>> assignment = assignor.assignPartitions(partitionsPerTopic, subscriptionsByConsumer);
-        Map<String, String> actualAssignment = assignment.entrySet().stream().collect(Collectors.toMap(Entry::getKey, e -> toSortedString(e.getValue())));
+        Map<String, String> actualAssignment = assignment.entrySet().stream()
+                .collect(Collectors.toMap(Entry::getKey, e -> toSortedString(e.getValue())));
         assertEquals(expectedAssignment, actualAssignment);
 
         if (numPartitionsWithRackMismatch >= 0) {
@@ -174,7 +205,9 @@ public class AbstractPartitionAssignorTest {
                 if (rack != null) {
                     List<TopicPartition> partitions = assignment.get(consumers.get(i));
                     for (TopicPartition tp : partitions) {
-                        PartitionInfo partitionInfo = partitionsPerTopic.get(tp.topic()).stream().filter(p -> p.topic().equals(tp.topic()) && p.partition() == tp.partition()).findFirst().get();
+                        PartitionInfo partitionInfo = partitionsPerTopic.get(tp.topic()).stream()
+                                .filter(p -> p.topic().equals(tp.topic()) && p.partition() == tp.partition())
+                                .findFirst().get();
                         if (Arrays.stream(partitionInfo.replicas()).noneMatch(n -> rack.equals(n.rack())))
                             numMismatched.add(tp);
                     }
@@ -185,14 +218,17 @@ public class AbstractPartitionAssignorTest {
     }
 
     private static String toSortedString(List<?> partitions) {
-        return Utils.join(partitions.stream().map(Object::toString).sorted().collect(Collectors.toList()), ", ");
+        return partitions.stream().map(Object::toString).sorted().collect(Collectors.joining(", "));
     }
 
-    private static List<Subscription> subscriptions(List<List<String>> consumerTopics, List<String> consumerRacks, List<String> consumerOwnedPartitions) {
+    private static List<Subscription> subscriptions(List<List<String>> consumerTopics,
+                                                    List<String> consumerRacks,
+                                                    List<String> consumerOwnedPartitions) {
         List<List<TopicPartition>> ownedPartitions = ownedPartitions(consumerOwnedPartitions, consumerTopics.size());
         List<Subscription> subscriptions = new ArrayList<>(consumerTopics.size());
         for (int i = 0; i < consumerTopics.size(); i++) {
-            subscriptions.add(new Subscription(consumerTopics.get(i), null, ownedPartitions.get(i), DEFAULT_GENERATION, Optional.ofNullable(consumerRacks.get(i))));
+            subscriptions.add(new Subscription(consumerTopics.get(i), null, ownedPartitions.get(i),
+                    DEFAULT_GENERATION, Optional.ofNullable(consumerRacks.get(i))));
         }
         return subscriptions;
     }
@@ -217,7 +253,9 @@ public class AbstractPartitionAssignorTest {
         return owedPartitions;
     }
 
-    private static Map<String, List<PartitionInfo>> partitionsPerTopic(Map<String, Integer> numPartitionsPerTopic, int replicationFactor, List<String> brokerRacks) {
+    private static Map<String, List<PartitionInfo>> partitionsPerTopic(Map<String, Integer> numPartitionsPerTopic,
+                                                                       int replicationFactor,
+                                                                       List<String> brokerRacks) {
         Map<String, List<PartitionInfo>> partitionsPerTopic = new HashMap<>();
         int nextIndex = 0;
         for (Map.Entry<String, Integer> entry : numPartitionsPerTopic.entrySet()) {

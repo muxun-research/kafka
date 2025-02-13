@@ -19,6 +19,7 @@ package org.apache.kafka.clients.producer;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.PartitionInfo;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -31,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class RoundRobinPartitionerTest {
-    private final static Node[] NODES = new Node[] {
+    private static final Node[] NODES = new Node[] {
         new Node(0, "localhost", 99),
         new Node(1, "localhost", 100),
         new Node(2, "localhost", 101)
@@ -51,16 +52,17 @@ public class RoundRobinPartitionerTest {
         int countForPart0 = 0;
         int countForPart2 = 0;
         Partitioner partitioner = new RoundRobinPartitioner();
-        Cluster cluster = new Cluster("clusterId", asList(NODES[0], NODES[1], NODES[2]), partitions, Collections.emptySet(), Collections.emptySet());
+        Cluster cluster = new Cluster("clusterId", asList(NODES[0], NODES[1], NODES[2]), partitions,
+            Collections.emptySet(), Collections.emptySet());
         for (int i = 1; i <= 100; i++) {
             int part = partitioner.partition("test", null, null, null, null, cluster);
-			assertTrue(part == 0 || part == 2, "We should never choose a leader-less node in round robin");
+            assertTrue(part == 0 || part == 2, "We should never choose a leader-less node in round robin");
             if (part == 0)
                 countForPart0++;
             else
                 countForPart2++;
         }
-		assertEquals(countForPart0, countForPart2, "The distribution between two available partitions should be even");
+        assertEquals(countForPart0, countForPart2, "The distribution between two available partitions should be even");
     }
 
     @Test
@@ -68,8 +70,11 @@ public class RoundRobinPartitionerTest {
         final String topicA = "topicA";
         final String topicB = "topicB";
 
-        List<PartitionInfo> allPartitions = asList(new PartitionInfo(topicA, 0, NODES[0], NODES, NODES), new PartitionInfo(topicA, 1, NODES[1], NODES, NODES), new PartitionInfo(topicA, 2, NODES[2], NODES, NODES), new PartitionInfo(topicB, 0, NODES[0], NODES, NODES));
-        Cluster testCluster = new Cluster("clusterId", asList(NODES[0], NODES[1], NODES[2]), allPartitions, Collections.emptySet(), Collections.emptySet());
+        List<PartitionInfo> allPartitions = asList(new PartitionInfo(topicA, 0, NODES[0], NODES, NODES),
+                new PartitionInfo(topicA, 1, NODES[1], NODES, NODES), new PartitionInfo(topicA, 2, NODES[2], NODES, NODES),
+                new PartitionInfo(topicB, 0, NODES[0], NODES, NODES));
+        Cluster testCluster = new Cluster("clusterId", asList(NODES[0], NODES[1], NODES[2]), allPartitions,
+                Collections.emptySet(), Collections.emptySet());
 
         final Map<Integer, Integer> partitionCount = new HashMap<>();
 
@@ -91,32 +96,4 @@ public class RoundRobinPartitionerTest {
         assertEquals(10, partitionCount.get(1).intValue());
         assertEquals(10, partitionCount.get(2).intValue());
     }
-
-    @Test
-    public void testRoundRobinWithNullKeyBytes() {
-        final String topicA = "topicA";
-        final String topicB = "topicB";
-
-        List<PartitionInfo> allPartitions = asList(new PartitionInfo(topicA, 0, NODES[0], NODES, NODES), new PartitionInfo(topicA, 1, NODES[1], NODES, NODES), new PartitionInfo(topicA, 2, NODES[2], NODES, NODES), new PartitionInfo(topicB, 0, NODES[0], NODES, NODES));
-        Cluster testCluster = new Cluster("clusterId", asList(NODES[0], NODES[1], NODES[2]), allPartitions, Collections.emptySet(), Collections.emptySet());
-
-        final Map<Integer, Integer> partitionCount = new HashMap<>();
-
-        Partitioner partitioner = new RoundRobinPartitioner();
-        for (int i = 0; i < 30; ++i) {
-            int partition = partitioner.partition(topicA, null, null, null, null, testCluster);
-            Integer count = partitionCount.get(partition);
-            if (null == count)
-                count = 0;
-            partitionCount.put(partition, count + 1);
-
-            if (i % 5 == 0) {
-                partitioner.partition(topicB, null, null, null, null, testCluster);
-            }
-        }
-
-        assertEquals(10, partitionCount.get(0).intValue());
-        assertEquals(10, partitionCount.get(1).intValue());
-        assertEquals(10, partitionCount.get(2).intValue());
-    }    
 }

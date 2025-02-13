@@ -21,12 +21,22 @@ import org.apache.kafka.common.MetricNameTemplate;
 import org.apache.kafka.common.metrics.internals.MetricsUtils;
 import org.apache.kafka.common.utils.KafkaThread;
 import org.apache.kafka.common.utils.Time;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -43,7 +53,7 @@ import static java.util.Collections.emptyList;
  * that are recorded by the sensor.
  * <p>
  * Usage looks something like this:
- *
+ * 
  * <pre>
  * // set up metrics:
  * Metrics metrics = new Metrics(); // this is the global repository of metrics and sensors
@@ -52,12 +62,12 @@ import static java.util.Collections.emptyList;
  * sensor.add(metricName, new Avg());
  * metricName = new MetricName(&quot;message-size-max&quot;, &quot;producer-metrics&quot;);
  * sensor.add(metricName, new Max());
- *
+ * 
  * // as messages are sent we record the sizes
  * sensor.record(messageSize);
  * </pre>
  */
-public class Metrics implements Closeable {
+public final class Metrics implements Closeable {
 
     private final MetricConfig config;
     private final ConcurrentMap<MetricName, KafkaMetric> metrics;
@@ -93,7 +103,7 @@ public class Metrics implements Closeable {
     }
 
 
-    /**
+  /**
      * Create a metrics repository with no reporters and the given default config. This config will be used for any
      * metric that doesn't override its own config. Expiration of Sensors is disabled.
      * @param defaultConfig The default config to use for all metrics that don't override their config
@@ -145,7 +155,8 @@ public class Metrics implements Closeable {
      * @param enableExpiration true if the metrics instance can garbage collect inactive sensors, false otherwise
      * @param metricsContext The metricsContext to initialize metrics reporter with
      */
-    public Metrics(MetricConfig defaultConfig, List<MetricsReporter> reporters, Time time, boolean enableExpiration, MetricsContext metricsContext) {
+    public Metrics(MetricConfig defaultConfig, List<MetricsReporter> reporters, Time time, boolean enableExpiration,
+                   MetricsContext metricsContext) {
         this.config = defaultConfig;
         this.sensors = new ConcurrentHashMap<>();
         this.metrics = new ConcurrentHashMap<>();
@@ -167,7 +178,8 @@ public class Metrics implements Closeable {
             this.metricsScheduler = null;
         }
 
-        addMetric(metricName("count", "kafka-metrics-count", "total number of registered metrics"), (config, now) -> metrics.size());
+        addMetric(metricName("count", "kafka-metrics-count", "total number of registered metrics"),
+            (config, now) -> metrics.size());
     }
 
     /**
@@ -244,14 +256,14 @@ public class Metrics implements Closeable {
      */
     public static String toHtmlTable(String domain, Iterable<MetricNameTemplate> allMetrics) {
         Map<String, Map<String, String>> beansAndAttributes = new TreeMap<>();
-
+    
         try (Metrics metrics = new Metrics()) {
             for (MetricNameTemplate template : allMetrics) {
                 Map<String, String> tags = new LinkedHashMap<>();
                 for (String s : template.tags()) {
                     tags.put(s, "{" + s + "}");
                 }
-
+    
                 MetricName metricName = metrics.metricName(template.name(), template.group(), template.description(), tags);
                 String mBeanName = JmxReporter.getMBeanName(domain, metricName);
                 if (!beansAndAttributes.containsKey(mBeanName)) {
@@ -265,40 +277,30 @@ public class Metrics implements Closeable {
                 }
             }
         }
-
         StringBuilder b = new StringBuilder();
-        b.append("<table class=\"data-table\"><tbody>\n");
-
+        b.append("<table class=\"data-table\">\n<tbody>\n");
+        b.append("<tr>\n");
+        b.append("<th>Metric/Attribute name</th>\n");
+        b.append("<th>Description</th>\n");
+        b.append("<th>Mbean name</th>\n");
+        b.append("</tr>\n");
         for (Entry<String, Map<String, String>> e : beansAndAttributes.entrySet()) {
-            b.append("<tr>\n");
-            b.append("<td colspan=3 class=\"mbeanName\" style=\"background-color:#ccc; font-weight: bold;\">");
-            b.append(e.getKey());
-            b.append("</td>");
-            b.append("</tr>\n");
-
-            b.append("<tr>\n");
-            b.append("<th style=\"width: 90px\"></th>\n");
-            b.append("<th>Attribute name</th>\n");
-            b.append("<th>Description</th>\n");
-            b.append("</tr>\n");
-
             for (Entry<String, String> e2 : e.getValue().entrySet()) {
                 b.append("<tr>\n");
-                b.append("<td></td>");
                 b.append("<td>");
                 b.append(e2.getKey());
-                b.append("</td>");
+                b.append("</td>\n");
                 b.append("<td>");
                 b.append(e2.getValue());
-                b.append("</td>");
+                b.append("</td>\n");
+                b.append("<td>");
+                b.append(e.getKey());
+                b.append("</td>\n");
                 b.append("</tr>\n");
             }
-
         }
         b.append("</tbody></table>");
-
         return b.toString();
-
     }
 
     public MetricConfig config() {
@@ -390,7 +392,7 @@ public class Metrics implements Closeable {
      * receive every value recorded with this sensor.
      * @param name The name of the sensor
      * @param config A default configuration to use for this sensor for metrics that don't have their own config
-     * @param inactiveSensorExpirationTimeSeconds If no value if recorded on the Sensor for this duration of time,
+     * @param inactiveSensorExpirationTimeSeconds If no value is recorded on the Sensor for this duration of time,
      *                                        it is eligible for removal
      * @param parents The parent sensors
      * @param recordingLevel The recording level.
@@ -417,7 +419,7 @@ public class Metrics implements Closeable {
      * receive every value recorded with this sensor. This uses a default recording level of INFO.
      * @param name The name of the sensor
      * @param config A default configuration to use for this sensor for metrics that don't have their own config
-     * @param inactiveSensorExpirationTimeSeconds If no value if recorded on the Sensor for this duration of time,
+     * @param inactiveSensorExpirationTimeSeconds If no value is recorded on the Sensor for this duration of time,
      *                                        it is eligible for removal
      * @param parents The parent sensors
      * @return The sensor that is created
@@ -494,7 +496,11 @@ public class Metrics implements Closeable {
      * @throws IllegalArgumentException if a metric with same name already exists.
      */
     public void addMetric(MetricName metricName, MetricConfig config, MetricValueProvider<?> metricValueProvider) {
-        KafkaMetric m = new KafkaMetric(new Object(), Objects.requireNonNull(metricName), Objects.requireNonNull(metricValueProvider), config == null ? this.config : config, time);
+        KafkaMetric m = new KafkaMetric(new Object(),
+                                        Objects.requireNonNull(metricName),
+                                        Objects.requireNonNull(metricValueProvider),
+                                        config == null ? this.config : config,
+                                        time);
         KafkaMetric existingMetric = registerMetric(m);
         if (existingMetric != null) {
             throw new IllegalArgumentException("A metric named '" + metricName + "' already exists, can't register another one.");
@@ -523,7 +529,11 @@ public class Metrics implements Closeable {
      * @return Existing KafkaMetric if already registered or else a newly created one
      */
     public KafkaMetric addMetricIfAbsent(MetricName metricName, MetricConfig config, MetricValueProvider<?> metricValueProvider) {
-        KafkaMetric metric = new KafkaMetric(new Object(), Objects.requireNonNull(metricName), Objects.requireNonNull(metricValueProvider), config == null ? this.config : config, time);
+        KafkaMetric metric = new KafkaMetric(new Object(),
+                Objects.requireNonNull(metricName),
+                Objects.requireNonNull(metricValueProvider),
+                config == null ? this.config : config,
+                time);
 
         KafkaMetric existingMetric = registerMetric(metric);
         return existingMetric == null ? metric : existingMetric;
@@ -646,13 +656,14 @@ public class Metrics implements Closeable {
         // check to make sure that the runtime defined tags contain all the template tags.
         Set<String> runtimeTagKeys = new HashSet<>(tags.keySet());
         runtimeTagKeys.addAll(config().tags().keySet());
-
+        
         Set<String> templateTagKeys = template.tags();
-
+        
         if (!runtimeTagKeys.equals(templateTagKeys)) {
-            throw new IllegalArgumentException("For '" + template.name() + "', runtime-defined metric tags do not match the tags in the template. " + "Runtime = " + runtimeTagKeys + " Template = " + templateTagKeys.toString());
+            throw new IllegalArgumentException("For '" + template.name() + "', runtime-defined metric tags do not match the tags in the template. "
+                    + "Runtime = " + runtimeTagKeys + " Template = " + templateTagKeys.toString());
         }
-
+                
         return this.metricName(template.name(), template.group(), template.description(), tags);
     }
 

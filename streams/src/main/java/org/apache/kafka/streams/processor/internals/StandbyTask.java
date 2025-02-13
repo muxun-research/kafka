@@ -49,8 +49,7 @@ public class StandbyTask extends AbstractTask implements Task {
     private final Sensor updateSensor;
     private final StreamsMetricsImpl streamsMetrics;
 
-    @SuppressWarnings("rawtypes")
-    protected final InternalProcessorContext processorContext;
+    protected final InternalProcessorContext<?, ?> processorContext;
 
     /**
      * @param id              the ID of this task
@@ -61,9 +60,25 @@ public class StandbyTask extends AbstractTask implements Task {
      * @param stateMgr        the {@link ProcessorStateManager} for this task
      * @param stateDirectory  the {@link StateDirectory} created by the thread
      */
-    @SuppressWarnings("rawtypes")
-    StandbyTask(final TaskId id, final Set<TopicPartition> inputPartitions, final ProcessorTopology topology, final TaskConfig config, final StreamsMetricsImpl streamsMetrics, final ProcessorStateManager stateMgr, final StateDirectory stateDirectory, final ThreadCache cache, final InternalProcessorContext processorContext) {
-        super(id, topology, stateDirectory, stateMgr, inputPartitions, config, "standby-task", StandbyTask.class);
+    StandbyTask(final TaskId id,
+                final Set<TopicPartition> inputPartitions,
+                final ProcessorTopology topology,
+                final TaskConfig config,
+                final StreamsMetricsImpl streamsMetrics,
+                final ProcessorStateManager stateMgr,
+                final StateDirectory stateDirectory,
+                final ThreadCache cache,
+                final InternalProcessorContext<?, ?> processorContext) {
+        super(
+            id,
+            topology,
+            stateDirectory,
+            stateMgr,
+            inputPartitions,
+            config,
+            "standby-task",
+            StandbyTask.class
+        );
         this.processorContext = processorContext;
         this.streamsMetrics = streamsMetrics;
         processorContext.transitionToStandby(cache);
@@ -89,7 +104,7 @@ public class StandbyTask extends AbstractTask implements Task {
 
     /**
      * @throws TaskCorruptedException if the state cannot be reused (with EOS) and needs to be reset)
-     * @throws StreamsException       fatal error, should close the thread
+     * @throws StreamsException fatal error, should close the thread
      */
     @Override
     public void initializeIfNeeded() {
@@ -158,9 +173,10 @@ public class StandbyTask extends AbstractTask implements Task {
 
     /**
      * Flush stores before a commit; the following exceptions maybe thrown from the state manager flushing call
+     *
      * @throws TaskMigratedException recoverable error sending changelog records that would cause the task to be removed
-     * @throws StreamsException      fatal error when flushing the state store, for example sending changelog records failed
-     *                               or flushing state store get IO errors; such error should cause the thread to die
+     * @throws StreamsException fatal error when flushing the state store, for example sending changelog records failed
+     *                          or flushing state store get IO errors; such error should cause the thread to die
      */
     @Override
     public Map<TopicPartition, OffsetAndMetadata> prepareCommit() {
@@ -236,10 +252,33 @@ public class StandbyTask extends AbstractTask implements Task {
         log.info("Closed and recycled state");
     }
 
+    @Override
+    public void resumePollingForPartitionsWithAvailableSpace() {
+        // noop
+    }
+
+    @Override
+    public void updateLags() {
+        // noop
+    }
+
     private void close(final boolean clean) {
         switch (state()) {
             case SUSPENDED:
-                TaskManager.executeAndMaybeSwallow(clean, () -> StateManagerUtil.closeStateManager(log, logPrefix, clean, eosEnabled, stateMgr, stateDirectory, TaskType.STANDBY), "state manager close", log);
+                TaskManager.executeAndMaybeSwallow(
+                    clean,
+                    () -> StateManagerUtil.closeStateManager(
+                        log,
+                        logPrefix,
+                        clean,
+                        eosEnabled,
+                        stateMgr,
+                        stateDirectory,
+                        TaskType.STANDBY
+                    ),
+                    "state manager close",
+                    log
+                );
 
                 break;
 
@@ -292,14 +331,10 @@ public class StandbyTask extends AbstractTask implements Task {
         throw new IllegalStateException("Attempted to add records to task " + id() + " for invalid input partition " + partition);
     }
 
-    @SuppressWarnings("rawtypes")
-    InternalProcessorContext processorContext() {
-        return processorContext;
-    }
-
     /**
      * Produces a string representation containing useful information about a Task.
      * This is useful in debugging scenarios.
+     *
      * @return A string representation of the StreamTask instance.
      */
     @Override
@@ -310,6 +345,7 @@ public class StandbyTask extends AbstractTask implements Task {
     /**
      * Produces a string representation containing useful information about a Task starting with the given indent.
      * This is useful in debugging scenarios.
+     *
      * @return A string representation of the Task instance.
      */
     public String toString(final String indent) {

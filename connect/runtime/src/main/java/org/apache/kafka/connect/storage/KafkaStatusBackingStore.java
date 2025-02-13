@@ -30,19 +30,41 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.ThreadUtils;
 import org.apache.kafka.common.utils.Time;
-import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaAndValue;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
-import org.apache.kafka.connect.runtime.*;
+import org.apache.kafka.connect.runtime.AbstractStatus;
+import org.apache.kafka.connect.runtime.ConnectorStatus;
+import org.apache.kafka.connect.runtime.TaskStatus;
+import org.apache.kafka.connect.runtime.TopicStatus;
+import org.apache.kafka.connect.runtime.WorkerConfig;
 import org.apache.kafka.connect.runtime.distributed.DistributedConfig;
-import org.apache.kafka.connect.util.*;
+import org.apache.kafka.connect.util.Callback;
+import org.apache.kafka.connect.util.ConnectUtils;
+import org.apache.kafka.connect.util.ConnectorTaskId;
+import org.apache.kafka.connect.util.KafkaBasedLog;
+import org.apache.kafka.connect.util.Table;
+import org.apache.kafka.connect.util.TopicAdmin;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
@@ -65,6 +87,7 @@ import java.util.function.Supplier;
  * </ol>
  * Basically all these conditions do is reduce the window for conflicts. They
  * obviously cannot take into account in-flight requests.
+ *
  */
 public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore implements StatusBackingStore {
     private static final Logger log = LoggerFactory.getLogger(KafkaStatusBackingStore.class);
@@ -85,11 +108,24 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
     public static final String TOPIC_TASK_KEY = "task";
     public static final String TOPIC_DISCOVER_TIMESTAMP_KEY = "discoverTimestamp";
 
-    private static final Schema STATUS_SCHEMA_V0 = SchemaBuilder.struct().field(STATE_KEY_NAME, Schema.STRING_SCHEMA).field(TRACE_KEY_NAME, SchemaBuilder.string().optional().build()).field(WORKER_ID_KEY_NAME, Schema.STRING_SCHEMA).field(GENERATION_KEY_NAME, Schema.INT32_SCHEMA).build();
+    private static final Schema STATUS_SCHEMA_V0 = SchemaBuilder.struct()
+            .field(STATE_KEY_NAME, Schema.STRING_SCHEMA)
+            .field(TRACE_KEY_NAME, SchemaBuilder.string().optional().build())
+            .field(WORKER_ID_KEY_NAME, Schema.STRING_SCHEMA)
+            .field(GENERATION_KEY_NAME, Schema.INT32_SCHEMA)
+            .build();
 
-    private static final Schema TOPIC_STATUS_VALUE_SCHEMA_V0 = SchemaBuilder.struct().field(TOPIC_NAME_KEY, Schema.STRING_SCHEMA).field(TOPIC_CONNECTOR_KEY, Schema.STRING_SCHEMA).field(TOPIC_TASK_KEY, Schema.INT32_SCHEMA).field(TOPIC_DISCOVER_TIMESTAMP_KEY, Schema.INT64_SCHEMA).build();
+    private static final Schema TOPIC_STATUS_VALUE_SCHEMA_V0 = SchemaBuilder.struct()
+            .field(TOPIC_NAME_KEY, Schema.STRING_SCHEMA)
+            .field(TOPIC_CONNECTOR_KEY, Schema.STRING_SCHEMA)
+            .field(TOPIC_TASK_KEY, Schema.INT32_SCHEMA)
+            .field(TOPIC_DISCOVER_TIMESTAMP_KEY, Schema.INT64_SCHEMA)
+            .build();
 
-    private static final Schema TOPIC_STATUS_SCHEMA_V0 = SchemaBuilder.map(Schema.STRING_SCHEMA, TOPIC_STATUS_VALUE_SCHEMA_V0).build();
+    private static final Schema TOPIC_STATUS_SCHEMA_V0 = SchemaBuilder.map(
+            Schema.STRING_SCHEMA,
+            TOPIC_STATUS_VALUE_SCHEMA_V0
+    ).build();
 
     private final Time time;
     private final Converter converter;
@@ -103,13 +139,7 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
     private String statusTopic;
     private KafkaBasedLog<String, byte[]> kafkaLog;
     private int generation;
-    private SharedTopicAdmin ownTopicAdmin;
     private ExecutorService sendRetryExecutor;
-
-    @Deprecated
-    public KafkaStatusBackingStore(Time time, Converter converter) {
-        this(time, converter, null, "connect-distributed-");
-    }
 
     public KafkaStatusBackingStore(Time time, Converter converter, Supplier<TopicAdmin> topicAdminSupplier, String clientIdBase) {
         this.time = time;
@@ -122,20 +152,23 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
     }
 
     // visible for testing
-    KafkaStatusBackingStore(Time time, Converter converter, String statusTopic, KafkaBasedLog<String, byte[]> kafkaLog) {
-        this(time, converter);
+    KafkaStatusBackingStore(Time time, Converter converter, String statusTopic, Supplier<TopicAdmin> topicAdminSupplier,
+        KafkaBasedLog<String, byte[]> kafkaLog) {
+        this(time, converter, null, "connect-distributed-");
         this.kafkaLog = kafkaLog;
         this.statusTopic = statusTopic;
-        sendRetryExecutor = Executors.newSingleThreadExecutor(ThreadUtils.createThreadFactory("status-store-retry-" + statusTopic, true));
+        sendRetryExecutor = Executors.newSingleThreadExecutor(
+                ThreadUtils.createThreadFactory("status-store-retry-" + statusTopic, true));
     }
 
     @Override
     public void configure(final WorkerConfig config) {
         this.statusTopic = config.getString(DistributedConfig.STATUS_STORAGE_TOPIC_CONFIG);
-        if (this.statusTopic == null || this.statusTopic.trim().length() == 0)
+        if (this.statusTopic == null || this.statusTopic.trim().isEmpty())
             throw new ConfigException("Must specify topic for connector status.");
 
-        sendRetryExecutor = Executors.newSingleThreadExecutor(ThreadUtils.createThreadFactory("status-store-retry-" + statusTopic, true));
+        sendRetryExecutor = Executors.newSingleThreadExecutor(
+                ThreadUtils.createThreadFactory("status-store-retry-" + statusTopic, true));
 
         String clusterId = config.kafkaClusterId();
         Map<String, Object> originals = config.originals();
@@ -161,21 +194,19 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
         Map<String, Object> adminProps = new HashMap<>(originals);
         adminProps.put(CommonClientConfigs.CLIENT_ID_CONFIG, clientId);
         ConnectUtils.addMetricsContextProperties(adminProps, config, clusterId);
-        Supplier<TopicAdmin> adminSupplier;
-        if (topicAdminSupplier != null) {
-            adminSupplier = topicAdminSupplier;
-        } else {
-            // Create our own topic admin supplier that we'll close when we're stopped
-            ownTopicAdmin = new SharedTopicAdmin(adminProps);
-            adminSupplier = ownTopicAdmin;
-        }
 
-        Map<String, Object> topicSettings = config instanceof DistributedConfig ? ((DistributedConfig) config).statusStorageTopicSettings() : Collections.emptyMap();
-        NewTopic topicDescription = TopicAdmin.defineTopic(statusTopic).config(topicSettings) // first so that we override user-supplied settings as needed
-                .compacted().partitions(config.getInt(DistributedConfig.STATUS_STORAGE_PARTITIONS_CONFIG)).replicationFactor(config.getShort(DistributedConfig.STATUS_STORAGE_REPLICATION_FACTOR_CONFIG)).build();
+        Map<String, Object> topicSettings = config instanceof DistributedConfig
+                                            ? ((DistributedConfig) config).statusStorageTopicSettings()
+                                            : Collections.emptyMap();
+        NewTopic topicDescription = TopicAdmin.defineTopic(statusTopic)
+                .config(topicSettings) // first so that we override user-supplied settings as needed
+                .compacted()
+                .partitions(config.getInt(DistributedConfig.STATUS_STORAGE_PARTITIONS_CONFIG))
+                .replicationFactor(config.getShort(DistributedConfig.STATUS_STORAGE_REPLICATION_FACTOR_CONFIG))
+                .build();
 
         Callback<ConsumerRecord<String, byte[]>> readCallback = (error, record) -> read(record);
-        this.kafkaLog = createKafkaBasedLog(statusTopic, producerProps, consumerProps, readCallback, topicDescription, adminSupplier, config, time);
+        this.kafkaLog = createKafkaBasedLog(statusTopic, producerProps, consumerProps, readCallback, topicDescription, topicAdminSupplier, config, time);
     }
 
     @Override
@@ -192,9 +223,6 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
             kafkaLog.stop();
         } finally {
             ThreadUtils.shutdownExecutorServiceQuietly(sendRetryExecutor, 10, TimeUnit.SECONDS);
-            if (ownTopicAdmin != null) {
-                ownTopicAdmin.close();
-            }
         }
     }
 
@@ -250,11 +278,10 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
         kafkaLog.send(key, value, new org.apache.kafka.clients.producer.Callback() {
             @Override
             public void onCompletion(RecordMetadata metadata, Exception exception) {
-                if (exception == null)
-                    return;
+                if (exception == null) return;
                 // TODO: retry more gracefully and not forever
                 if (exception instanceof RetriableException) {
-                    sendRetryExecutor.submit((Runnable) () -> kafkaLog.send(key, value, this));
+                    sendRetryExecutor.submit(() -> kafkaLog.send(key, value, this));
                 } else {
                     log.error("Failed to write status update", exception);
                 }
@@ -262,7 +289,10 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
         });
     }
 
-    private <V extends AbstractStatus<?>> void send(final String key, final V status, final CacheEntry<V> entry, final boolean safeWrite) {
+    private <V extends AbstractStatus<?>> void send(final String key,
+                                                 final V status,
+                                                 final CacheEntry<V> entry,
+                                                 final boolean safeWrite) {
         final int sequence;
         synchronized (this) {
             this.generation = status.generation();
@@ -276,15 +306,16 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
         kafkaLog.send(key, value, new org.apache.kafka.clients.producer.Callback() {
             @Override
             public void onCompletion(RecordMetadata metadata, Exception exception) {
-                if (exception == null)
-                    return;
+                if (exception == null) return;
                 if (exception instanceof RetriableException) {
                     synchronized (KafkaStatusBackingStore.this) {
-                        if (entry.isDeleted() || status.generation() != generation || (safeWrite && !entry.canWriteSafely(status, sequence)))
+                        if (entry.isDeleted()
+                            || status.generation() != generation
+                            || (safeWrite && !entry.canWriteSafely(status, sequence)))
                             return;
                     }
 
-                    sendRetryExecutor.submit((Runnable) () -> kafkaLog.send(key, value, this));
+                    sendRetryExecutor.submit(() -> kafkaLog.send(key, value, this));
                 } else {
                     log.error("Failed to write status update", exception);
                 }
@@ -368,7 +399,9 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
     @Override
     public Collection<TopicStatus> getAllTopics(String connector) {
         ConcurrentMap<String, TopicStatus> activeTopics = topics.get(Objects.requireNonNull(connector));
-        return activeTopics != null ? Collections.unmodifiableCollection(Objects.requireNonNull(activeTopics.values())) : Collections.emptySet();
+        return activeTopics != null
+               ? Collections.unmodifiableCollection(Objects.requireNonNull(activeTopics.values()))
+               : Collections.emptySet();
     }
 
     @Override
@@ -389,7 +422,8 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
                 return null;
             }
 
-            @SuppressWarnings("unchecked") Map<String, Object> statusMap = (Map<String, Object>) schemaAndValue.value();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> statusMap = (Map<String, Object>) schemaAndValue.value();
             TaskStatus.State state = TaskStatus.State.valueOf((String) statusMap.get(STATE_KEY_NAME));
             String trace = (String) statusMap.get(TRACE_KEY_NAME);
             String workerUrl = (String) statusMap.get(WORKER_ID_KEY_NAME);
@@ -408,7 +442,8 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
                 log.error("Invalid task status type {}", schemaAndValue.value().getClass());
                 return null;
             }
-            @SuppressWarnings("unchecked") Map<String, Object> statusMap = (Map<String, Object>) schemaAndValue.value();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> statusMap = (Map<String, Object>) schemaAndValue.value();
             TaskStatus.State state = TaskStatus.State.valueOf((String) statusMap.get(STATE_KEY_NAME));
             String trace = (String) statusMap.get(TRACE_KEY_NAME);
             String workerUrl = (String) statusMap.get(WORKER_ID_KEY_NAME);
@@ -427,13 +462,18 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
                 log.error("Invalid topic status value {}", schemaAndValue.value());
                 return null;
             }
-            @SuppressWarnings("unchecked") Object innerValue = ((Map<String, Object>) schemaAndValue.value()).get(TOPIC_STATE_KEY);
+            @SuppressWarnings("unchecked")
+            Object innerValue = ((Map<String, Object>) schemaAndValue.value()).get(TOPIC_STATE_KEY);
             if (!(innerValue instanceof Map)) {
                 log.error("Invalid topic status value {} for field {}", innerValue, TOPIC_STATE_KEY);
                 return null;
             }
-            @SuppressWarnings("unchecked") Map<String, Object> topicStatusMetadata = (Map<String, Object>) innerValue;
-            return new TopicStatus((String) topicStatusMetadata.get(TOPIC_NAME_KEY), (String) topicStatusMetadata.get(TOPIC_CONNECTOR_KEY), ((Long) topicStatusMetadata.get(TOPIC_TASK_KEY)).intValue(), (long) topicStatusMetadata.get(TOPIC_DISCOVER_TIMESTAMP_KEY));
+            @SuppressWarnings("unchecked")
+            Map<String, Object> topicStatusMetadata = (Map<String, Object>) innerValue;
+            return new TopicStatus((String) topicStatusMetadata.get(TOPIC_NAME_KEY),
+                    (String) topicStatusMetadata.get(TOPIC_CONNECTOR_KEY),
+                    ((Long) topicStatusMetadata.get(TOPIC_TASK_KEY)).intValue(),
+                    (long) topicStatusMetadata.get(TOPIC_DISCOVER_TIMESTAMP_KEY));
         } catch (Exception e) {
             log.error("Failed to deserialize topic status", e);
             return null;
@@ -461,7 +501,10 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
         struct.put(TOPIC_CONNECTOR_KEY, status.connector());
         struct.put(TOPIC_TASK_KEY, status.task());
         struct.put(TOPIC_DISCOVER_TIMESTAMP_KEY, status.discoverTimestamp());
-        return converter.fromConnectData(statusTopic, TOPIC_STATUS_SCHEMA_V0, Collections.singletonMap(TOPIC_STATE_KEY, struct));
+        return converter.fromConnectData(
+                statusTopic,
+                TOPIC_STATUS_SCHEMA_V0,
+                Collections.singletonMap(TOPIC_STATE_KEY, struct));
     }
 
     private String parseConnectorStatusKey(String key) {
@@ -470,12 +513,11 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
 
     private ConnectorTaskId parseConnectorTaskId(String key) {
         String[] parts = key.split("-");
-        if (parts.length < 4)
-            return null;
+        if (parts.length < 4) return null;
 
         try {
             int taskNum = Integer.parseInt(parts[parts.length - 1]);
-            String connectorName = Utils.join(Arrays.copyOfRange(parts, 2, parts.length - 1), "-");
+            String connectorName = String.join("-", Arrays.copyOfRange(parts, 2, parts.length - 1));
             return new ConnectorTaskId(connectorName, taskNum);
         } catch (NumberFormatException e) {
             log.warn("Invalid task status key {}", key);
@@ -540,7 +582,10 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
             // at a higher generation. But since it will be followed by a RUNNING or a different
             // status message(at the lower generation) soon after, the misrepresentation of the UNASSIGNED
             // status would be short-lived in most cases.
-            if (status.state() == TaskStatus.State.UNASSIGNED && entry.get() != null && entry.get().state() == TaskStatus.State.RUNNING && entry.get().generation() >= status.generation()) {
+            if (status.state() == TaskStatus.State.UNASSIGNED
+                    && entry.get() != null
+                    && entry.get().state() == TaskStatus.State.RUNNING
+                    && entry.get().generation() >= status.generation()) {
                 log.trace("Ignoring stale status {} in favour of more upto date status {}", status, entry.get());
                 return;
             }
@@ -589,7 +634,8 @@ public class KafkaStatusBackingStore extends KafkaTopicBasedBackingStore impleme
         }
 
         log.trace("Received topic status update {}", status);
-        topics.computeIfAbsent(connector, k -> new ConcurrentHashMap<>()).put(topic, status);
+        topics.computeIfAbsent(connector, k -> new ConcurrentHashMap<>())
+                .put(topic, status);
     }
 
     // visible for testing

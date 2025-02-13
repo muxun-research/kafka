@@ -17,26 +17,39 @@
 package org.apache.kafka.streams.kstream.internals;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.streams.kstream.*;
+import org.apache.kafka.streams.kstream.Aggregator;
+import org.apache.kafka.streams.kstream.EmitStrategy;
 import org.apache.kafka.streams.kstream.EmitStrategy.StrategyType;
+import org.apache.kafka.streams.kstream.Initializer;
+import org.apache.kafka.streams.kstream.TimeWindows;
+import org.apache.kafka.streams.kstream.Window;
+import org.apache.kafka.streams.kstream.Windowed;
+import org.apache.kafka.streams.kstream.Windows;
 import org.apache.kafka.streams.processor.api.Processor;
 import org.apache.kafka.streams.processor.api.ProcessorContext;
 import org.apache.kafka.streams.processor.api.Record;
 import org.apache.kafka.streams.processor.api.RecordMetadata;
+import org.apache.kafka.streams.processor.internals.StoreFactory;
+import org.apache.kafka.streams.processor.internals.StoreFactory.FactoryWrappingStoreBuilder;
+import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.TimestampedWindowStore;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collections;
 import java.util.Map;
+import java.util.Set;
 
 import static org.apache.kafka.streams.state.ValueAndTimestamp.getValueOrNull;
 
 public class KStreamWindowAggregate<KIn, VIn, VAgg, W extends Window> implements KStreamAggProcessorSupplier<KIn, VIn, Windowed<KIn>, VAgg> {
 
-    private final Logger log = LoggerFactory.getLogger(getClass());
+    private static final Logger log = LoggerFactory.getLogger(KStreamWindowAggregate.class);
 
     private final String storeName;
+    private final StoreFactory storeFactory;
     private final Windows<W> windows;
     private final Initializer<VAgg> initializer;
     private final Aggregator<? super KIn, ? super VIn, VAgg> aggregator;
@@ -44,18 +57,29 @@ public class KStreamWindowAggregate<KIn, VIn, VAgg, W extends Window> implements
 
     private boolean sendOldValues = false;
 
-    public KStreamWindowAggregate(final Windows<W> windows, final String storeName, final EmitStrategy emitStrategy, final Initializer<VAgg> initializer, final Aggregator<? super KIn, ? super VIn, VAgg> aggregator) {
+    public KStreamWindowAggregate(final Windows<W> windows,
+                                  final StoreFactory storeFactory,
+                                  final EmitStrategy emitStrategy,
+                                  final Initializer<VAgg> initializer,
+                                  final Aggregator<? super KIn, ? super VIn, VAgg> aggregator) {
         this.windows = windows;
-        this.storeName = storeName;
+        this.storeName = storeFactory.storeName();
+        this.storeFactory = storeFactory;
         this.emitStrategy = emitStrategy;
         this.initializer = initializer;
         this.aggregator = aggregator;
 
         if (emitStrategy.type() == StrategyType.ON_WINDOW_CLOSE) {
             if (!(windows instanceof TimeWindows)) {
-                throw new IllegalArgumentException("ON_WINDOW_CLOSE strategy is only supported for " + "TimeWindows and SlidingWindows for TimeWindowedKStream");
+                throw new IllegalArgumentException("ON_WINDOW_CLOSE strategy is only supported for "
+                    + "TimeWindows and SlidingWindows for TimeWindowedKStream");
             }
         }
+    }
+
+    @Override
+    public Set<StoreBuilder<?>> stores() {
+        return Collections.singleton(new FactoryWrappingStoreBuilder<>(storeFactory));
     }
 
     @Override
@@ -82,9 +106,15 @@ public class KStreamWindowAggregate<KIn, VIn, VAgg, W extends Window> implements
             if (record.key() == null) {
                 if (context().recordMetadata().isPresent()) {
                     final RecordMetadata recordMetadata = context().recordMetadata().get();
-                    log.warn("Skipping record due to null key. " + "topic=[{}] partition=[{}] offset=[{}]", recordMetadata.topic(), recordMetadata.partition(), recordMetadata.offset());
+                    log.warn(
+                        "Skipping record due to null key. "
+                            + "topic=[{}] partition=[{}] offset=[{}]",
+                        recordMetadata.topic(), recordMetadata.partition(), recordMetadata.offset()
+                    );
                 } else {
-                    log.warn("Skipping record due to null key. Topic, partition, and offset not known.");
+                    log.warn(
+                        "Skipping record due to null key. Topic, partition, and offset not known."
+                    );
                 }
                 droppedRecordsSensor.record();
                 return;
@@ -134,7 +164,8 @@ public class KStreamWindowAggregate<KIn, VIn, VAgg, W extends Window> implements
         protected long emitRangeLowerBound(final long windowCloseTime) {
             // Since time window end timestamp is exclusive, we set the inclusive lower bound plus 1;
             // Set lower bound to 0L for the first time emit so that when we fetchAll, we fetch from 0L
-            return lastEmitWindowCloseTime == ConsumerRecord.NO_TIMESTAMP ? 0L : Math.max(0L, lastEmitWindowCloseTime - windows.size()) + 1;
+            return lastEmitWindowCloseTime == ConsumerRecord.NO_TIMESTAMP ?
+                0L : Math.max(0L, lastEmitWindowCloseTime - windows.size()) + 1;
         }
 
         @Override
@@ -153,7 +184,8 @@ public class KStreamWindowAggregate<KIn, VIn, VAgg, W extends Window> implements
                 final Map<Long, W> matchedEmitWindows = windows.windowsFor(emitRangeLowerBound - 1);
 
                 if (matchedCloseWindows.equals(matchedEmitWindows)) {
-                    log.trace("No new windows to emit. LastEmitCloseTime={}, emitRangeLowerBound={}, emitRangeUpperBound={}", lastEmitWindowCloseTime, emitRangeLowerBound, emitRangeUpperBound);
+                    log.trace("No new windows to emit. LastEmitCloseTime={}, emitRangeLowerBound={}, emitRangeUpperBound={}",
+                            lastEmitWindowCloseTime, emitRangeLowerBound, emitRangeUpperBound);
                     return false;
                 }
             }
@@ -172,7 +204,7 @@ public class KStreamWindowAggregate<KIn, VIn, VAgg, W extends Window> implements
 
             @Override
             public String[] storeNames() {
-                return new String[]{storeName};
+                return new String[] {storeName};
             }
         };
     }

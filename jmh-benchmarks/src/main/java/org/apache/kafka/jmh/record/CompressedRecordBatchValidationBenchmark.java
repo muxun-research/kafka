@@ -17,15 +17,22 @@
 package org.apache.kafka.jmh.record;
 
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.compress.Compression;
 import org.apache.kafka.common.record.CompressionType;
 import org.apache.kafka.common.record.MemoryRecords;
 import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.common.utils.PrimitiveRef;
 import org.apache.kafka.common.utils.Time;
-import org.apache.kafka.server.common.MetadataVersion;
 import org.apache.kafka.storage.internals.log.AppendOrigin;
 import org.apache.kafka.storage.internals.log.LogValidator;
-import org.openjdk.jmh.annotations.*;
+
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 @State(Scope.Benchmark)
@@ -38,13 +45,17 @@ public class CompressedRecordBatchValidationBenchmark extends BaseRecordBatchBen
     private CompressionType compressionType = CompressionType.LZ4;
 
     @Override
-    CompressionType compressionType() {
-        return compressionType;
+    Compression compression() {
+        return Compression.of(compressionType).build();
     }
 
     @Benchmark
     public void measureValidateMessagesAndAssignOffsetsCompressed(Blackhole bh) {
         MemoryRecords records = MemoryRecords.readableRecords(singleBatchBuffer.duplicate());
-        new LogValidator(records, new TopicPartition("a", 0), Time.SYSTEM, compressionType, compressionType, false, messageVersion, TimestampType.CREATE_TIME, Long.MAX_VALUE, 0, AppendOrigin.CLIENT, MetadataVersion.latest()).validateMessagesAndAssignOffsetsCompressed(PrimitiveRef.ofLong(startingOffset), validatorMetricsRecorder, requestLocal.bufferSupplier());
+        new LogValidator(records, new TopicPartition("a", 0),
+            Time.SYSTEM, compressionType, compression(), false,  messageVersion,
+            TimestampType.CREATE_TIME, Long.MAX_VALUE, Long.MAX_VALUE, 0, AppendOrigin.CLIENT
+        ).validateMessagesAndAssignOffsetsCompressed(PrimitiveRef.ofLong(startingOffset),
+            validatorMetricsRecorder, requestLocal.bufferSupplier());
     }
 }

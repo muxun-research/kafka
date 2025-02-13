@@ -20,7 +20,7 @@ import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.utils.LogContext;
-import org.junit.jupiter.api.AfterEach;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -29,33 +29,38 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.util.Arrays.asList;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class BuiltInPartitionerTest {
-    private final static Node[] NODES = new Node[]{new Node(0, "localhost", 99), new Node(1, "localhost", 100), new Node(2, "localhost", 101), new Node(11, "localhost", 102)};
-    final static String TOPIC_A = "topicA";
-    final static String TOPIC_B = "topicB";
-    final static String TOPIC_C = "topicC";
+    private static final Node[] NODES = new Node[] {
+        new Node(0, "localhost", 99),
+        new Node(1, "localhost", 100),
+        new Node(2, "localhost", 101),
+        new Node(11, "localhost", 102)
+    };
+    static final String TOPIC_A = "topicA";
+    static final String TOPIC_B = "topicB";
+    static final String TOPIC_C = "topicC";
     final LogContext logContext = new LogContext();
-
-    @AfterEach
-    public void tearDown() {
-        BuiltInPartitioner.mockRandom = null;
-    }
 
     @Test
     public void testStickyPartitioning() {
-        List<PartitionInfo> allPartitions = asList(new PartitionInfo(TOPIC_A, 0, NODES[0], NODES, NODES), new PartitionInfo(TOPIC_A, 1, NODES[1], NODES, NODES), new PartitionInfo(TOPIC_A, 2, NODES[2], NODES, NODES), new PartitionInfo(TOPIC_B, 0, NODES[0], NODES, NODES));
-        Cluster testCluster = new Cluster("clusterId", asList(NODES), allPartitions, Collections.emptySet(), Collections.emptySet());
+        List<PartitionInfo> allPartitions = asList(new PartitionInfo(TOPIC_A, 0, NODES[0], NODES, NODES),
+            new PartitionInfo(TOPIC_A, 1, NODES[1], NODES, NODES),
+            new PartitionInfo(TOPIC_A, 2, NODES[2], NODES, NODES),
+            new PartitionInfo(TOPIC_B, 0, NODES[0], NODES, NODES)
+        );
+        Cluster testCluster = new Cluster("clusterId", asList(NODES), allPartitions,
+            Collections.emptySet(), Collections.emptySet());
 
         // Create partitions with "sticky" batch size to accommodate 3 records.
-        BuiltInPartitioner builtInPartitionerA = new BuiltInPartitioner(logContext, TOPIC_A, 3);
+        BuiltInPartitioner builtInPartitionerA = new SequentialPartitioner(logContext, TOPIC_A, 3);
 
         // Test the partition is not switched until sticky batch size is reached.
-        // Mock random number generator with just sequential integer.
-        AtomicInteger mockRandom = new AtomicInteger();
-        BuiltInPartitioner.mockRandom = () -> mockRandom.getAndAdd(1);
-
         BuiltInPartitioner.StickyPartitionInfo partitionInfo = builtInPartitionerA.peekCurrentPartitionInfo(testCluster);
         int partA = partitionInfo.partition();
         builtInPartitionerA.updatePartitionInfo(partitionInfo, 1, testCluster);
@@ -72,7 +77,7 @@ public class BuiltInPartitionerTest {
         assertNotEquals(partA, builtInPartitionerA.peekCurrentPartitionInfo(testCluster).partition());
 
         // Check that switching works even when there is one partition.
-        BuiltInPartitioner builtInPartitionerB = new BuiltInPartitioner(logContext, TOPIC_B, 1);
+        BuiltInPartitioner builtInPartitionerB = new SequentialPartitioner(logContext, TOPIC_B, 1);
         for (int c = 10; c-- > 0; ) {
             partitionInfo = builtInPartitionerB.peekCurrentPartitionInfo(testCluster);
             assertEquals(0, partitionInfo.partition());
@@ -83,9 +88,16 @@ public class BuiltInPartitionerTest {
     @Test
     public void unavailablePartitionsTest() {
         // Partition 1 in topic A, partition 0 in topic B and partition 0 in topic C are unavailable partitions.
-        List<PartitionInfo> allPartitions = asList(new PartitionInfo(TOPIC_A, 0, NODES[0], NODES, NODES), new PartitionInfo(TOPIC_A, 1, null, NODES, NODES), new PartitionInfo(TOPIC_A, 2, NODES[2], NODES, NODES), new PartitionInfo(TOPIC_B, 0, null, NODES, NODES), new PartitionInfo(TOPIC_B, 1, NODES[0], NODES, NODES), new PartitionInfo(TOPIC_C, 0, null, NODES, NODES));
+        List<PartitionInfo> allPartitions = asList(new PartitionInfo(TOPIC_A, 0, NODES[0], NODES, NODES),
+            new PartitionInfo(TOPIC_A, 1, null, NODES, NODES),
+            new PartitionInfo(TOPIC_A, 2, NODES[2], NODES, NODES),
+            new PartitionInfo(TOPIC_B, 0, null, NODES, NODES),
+            new PartitionInfo(TOPIC_B, 1, NODES[0], NODES, NODES),
+            new PartitionInfo(TOPIC_C, 0, null, NODES, NODES)
+        );
 
-        Cluster testCluster = new Cluster("clusterId", asList(NODES[0], NODES[1], NODES[2]), allPartitions, Collections.emptySet(), Collections.emptySet());
+        Cluster testCluster = new Cluster("clusterId", asList(NODES[0], NODES[1], NODES[2]), allPartitions,
+            Collections.emptySet(), Collections.emptySet());
 
         // Create partitions with "sticky" batch size to accommodate 1 record.
         BuiltInPartitioner builtInPartitionerA = new BuiltInPartitioner(logContext, TOPIC_A, 1);
@@ -134,11 +146,7 @@ public class BuiltInPartitionerTest {
 
     @Test
     public void adaptivePartitionsTest() {
-        // Mock random number generator with just sequential integer.
-        AtomicInteger mockRandom = new AtomicInteger();
-        BuiltInPartitioner.mockRandom = () -> mockRandom.getAndAdd(1);
-
-        BuiltInPartitioner builtInPartitioner = new BuiltInPartitioner(logContext, TOPIC_A, 1);
+        BuiltInPartitioner builtInPartitioner = new SequentialPartitioner(logContext, TOPIC_A, 1);
 
         // Simulate partition queue sizes.
         int[] queueSizes = {5, 0, 3, 0, 1};
@@ -153,7 +161,8 @@ public class BuiltInPartitionerTest {
 
         builtInPartitioner.updatePartitionLoadStats(queueSizes, partitionIds, queueSizes.length);
 
-        Cluster testCluster = new Cluster("clusterId", asList(NODES), allPartitions, Collections.emptySet(), Collections.emptySet());
+        Cluster testCluster = new Cluster("clusterId", asList(NODES), allPartitions,
+            Collections.emptySet(), Collections.emptySet());
 
         // Issue a certain number of partition calls to validate that the partitions would be
         // distributed with frequencies that are reciprocal to the queue sizes.  The number of
@@ -171,7 +180,29 @@ public class BuiltInPartitionerTest {
 
         // Verify that frequencies are reciprocal of queue sizes.
         for (int i = 0; i < frequencies.length; i++) {
-            assertEquals(expectedFrequencies[i] * numberOfCycles, frequencies[i], "Partition " + i + " was chosen " + frequencies[i] + " times");
+            assertEquals(expectedFrequencies[i] * numberOfCycles, frequencies[i],
+                "Partition " + i + " was chosen " + frequencies[i] + " times");
+        }
+    }
+
+    @Test
+    void testStickyBatchSizeMoreThatZero() {
+        assertThrows(IllegalArgumentException.class, () -> new BuiltInPartitioner(logContext, TOPIC_A, 0));
+        assertDoesNotThrow(() -> new BuiltInPartitioner(logContext, TOPIC_A, 1));
+    }
+
+
+    private static class SequentialPartitioner extends BuiltInPartitioner {
+
+        AtomicInteger mockRandom = new AtomicInteger();
+
+        public SequentialPartitioner(LogContext logContext, String topic, int stickyBatchSize) {
+            super(logContext, topic, stickyBatchSize);
+        }
+
+        @Override
+        int randomPartition() {
+            return mockRandom.getAndAdd(1);
         }
     }
 }

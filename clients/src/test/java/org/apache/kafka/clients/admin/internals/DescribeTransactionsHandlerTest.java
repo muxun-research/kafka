@@ -25,6 +25,7 @@ import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.requests.DescribeTransactionsRequest;
 import org.apache.kafka.common.requests.DescribeTransactionsResponse;
 import org.apache.kafka.common.utils.LogContext;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
@@ -32,10 +33,11 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static java.util.Arrays.asList;
-import static java.util.Collections.*;
-import static org.apache.kafka.common.utils.Utils.mkSet;
+import static java.util.Collections.emptyList;
+import static java.util.Collections.emptyMap;
+import static java.util.Collections.singletonList;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 public class DescribeTransactionsHandlerTest {
     private final LogContext logContext = new LogContext();
@@ -47,12 +49,12 @@ public class DescribeTransactionsHandlerTest {
         String transactionalId2 = "bar";
         String transactionalId3 = "baz";
 
-        Set<String> transactionalIds = mkSet(transactionalId1, transactionalId2, transactionalId3);
+        Set<String> transactionalIds = Set.of(transactionalId1, transactionalId2, transactionalId3);
         DescribeTransactionsHandler handler = new DescribeTransactionsHandler(logContext);
 
         assertLookup(handler, transactionalIds);
-        assertLookup(handler, mkSet(transactionalId1));
-        assertLookup(handler, mkSet(transactionalId2, transactionalId3));
+        assertLookup(handler, Set.of(transactionalId1));
+        assertLookup(handler, Set.of(transactionalId2, transactionalId3));
     }
 
     @Test
@@ -60,20 +62,26 @@ public class DescribeTransactionsHandlerTest {
         String transactionalId1 = "foo";
         String transactionalId2 = "bar";
 
-        Set<String> transactionalIds = mkSet(transactionalId1, transactionalId2);
+        Set<String> transactionalIds = Set.of(transactionalId1, transactionalId2);
         DescribeTransactionsHandler handler = new DescribeTransactionsHandler(logContext);
 
-        DescribeTransactionsResponseData.TransactionState transactionState1 = sampleTransactionState1(transactionalId1);
-        DescribeTransactionsResponseData.TransactionState transactionState2 = sampleTransactionState2(transactionalId2);
+        DescribeTransactionsResponseData.TransactionState transactionState1 =
+            sampleTransactionState1(transactionalId1);
+        DescribeTransactionsResponseData.TransactionState transactionState2 =
+            sampleTransactionState2(transactionalId2);
 
         Set<CoordinatorKey> keys = coordinatorKeys(transactionalIds);
-        DescribeTransactionsResponse response = new DescribeTransactionsResponse(new DescribeTransactionsResponseData().setTransactionStates(asList(transactionState1, transactionState2)));
+        DescribeTransactionsResponse response = new DescribeTransactionsResponse(new DescribeTransactionsResponseData()
+            .setTransactionStates(asList(transactionState1, transactionState2)));
 
-        ApiResult<CoordinatorKey, TransactionDescription> result = handler.handleResponse(node, keys, response);
+        ApiResult<CoordinatorKey, TransactionDescription> result = handler.handleResponse(
+            node, keys, response);
 
         assertEquals(keys, result.completedKeys.keySet());
-        assertMatchingTransactionState(node.id(), transactionState1, result.completedKeys.get(CoordinatorKey.byTransactionalId(transactionalId1)));
-        assertMatchingTransactionState(node.id(), transactionState2, result.completedKeys.get(CoordinatorKey.byTransactionalId(transactionalId2)));
+        assertMatchingTransactionState(node.id(), transactionState1,
+            result.completedKeys.get(CoordinatorKey.byTransactionalId(transactionalId1)));
+        assertMatchingTransactionState(node.id(), transactionState2,
+            result.completedKeys.get(CoordinatorKey.byTransactionalId(transactionalId2)));
     }
 
     @Test
@@ -88,61 +96,114 @@ public class DescribeTransactionsHandlerTest {
         assertUnmappedKey(handler, transactionalId, Errors.COORDINATOR_NOT_AVAILABLE);
     }
 
-    private void assertFatalError(DescribeTransactionsHandler handler, String transactionalId, Errors error) {
+    private void assertFatalError(
+        DescribeTransactionsHandler handler,
+        String transactionalId,
+        Errors error
+    ) {
         CoordinatorKey key = CoordinatorKey.byTransactionalId(transactionalId);
         ApiResult<CoordinatorKey, TransactionDescription> result = handleResponseError(handler, transactionalId, error);
         assertEquals(emptyList(), result.unmappedKeys);
-        assertEquals(mkSet(key), result.failedKeys.keySet());
+        assertEquals(Set.of(key), result.failedKeys.keySet());
 
         Throwable throwable = result.failedKeys.get(key);
-        assertTrue(error.exception().getClass().isInstance(throwable));
+        assertInstanceOf(error.exception().getClass(), throwable);
     }
 
-    private void assertRetriableError(DescribeTransactionsHandler handler, String transactionalId, Errors error) {
+    private void assertRetriableError(
+        DescribeTransactionsHandler handler,
+        String transactionalId,
+        Errors error
+    ) {
         ApiResult<CoordinatorKey, TransactionDescription> result = handleResponseError(handler, transactionalId, error);
         assertEquals(emptyList(), result.unmappedKeys);
         assertEquals(emptyMap(), result.failedKeys);
     }
 
-    private void assertUnmappedKey(DescribeTransactionsHandler handler, String transactionalId, Errors error) {
+    private void assertUnmappedKey(
+        DescribeTransactionsHandler handler,
+        String transactionalId,
+        Errors error
+    ) {
         CoordinatorKey key = CoordinatorKey.byTransactionalId(transactionalId);
         ApiResult<CoordinatorKey, TransactionDescription> result = handleResponseError(handler, transactionalId, error);
         assertEquals(emptyMap(), result.failedKeys);
         assertEquals(singletonList(key), result.unmappedKeys);
     }
 
-    private ApiResult<CoordinatorKey, TransactionDescription> handleResponseError(DescribeTransactionsHandler handler, String transactionalId, Errors error) {
+    private ApiResult<CoordinatorKey, TransactionDescription> handleResponseError(
+        DescribeTransactionsHandler handler,
+        String transactionalId,
+        Errors error
+    ) {
         CoordinatorKey key = CoordinatorKey.byTransactionalId(transactionalId);
-        Set<CoordinatorKey> keys = mkSet(key);
+        Set<CoordinatorKey> keys = Set.of(key);
 
-        DescribeTransactionsResponseData.TransactionState transactionState = new DescribeTransactionsResponseData.TransactionState().setErrorCode(error.code()).setTransactionalId(transactionalId);
+        DescribeTransactionsResponseData.TransactionState transactionState = new DescribeTransactionsResponseData.TransactionState()
+            .setErrorCode(error.code())
+            .setTransactionalId(transactionalId);
 
-        DescribeTransactionsResponse response = new DescribeTransactionsResponse(new DescribeTransactionsResponseData().setTransactionStates(singletonList(transactionState)));
+        DescribeTransactionsResponse response = new DescribeTransactionsResponse(new DescribeTransactionsResponseData()
+            .setTransactionStates(singletonList(transactionState)));
 
         ApiResult<CoordinatorKey, TransactionDescription> result = handler.handleResponse(node, keys, response);
         assertEquals(emptyMap(), result.completedKeys);
         return result;
     }
 
-    private void assertLookup(DescribeTransactionsHandler handler, Set<String> transactionalIds) {
+    private void assertLookup(
+        DescribeTransactionsHandler handler,
+        Set<String> transactionalIds
+    ) {
         Set<CoordinatorKey> keys = coordinatorKeys(transactionalIds);
         DescribeTransactionsRequest.Builder request = handler.buildBatchedRequest(1, keys);
         assertEquals(transactionalIds, new HashSet<>(request.data.transactionalIds()));
     }
 
     private static Set<CoordinatorKey> coordinatorKeys(Set<String> transactionalIds) {
-        return transactionalIds.stream().map(CoordinatorKey::byTransactionalId).collect(Collectors.toSet());
+        return transactionalIds.stream()
+            .map(CoordinatorKey::byTransactionalId)
+            .collect(Collectors.toSet());
     }
 
-    private DescribeTransactionsResponseData.TransactionState sampleTransactionState1(String transactionalId) {
-        return new DescribeTransactionsResponseData.TransactionState().setErrorCode(Errors.NONE.code()).setTransactionState("Ongoing").setTransactionalId(transactionalId).setProducerId(12345L).setProducerEpoch((short) 15).setTransactionStartTimeMs(1599151791L).setTransactionTimeoutMs(10000).setTopics(new DescribeTransactionsResponseData.TopicDataCollection(asList(new DescribeTransactionsResponseData.TopicData().setTopic("foo").setPartitions(asList(1, 3, 5)), new DescribeTransactionsResponseData.TopicData().setTopic("bar").setPartitions(asList(1, 3, 5))).iterator()));
+    private DescribeTransactionsResponseData.TransactionState sampleTransactionState1(
+        String transactionalId
+    ) {
+        return new DescribeTransactionsResponseData.TransactionState()
+            .setErrorCode(Errors.NONE.code())
+            .setTransactionState("Ongoing")
+            .setTransactionalId(transactionalId)
+            .setProducerId(12345L)
+            .setProducerEpoch((short) 15)
+            .setTransactionStartTimeMs(1599151791L)
+            .setTransactionTimeoutMs(10000)
+            .setTopics(new DescribeTransactionsResponseData.TopicDataCollection(asList(
+                new DescribeTransactionsResponseData.TopicData()
+                    .setTopic("foo")
+                    .setPartitions(asList(1, 3, 5)),
+                new DescribeTransactionsResponseData.TopicData()
+                    .setTopic("bar")
+                    .setPartitions(asList(1, 3, 5))
+            ).iterator()));
     }
 
-    private DescribeTransactionsResponseData.TransactionState sampleTransactionState2(String transactionalId) {
-        return new DescribeTransactionsResponseData.TransactionState().setErrorCode(Errors.NONE.code()).setTransactionState("Empty").setTransactionalId(transactionalId).setProducerId(98765L).setProducerEpoch((short) 30).setTransactionStartTimeMs(-1);
+    private DescribeTransactionsResponseData.TransactionState sampleTransactionState2(
+        String transactionalId
+    ) {
+        return new DescribeTransactionsResponseData.TransactionState()
+            .setErrorCode(Errors.NONE.code())
+            .setTransactionState("Empty")
+            .setTransactionalId(transactionalId)
+            .setProducerId(98765L)
+            .setProducerEpoch((short) 30)
+            .setTransactionStartTimeMs(-1);
     }
 
-    private void assertMatchingTransactionState(int expectedCoordinatorId, DescribeTransactionsResponseData.TransactionState expected, TransactionDescription actual) {
+    private void assertMatchingTransactionState(
+        int expectedCoordinatorId,
+        DescribeTransactionsResponseData.TransactionState expected,
+        TransactionDescription actual
+    ) {
         assertEquals(expectedCoordinatorId, actual.coordinatorId());
         assertEquals(expected.producerId(), actual.producerId());
         assertEquals(expected.producerEpoch(), actual.producerEpoch());
@@ -151,7 +212,9 @@ public class DescribeTransactionsHandlerTest {
         assertEquals(collectTransactionPartitions(expected), actual.topicPartitions());
     }
 
-    private Set<TopicPartition> collectTransactionPartitions(DescribeTransactionsResponseData.TransactionState transactionState) {
+    private Set<TopicPartition> collectTransactionPartitions(
+        DescribeTransactionsResponseData.TransactionState transactionState
+    ) {
         Set<TopicPartition> topicPartitions = new HashSet<>();
         for (DescribeTransactionsResponseData.TopicData topicData : transactionState.topics()) {
             for (Integer partitionId : topicData.partitions()) {

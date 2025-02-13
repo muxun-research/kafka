@@ -19,7 +19,11 @@ package org.apache.kafka.server.authorizer;
 
 import org.apache.kafka.common.Configurable;
 import org.apache.kafka.common.Endpoint;
-import org.apache.kafka.common.acl.*;
+import org.apache.kafka.common.acl.AccessControlEntryFilter;
+import org.apache.kafka.common.acl.AclBinding;
+import org.apache.kafka.common.acl.AclBindingFilter;
+import org.apache.kafka.common.acl.AclOperation;
+import org.apache.kafka.common.acl.AclPermissionType;
 import org.apache.kafka.common.annotation.InterfaceStability;
 import org.apache.kafka.common.resource.PatternType;
 import org.apache.kafka.common.resource.ResourcePattern;
@@ -29,7 +33,12 @@ import org.apache.kafka.common.security.auth.KafkaPrincipal;
 import org.apache.kafka.common.utils.SecurityUtils;
 
 import java.io.Closeable;
-import java.util.*;
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletionStage;
 
 /**
@@ -74,9 +83,10 @@ public interface Authorizer extends Configurable, Closeable {
      * metadata for authorizing requests on each listener is available. Each listener will be
      * started only after its metadata is available and authorizer is ready to start authorizing
      * requests on that listener.
+     *
      * @param serverInfo Metadata for the broker including broker id and listener endpoints
      * @return CompletionStage for each endpoint that completes when authorizer is ready to
-     * start authorizing requests on that listener.
+     *         start authorizing requests on that listener.
      */
     Map<Endpoint, ? extends CompletionStage<Void>> start(AuthorizerServerInfo serverInfo);
 
@@ -87,8 +97,9 @@ public interface Authorizer extends Configurable, Closeable {
      * This is a synchronous API designed for use with locally cached ACLs. Since this method is invoked on the
      * request thread while processing each request, implementations of this method should avoid time-consuming
      * remote communication that may block request threads.
+     *
      * @param requestContext Request context including request type, security protocol and listener name
-     * @param actions        Actions being authorized including resource and operation for each action
+     * @param actions Actions being authorized including resource and operation for each action
      * @return List of authorization results for each action in the same order as the provided actions
      */
     List<AuthorizationResult> authorize(AuthorizableRequestContext requestContext, List<Action> actions);
@@ -99,12 +110,13 @@ public interface Authorizer extends Configurable, Closeable {
      * This is an asynchronous API that enables the caller to avoid blocking during the update. Implementations of this
      * API can return completed futures using {@link java.util.concurrent.CompletableFuture#completedFuture(Object)}
      * to process the update synchronously on the request thread.
+     *
      * @param requestContext Request context if the ACL is being created by a broker to handle
-     *                       a client request to create ACLs. This may be null if ACLs are created directly in ZooKeeper
-     *                       using AclCommand.
-     * @param aclBindings    ACL bindings to create
+     *        a client request to create ACLs.
+     * @param aclBindings ACL bindings to create
+     *
      * @return Create result for each ACL binding in the same order as in the input list. Each result
-     * is returned as a CompletionStage that completes when the result is available.
+     *         is returned as a CompletionStage that completes when the result is available.
      */
     List<? extends CompletionStage<AclCreateResult>> createAcls(AuthorizableRequestContext requestContext, List<AclBinding> aclBindings);
 
@@ -116,14 +128,15 @@ public interface Authorizer extends Configurable, Closeable {
      * to process the update synchronously on the request thread.
      * <p>
      * Refer to the authorizer implementation docs for details on concurrent update guarantees.
-     * @param requestContext    Request context if the ACL is being deleted by a broker to handle
-     *                          a client request to delete ACLs. This may be null if ACLs are deleted directly in ZooKeeper
-     *                          using AclCommand.
+     *
+     * @param requestContext Request context if the ACL is being deleted by a broker to handle
+     *        a client request to delete ACLs.
      * @param aclBindingFilters Filters to match ACL bindings that are to be deleted
+     *
      * @return Delete result for each filter in the same order as in the input list.
-     * Each result indicates which ACL bindings were actually deleted as well as any
-     * bindings that matched but could not be deleted. Each result is returned as a
-     * CompletionStage that completes when the result is available.
+     *         Each result indicates which ACL bindings were actually deleted as well as any
+     *         bindings that matched but could not be deleted. Each result is returned as a
+     *         CompletionStage that completes when the result is available.
      */
     List<? extends CompletionStage<AclDeleteResult>> deleteAcls(AuthorizableRequestContext requestContext, List<AclBindingFilter> aclBindingFilters);
 
@@ -133,6 +146,7 @@ public interface Authorizer extends Configurable, Closeable {
      * This is a synchronous API designed for use with locally cached ACLs. This method is invoked on the request
      * thread while processing DescribeAcls requests and should avoid time-consuming remote communication that may
      * block request threads.
+     *
      * @return Iterator for ACL bindings, which may be populated lazily.
      */
     Iterable<AclBinding> acls(AclBindingFilter filter);
@@ -148,58 +162,70 @@ public interface Authorizer extends Configurable, Closeable {
     /**
      * Check if the caller is authorized to perform the given ACL operation on at least one
      * resource of the given type.
-     * <p>
+     *
      * Custom authorizer implementations should consider overriding this default implementation because:
      * 1. The default implementation iterates all AclBindings multiple times, without any caching
-     * by principal, host, operation, permission types, and resource types. More efficient
-     * implementations may be added in custom authorizers that directly access cached entries.
+     *    by principal, host, operation, permission types, and resource types. More efficient
+     *    implementations may be added in custom authorizers that directly access cached entries.
      * 2. The default implementation cannot integrate with any audit logging included in the
-     * authorizer implementation.
+     *    authorizer implementation.
      * 3. The default implementation does not support any custom authorizer configs or other access
-     * rules apart from ACLs.
+     *    rules apart from ACLs.
+     *
      * @param requestContext Request context including request resourceType, security protocol and listener name
      * @param op             The ACL operation to check
      * @param resourceType   The resource type to check
-     * @return Return {@link AuthorizationResult#ALLOWED} if the caller is authorized
-     * to perform the given ACL operation on at least one resource of the
-     * given type. Return {@link AuthorizationResult#DENIED} otherwise.
+     * @return               Return {@link AuthorizationResult#ALLOWED} if the caller is authorized
+     *                       to perform the given ACL operation on at least one resource of the
+     *                       given type. Return {@link AuthorizationResult#DENIED} otherwise.
      */
     default AuthorizationResult authorizeByResourceType(AuthorizableRequestContext requestContext, AclOperation op, ResourceType resourceType) {
         SecurityUtils.authorizeByResourceTypeCheckArgs(op, resourceType);
 
         // Check a hard-coded name to ensure that super users are granted
         // access regardless of DENY ACLs.
-        if (authorize(requestContext, Collections.singletonList(new Action(op, new ResourcePattern(resourceType, "hardcode", PatternType.LITERAL), 0, true, false))).get(0) == AuthorizationResult.ALLOWED) {
+        if (authorize(requestContext, Collections.singletonList(new Action(
+                op, new ResourcePattern(resourceType, "hardcode", PatternType.LITERAL),
+                0, true, false)))
+                .get(0) == AuthorizationResult.ALLOWED) {
             return AuthorizationResult.ALLOWED;
         }
 
         // Filter out all the resource pattern corresponding to the RequestContext,
         // AclOperation, and ResourceType
-        ResourcePatternFilter resourceTypeFilter = new ResourcePatternFilter(resourceType, null, PatternType.ANY);
-        AclBindingFilter aclFilter = new AclBindingFilter(resourceTypeFilter, AccessControlEntryFilter.ANY);
+        ResourcePatternFilter resourceTypeFilter = new ResourcePatternFilter(
+            resourceType, null, PatternType.ANY);
+        AclBindingFilter aclFilter = new AclBindingFilter(
+            resourceTypeFilter, AccessControlEntryFilter.ANY);
 
-        EnumMap<PatternType, Set<String>> denyPatterns = new EnumMap<PatternType, Set<String>>(PatternType.class) {{
-            put(PatternType.LITERAL, new HashSet<>());
-            put(PatternType.PREFIXED, new HashSet<>());
-        }};
-        EnumMap<PatternType, Set<String>> allowPatterns = new EnumMap<PatternType, Set<String>>(PatternType.class) {{
-            put(PatternType.LITERAL, new HashSet<>());
-            put(PatternType.PREFIXED, new HashSet<>());
-        }};
+        EnumMap<PatternType, Set<String>> denyPatterns =
+            new EnumMap<>(PatternType.class) {{
+                    put(PatternType.LITERAL, new HashSet<>());
+                    put(PatternType.PREFIXED, new HashSet<>());
+                }};
+        EnumMap<PatternType, Set<String>> allowPatterns =
+            new EnumMap<>(PatternType.class) {{
+                    put(PatternType.LITERAL, new HashSet<>());
+                    put(PatternType.PREFIXED, new HashSet<>());
+                }};
 
         boolean hasWildCardAllow = false;
 
-        KafkaPrincipal principal = new KafkaPrincipal(requestContext.principal().getPrincipalType(), requestContext.principal().getName());
+        KafkaPrincipal principal = new KafkaPrincipal(
+            requestContext.principal().getPrincipalType(),
+            requestContext.principal().getName());
         String hostAddr = requestContext.clientAddress().getHostAddress();
 
         for (AclBinding binding : acls(aclFilter)) {
             if (!binding.entry().host().equals(hostAddr) && !binding.entry().host().equals("*"))
                 continue;
 
-            if (!SecurityUtils.parseKafkaPrincipal(binding.entry().principal()).equals(principal) && !binding.entry().principal().equals("User:*"))
+            if (!SecurityUtils.parseKafkaPrincipal(binding.entry().principal()).equals(principal)
+                    && !binding.entry().principal().equals("User:*"))
                 continue;
 
-            if (binding.entry().operation() != op && binding.entry().operation() != AclOperation.ALL)
+            if (binding.entry().operation() != op
+                    && binding.entry().operation() != AclOperation.ALL)
                 continue;
 
             if (binding.entry().permissionType() == AclPermissionType.DENY) {
@@ -244,7 +270,8 @@ public interface Authorizer extends Configurable, Closeable {
         // For any prefix allowed, if there's no dominant prefix denied, return allow.
         for (Map.Entry<PatternType, Set<String>> entry : allowPatterns.entrySet()) {
             for (String allowStr : entry.getValue()) {
-                if (entry.getKey() == PatternType.LITERAL && denyPatterns.get(PatternType.LITERAL).contains(allowStr))
+                if (entry.getKey() == PatternType.LITERAL
+                        && denyPatterns.get(PatternType.LITERAL).contains(allowStr))
                     continue;
                 StringBuilder sb = new StringBuilder();
                 boolean hasDominatedDeny = false;

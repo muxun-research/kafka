@@ -17,14 +17,17 @@
 
 package kafka.integration
 
-import com.yammer.metrics.core.Gauge
+import java.util.Properties
 import kafka.server.KafkaConfig
 import kafka.utils.{Logging, TestUtils}
-import org.apache.kafka.server.metrics.KafkaYammerMetrics
-import org.junit.jupiter.api.{BeforeEach, Test, TestInfo}
 
-import java.util.Properties
 import scala.jdk.CollectionConverters._
+import org.junit.jupiter.api.{BeforeEach, TestInfo}
+import com.yammer.metrics.core.Gauge
+import org.apache.kafka.server.config.{ReplicationConfigs, ServerConfigs, ServerLogConfigs}
+import org.apache.kafka.server.metrics.KafkaYammerMetrics
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 
 class MetricsDuringTopicCreationDeletionTest extends KafkaServerTestHarness with Logging {
 
@@ -36,18 +39,18 @@ class MetricsDuringTopicCreationDeletionTest extends KafkaServerTestHarness with
   private val createDeleteIterations = 3
 
   private val overridingProps = new Properties
-  overridingProps.put(KafkaConfig.DeleteTopicEnableProp, "true")
-  overridingProps.put(KafkaConfig.AutoCreateTopicsEnableProp, "false")
+  overridingProps.put(ServerConfigs.DELETE_TOPIC_ENABLE_CONFIG, "true")
+  overridingProps.put(ServerLogConfigs.AUTO_CREATE_TOPICS_ENABLE_CONFIG, "false")
   // speed up the test for UnderReplicatedPartitions, which relies on the ISR expiry thread to execute concurrently with topic creation
   // But the replica.lag.time.max.ms value still need to consider the slow Jenkins testing environment
-  overridingProps.put(KafkaConfig.ReplicaLagTimeMaxMsProp, "4000")
+  overridingProps.put(ReplicationConfigs.REPLICA_LAG_TIME_MAX_MS_CONFIG, "4000")
 
-  private val testedMetrics = List("OfflinePartitionsCount", "PreferredReplicaImbalanceCount", "UnderReplicatedPartitions")
-  private val topics = List.tabulate(topicNum)(n => topicName + n)
+  private val testedMetrics = List("OfflinePartitionsCount","PreferredReplicaImbalanceCount","UnderReplicatedPartitions")
+  private val topics = List.tabulate(topicNum) (n => topicName + n)
 
   @volatile private var running = true
 
-  override def generateConfigs = TestUtils.createBrokerConfigs(nodesNum, zkConnect)
+  override def generateConfigs = TestUtils.createBrokerConfigs(nodesNum)
     .map(KafkaConfig.fromProps(_, overridingProps))
 
   @BeforeEach
@@ -56,8 +59,8 @@ class MetricsDuringTopicCreationDeletionTest extends KafkaServerTestHarness with
     // This is a test workaround to the issue that prior harness runs may have left a populated registry.
     // see https://issues.apache.org/jira/browse/KAFKA-4605
     for (m <- testedMetrics) {
-      val metricName = KafkaYammerMetrics.defaultRegistry.allMetrics.asScala.keys.find(_.getName.endsWith(m))
-      metricName.foreach(KafkaYammerMetrics.defaultRegistry.removeMetric)
+        val metricName = KafkaYammerMetrics.defaultRegistry.allMetrics.asScala.keys.find(_.getName.endsWith(m))
+        metricName.foreach(KafkaYammerMetrics.defaultRegistry.removeMetric)
     }
 
     super.setUp(testInfo)
@@ -66,8 +69,9 @@ class MetricsDuringTopicCreationDeletionTest extends KafkaServerTestHarness with
   /*
    * checking all metrics we care in a single test is faster though it would be more elegant to have 3 @Test methods
    */
-  @Test
-  def testMetricsDuringTopicCreateDelete(): Unit = {
+  @ParameterizedTest
+  @ValueSource(strings = Array("kraft"))
+  def testMetricsDuringTopicCreateDelete(quorum: String): Unit = {
 
     // For UnderReplicatedPartitions, because of https://issues.apache.org/jira/browse/KAFKA-4605
     // we can't access the metrics value of each server. So instead we directly invoke the method
@@ -106,24 +110,24 @@ class MetricsDuringTopicCreationDeletionTest extends KafkaServerTestHarness with
         }
       }
     })
-    thread.start
+    thread.start()
 
     // breakable loop that creates and deletes topics
     createDeleteTopics()
 
     // if the thread checking the gauge is still run, stop it
-    running = false;
-    thread.join
+    running = false
+    thread.join()
 
-    assert(offlinePartitionsCount == 0, s"Expect offlinePartitionsCount to be 0, but got: $offlinePartitionsCount")
-    assert(preferredReplicaImbalanceCount == 0, s"Expect PreferredReplicaImbalanceCount to be 0, but got: $preferredReplicaImbalanceCount")
-    assert(underReplicatedPartitionCount == 0, s"Expect UnderReplicatedPartitionCount to be 0, but got: $underReplicatedPartitionCount")
+    assert(offlinePartitionsCount==0, s"Expect offlinePartitionsCount to be 0, but got: $offlinePartitionsCount")
+    assert(preferredReplicaImbalanceCount==0, s"Expect PreferredReplicaImbalanceCount to be 0, but got: $preferredReplicaImbalanceCount")
+    assert(underReplicatedPartitionCount==0, s"Expect UnderReplicatedPartitionCount to be 0, but got: $underReplicatedPartitionCount")
   }
 
   private def getGauge(metricName: String) = {
     KafkaYammerMetrics.defaultRegistry.allMetrics.asScala
       .find { case (k, _) => k.getName.endsWith(metricName) }
-      .getOrElse(throw new AssertionError("Unable to find metric " + metricName))
+      .getOrElse(throw new AssertionError( "Unable to find metric " + metricName))
       ._2.asInstanceOf[Gauge[Int]]
   }
 
@@ -134,17 +138,17 @@ class MetricsDuringTopicCreationDeletionTest extends KafkaServerTestHarness with
         try {
           createTopic(t, partitionNum, replicationFactor)
         } catch {
-          case e: Exception => e.printStackTrace
+          case e: Exception => e.printStackTrace()
         }
       }
 
       // Delete topics
       for (t <- topics if running) {
           try {
-            adminZkClient.deleteTopic(t)
-            TestUtils.verifyTopicDeletion(zkClient, t, partitionNum, servers)
+            deleteTopic(t)
+            TestUtils.verifyTopicDeletion(t, partitionNum, servers)
           } catch {
-          case e: Exception => e.printStackTrace
+          case e: Exception => e.printStackTrace()
           }
       }
     }

@@ -27,8 +27,26 @@ import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
  */
 public class UnoptimizableRepartitionNode<K, V> extends BaseRepartitionNode<K, V> {
 
-    private UnoptimizableRepartitionNode(final String nodeName, final String sourceName, final ProcessorParameters<K, V, ?, ?> processorParameters, final Serde<K> keySerde, final Serde<V> valueSerde, final String sinkName, final String repartitionTopic, final StreamPartitioner<K, V> partitioner, final InternalTopicProperties internalTopicProperties) {
-        super(nodeName, sourceName, processorParameters, keySerde, valueSerde, sinkName, repartitionTopic, partitioner, internalTopicProperties);
+    private UnoptimizableRepartitionNode(final String nodeName,
+                                         final String sourceName,
+                                         final ProcessorParameters<K, V, K, V> processorParameters,
+                                         final Serde<K> keySerde,
+                                         final Serde<V> valueSerde,
+                                         final String sinkName,
+                                         final String repartitionTopic,
+                                         final StreamPartitioner<K, V> partitioner,
+                                         final InternalTopicProperties internalTopicProperties) {
+        super(
+            nodeName,
+            sourceName,
+            processorParameters,
+            keySerde,
+            valueSerde,
+            sinkName,
+            repartitionTopic,
+            partitioner,
+            internalTopicProperties
+        );
     }
 
     @Override
@@ -37,9 +55,23 @@ public class UnoptimizableRepartitionNode<K, V> extends BaseRepartitionNode<K, V
 
         processorParameters.addProcessorTo(topologyBuilder, parentNodeNames());
 
-        topologyBuilder.addSink(sinkName, repartitionTopic, keySerializer(), valueSerializer(), partitioner, processorParameters.processorName());
+        topologyBuilder.addSink(
+            sinkName,
+            repartitionTopic,
+            keySerializer(),
+            valueSerializer(),
+            partitioner,
+            processorParameters.processorName()
+        );
 
-        topologyBuilder.addSource(null, sourceName, new FailOnInvalidTimestamp(), keyDeserializer(), valueDeserializer(), repartitionTopic);
+        topologyBuilder.addSource(
+            null,
+            sourceName,
+            new FailOnInvalidTimestamp(),
+            keyDeserializer(),
+            valueDeserializer(),
+            repartitionTopic
+        );
     }
 
     @Override
@@ -52,10 +84,17 @@ public class UnoptimizableRepartitionNode<K, V> extends BaseRepartitionNode<K, V
     }
 
     public static final class UnoptimizableRepartitionNodeBuilder<K, V> extends BaseRepartitionNodeBuilder<K, V, UnoptimizableRepartitionNode<K, V>> {
-
         @Override
         public UnoptimizableRepartitionNode<K, V> build() {
-            return new UnoptimizableRepartitionNode<>(nodeName, sourceName, processorParameters, keySerde, valueSerde, sinkName, repartitionTopic, partitioner, internalTopicProperties);
+            return new UnoptimizableRepartitionNode<>(nodeName,
+                                                      sourceName,
+                                                      processorParameters,
+                                                      keySerde,
+                                                      valueSerde,
+                                                      sinkName,
+                                                      repartitionTopic,
+                                                      partitioner,
+                                                      internalTopicProperties);
         }
     }
 }

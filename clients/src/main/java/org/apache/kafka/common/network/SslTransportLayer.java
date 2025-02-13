@@ -22,11 +22,9 @@ import org.apache.kafka.common.utils.ByteBufferUnmapper;
 import org.apache.kafka.common.utils.ByteUtils;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Utils;
+
 import org.slf4j.Logger;
 
-import javax.net.ssl.*;
-import javax.net.ssl.SSLEngineResult.HandshakeStatus;
-import javax.net.ssl.SSLEngineResult.Status;
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -35,6 +33,17 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 import java.security.Principal;
+
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLEngineResult;
+import javax.net.ssl.SSLEngineResult.HandshakeStatus;
+import javax.net.ssl.SSLEngineResult.Status;
+import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLHandshakeException;
+import javax.net.ssl.SSLKeyException;
+import javax.net.ssl.SSLPeerUnverifiedException;
+import javax.net.ssl.SSLProtocolException;
+import javax.net.ssl.SSLSession;
 
 /*
  * Transport layer for SSL communication
@@ -49,12 +58,17 @@ import java.security.Principal;
 public class SslTransportLayer implements TransportLayer {
     private enum State {
         // Initial state
-        NOT_INITIALIZED, // SSLEngine is in handshake mode
-        HANDSHAKE, // SSL handshake failed, connection will be terminated
-        HANDSHAKE_FAILED, // SSLEngine has completed handshake, post-handshake messages may be pending for TLSv1.3
-        POST_HANDSHAKE, // SSLEngine has completed handshake, any post-handshake messages have been processed for TLSv1.3
+        NOT_INITIALIZED,
+        // SSLEngine is in handshake mode
+        HANDSHAKE,
+        // SSL handshake failed, connection will be terminated
+        HANDSHAKE_FAILED,
+        // SSLEngine has completed handshake, post-handshake messages may be pending for TLSv1.3
+        POST_HANDSHAKE,
+        // SSLEngine has completed handshake, any post-handshake messages have been processed for TLSv1.3
         // For TLSv1.3, we move the channel to READY state when incoming data is processed after handshake
-        READY, // Channel is being closed
+        READY,
+        // Channel is being closed
         CLOSING
     }
 
@@ -77,12 +91,14 @@ public class SslTransportLayer implements TransportLayer {
     private ByteBuffer fileChannelBuffer;
     private boolean hasBytesBuffered;
 
-    public static SslTransportLayer create(String channelId, SelectionKey key, SSLEngine sslEngine, ChannelMetadataRegistry metadataRegistry) throws IOException {
+    public static SslTransportLayer create(String channelId, SelectionKey key, SSLEngine sslEngine,
+                                           ChannelMetadataRegistry metadataRegistry) throws IOException {
         return new SslTransportLayer(channelId, key, sslEngine, metadataRegistry);
     }
 
     // Prefer `create`, only use this in tests
-    SslTransportLayer(String channelId, SelectionKey key, SSLEngine sslEngine, ChannelMetadataRegistry metadataRegistry) {
+    SslTransportLayer(String channelId, SelectionKey key, SSLEngine sslEngine,
+                      ChannelMetadataRegistry metadataRegistry) {
         this.channelId = channelId;
         this.key = key;
         this.socketChannel = (SocketChannel) key.channel();
@@ -156,13 +172,12 @@ public class SslTransportLayer implements TransportLayer {
     }
 
     /**
-     * Sends an SSL close message and closes socketChannel.
-     */
+    * Sends an SSL close message and closes socketChannel.
+    */
     @Override
     public void close() throws IOException {
         State prevState = state;
-        if (state == State.CLOSING)
-            return;
+        if (state == State.CLOSING) return;
         state = State.CLOSING;
         sslEngine.closeOutbound();
         try {
@@ -176,7 +191,8 @@ public class SslTransportLayer implements TransportLayer {
                 SSLEngineResult wrapResult = sslEngine.wrap(ByteUtils.EMPTY_BUF, netWriteBuffer);
                 //we should be in a close state
                 if (wrapResult.getStatus() != SSLEngineResult.Status.CLOSED) {
-                    throw new IOException("Unexpected status returned by SSLEngine.wrap, expected CLOSED, received " + wrapResult.getStatus() + ". Will not send close message to peer.");
+                    throw new IOException("Unexpected status returned by SSLEngine.wrap, expected CLOSED, received " +
+                            wrapResult.getStatus() + ". Will not send close message to peer.");
                 }
                 netWriteBuffer.flip();
                 flush(netWriteBuffer);
@@ -184,6 +200,14 @@ public class SslTransportLayer implements TransportLayer {
         } catch (IOException ie) {
             log.debug("Failed to send SSL Close message", ie);
         } finally {
+            try {
+                sslEngine.closeInbound();
+            } catch (SSLException e) {
+                // This log is for debugging purposes as an exception might occur frequently
+                // at this point due to peers not following the TLS specs and failing to send a close_notify alert. 
+                // Even if they do, currently, we do not read data from the socket after invoking close().
+                log.debug("SSLEngine.closeInBound() raised an exception.", e);
+            }
             socketChannel.socket().close();
             socketChannel.close();
             netReadBuffer = null;
@@ -287,7 +311,8 @@ public class SslTransportLayer implements TransportLayer {
             // in the socket channel to read and unwrap, process the data so that any SSL handshake exceptions are reported.
             try {
                 do {
-                    log.trace("Process any available bytes from peer, netReadBuffer {} netWriterBuffer {} handshakeStatus {} readable? {}", netReadBuffer, netWriteBuffer, handshakeStatus, readable);
+                    log.trace("Process any available bytes from peer, netReadBuffer {} netWriterBuffer {} handshakeStatus {} readable? {}",
+                        netReadBuffer, netWriteBuffer, handshakeStatus, readable);
                     handshakeWrapAfterFailure(false);
                     handshakeUnwrap(false, true);
                 } while (readable && readFromSocketChannel() > 0);
@@ -438,8 +463,10 @@ public class SslTransportLayer implements TransportLayer {
                 SSLSession session = sslEngine.getSession();
                 state = session.getProtocol().equals(TLS13) ? State.POST_HANDSHAKE : State.READY;
                 key.interestOps(key.interestOps() & ~SelectionKey.OP_WRITE);
-                log.debug("SSL handshake completed successfully with peerHost '{}' peerPort {} peerPrincipal '{}' protocol '{}' cipherSuite '{}'", session.getPeerHost(), session.getPeerPort(), peerPrincipal(), session.getProtocol(), session.getCipherSuite());
-                metadataRegistry.registerCipherInformation(new CipherInformation(session.getCipherSuite(), session.getProtocol()));
+                log.debug("SSL handshake completed successfully with peerHost '{}' peerPort {} peerPrincipal '{}' protocol '{}' cipherSuite '{}'",
+                        session.getPeerHost(), session.getPeerPort(), peerPrincipal(), session.getProtocol(), session.getCipherSuite());
+                metadataRegistry.registerCipherInformation(
+                    new CipherInformation(session.getCipherSuite(),  session.getProtocol()));
             }
 
             log.trace("SSLHandshake FINISHED channelId {}, appReadBuffer pos {}, netReadBuffer pos {}, netWriteBuffer pos {} ",
@@ -470,23 +497,24 @@ public class SslTransportLayer implements TransportLayer {
             netWriteBuffer.flip();
         }
         handshakeStatus = result.getHandshakeStatus();
-        if (result.getStatus() == SSLEngineResult.Status.OK && result.getHandshakeStatus() == HandshakeStatus.NEED_TASK) {
+        if (result.getStatus() == SSLEngineResult.Status.OK &&
+            result.getHandshakeStatus() == HandshakeStatus.NEED_TASK) {
             handshakeStatus = runDelegatedTasks();
         }
 
-        if (doWrite)
-            flush(netWriteBuffer);
+        if (doWrite) flush(netWriteBuffer);
         return result;
     }
 
     /**
-     * Perform handshake unwrap
+     * Perform handshake unwrap.
+     * Visible for testing.
      * @param doRead boolean If true, read more from the socket channel
      * @param ignoreHandshakeStatus If true, continue to unwrap if data available regardless of handshake status
      * @return SSLEngineResult
      * @throws IOException
      */
-    private SSLEngineResult handshakeUnwrap(boolean doRead, boolean ignoreHandshakeStatus) throws IOException {
+    SSLEngineResult handshakeUnwrap(boolean doRead, boolean ignoreHandshakeStatus) throws IOException {
         log.trace("SSLHandshake handshakeUnwrap {}", channelId);
         SSLEngineResult result;
         int read = 0;
@@ -508,7 +536,7 @@ public class SslTransportLayer implements TransportLayer {
                     handshakeStatus == HandshakeStatus.NEED_UNWRAP) ||
                     (ignoreHandshakeStatus && netReadBuffer.position() != position);
             log.trace("SSLHandshake handshakeUnwrap: handshakeStatus {} status {}", handshakeStatus, result.getStatus());
-        } while (netReadBuffer.position() != 0 && cont);
+        } while (cont);
 
         // Throw EOF exception for failed read after processing already received data
         // so that handshake failures are reported correctly
@@ -530,10 +558,8 @@ public class SslTransportLayer implements TransportLayer {
     */
     @Override
     public int read(ByteBuffer dst) throws IOException {
-        if (state == State.CLOSING)
-            return -1;
-        else if (!ready())
-            return 0;
+        if (state == State.CLOSING) return -1;
+        else if (!ready()) return 0;
 
         //if we have unread decrypted data in appReadBuffer read that into dst buffer.
         int read = 0;
@@ -572,8 +598,13 @@ public class SslTransportLayer implements TransportLayer {
                 }
                 netReadBuffer.compact();
                 // reject renegotiation if TLS < 1.3, key updates for TLS 1.3 are allowed
-                if (unwrapResult.getHandshakeStatus() != HandshakeStatus.NOT_HANDSHAKING && unwrapResult.getHandshakeStatus() != HandshakeStatus.FINISHED && unwrapResult.getStatus() == Status.OK && !sslEngine.getSession().getProtocol().equals(TLS13)) {
-                    log.error("Renegotiation requested, but it is not supported, channelId {}, " + "appReadBuffer pos {}, netReadBuffer pos {}, netWriteBuffer pos {} handshakeStatus {}", channelId, appReadBuffer.position(), netReadBuffer.position(), netWriteBuffer.position(), unwrapResult.getHandshakeStatus());
+                if (unwrapResult.getHandshakeStatus() != HandshakeStatus.NOT_HANDSHAKING &&
+                        unwrapResult.getHandshakeStatus() != HandshakeStatus.FINISHED &&
+                        unwrapResult.getStatus() == Status.OK &&
+                        !sslEngine.getSession().getProtocol().equals(TLS13)) {
+                    log.error("Renegotiation requested, but it is not supported, channelId {}, " +
+                        "appReadBuffer pos {}, netReadBuffer pos {}, netWriteBuffer pos {} handshakeStatus {}", channelId,
+                        appReadBuffer.position(), netReadBuffer.position(), netWriteBuffer.position(), unwrapResult.getHandshakeStatus());
                     throw renegotiationException();
                 }
 
@@ -583,7 +614,8 @@ public class SslTransportLayer implements TransportLayer {
                     int currentApplicationBufferSize = applicationBufferSize();
                     appReadBuffer = Utils.ensureCapacity(appReadBuffer, currentApplicationBufferSize);
                     if (appReadBuffer.position() >= currentApplicationBufferSize) {
-                        throw new IllegalStateException("Buffer overflow when available data size (" + appReadBuffer.position() + ") >= application buffer size (" + currentApplicationBufferSize + ")");
+                        throw new IllegalStateException("Buffer overflow when available data size (" + appReadBuffer.position() +
+                                                        ") >= application buffer size (" + currentApplicationBufferSize + ")");
                     }
 
                     // appReadBuffer will extended upto currentApplicationBufferSize
@@ -651,7 +683,7 @@ public class SslTransportLayer implements TransportLayer {
 
         int totalRead = 0;
         int i = offset;
-        while (i < length) {
+        while (i < offset + length) {
             if (dsts[i].hasRemaining()) {
                 int read = read(dsts[i]);
                 if (read > 0)
@@ -668,11 +700,12 @@ public class SslTransportLayer implements TransportLayer {
 
 
     /**
-     * Writes a sequence of bytes to this channel from the given buffer.
-     * @param src The buffer from which bytes are to be retrieved
-     * @return The number of bytes read from src, possibly zero, or -1 if the channel has reached end-of-stream
-     * @throws IOException If some other I/O error occurs
-     */
+    * Writes a sequence of bytes to this channel from the given buffer.
+    *
+    * @param src The buffer from which bytes are to be retrieved
+    * @return The number of bytes read from src, possibly zero, or -1 if the channel has reached end-of-stream
+    * @throws IOException If some other I/O error occurs
+    */
     @Override
     public int write(ByteBuffer src) throws IOException {
         if (state == State.CLOSING)
@@ -687,7 +720,9 @@ public class SslTransportLayer implements TransportLayer {
             netWriteBuffer.flip();
 
             // reject renegotiation if TLS < 1.3, key updates for TLS 1.3 are allowed
-            if (wrapResult.getHandshakeStatus() != HandshakeStatus.NOT_HANDSHAKING && wrapResult.getStatus() == Status.OK && !sslEngine.getSession().getProtocol().equals(TLS13)) {
+            if (wrapResult.getHandshakeStatus() != HandshakeStatus.NOT_HANDSHAKING &&
+                    wrapResult.getStatus() == Status.OK &&
+                    !sslEngine.getSession().getProtocol().equals(TLS13)) {
                 throw renegotiationException();
             }
 
@@ -721,7 +756,7 @@ public class SslTransportLayer implements TransportLayer {
             throw new IndexOutOfBoundsException();
         int totalWritten = 0;
         int i = offset;
-        while (i < length) {
+        while (i < offset + length) {
             if (srcs[i].hasRemaining() || hasPendingWrites()) {
                 int written = write(srcs[i]);
                 if (written > 0) {
@@ -852,7 +887,7 @@ public class SslTransportLayer implements TransportLayer {
      * retries and report the failure. If `flush` is true, exceptions are propagated after
      * any pending outgoing bytes are flushed to ensure that the peer is notified of the failure.
      */
-    private void handshakeFailure(SSLException sslException, boolean flush) throws IOException {
+    private void handshakeFailure(SSLException sslException, boolean flush) {
         //Release all resources such as internal buffers that SSLEngine is managing
         log.debug("SSL Handshake failed", sslException);
         sslEngine.closeOutbound();
@@ -909,14 +944,14 @@ public class SslTransportLayer implements TransportLayer {
 
     /**
      * Perform handshake wrap after an SSLException or any IOException.
-     * <p>
+     *
      * If `doWrite=false`, we are processing IOException after peer has disconnected, so we
      * cannot send any more data. We perform any pending wraps so that we can unwrap any
      * peer data that is already available.
-     * <p>
+     *
      * If `doWrite=true`, we are processing SSLException, we perform wrap and flush
      * any data to notify the peer of the handshake failure.
-     * <p>
+     *
      * Returns true if no more wrap is required and any data is flushed or discarded.
      */
     private boolean handshakeWrapAfterFailure(boolean doWrite) {

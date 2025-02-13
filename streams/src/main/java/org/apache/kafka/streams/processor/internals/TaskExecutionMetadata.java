@@ -21,6 +21,8 @@ import org.apache.kafka.streams.internals.StreamsConfigUtils.ProcessingMode;
 import org.apache.kafka.streams.processor.TaskId;
 import org.slf4j.Logger;
 
+import org.slf4j.Logger;
+
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Map;
@@ -94,7 +96,7 @@ public class TaskExecutionMetadata {
         return successfullyProcessed;
     }
 
-    void addToSuccessfullyProcessed(final Task task) {
+    public void addToSuccessfullyProcessed(final Task task) {
         successfullyProcessed.add(task);
     }
 

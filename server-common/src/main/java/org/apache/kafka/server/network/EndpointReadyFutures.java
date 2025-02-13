@@ -21,9 +21,17 @@ import org.apache.kafka.common.Endpoint;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.server.authorizer.Authorizer;
 import org.apache.kafka.server.authorizer.AuthorizerServerInfo;
+
 import org.slf4j.Logger;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
@@ -38,35 +46,49 @@ public class EndpointReadyFutures {
 
         /**
          * Add a readiness future that will block all endpoints.
-         * @param name   The future name.
-         * @param future The future object.
-         * @return This builder object.
+         *
+         * @param name          The future name.
+         * @param future        The future object.
+         *
+         * @return              This builder object.
          */
-        public Builder addReadinessFuture(String name, CompletableFuture<?> future) {
+        public Builder addReadinessFuture(
+            String name,
+            CompletableFuture<?> future
+        ) {
             stages.add(new EndpointCompletionStage(name, future));
             return this;
         }
 
         /**
          * Add readiness futures for individual endpoints.
-         * @param name       The future name.
-         * @param newFutures A map from endpoints to futures.
-         * @return This builder object.
+         *
+         * @param name          The future name.
+         * @param newFutures    A map from endpoints to futures.
+         *
+         * @return              This builder object.
          */
-        public Builder addReadinessFutures(String name, Map<Endpoint, ? extends CompletionStage<?>> newFutures) {
-            newFutures.forEach((endpoint, future) -> {
-                endpointStages.computeIfAbsent(endpoint, __ -> new ArrayList<>()).add(new EndpointCompletionStage(name, future));
-            });
+        public Builder addReadinessFutures(
+            String name,
+            Map<Endpoint, ? extends CompletionStage<?>> newFutures
+        ) {
+            newFutures.forEach((endpoint, future) -> endpointStages.computeIfAbsent(endpoint, __ -> new ArrayList<>()).
+                add(new EndpointCompletionStage(name, future)));
             return this;
         }
 
         /**
          * Build the EndpointReadyFutures object.
-         * @param authorizer The authorizer to use, if any. Will be started.
-         * @param info       Server information to be passed to the authorizer.
-         * @return The new futures object.
+         *
+         * @param authorizer    The authorizer to use, if any. Will be started.
+         * @param info          Server information to be passed to the authorizer.
+         *
+         * @return              The new futures object.
          */
-        public EndpointReadyFutures build(Optional<Authorizer> authorizer, AuthorizerServerInfo info) {
+        public EndpointReadyFutures build(
+            Optional<Authorizer> authorizer,
+            AuthorizerServerInfo info
+        ) {
             if (authorizer.isPresent()) {
                 return build(authorizer.get().start(info), info);
             } else {
@@ -74,10 +96,13 @@ public class EndpointReadyFutures {
             }
         }
 
-        EndpointReadyFutures build(Map<Endpoint, ? extends CompletionStage<?>> authorizerStartFutures, AuthorizerServerInfo info) {
-            if (logContext == null)
-                logContext = new LogContext();
-            Map<Endpoint, CompletionStage<?>> effectiveStartFutures = new HashMap<>(authorizerStartFutures);
+        EndpointReadyFutures build(
+            Map<Endpoint, ? extends CompletionStage<?>> authorizerStartFutures,
+            AuthorizerServerInfo info
+        ) {
+            if (logContext == null) logContext = new LogContext();
+            Map<Endpoint, CompletionStage<?>> effectiveStartFutures =
+                    new HashMap<>(authorizerStartFutures);
             for (Endpoint endpoint : info.endpoints()) {
                 if (!effectiveStartFutures.containsKey(endpoint)) {
                     CompletableFuture<Void> completedFuture = CompletableFuture.completedFuture(null);
@@ -91,17 +116,17 @@ public class EndpointReadyFutures {
                         notInInfo.add(endpoint.listenerName().orElse("[none]"));
                     }
                 }
-                throw new RuntimeException("Found authorizer futures that weren't included " + "in AuthorizerServerInfo: " + notInInfo);
+                throw new RuntimeException("Found authorizer futures that weren't included " +
+                        "in AuthorizerServerInfo: " + notInInfo);
             }
             addReadinessFutures("authorizerStart", effectiveStartFutures);
             stages.forEach(stage -> {
                 Map<Endpoint, CompletionStage<?>> newReadinessFutures = new HashMap<>();
-                info.endpoints().forEach(endpoint -> {
-                    newReadinessFutures.put(endpoint, stage.future);
-                });
+                info.endpoints().forEach(endpoint -> newReadinessFutures.put(endpoint, stage.future));
                 addReadinessFutures(stage.name, newReadinessFutures);
             });
-            return new EndpointReadyFutures(logContext, endpointStages);
+            return new EndpointReadyFutures(logContext,
+                    endpointStages);
         }
     }
 
@@ -133,13 +158,15 @@ public class EndpointReadyFutures {
                     if (incomplete.isEmpty()) {
                         done = true;
                     } else {
-                        log.info("{} completed for endpoint {}. Still waiting for {}.", stageName, endpointName, incomplete);
+                        log.info("{} completed for endpoint {}. Still waiting for {}.",
+                                stageName, endpointName, incomplete);
                     }
                 }
             }
             if (done) {
                 if (future.complete(null)) {
-                    log.info("{} completed for endpoint {}. Endpoint is now READY.", stageName, endpointName);
+                    log.info("{} completed for endpoint {}. Endpoint is now READY.",
+                            stageName, endpointName);
                 }
             }
         }
@@ -149,7 +176,8 @@ public class EndpointReadyFutures {
                 synchronized (EndpointReadyFuture.this) {
                     incomplete.clear();
                 }
-                log.warn("Endpoint {} will never become ready because we encountered an {} exception", endpointName, what, exception);
+                log.warn("Endpoint {} will never become ready because we encountered an {} exception",
+                        endpointName, what, exception);
             }
         }
     }
@@ -158,7 +186,10 @@ public class EndpointReadyFutures {
 
     private final Map<Endpoint, CompletableFuture<Void>> futures;
 
-    private EndpointReadyFutures(LogContext logContext, Map<Endpoint, List<EndpointCompletionStage>> endpointStages) {
+    private EndpointReadyFutures(
+        LogContext logContext,
+        Map<Endpoint, List<EndpointCompletionStage>> endpointStages
+    ) {
         this.log = logContext.logger(EndpointReadyFutures.class);
         Map<Endpoint, CompletableFuture<Void>> newFutures = new HashMap<>();
         endpointStages.forEach((endpoint, stages) -> {
@@ -166,15 +197,13 @@ public class EndpointReadyFutures {
             stages.forEach(stage -> stageNames.add(stage.name));
             EndpointReadyFuture readyFuture = new EndpointReadyFuture(endpoint, stageNames);
             newFutures.put(endpoint, readyFuture.future);
-            stages.forEach(stage -> {
-                stage.future.whenComplete((__, exception) -> {
-                    if (exception != null) {
-                        readyFuture.failStage(stage.name, exception);
-                    } else {
-                        readyFuture.completeStage(stage.name);
-                    }
-                });
-            });
+            stages.forEach(stage -> stage.future.whenComplete((__, exception) -> {
+                if (exception != null) {
+                    readyFuture.failStage(stage.name, exception);
+                } else {
+                    readyFuture.completeStage(stage.name);
+                }
+            }));
         });
         this.futures = Collections.unmodifiableMap(newFutures);
     }

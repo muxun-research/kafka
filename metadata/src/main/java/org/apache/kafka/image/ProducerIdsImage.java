@@ -27,11 +27,11 @@ import java.util.Objects;
 
 /**
  * Stores the highest seen producer ID in the metadata image.
- * <p>
+ *
  * This class is thread-safe.
  */
 public final class ProducerIdsImage {
-    public final static ProducerIdsImage EMPTY = new ProducerIdsImage(-1L);
+    public static final ProducerIdsImage EMPTY = new ProducerIdsImage(-1L);
 
     /**
      * The next producer ID, or -1 in the special case where no producer IDs have been issued.
@@ -48,7 +48,10 @@ public final class ProducerIdsImage {
 
     public void write(ImageWriter writer, ImageWriterOptions options) {
         if (nextProducerId >= 0) {
-            writer.write(0, new ProducerIdsRecord().setBrokerId(-1).setBrokerEpoch(-1).setNextProducerId(nextProducerId));
+            writer.write(0, new ProducerIdsRecord().
+                    setBrokerId(-1).
+                    setBrokerEpoch(-1).
+                    setNextProducerId(nextProducerId));
         }
     }
 
@@ -58,9 +61,7 @@ public final class ProducerIdsImage {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof ProducerIdsImage))
-            return false;
-        ProducerIdsImage other = (ProducerIdsImage) o;
+        if (!(o instanceof ProducerIdsImage other)) return false;
         return nextProducerId == other.nextProducerId;
     }
 

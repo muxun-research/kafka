@@ -17,21 +17,45 @@
 package org.apache.kafka.clients.producer.internals;
 
 import org.apache.kafka.clients.ApiVersions;
+import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.clients.MetadataSnapshot;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.RecordMetadata;
-import org.apache.kafka.common.*;
-import org.apache.kafka.common.errors.UnsupportedVersionException;
+import org.apache.kafka.common.Cluster;
+import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.Node;
+import org.apache.kafka.common.PartitionInfo;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.compress.Compression;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.metrics.Metrics;
-import org.apache.kafka.common.record.*;
+import org.apache.kafka.common.record.AbstractRecords;
+import org.apache.kafka.common.record.CompressionRatioEstimator;
+import org.apache.kafka.common.record.MemoryRecords;
+import org.apache.kafka.common.record.MemoryRecordsBuilder;
+import org.apache.kafka.common.record.Record;
+import org.apache.kafka.common.record.RecordBatch;
+import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.common.utils.CopyOnWriteMap;
+import org.apache.kafka.common.utils.ExponentialBackoff;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.ProducerIdAndEpoch;
 import org.apache.kafka.common.utils.Time;
+
 import org.slf4j.Logger;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.OptionalInt;
+import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -50,9 +74,9 @@ public class RecordAccumulator {
     private final AtomicInteger flushesInProgress;
     private final AtomicInteger appendsInProgress;
     private final int batchSize;
-    private final CompressionType compression;
+    private final Compression compression;
     private final int lingerMs;
-    private final long retryBackoffMs;
+    private final ExponentialBackoff retryBackoff;
     private final int deliveryTimeoutMs;
     private final long partitionAvailabilityTimeoutMs;  // latency threshold for marking partition temporary unavailable
     private final boolean enableAdaptivePartitioning;
@@ -70,25 +94,40 @@ public class RecordAccumulator {
 
     /**
      * Create a new record accumulator
-     * @param logContext         The log context used for logging
-     * @param batchSize          The size to use when allocating {@link MemoryRecords} instances
-     * @param compression        The compression codec for the records
-     * @param lingerMs           An artificial delay time to add before declaring a records instance that isn't full ready for
-     *                           sending. This allows time for more records to arrive. Setting a non-zero lingerMs will trade off some
-     *                           latency for potentially better throughput due to more batching (and hence fewer, larger requests).
-     * @param retryBackoffMs     An artificial delay time to retry the produce request upon receiving an error. This avoids
-     *                           exhausting all retries in a short period of time.
-     * @param deliveryTimeoutMs  An upper bound on the time to report success or failure on record delivery
-     * @param partitionerConfig  Partitioner config
-     * @param metrics            The metrics
-     * @param metricGrpName      The metric group name
-     * @param time               The time instance to use
-     * @param apiVersions        Request API versions for current connected brokers
+     *
+     * @param logContext The log context used for logging
+     * @param batchSize The size to use when allocating {@link MemoryRecords} instances
+     * @param compression The compression codec for the records
+     * @param lingerMs An artificial delay time to add before declaring a records instance that isn't full ready for
+     *        sending. This allows time for more records to arrive. Setting a non-zero lingerMs will trade off some
+     *        latency for potentially better throughput due to more batching (and hence fewer, larger requests).
+     * @param retryBackoffMs An artificial delay time to retry the produce request upon receiving an error. This avoids
+     *        exhausting all retries in a short period of time.
+     * @param retryBackoffMaxMs The upper bound of the retry backoff time.
+     * @param deliveryTimeoutMs An upper bound on the time to report success or failure on record delivery
+     * @param partitionerConfig Partitioner config
+     * @param metrics The metrics
+     * @param metricGrpName The metric group name
+     * @param time The time instance to use
+     * @param apiVersions Request API versions for current connected brokers
      * @param transactionManager The shared transaction state object which tracks producer IDs, epochs, and sequence
      *                           numbers per partition.
-     * @param bufferPool         The buffer pool
+     * @param bufferPool The buffer pool
      */
-    public RecordAccumulator(LogContext logContext, int batchSize, CompressionType compression, int lingerMs, long retryBackoffMs, int deliveryTimeoutMs, PartitionerConfig partitionerConfig, Metrics metrics, String metricGrpName, Time time, ApiVersions apiVersions, TransactionManager transactionManager, BufferPool bufferPool) {
+    public RecordAccumulator(LogContext logContext,
+                             int batchSize,
+                             Compression compression,
+                             int lingerMs,
+                             long retryBackoffMs,
+                             long retryBackoffMaxMs,
+                             int deliveryTimeoutMs,
+                             PartitionerConfig partitionerConfig,
+                             Metrics metrics,
+                             String metricGrpName,
+                             Time time,
+                             ApiVersions apiVersions,
+                             TransactionManager transactionManager,
+                             BufferPool bufferPool) {
         this.logContext = logContext;
         this.log = logContext.logger(RecordAccumulator.class);
         this.closed = false;
@@ -97,7 +136,10 @@ public class RecordAccumulator {
         this.batchSize = batchSize;
         this.compression = compression;
         this.lingerMs = lingerMs;
-        this.retryBackoffMs = retryBackoffMs;
+        this.retryBackoff = new ExponentialBackoff(retryBackoffMs,
+                CommonClientConfigs.RETRY_BACKOFF_EXP_BASE,
+                retryBackoffMaxMs,
+                CommonClientConfigs.RETRY_BACKOFF_JITTER);
         this.deliveryTimeoutMs = deliveryTimeoutMs;
         this.enableAdaptivePartitioning = partitionerConfig.enableAdaptivePartitioning;
         this.partitionAvailabilityTimeoutMs = partitionerConfig.partitionAvailabilityTimeoutMs;
@@ -113,33 +155,69 @@ public class RecordAccumulator {
 
     /**
      * Create a new record accumulator with default partitioner config
-     * @param logContext         The log context used for logging
-     * @param batchSize          The size to use when allocating {@link MemoryRecords} instances
-     * @param compression        The compression codec for the records
-     * @param lingerMs           An artificial delay time to add before declaring a records instance that isn't full ready for
-     *                           sending. This allows time for more records to arrive. Setting a non-zero lingerMs will trade off some
-     *                           latency for potentially better throughput due to more batching (and hence fewer, larger requests).
-     * @param retryBackoffMs     An artificial delay time to retry the produce request upon receiving an error. This avoids
-     *                           exhausting all retries in a short period of time.
-     * @param deliveryTimeoutMs  An upper bound on the time to report success or failure on record delivery
-     * @param metrics            The metrics
-     * @param metricGrpName      The metric group name
-     * @param time               The time instance to use
-     * @param apiVersions        Request API versions for current connected brokers
+     *
+     * @param logContext The log context used for logging
+     * @param batchSize The size to use when allocating {@link MemoryRecords} instances
+     * @param compression The compression codec for the records
+     * @param lingerMs An artificial delay time to add before declaring a records instance that isn't full ready for
+     *        sending. This allows time for more records to arrive. Setting a non-zero lingerMs will trade off some
+     *        latency for potentially better throughput due to more batching (and hence fewer, larger requests).
+     * @param retryBackoffMs An artificial delay time to retry the produce request upon receiving an error. This avoids
+     *        exhausting all retries in a short period of time.
+     * @param retryBackoffMaxMs The upper bound of the retry backoff time.
+     * @param deliveryTimeoutMs An upper bound on the time to report success or failure on record delivery
+     * @param metrics The metrics
+     * @param metricGrpName The metric group name
+     * @param time The time instance to use
+     * @param apiVersions Request API versions for current connected brokers
      * @param transactionManager The shared transaction state object which tracks producer IDs, epochs, and sequence
      *                           numbers per partition.
-     * @param bufferPool         The buffer pool
+     * @param bufferPool The buffer pool
      */
-    public RecordAccumulator(LogContext logContext, int batchSize, CompressionType compression, int lingerMs, long retryBackoffMs, int deliveryTimeoutMs, Metrics metrics, String metricGrpName, Time time, ApiVersions apiVersions, TransactionManager transactionManager, BufferPool bufferPool) {
-        this(logContext, batchSize, compression, lingerMs, retryBackoffMs, deliveryTimeoutMs, new PartitionerConfig(), metrics, metricGrpName, time, apiVersions, transactionManager, bufferPool);
+    public RecordAccumulator(LogContext logContext,
+                             int batchSize,
+                             Compression compression,
+                             int lingerMs,
+                             long retryBackoffMs,
+                             long retryBackoffMaxMs,
+                             int deliveryTimeoutMs,
+                             Metrics metrics,
+                             String metricGrpName,
+                             Time time,
+                             ApiVersions apiVersions,
+                             TransactionManager transactionManager,
+                             BufferPool bufferPool) {
+        this(logContext,
+            batchSize,
+            compression,
+            lingerMs,
+            retryBackoffMs,
+            retryBackoffMaxMs,
+            deliveryTimeoutMs,
+            new PartitionerConfig(),
+            metrics,
+            metricGrpName,
+            time,
+            apiVersions,
+            transactionManager,
+            bufferPool);
     }
 
     private void registerMetrics(Metrics metrics, String metricGrpName) {
-        metrics.addMetric(metrics.metricName("waiting-threads", metricGrpName, "The number of user threads blocked waiting for buffer memory to enqueue their records"), (config, now) -> free.queued());
+        metrics.addMetric(
+            metrics.metricName("waiting-threads", metricGrpName,
+                "The number of user threads blocked waiting for buffer memory to enqueue their records"),
+            (config, now) -> free.queued());
 
-        metrics.addMetric(metrics.metricName("buffer-total-bytes", metricGrpName, "The maximum amount of buffer memory the client can use (whether or not it is currently used)."), (config, now) -> free.totalMemory());
+        metrics.addMetric(
+            metrics.metricName("buffer-total-bytes", metricGrpName,
+                "The maximum amount of buffer memory the client can use (whether or not it is currently used)."),
+            (config, now) -> free.totalMemory());
 
-        metrics.addMetric(metrics.metricName("buffer-available-bytes", metricGrpName, "The total amount of buffer memory that is not being used (either unallocated or in the free list)."), (config, now) -> free.availableMemory());
+        metrics.addMetric(
+            metrics.metricName("buffer-available-bytes", metricGrpName,
+                "The total amount of buffer memory that is not being used (either unallocated or in the free list)."),
+            (config, now) -> free.availableMemory());
     }
 
     private void setPartition(AppendCallbacks callbacks, int partition) {
@@ -149,18 +227,24 @@ public class RecordAccumulator {
 
     /**
      * Check if partition concurrently changed, or we need to complete previously disabled partition change.
-     * @param topic         The topic
-     * @param topicInfo     The topic info
+     *
+     * @param topic The topic
+     * @param topicInfo The topic info
      * @param partitionInfo The built-in partitioner's partition info
-     * @param deque         The partition queue
-     * @param nowMs         The current time, in milliseconds
-     * @param cluster       THe cluster metadata
+     * @param deque The partition queue
+     * @param nowMs The current time, in milliseconds
+     * @param cluster THe cluster metadata
      * @return 'true' if partition changed and we need to get new partition info and retry,
-     * 'false' otherwise
+     *         'false' otherwise
      */
-    private boolean partitionChanged(String topic, TopicInfo topicInfo, BuiltInPartitioner.StickyPartitionInfo partitionInfo, Deque<ProducerBatch> deque, long nowMs, Cluster cluster) {
+    private boolean partitionChanged(String topic,
+                                     TopicInfo topicInfo,
+                                     BuiltInPartitioner.StickyPartitionInfo partitionInfo,
+                                     Deque<ProducerBatch> deque, long nowMs,
+                                     Cluster cluster) {
         if (topicInfo.builtInPartitioner.isPartitionChanged(partitionInfo)) {
-            log.trace("Partition {} for topic {} switched by a concurrent append, retrying", partitionInfo.partition(), topic);
+            log.trace("Partition {} for topic {} switched by a concurrent append, retrying",
+                    partitionInfo.partition(), topic);
             return true;
         }
 
@@ -169,7 +253,8 @@ public class RecordAccumulator {
         if (allBatchesFull(deque)) {
             topicInfo.builtInPartitioner.updatePartitionInfo(partitionInfo, 0, cluster, true);
             if (topicInfo.builtInPartitioner.isPartitionChanged(partitionInfo)) {
-                log.trace("Completed previously disabled switch for topic {} partition {}, retrying", topic, partitionInfo.partition());
+                log.trace("Completed previously disabled switch for topic {} partition {}, retrying",
+                        topic, partitionInfo.partition());
                 return true;
             }
         }
@@ -182,29 +267,36 @@ public class RecordAccumulator {
      * <p>
      * The append result will contain the future metadata, and flag for whether the appended batch is full or a new batch is created
      * <p>
-     * @param topic           The topic to which this record is being sent
-     * @param partition       The partition to which this record is being sent or RecordMetadata.UNKNOWN_PARTITION
-     *                        if any partition could be used
-     * @param timestamp       The timestamp of the record
-     * @param key             The key for the record
-     * @param value           The value for the record
-     * @param headers         the Headers for the record
-     * @param callbacks       The callbacks to execute
-     * @param maxTimeToBlock  The maximum time in milliseconds to block for buffer memory to be available
-     * @param abortOnNewBatch A boolean that indicates returning before a new batch is created and
-     *                        running the partitioner's onNewBatch method before trying to append again
-     * @param nowMs           The current time, in milliseconds
-     * @param cluster         The cluster metadata
+     *
+     * @param topic The topic to which this record is being sent
+     * @param partition The partition to which this record is being sent or RecordMetadata.UNKNOWN_PARTITION
+     *                  if any partition could be used
+     * @param timestamp The timestamp of the record
+     * @param key The key for the record
+     * @param value The value for the record
+     * @param headers the Headers for the record
+     * @param callbacks The callbacks to execute
+     * @param maxTimeToBlock The maximum time in milliseconds to block for buffer memory to be available
+     * @param nowMs The current time, in milliseconds
+     * @param cluster The cluster metadata
      */
-    public RecordAppendResult append(String topic, int partition, long timestamp, byte[] key, byte[] value, Header[] headers, AppendCallbacks callbacks, long maxTimeToBlock, boolean abortOnNewBatch, long nowMs, Cluster cluster) throws InterruptedException {
-        TopicInfo topicInfo = topicInfoMap.computeIfAbsent(topic, k -> new TopicInfo(logContext, k, batchSize));
+    public RecordAppendResult append(String topic,
+                                     int partition,
+                                     long timestamp,
+                                     byte[] key,
+                                     byte[] value,
+                                     Header[] headers,
+                                     AppendCallbacks callbacks,
+                                     long maxTimeToBlock,
+                                     long nowMs,
+                                     Cluster cluster) throws InterruptedException {
+        TopicInfo topicInfo = topicInfoMap.computeIfAbsent(topic, k -> new TopicInfo(createBuiltInPartitioner(logContext, k, batchSize)));
 
         // We keep track of the number of appending thread to make sure we do not miss batches in
         // abortIncompleteBatches().
         appendsInProgress.incrementAndGet();
         ByteBuffer buffer = null;
-        if (headers == null)
-            headers = Record.EMPTY_HEADERS;
+        if (headers == null) headers = Record.EMPTY_HEADERS;
         try {
             // Loop to retry in case we encounter partitioner's race conditions.
             while (true) {
@@ -241,16 +333,10 @@ public class RecordAccumulator {
                     }
                 }
 
-                // we don't have an in-progress record batch try to allocate a new batch
-                if (abortOnNewBatch) {
-                    // Return a result that will cause another call to append.
-                    return new RecordAppendResult(null, false, false, true, 0);
-                }
-
                 if (buffer == null) {
-                    byte maxUsableMagic = apiVersions.maxUsableProduceMagic();
-                    int size = Math.max(this.batchSize, AbstractRecords.estimateSizeInBytesUpperBound(maxUsableMagic, compression, key, value, headers));
-                    log.trace("Allocating a new {} byte message buffer for topic {} partition {} with remaining timeout {}ms", size, topic, partition, maxTimeToBlock);
+                    int size = Math.max(this.batchSize, AbstractRecords.estimateSizeInBytesUpperBound(
+                            RecordBatch.CURRENT_MAGIC_VALUE, compression.type(), key, value, headers));
+                    log.trace("Allocating a new {} byte message buffer for topic {} partition {} with remaining timeout {}ms", size, topic, effectivePartition, maxTimeToBlock);
                     // This call may block if we exhausted buffer space.
                     buffer = free.allocate(size, maxTimeToBlock);
                     // Update the current time in case the buffer allocation blocked above.
@@ -282,18 +368,28 @@ public class RecordAccumulator {
 
     /**
      * Append a new batch to the queue
-     * @param topic     The topic
+     *
+     * @param topic The topic
      * @param partition The partition (cannot be RecordMetadata.UNKNOWN_PARTITION)
-     * @param dq        The queue
+     * @param dq The queue
      * @param timestamp The timestamp of the record
-     * @param key       The key for the record
-     * @param value     The value for the record
-     * @param headers   the Headers for the record
+     * @param key The key for the record
+     * @param value The value for the record
+     * @param headers the Headers for the record
      * @param callbacks The callbacks to execute
-     * @param buffer    The buffer for the new batch
-     * @param nowMs     The current time, in milliseconds
+     * @param buffer The buffer for the new batch
+     * @param nowMs The current time, in milliseconds
      */
-    private RecordAppendResult appendNewBatch(String topic, int partition, Deque<ProducerBatch> dq, long timestamp, byte[] key, byte[] value, Header[] headers, AppendCallbacks callbacks, ByteBuffer buffer, long nowMs) {
+    private RecordAppendResult appendNewBatch(String topic,
+                                              int partition,
+                                              Deque<ProducerBatch> dq,
+                                              long timestamp,
+                                              byte[] key,
+                                              byte[] value,
+                                              Header[] headers,
+                                              AppendCallbacks callbacks,
+                                              ByteBuffer buffer,
+                                              long nowMs) {
         assert partition != RecordMetadata.UNKNOWN_PARTITION;
 
         RecordAppendResult appendResult = tryAppend(timestamp, key, value, headers, callbacks, dq, nowMs);
@@ -302,21 +398,19 @@ public class RecordAccumulator {
             return appendResult;
         }
 
-        MemoryRecordsBuilder recordsBuilder = recordsBuilder(buffer, apiVersions.maxUsableProduceMagic());
+        MemoryRecordsBuilder recordsBuilder = recordsBuilder(buffer);
         ProducerBatch batch = new ProducerBatch(new TopicPartition(topic, partition), recordsBuilder, nowMs);
-        FutureRecordMetadata future = Objects.requireNonNull(batch.tryAppend(timestamp, key, value, headers, callbacks, nowMs));
+        FutureRecordMetadata future = Objects.requireNonNull(batch.tryAppend(timestamp, key, value, headers,
+                callbacks, nowMs));
 
         dq.addLast(batch);
         incomplete.add(batch);
 
-        return new RecordAppendResult(future, dq.size() > 1 || batch.isFull(), true, false, batch.estimatedSizeInBytes());
+        return new RecordAppendResult(future, dq.size() > 1 || batch.isFull(), true, batch.estimatedSizeInBytes());
     }
 
-    private MemoryRecordsBuilder recordsBuilder(ByteBuffer buffer, byte maxUsableMagic) {
-        if (transactionManager != null && maxUsableMagic < RecordBatch.MAGIC_VALUE_V2) {
-            throw new UnsupportedVersionException("Attempting to use idempotence with a broker which does not " + "support the required message format (v2). The broker must be version 0.11 or later.");
-        }
-        return MemoryRecords.builder(buffer, maxUsableMagic, compression, TimestampType.CREATE_TIME, 0L);
+    private MemoryRecordsBuilder recordsBuilder(ByteBuffer buffer) {
+        return MemoryRecords.builder(buffer, RecordBatch.CURRENT_MAGIC_VALUE, compression, TimestampType.CREATE_TIME, 0L);
     }
 
     /**
@@ -328,15 +422,16 @@ public class RecordAccumulator {
         return last == null || last.isFull();
     }
 
-    /**
-     * Try to append to a ProducerBatch.
-     * <p>
-     * If it is full, we return null and a new batch is created. We also close the batch for record appends to free up
-     * resources like compression buffers. The batch will be fully closed (ie. the record batch headers will be written
-     * and memory records built) in one of the following cases (whichever comes first): right before send,
-     * if it is expired, or when the producer is closed.
+     /**
+     *  Try to append to a ProducerBatch.
+     *
+     *  If it is full, we return null and a new batch is created. We also close the batch for record appends to free up
+     *  resources like compression buffers. The batch will be fully closed (ie. the record batch headers will be written
+     *  and memory records built) in one of the following cases (whichever comes first): right before send,
+     *  if it is expired, or when the producer is closed.
      */
-    private RecordAppendResult tryAppend(long timestamp, byte[] key, byte[] value, Header[] headers, Callback callback, Deque<ProducerBatch> deque, long nowMs) {
+    private RecordAppendResult tryAppend(long timestamp, byte[] key, byte[] value, Header[] headers,
+                                         Callback callback, Deque<ProducerBatch> deque, long nowMs) {
         if (closed)
             throw new KafkaException("Producer closed while send in progress");
         ProducerBatch last = deque.peekLast();
@@ -347,7 +442,7 @@ public class RecordAccumulator {
                 last.closeForRecordAppends();
             } else {
                 int appendedBytes = last.estimatedSizeInBytes() - initialBytes;
-                return new RecordAppendResult(future, deque.size() > 1 || last.isFull(), false, false, appendedBytes);
+                return new RecordAppendResult(future, deque.size() > 1 || last.isFull(), false, appendedBytes);
             }
         }
         return null;
@@ -362,12 +457,13 @@ public class RecordAccumulator {
     }
 
     public void maybeUpdateNextBatchExpiryTime(ProducerBatch batch) {
-        if (batch.createdMs + deliveryTimeoutMs > 0) {
+        if (batch.createdMs + deliveryTimeoutMs  > 0) {
             // the non-negative check is to guard us against potential overflow due to setting
             // a large value for deliveryTimeoutMs
             nextBatchExpiryTimeMs = Math.min(nextBatchExpiryTimeMs, batch.createdMs + deliveryTimeoutMs);
         } else {
-            log.warn("Skipping next batch expiry time update due to addition overflow: " + "batch.createMs={}, deliveryTimeoutMs={}", batch.createdMs, deliveryTimeoutMs);
+            log.warn("Skipping next batch expiry time update due to addition overflow: "
+                + "batch.createMs={}, deliveryTimeoutMs={}", batch.createdMs, deliveryTimeoutMs);
         }
     }
 
@@ -424,7 +520,8 @@ public class RecordAccumulator {
         // Reset the estimated compression ratio to the initial value or the big batch compression ratio, whichever
         // is bigger. There are several different ways to do the reset. We chose the most conservative one to ensure
         // the split doesn't happen too often.
-        CompressionRatioEstimator.setEstimation(bigBatch.topicPartition.topic(), compression, Math.max(1.0f, (float) bigBatch.compressionRatio()));
+        CompressionRatioEstimator.setEstimation(bigBatch.topicPartition.topic(), compression.type(),
+                                                Math.max(1.0f, (float) bigBatch.compressionRatio()));
         Deque<ProducerBatch> dq = bigBatch.split(this.batchSize);
         int numSplitBatches = dq.size();
         Deque<ProducerBatch> partitionDequeue = getOrCreateDeque(bigBatch.topicPartition);
@@ -479,7 +576,8 @@ public class RecordAccumulator {
             while (deque.peekFirst() != null && deque.peekFirst().hasSequence() && deque.peekFirst().baseSequence() < batch.baseSequence())
                 orderedBatches.add(deque.pollFirst());
 
-            log.debug("Reordered incoming batch with sequence {} for partition {}. It was placed in the queue at " + "position {}", batch.baseSequence(), batch.topicPartition, orderedBatches.size());
+            log.debug("Reordered incoming batch with sequence {} for partition {}. It was placed in the queue at " +
+                "position {}", batch.baseSequence(), batch.topicPartition, orderedBatches.size());
             // Either we have reached a point where there are batches without a sequence (ie. never been drained
             // and are hence in order by default), or the batch at the front of the queue has a sequence greater
             // than the incoming batch. This is the right place to add the incoming batch.
@@ -498,23 +596,31 @@ public class RecordAccumulator {
 
     /**
      * Add the leader to the ready nodes if the batch is ready
-     * @param nowMs                 The current time
-     * @param exhausted             'true' is the buffer pool is exhausted
-     * @param part                  The partition
-     * @param leader                The leader for the partition
-     * @param waitedTimeMs          How long batch waited
-     * @param backingOff            Is backing off
-     * @param full                  Is batch full
+     *
+     * @param exhausted 'true' is the buffer pool is exhausted
+     * @param part The partition
+     * @param leader The leader for the partition
+     * @param waitedTimeMs How long batch waited
+     * @param backingOff Is backing off
+     * @param backoffAttempts Number of attempts for calculating backoff delay
+     * @param full Is batch full
      * @param nextReadyCheckDelayMs The delay for next check
-     * @param readyNodes            The set of ready nodes (to be filled in)
+     * @param readyNodes The set of ready nodes (to be filled in)
      * @return The delay for next check
      */
-    private long batchReady(long nowMs, boolean exhausted, TopicPartition part, Node leader, long waitedTimeMs, boolean backingOff, boolean full, long nextReadyCheckDelayMs, Set<Node> readyNodes) {
+    private long batchReady(boolean exhausted, TopicPartition part, Node leader,
+                            long waitedTimeMs, boolean backingOff, int backoffAttempts,
+                            boolean full, long nextReadyCheckDelayMs, Set<Node> readyNodes) {
         if (!readyNodes.contains(leader) && !isMuted(part)) {
-            long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
+            long timeToWaitMs = backingOff ? retryBackoff.backoff(backoffAttempts > 0 ? backoffAttempts - 1 : 0) : lingerMs;
             boolean expired = waitedTimeMs >= timeToWaitMs;
             boolean transactionCompleting = transactionManager != null && transactionManager.isCompleting();
-            boolean sendable = full || expired || exhausted || closed || flushInProgress() || transactionCompleting;
+            boolean sendable = full
+                    || expired
+                    || exhausted
+                    || closed
+                    || flushInProgress()
+                    || transactionCompleting;
             if (sendable && !backingOff) {
                 readyNodes.add(leader);
             } else {
@@ -529,10 +635,11 @@ public class RecordAccumulator {
     }
 
     /**
-     * Iterate over partitions to see which one have batches ready and collect leaders of those partitions
-     * into the set of ready nodes.  If partition has no leader, add the topic to the set of topics with
-     * no leader.  This function also calculates stats for adaptive partitioning.
-     * @param cluster               The cluster metadata
+     * Iterate over partitions to see which one have batches ready and collect leaders of those
+     * partitions into the set of ready nodes.  If partition has no leader, add the topic to the set
+     * of topics with no leader.  This function also calculates stats for adaptive partitioning.
+     *
+     * @param metadataSnapshot      The cluster metadata
      * @param nowMs                 The current time
      * @param topic                 The topic
      * @param topicInfo             The topic info
@@ -541,12 +648,14 @@ public class RecordAccumulator {
      * @param unknownLeaderTopics   The set of topics with no leader (to be filled in)
      * @return The delay for next check
      */
-    private long partitionReady(Cluster cluster, long nowMs, String topic, TopicInfo topicInfo, long nextReadyCheckDelayMs, Set<Node> readyNodes, Set<String> unknownLeaderTopics) {
+    private long partitionReady(MetadataSnapshot metadataSnapshot, long nowMs, String topic,
+                                TopicInfo topicInfo,
+                                long nextReadyCheckDelayMs, Set<Node> readyNodes, Set<String> unknownLeaderTopics) {
         ConcurrentMap<Integer, Deque<ProducerBatch>> batches = topicInfo.batches;
         // Collect the queue sizes for available partitions to be used in adaptive partitioning.
         int[] queueSizes = null;
         int[] partitionIds = null;
-        if (enableAdaptivePartitioning && batches.size() >= cluster.partitionsForTopic(topic).size()) {
+        if (enableAdaptivePartitioning && batches.size() >= metadataSnapshot.cluster().partitionsForTopic(topic).size()) {
             // We don't do adaptive partitioning until we scheduled at least a batch for all
             // partitions (i.e. we have the corresponding entries in the batches map), we just
             // do uniform.  The reason is that we build queue sizes from the batches map,
@@ -562,7 +671,8 @@ public class RecordAccumulator {
             TopicPartition part = new TopicPartition(topic, entry.getKey());
             // Advance queueSizesIndex so that we properly index available
             // partitions.  Do it here so that it's done for all code paths.
-            Node leader = cluster.leaderFor(part);
+
+            Node leader = metadataSnapshot.cluster().leaderFor(part);
             if (leader != null && queueSizes != null) {
                 ++queueSizesIndex;
                 assert queueSizesIndex < queueSizes.length;
@@ -573,12 +683,18 @@ public class RecordAccumulator {
 
             final long waitedTimeMs;
             final boolean backingOff;
+            final int backoffAttempts;
             final int dequeSize;
             final boolean full;
 
-            // This loop is especially hot with large partition counts.
+            OptionalInt leaderEpoch = metadataSnapshot.leaderEpochFor(part);
 
-            // We are careful to only perform the minimum required inside the
+            // This loop is especially hot with large partition counts. So -
+
+            // 1. We should avoid code that increases synchronization between application thread calling
+            // send(), and background thread running runOnce(), see https://issues.apache.org/jira/browse/KAFKA-16226
+
+            // 2. We are careful to only perform the minimum required inside the
             // synchronized block, as this lock is also used to synchronize producer threads
             // attempting to append() to a partition/batch.
 
@@ -591,7 +707,9 @@ public class RecordAccumulator {
                 }
 
                 waitedTimeMs = batch.waitedTimeMs(nowMs);
-                backingOff = batch.attempts() > 0 && waitedTimeMs < retryBackoffMs;
+                batch.maybeUpdateLeaderEpoch(leaderEpoch);
+                backingOff = shouldBackoff(batch.hasLeaderChangedForTheOngoingRetry(), batch, waitedTimeMs);
+                backoffAttempts = batch.attempts();
                 dequeSize = deque.size();
                 full = dequeSize > 1 || batch.isFull();
             }
@@ -617,7 +735,8 @@ public class RecordAccumulator {
                     }
                 }
 
-                nextReadyCheckDelayMs = batchReady(nowMs, exhausted, part, leader, waitedTimeMs, backingOff, full, nextReadyCheckDelayMs, readyNodes);
+                nextReadyCheckDelayMs = batchReady(exhausted, part, leader, waitedTimeMs, backingOff,
+                    backoffAttempts, full, nextReadyCheckDelayMs, readyNodes);
             }
         }
 
@@ -649,7 +768,7 @@ public class RecordAccumulator {
      * </ul>
      * </ol>
      */
-    public ReadyCheckResult ready(Cluster cluster, long nowMs) {
+    public ReadyCheckResult ready(MetadataSnapshot metadataSnapshot, long nowMs) {
         Set<Node> readyNodes = new HashSet<>();
         long nextReadyCheckDelayMs = Long.MAX_VALUE;
         Set<String> unknownLeaderTopics = new HashSet<>();
@@ -657,7 +776,7 @@ public class RecordAccumulator {
         // cumulative frequency table (used in partitioner).
         for (Map.Entry<String, TopicInfo> topicInfoEntry : this.topicInfoMap.entrySet()) {
             final String topic = topicInfoEntry.getKey();
-            nextReadyCheckDelayMs = partitionReady(cluster, nowMs, topic, topicInfoEntry.getValue(), nextReadyCheckDelayMs, readyNodes, unknownLeaderTopics);
+            nextReadyCheckDelayMs = partitionReady(metadataSnapshot, nowMs, topic, topicInfoEntry.getValue(), nextReadyCheckDelayMs, readyNodes, unknownLeaderTopics);
         }
         return new ReadyCheckResult(readyNodes, nextReadyCheckDelayMs, unknownLeaderTopics);
     }
@@ -677,8 +796,27 @@ public class RecordAccumulator {
         return false;
     }
 
+    private boolean shouldBackoff(boolean hasLeaderChanged, final ProducerBatch batch, final long waitedTimeMs) {
+        boolean shouldWaitMore = batch.attempts() > 0 && waitedTimeMs < retryBackoff.backoff(batch.attempts() - 1);
+        boolean shouldBackoff = !hasLeaderChanged && shouldWaitMore;
+        if (log.isTraceEnabled()) {
+            if (shouldBackoff) {
+                log.trace(
+                    "For {}, will backoff", batch);
+            } else {
+                log.trace(
+                    "For {}, will not backoff, shouldWaitMore {}, hasLeaderChanged {}", batch,
+                    shouldWaitMore, hasLeaderChanged);
+            }
+        } else if (log.isDebugEnabled() && hasLeaderChanged) {
+            // Add less-verbose log at DEBUG.
+            log.debug("For {}, leader has changed, hence skipping backoff.", batch);
+        }
+        return shouldBackoff;
+    }
+
     private boolean shouldStopDrainBatchesForPartition(ProducerBatch first, TopicPartition tp) {
-        ProducerIdAndEpoch producerIdAndEpoch = null;
+        ProducerIdAndEpoch producerIdAndEpoch;
         if (transactionManager != null) {
             if (!transactionManager.isSendToPartitionAllowed(tp))
                 return true;
@@ -704,35 +842,39 @@ public class RecordAccumulator {
             }
 
             int firstInFlightSequence = transactionManager.firstInFlightSequence(first.topicPartition);
-            if (firstInFlightSequence != RecordBatch.NO_SEQUENCE && first.hasSequence() && first.baseSequence() != firstInFlightSequence)
-                // If the queued batch already has an assigned sequence, then it is being retried.
-                // In this case, we wait until the next immediate batch is ready and drain that.
-                // We only move on when the next in line batch is complete (either successfully or due to
-                // a fatal broker error). This effectively reduces our in flight request count to 1.
-                return true;
+            // If the queued batch already has an assigned sequence, then it is being retried.
+            // In this case, we wait until the next immediate batch is ready and drain that.
+            // We only move on when the next in line batch is complete (either successfully or due to
+            // a fatal broker error). This effectively reduces our in flight request count to 1.
+            return firstInFlightSequence != RecordBatch.NO_SEQUENCE && first.hasSequence()
+                    && first.baseSequence() != firstInFlightSequence;
         }
         return false;
     }
 
-    private List<ProducerBatch> drainBatchesForOneNode(Cluster cluster, Node node, int maxSize, long now) {
+    private List<ProducerBatch> drainBatchesForOneNode(MetadataSnapshot metadataSnapshot, Node node, int maxSize, long now) {
         int size = 0;
-        List<PartitionInfo> parts = cluster.partitionsForNode(node.id());
+        List<PartitionInfo> parts = metadataSnapshot.cluster().partitionsForNode(node.id());
         List<ProducerBatch> ready = new ArrayList<>();
+        if (parts.isEmpty())
+            return ready;
         /* to make starvation less likely each node has it's own drainIndex */
         int drainIndex = getDrainIndex(node.idString());
         int start = drainIndex = drainIndex % parts.size();
         do {
             PartitionInfo part = parts.get(drainIndex);
+
             TopicPartition tp = new TopicPartition(part.topic(), part.partition());
             updateDrainIndex(node.idString(), drainIndex);
             drainIndex = (drainIndex + 1) % parts.size();
             // Only proceed if the partition has no in-flight batches.
             if (isMuted(tp))
                 continue;
-
             Deque<ProducerBatch> deque = getDeque(tp);
             if (deque == null)
                 continue;
+
+            OptionalInt leaderEpoch = metadataSnapshot.leaderEpochFor(tp);
 
             final ProducerBatch batch;
             synchronized (deque) {
@@ -742,9 +884,9 @@ public class RecordAccumulator {
                     continue;
 
                 // first != null
-                boolean backoff = first.attempts() > 0 && first.waitedTimeMs(now) < retryBackoffMs;
                 // Only drain the batch if it is not during backoff period.
-                if (backoff)
+                first.maybeUpdateLeaderEpoch(leaderEpoch);
+                if (shouldBackoff(first.hasLeaderChangedForTheOngoingRetry(), first, first.waitedTimeMs(now)))
                     continue;
 
                 if (size + first.estimatedSizeInBytes() > maxSize && !ready.isEmpty()) {
@@ -759,7 +901,8 @@ public class RecordAccumulator {
                 batch = deque.pollFirst();
 
                 boolean isTransactional = transactionManager != null && transactionManager.isTransactional();
-                ProducerIdAndEpoch producerIdAndEpoch = transactionManager != null ? transactionManager.producerIdAndEpoch() : null;
+                ProducerIdAndEpoch producerIdAndEpoch =
+                    transactionManager != null ? transactionManager.producerIdAndEpoch() : null;
                 if (producerIdAndEpoch != null && !batch.hasSequence()) {
                     // If the producer id/epoch of the partition do not match the latest one
                     // of the producer, we update it and reset the sequence. This should be
@@ -777,7 +920,9 @@ public class RecordAccumulator {
                     // even if we receive out of order responses.
                     batch.setProducerState(producerIdAndEpoch, transactionManager.sequenceNumber(batch.topicPartition), isTransactional);
                     transactionManager.incrementSequenceNumber(batch.topicPartition, batch.recordCount);
-                    log.debug("Assigned producerId {} and producerEpoch {} to batch with base sequence " + "{} being sent to partition {}", producerIdAndEpoch.producerId, producerIdAndEpoch.epoch, batch.baseSequence(), tp);
+                    log.debug("Assigned producerId {} and producerEpoch {} to batch with base sequence " +
+                            "{} being sent to partition {}", producerIdAndEpoch.producerId,
+                        producerIdAndEpoch.epoch, batch.baseSequence(), tp);
 
                     transactionManager.addInFlightBatch(batch);
                 }
@@ -785,7 +930,6 @@ public class RecordAccumulator {
 
             // the rest of the work by processing outside the lock
             // close() is particularly expensive
-
             batch.close();
             size += batch.records().sizeInBytes();
             ready.add(batch);
@@ -804,21 +948,24 @@ public class RecordAccumulator {
     }
 
     /**
-     * Drain all the data for the given nodes and collate them into a list of batches that will fit within the specified
-     * size on a per-node basis. This method attempts to avoid choosing the same topic-node over and over.
-     * @param cluster The current cluster metadata
-     * @param nodes   The list of node to drain
-     * @param maxSize The maximum number of bytes to drain
-     * @param now     The current unix time in milliseconds
-     * @return A list of {@link ProducerBatch} for each node specified with total size less than the requested maxSize.
+     * Drain all the data for the given nodes and collate them into a list of batches that will fit
+     * within the specified size on a per-node basis. This method attempts to avoid choosing the same
+     * topic-node over and over.
+     *
+     * @param metadataSnapshot  The current cluster metadata
+     * @param nodes             The list of node to drain
+     * @param maxSize           The maximum number of bytes to drain
+     * @param now               The current unix time in milliseconds
+     * @return A list of {@link ProducerBatch} for each node specified with total size less than the
+     * requested maxSize.
      */
-    public Map<Integer, List<ProducerBatch>> drain(Cluster cluster, Set<Node> nodes, int maxSize, long now) {
+    public Map<Integer, List<ProducerBatch>> drain(MetadataSnapshot metadataSnapshot, Set<Node> nodes, int maxSize, long now) {
         if (nodes.isEmpty())
             return Collections.emptyMap();
 
         Map<Integer, List<ProducerBatch>> batches = new HashMap<>();
         for (Node node : nodes) {
-            List<ProducerBatch> ready = drainBatchesForOneNode(cluster, node, maxSize, now);
+            List<ProducerBatch> ready = drainBatchesForOneNode(metadataSnapshot, node, maxSize, now);
             batches.put(node.id(), ready);
         }
         return batches;
@@ -861,7 +1008,7 @@ public class RecordAccumulator {
         return this.nextBatchExpiryTimeMs;
     }
 
-    /* Visible for testing */
+      /* Visible for testing */
     public Deque<ProducerBatch> getDeque(TopicPartition tp) {
         TopicInfo topicInfo = topicInfoMap.get(tp.topic());
         if (topicInfo == null)
@@ -873,8 +1020,13 @@ public class RecordAccumulator {
      * Get the deque for the given topic-partition, creating it if necessary.
      */
     private Deque<ProducerBatch> getOrCreateDeque(TopicPartition tp) {
-        TopicInfo topicInfo = topicInfoMap.computeIfAbsent(tp.topic(), k -> new TopicInfo(logContext, k, batchSize));
+        TopicInfo topicInfo = topicInfoMap.computeIfAbsent(tp.topic(),
+                k -> new TopicInfo(createBuiltInPartitioner(logContext, k, batchSize)));
         return topicInfo.batches.computeIfAbsent(tp.partition(), k -> new ArrayDeque<>());
+    }
+
+    BuiltInPartitioner createBuiltInPartitioner(LogContext logContext, String topic, int stickyBatchSize) {
+        return new BuiltInPartitioner(logContext, topic, stickyBatchSize);
     }
 
     /**
@@ -1028,11 +1180,12 @@ public class RecordAccumulator {
 
         /**
          * Partitioner config
-         * @param enableAdaptivePartitioning     If it's true, partition switching adapts to broker load, otherwise partition
-         *                                       switching is random.
+         *
+         * @param enableAdaptivePartitioning If it's true, partition switching adapts to broker load, otherwise partition
+         *        switching is random.
          * @param partitionAvailabilityTimeoutMs If a broker cannot process produce requests from a partition
-         *                                       for the specified time, the partition is treated by the partitioner as not available.
-         *                                       If the timeout is 0, this logic is disabled.
+         *        for the specified time, the partition is treated by the partitioner as not available.
+         *        If the timeout is 0, this logic is disabled.
          */
         public PartitionerConfig(boolean enableAdaptivePartitioning, long partitionAvailabilityTimeoutMs) {
             this.enableAdaptivePartitioning = enableAdaptivePartitioning;
@@ -1047,18 +1200,19 @@ public class RecordAccumulator {
     /*
      * Metadata about a record just appended to the record accumulator
      */
-    public final static class RecordAppendResult {
+    public static final class RecordAppendResult {
         public final FutureRecordMetadata future;
         public final boolean batchIsFull;
         public final boolean newBatchCreated;
-        public final boolean abortForNewBatch;
         public final int appendedBytes;
 
-        public RecordAppendResult(FutureRecordMetadata future, boolean batchIsFull, boolean newBatchCreated, boolean abortForNewBatch, int appendedBytes) {
+        public RecordAppendResult(FutureRecordMetadata future,
+                                  boolean batchIsFull,
+                                  boolean newBatchCreated,
+                                  int appendedBytes) {
             this.future = future;
             this.batchIsFull = batchIsFull;
             this.newBatchCreated = newBatchCreated;
-            this.abortForNewBatch = abortForNewBatch;
             this.appendedBytes = appendedBytes;
         }
     }
@@ -1077,7 +1231,7 @@ public class RecordAccumulator {
     /*
      * The set of nodes that have at least one complete record batch in the accumulator
      */
-    public final static class ReadyCheckResult {
+    public static final class ReadyCheckResult {
         public final Set<Node> readyNodes;
         public final long nextReadyCheckDelayMs;
         public final Set<String> unknownLeaderTopics;
@@ -1096,8 +1250,8 @@ public class RecordAccumulator {
         public final ConcurrentMap<Integer /*partition*/, Deque<ProducerBatch>> batches = new CopyOnWriteMap<>();
         public final BuiltInPartitioner builtInPartitioner;
 
-        public TopicInfo(LogContext logContext, String topic, int stickyBatchSize) {
-            builtInPartitioner = new BuiltInPartitioner(logContext, topic, stickyBatchSize);
+        public TopicInfo(BuiltInPartitioner builtInPartitioner) {
+            this.builtInPartitioner = builtInPartitioner;
         }
     }
 
@@ -1105,9 +1259,9 @@ public class RecordAccumulator {
      * Node latency stats for each node that are used for adaptive partition distribution
      * Visible for testing
      */
-    public final static class NodeLatencyStats {
-        volatile public long readyTimeMs;  // last time the node had batches ready to send
-        volatile public long drainTimeMs;  // last time the node was able to drain batches
+    public static final class NodeLatencyStats {
+        public volatile long readyTimeMs;  // last time the node had batches ready to send
+        public volatile long drainTimeMs;  // last time the node was able to drain batches
 
         NodeLatencyStats(long nowMs) {
             readyTimeMs = nowMs;

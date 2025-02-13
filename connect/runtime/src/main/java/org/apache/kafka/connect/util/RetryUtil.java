@@ -20,6 +20,7 @@ import org.apache.kafka.common.errors.RetriableException;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.connect.errors.ConnectException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,15 +41,16 @@ public class RetryUtil {
      * be used for logging.  For example, "list offsets". If the supplier is null or the supplied string is
      * null, {@code callable} will be used as the default string.
      *
-     * <p>The task will be executed at least once. No retries will be performed
+     * <p>The task will be executed at least once. No retries will be performed 
      * if {@code timeoutDuration} is 0 or negative, or if {@code timeoutDuration} is less than {@code retryBackoffMs}.
      *
      * <p>A {@code retryBackoffMs} that is negative or zero will result in no delays between retries.
-     * @param callable        the function to execute
-     * @param description     supplier that provides custom message for logging purpose
-     * @param timeoutDuration timeout duration; must not be null
-     * @param retryBackoffMs  the number of milliseconds to delay upon receiving a
-     *                        {@link org.apache.kafka.connect.errors.RetriableException} before retrying again
+     *
+     * @param callable          the function to execute
+     * @param description       supplier that provides custom message for logging purpose
+     * @param timeoutDuration   timeout duration; must not be null
+     * @param retryBackoffMs    the number of milliseconds to delay upon receiving a
+     *                          {@link org.apache.kafka.connect.errors.RetriableException} before retrying again
      * @throws ConnectException If the task exhausted all the retries
      */
     public static <T> T retryUntilTimeout(Callable<T> callable, Supplier<String> description, Duration timeoutDuration, long retryBackoffMs) throws Exception {
@@ -57,30 +59,36 @@ public class RetryUtil {
 
     // visible for testing
     static <T> T retryUntilTimeout(Callable<T> callable, Supplier<String> description, Duration timeoutDuration, long retryBackoffMs, Time time) throws Exception {
-        // if null supplier or string is provided, the message will be default to "callabe"
-        final String descriptionStr = Optional.ofNullable(description).map(Supplier::get).orElse("callable");
+        // if null supplier or string is provided, the message will be default to "callable"
+        final String descriptionStr = Optional.ofNullable(description)
+                .map(Supplier::get)
+                .orElse("callable");
 
         // handling null duration
-        final long timeoutMs = Optional.ofNullable(timeoutDuration).map(Duration::toMillis).orElse(0L);
+        final long timeoutMs = Optional.ofNullable(timeoutDuration)
+                .map(Duration::toMillis)
+                .orElse(0L);
 
         if (retryBackoffMs < 0) {
             log.debug("Assuming no retry backoff since retryBackoffMs={} is negative", retryBackoffMs);
             retryBackoffMs = 0;
         }
         if (timeoutMs <= 0 || retryBackoffMs >= timeoutMs) {
-            log.debug("Executing {} only once, since timeoutMs={} is not larger than retryBackoffMs={}", descriptionStr, timeoutMs, retryBackoffMs);
+            log.debug("Executing {} only once, since timeoutMs={} is not larger than retryBackoffMs={}",
+                    descriptionStr, timeoutMs, retryBackoffMs);
             return callable.call();
         }
 
         final long end = time.milliseconds() + timeoutMs;
         int attempt = 0;
-        Throwable lastError = null;
+        Throwable lastError;
         do {
             attempt++;
             try {
                 return callable.call();
             } catch (RetriableException | org.apache.kafka.connect.errors.RetriableException e) {
-                log.warn("Attempt {} to {} resulted in RetriableException; retrying automatically. " + "Reason: {}", attempt, descriptionStr, e.getMessage(), e);
+                log.warn("Attempt {} to {} resulted in RetriableException; retrying automatically. " +
+                        "Reason: {}", attempt, descriptionStr, e.getMessage(), e);
                 lastError = e;
             } catch (WakeupException e) {
                 lastError = e;

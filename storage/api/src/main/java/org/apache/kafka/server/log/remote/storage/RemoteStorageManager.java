@@ -18,9 +18,12 @@ package org.apache.kafka.server.log.remote.storage;
 
 import org.apache.kafka.common.Configurable;
 import org.apache.kafka.common.annotation.InterfaceStability;
+import org.apache.kafka.server.log.remote.storage.RemoteLogSegmentMetadata.CustomMetadata;
 
 import java.io.Closeable;
 import java.io.InputStream;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * This interface provides the lifecycle of remote log segments that includes copy, fetch, and delete from remote
@@ -34,6 +37,9 @@ import java.io.InputStream;
  * responsible for storing and fetching metadata about the remote log segments in a strongly consistent manner.
  * This allows {@link RemoteStorageManager} to have eventual consistency on metadata (although the data is stored
  * in strongly consistent semantics).
+ * <p>
+ * All properties prefixed with the config: "remote.log.storage.manager.impl.prefix"
+ * (default value is "rsm.config.") are passed when {@link #configure(Map)} is invoked on this instance.
  */
 @InterfaceStability.Evolving
 public interface RemoteStorageManager extends Configurable, Closeable {
@@ -78,27 +84,34 @@ public interface RemoteStorageManager extends Configurable, Closeable {
      * <p>
      * This operation is expected to be idempotent. If a copy operation is retried and there is existing content already written,
      * it should be overwritten, and do not throw {@link RemoteStorageException}
+     *
      * @param remoteLogSegmentMetadata metadata about the remote log segment.
      * @param logSegmentData           data to be copied to tiered storage.
+     * @return custom metadata to be added to the segment metadata after copying.
      * @throws RemoteStorageException if there are any errors in storing the data of the segment.
      */
-    void copyLogSegmentData(RemoteLogSegmentMetadata remoteLogSegmentMetadata, LogSegmentData logSegmentData) throws RemoteStorageException;
+    Optional<CustomMetadata> copyLogSegmentData(RemoteLogSegmentMetadata remoteLogSegmentMetadata,
+                                                LogSegmentData logSegmentData)
+            throws RemoteStorageException;
 
     /**
      * Returns the remote log segment data file/object as InputStream for the given {@link RemoteLogSegmentMetadata}
      * starting from the given startPosition. The stream will end at the end of the remote log segment data file/object.
+     *
      * @param remoteLogSegmentMetadata metadata about the remote log segment.
      * @param startPosition            start position of log segment to be read, inclusive.
      * @return input stream of the requested log segment data.
      * @throws RemoteStorageException          if there are any errors while fetching the desired segment.
      * @throws RemoteResourceNotFoundException the requested log segment is not found in the remote storage.
      */
-    InputStream fetchLogSegment(RemoteLogSegmentMetadata remoteLogSegmentMetadata, int startPosition) throws RemoteStorageException;
+    InputStream fetchLogSegment(RemoteLogSegmentMetadata remoteLogSegmentMetadata,
+                                int startPosition) throws RemoteStorageException;
 
     /**
      * Returns the remote log segment data file/object as InputStream for the given {@link RemoteLogSegmentMetadata}
      * starting from the given startPosition. The stream will end at the smaller of endPosition and the end of the
      * remote log segment data file/object.
+     *
      * @param remoteLogSegmentMetadata metadata about the remote log segment.
      * @param startPosition            start position of log segment to be read, inclusive.
      * @param endPosition              end position of log segment to be read, inclusive.
@@ -106,20 +119,24 @@ public interface RemoteStorageManager extends Configurable, Closeable {
      * @throws RemoteStorageException          if there are any errors while fetching the desired segment.
      * @throws RemoteResourceNotFoundException the requested log segment is not found in the remote storage.
      */
-    InputStream fetchLogSegment(RemoteLogSegmentMetadata remoteLogSegmentMetadata, int startPosition, int endPosition) throws RemoteStorageException;
+    InputStream fetchLogSegment(RemoteLogSegmentMetadata remoteLogSegmentMetadata,
+                                int startPosition,
+                                int endPosition) throws RemoteStorageException;
 
     /**
      * Returns the index for the respective log segment of {@link RemoteLogSegmentMetadata}.
+     * <p>
+     * Note: The transaction index may not exist because of no transactional records.
+     * In this case, it should throw a RemoteResourceNotFoundException, instead of returning {@code null}.
+     *
      * @param remoteLogSegmentMetadata metadata about the remote log segment.
      * @param indexType                type of the index to be fetched for the segment.
      * @return input stream of the requested index.
      * @throws RemoteStorageException          if there are any errors while fetching the index.
      * @throws RemoteResourceNotFoundException the requested index is not found in the remote storage
-     *                                         (e.g. Transaction index may not exist because segments created prior to version 2.8.0 will not have transaction index associated with them.).
-     *                                         The caller of this function are encouraged to re-create the indexes from the segment
-     *                                         as the suggested way of handling this error if the index is expected to be existed.
      */
-    InputStream fetchIndex(RemoteLogSegmentMetadata remoteLogSegmentMetadata, IndexType indexType) throws RemoteStorageException;
+    InputStream fetchIndex(RemoteLogSegmentMetadata remoteLogSegmentMetadata,
+                           IndexType indexType) throws RemoteStorageException;
 
     /**
      * Deletes the resources associated with the given {@code remoteLogSegmentMetadata}. Deletion is considered as
@@ -128,8 +145,9 @@ public interface RemoteStorageManager extends Configurable, Closeable {
      * <p>
      * This operation is expected to be idempotent. If resources are not found, it is not expected to
      * throw {@link RemoteResourceNotFoundException} as it may be already removed from a previous attempt.
+     *
      * @param remoteLogSegmentMetadata metadata about the remote log segment to be deleted.
-     * @throws RemoteStorageException if there are any storage related errors occurred.
+     * @throws RemoteStorageException          if there are any storage related errors occurred.
      */
     void deleteLogSegmentData(RemoteLogSegmentMetadata remoteLogSegmentMetadata) throws RemoteStorageException;
 }

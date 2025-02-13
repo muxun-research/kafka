@@ -18,9 +18,7 @@ package org.apache.kafka.common.internals;
 
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.InvalidTopicException;
-import org.apache.kafka.common.utils.Utils;
 
-import java.util.Collections;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -28,11 +26,15 @@ public class Topic {
 
     public static final String GROUP_METADATA_TOPIC_NAME = "__consumer_offsets";
     public static final String TRANSACTION_STATE_TOPIC_NAME = "__transaction_state";
+    public static final String SHARE_GROUP_STATE_TOPIC_NAME = "__share_group_state";
     public static final String CLUSTER_METADATA_TOPIC_NAME = "__cluster_metadata";
-    public static final TopicPartition CLUSTER_METADATA_TOPIC_PARTITION = new TopicPartition(CLUSTER_METADATA_TOPIC_NAME, 0);
+    public static final TopicPartition CLUSTER_METADATA_TOPIC_PARTITION = new TopicPartition(
+        CLUSTER_METADATA_TOPIC_NAME,
+        0
+    );
     public static final String LEGAL_CHARS = "[a-zA-Z0-9._-]";
 
-    private static final Set<String> INTERNAL_TOPICS = Collections.unmodifiableSet(Utils.mkSet(GROUP_METADATA_TOPIC_NAME, TRANSACTION_STATE_TOPIC_NAME));
+    private static final Set<String> INTERNAL_TOPICS = Set.of(GROUP_METADATA_TOPIC_NAME, TRANSACTION_STATE_TOPIC_NAME, SHARE_GROUP_STATE_TOPIC_NAME);
 
     private static final int MAX_NAME_LENGTH = 249;
 
@@ -52,7 +54,8 @@ public class Topic {
         if (name.length() > MAX_NAME_LENGTH)
             return "the length of '" + name + "' is longer than the max allowed length " + MAX_NAME_LENGTH;
         if (!containsValidPattern(name))
-            return "'" + name + "' contains one or more characters other than " + "ASCII alphanumerics, '.', '_' and '-'";
+            return "'" + name + "' contains one or more characters other than " +
+                "ASCII alphanumerics, '.', '_' and '-'";
         return null;
     }
 
@@ -64,7 +67,7 @@ public class Topic {
     public static void validate(String name, String logPrefix, Consumer<String> throwableConsumer) {
         String reasonInvalid = detectInvalidTopic(name);
         if (reasonInvalid != null) {
-            throwableConsumer.accept(logPrefix + " is invalid: " + reasonInvalid);
+            throwableConsumer.accept(logPrefix + " is invalid: " +  reasonInvalid);
         }
     }
 
@@ -74,6 +77,7 @@ public class Topic {
 
     /**
      * Due to limitations in metric names, topics with a period ('.') or underscore ('_') could collide.
+     *
      * @param topic The topic to check for colliding character
      * @return true if the topic has collision characters
      */
@@ -84,6 +88,7 @@ public class Topic {
     /**
      * Unify topic name with a period ('.') or underscore ('_'), this is only used to check collision and will not
      * be used to really change topic name.
+     *
      * @param topic A topic to unify
      * @return A unified topic name
      */
@@ -93,6 +98,7 @@ public class Topic {
 
     /**
      * Returns true if the topicNames collide due to a period ('.') or underscore ('_') in the same position.
+     *
      * @param topicA A topic to check for collision
      * @param topicB A topic to check for collision
      * @return true if the topics collide

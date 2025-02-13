@@ -29,11 +29,11 @@ import java.util.Map;
 
 /**
  * Possible error codes.
- * <p>
+ *
  * Top level errors:
  * - {@link Errors#CLUSTER_AUTHORIZATION_FAILED}
  * - {@link Errors#BROKER_NOT_AVAILABLE}
- * <p>
+ *
  * Partition level errors:
  * - {@link Errors#NOT_LEADER_OR_FOLLOWER}
  * - {@link Errors#UNKNOWN_TOPIC_OR_PARTITION}
@@ -75,13 +75,35 @@ public class DescribeQuorumResponse extends AbstractResponse {
         // Not supported by the response schema
     }
 
-    public static DescribeQuorumResponseData singletonErrorResponse(TopicPartition topicPartition, Errors error) {
-        return new DescribeQuorumResponseData().setTopics(Collections.singletonList(new DescribeQuorumResponseData.TopicData().setTopicName(topicPartition.topic()).setPartitions(Collections.singletonList(new DescribeQuorumResponseData.PartitionData().setPartitionIndex(topicPartition.partition()).setErrorCode(error.code())))));
+    public static DescribeQuorumResponseData singletonErrorResponse(
+        TopicPartition topicPartition,
+        Errors error
+    ) {
+        return new DescribeQuorumResponseData()
+            .setTopics(Collections.singletonList(new DescribeQuorumResponseData.TopicData()
+                .setTopicName(topicPartition.topic())
+                .setPartitions(Collections.singletonList(new DescribeQuorumResponseData.PartitionData()
+                    .setPartitionIndex(topicPartition.partition())
+                    .setErrorCode(error.code())
+                    .setErrorMessage(error.message())))));
     }
 
 
-    public static DescribeQuorumResponseData singletonResponse(TopicPartition topicPartition, DescribeQuorumResponseData.PartitionData partitionData) {
-        return new DescribeQuorumResponseData().setTopics(Collections.singletonList(new DescribeQuorumResponseData.TopicData().setTopicName(topicPartition.topic()).setPartitions(Collections.singletonList(partitionData.setPartitionIndex(topicPartition.partition())))));
+    public static DescribeQuorumResponseData singletonResponse(
+        TopicPartition topicPartition,
+        DescribeQuorumResponseData.PartitionData partitionData,
+        DescribeQuorumResponseData.NodeCollection nodes
+    ) {
+        DescribeQuorumResponseData res = new DescribeQuorumResponseData()
+            .setTopics(Collections.singletonList(new DescribeQuorumResponseData.TopicData()
+                .setTopicName(topicPartition.topic())
+                .setPartitions(Collections.singletonList(partitionData
+                    .setPartitionIndex(topicPartition.partition())))));
+
+        if (nodes != null)
+            res.setNodes(nodes);
+
+        return res;
     }
 
     public static DescribeQuorumResponse parse(ByteBuffer buffer, short version) {

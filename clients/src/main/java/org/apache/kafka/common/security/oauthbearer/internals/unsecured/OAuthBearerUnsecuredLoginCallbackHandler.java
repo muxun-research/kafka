@@ -26,27 +26,27 @@ import org.apache.kafka.common.security.oauthbearer.OAuthBearerTokenCallback;
 import org.apache.kafka.common.security.oauthbearer.internals.OAuthBearerClientInitialResponse;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.security.auth.callback.Callback;
-import javax.security.auth.callback.UnsupportedCallbackException;
-import javax.security.auth.login.AppConfigurationEntry;
-import javax.security.sasl.SaslException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.Base64.Encoder;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import javax.security.auth.callback.Callback;
+import javax.security.auth.callback.UnsupportedCallbackException;
+import javax.security.auth.login.AppConfigurationEntry;
+import javax.security.sasl.SaslException;
 
 /**
  * A {@code CallbackHandler} that recognizes {@link OAuthBearerTokenCallback}
@@ -97,13 +97,12 @@ import java.util.regex.Pattern;
  * broker configuration property.
  */
 public class OAuthBearerUnsecuredLoginCallbackHandler implements AuthenticateCallbackHandler {
-    private final Logger log = LoggerFactory.getLogger(OAuthBearerUnsecuredLoginCallbackHandler.class);
+    private static final Logger log = LoggerFactory.getLogger(OAuthBearerUnsecuredLoginCallbackHandler.class);
     private static final String OPTION_PREFIX = "unsecuredLogin";
     private static final String PRINCIPAL_CLAIM_NAME_OPTION = OPTION_PREFIX + "PrincipalClaimName";
     private static final String LIFETIME_SECONDS_OPTION = OPTION_PREFIX + "LifetimeSeconds";
     private static final String SCOPE_CLAIM_NAME_OPTION = OPTION_PREFIX + "ScopeClaimName";
-    private static final Set<String> RESERVED_CLAIMS = Collections
-            .unmodifiableSet(new HashSet<>(Arrays.asList("iat", "exp")));
+    private static final Set<String> RESERVED_CLAIMS = Set.of("iat", "exp");
     private static final String DEFAULT_PRINCIPAL_CLAIM_NAME = "sub";
     private static final String DEFAULT_LIFETIME_SECONDS_ONE_HOUR = "3600";
     private static final String DEFAULT_SCOPE_CLAIM_NAME = "scope";
@@ -187,14 +186,14 @@ public class OAuthBearerUnsecuredLoginCallbackHandler implements AuthenticateCal
             callback.token(null);
             return;
         }
-        if (moduleOptions.keySet().stream().noneMatch(name -> !name.startsWith(EXTENSION_PREFIX))) {
+        if (moduleOptions.keySet().stream().allMatch(name -> name.startsWith(EXTENSION_PREFIX))) {
             throw new OAuthBearerConfigException("Extensions provided in login context without a token");
         }
-		String principalClaimNameValue = optionValue(PRINCIPAL_CLAIM_NAME_OPTION);
-		String principalClaimName = Utils.isBlank(principalClaimNameValue) ? DEFAULT_PRINCIPAL_CLAIM_NAME : principalClaimNameValue.trim();
-		String scopeClaimNameValue = optionValue(SCOPE_CLAIM_NAME_OPTION);
-		String scopeClaimName = Utils.isBlank(scopeClaimNameValue) ? DEFAULT_SCOPE_CLAIM_NAME : scopeClaimNameValue.trim();
-		String headerJson = "{" + claimOrHeaderJsonText("alg", "none") + "}";
+        String principalClaimNameValue = optionValue(PRINCIPAL_CLAIM_NAME_OPTION);
+        String principalClaimName = Utils.isBlank(principalClaimNameValue) ? DEFAULT_PRINCIPAL_CLAIM_NAME : principalClaimNameValue.trim();
+        String scopeClaimNameValue = optionValue(SCOPE_CLAIM_NAME_OPTION);
+        String scopeClaimName = Utils.isBlank(scopeClaimNameValue) ? DEFAULT_SCOPE_CLAIM_NAME : scopeClaimNameValue.trim();
+        String headerJson = "{" + claimOrHeaderJsonText("alg", "none") + "}";
         String lifetimeSecondsValueToUse = optionValue(LIFETIME_SECONDS_OPTION, DEFAULT_LIFETIME_SECONDS_ONE_HOUR);
         String claimsJson;
         try {
@@ -270,7 +269,7 @@ public class OAuthBearerUnsecuredLoginCallbackHandler implements AuthenticateCal
     }
 
     private String listJsonText(String value) {
-        if (value.isEmpty() || value.length() <= 1)
+        if (value.length() <= 1)
             return "[]";
         String delimiter;
         String unescapedDelimiterChar = value.substring(0, 1);

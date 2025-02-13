@@ -16,7 +16,11 @@
  */
 package org.apache.kafka.common.requests;
 
-import org.apache.kafka.common.*;
+import org.apache.kafka.common.Cluster;
+import org.apache.kafka.common.Node;
+import org.apache.kafka.common.PartitionInfo;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.message.MetadataResponseData;
 import org.apache.kafka.common.message.MetadataResponseData.MetadataResponseBroker;
 import org.apache.kafka.common.message.MetadataResponseData.MetadataResponsePartition;
@@ -24,10 +28,18 @@ import org.apache.kafka.common.message.MetadataResponseData.MetadataResponseTopi
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.utils.Utils;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -37,6 +49,7 @@ import java.util.stream.Collectors;
  *  LeaderNotAvailable (5)
  *  InvalidTopic (17)
  *  TopicAuthorizationFailed (29)
+
  * Possible partition-level error codes:
  *  LeaderNotAvailable (5)
  *  ReplicaNotAvailable (9)
@@ -91,6 +104,10 @@ public class MetadataResponse extends AbstractResponse {
         return errors;
     }
 
+    public Errors topLevelError() {
+        return Errors.forCode(data.errorCode());
+    }
+
     /**
      * Get a map of the topicIds which had metadata errors
      * @return the map
@@ -98,7 +115,7 @@ public class MetadataResponse extends AbstractResponse {
     public Map<Uuid, Errors> errorsByTopicId() {
         Map<Uuid, Errors> errors = new HashMap<>();
         for (MetadataResponseTopic metadata : data.topics()) {
-            if (metadata.topicId() == Uuid.ZERO_UUID) {
+            if (metadata.topicId().equals(Uuid.ZERO_UUID)) {
                 throw new IllegalStateException("Use errors() when managing topic using topic name");
             }
             if (metadata.errorCode() != Errors.NONE.code())
@@ -150,20 +167,31 @@ public class MetadataResponse extends AbstractResponse {
                 }
             }
         }
-        return new Cluster(data.clusterId(), brokers(), partitions, topicsByError(Errors.TOPIC_AUTHORIZATION_FAILED), topicsByError(Errors.INVALID_TOPIC_EXCEPTION), internalTopics, controller(), topicIds);
+        return new Cluster(data.clusterId(), brokers(), partitions, topicsByError(Errors.TOPIC_AUTHORIZATION_FAILED),
+                topicsByError(Errors.INVALID_TOPIC_EXCEPTION), internalTopics, controller(), topicIds);
     }
 
     public static PartitionInfo toPartitionInfo(PartitionMetadata metadata, Map<Integer, Node> nodesById) {
-        return new PartitionInfo(metadata.topic(), metadata.partition(), metadata.leaderId.map(nodesById::get).orElse(null), convertToNodeArray(metadata.replicaIds, nodesById), convertToNodeArray(metadata.inSyncReplicaIds, nodesById), convertToNodeArray(metadata.offlineReplicaIds, nodesById));
+        return new PartitionInfo(metadata.topic(),
+                metadata.partition(),
+                metadata.leaderId.map(nodesById::get).orElse(null),
+                (metadata.replicaIds == null) ? null : convertToNodeArray(metadata.replicaIds, nodesById),
+                (metadata.inSyncReplicaIds == null) ? null : convertToNodeArray(metadata.inSyncReplicaIds, nodesById),
+                (metadata.offlineReplicaIds == null) ? null : convertToNodeArray(metadata.offlineReplicaIds, nodesById));
     }
 
     private static Node[] convertToNodeArray(List<Integer> replicaIds, Map<Integer, Node> nodesById) {
-        return replicaIds.stream().map(replicaId -> {
+        // Since this is on hot path for partition info, use indexed iteration to avoid allocation overhead of Streams.
+        int size = replicaIds.size();
+        Node[] nodes = new Node[size];
+        for (int i = 0; i < size; i++) {
+            Integer replicaId = replicaIds.get(i);
             Node node = nodesById.get(replicaId);
             if (node == null)
-                return new Node(replicaId, "", -1);
-            return node;
-        }).toArray(Node[]::new);
+                node = new Node(replicaId, "", -1);
+            nodes[i] = node;
+        }
+        return nodes;
     }
 
     /**
@@ -235,6 +263,7 @@ public class MetadataResponse extends AbstractResponse {
      * for epoch validation in Fetch, ListOffsets, and OffsetsForLeaderEpoch requests.
      * If not, then the client will not retain the leader epochs and hence will not
      * forward them in requests.
+     *
      * @return true if the epoch can be used for validation
      */
     public boolean hasReliableLeaderEpochs() {
@@ -252,7 +281,8 @@ public class MetadataResponse extends AbstractResponse {
     }
 
     public static MetadataResponse parse(ByteBuffer buffer, short version) {
-        return new MetadataResponse(new MetadataResponseData(new ByteBufferAccessor(buffer), version), hasReliableLeaderEpochs(version));
+        return new MetadataResponse(new MetadataResponseData(new ByteBufferAccessor(buffer), version),
+            hasReliableLeaderEpochs(version));
     }
 
     public static class TopicMetadata {
@@ -263,7 +293,12 @@ public class MetadataResponse extends AbstractResponse {
         private final List<PartitionMetadata> partitionMetadata;
         private int authorizedOperations;
 
-        public TopicMetadata(Errors error, String topic, Uuid topicId, boolean isInternal, List<PartitionMetadata> partitionMetadata, int authorizedOperations) {
+        public TopicMetadata(Errors error,
+                             String topic,
+                             Uuid topicId,
+                             boolean isInternal,
+                             List<PartitionMetadata> partitionMetadata,
+                             int authorizedOperations) {
             this.error = error;
             this.topic = topic;
             this.topicId = topicId;
@@ -272,7 +307,10 @@ public class MetadataResponse extends AbstractResponse {
             this.authorizedOperations = authorizedOperations;
         }
 
-        public TopicMetadata(Errors error, String topic, boolean isInternal, List<PartitionMetadata> partitionMetadata) {
+        public TopicMetadata(Errors error,
+                             String topic,
+                             boolean isInternal,
+                             List<PartitionMetadata> partitionMetadata) {
             this(error, topic, Uuid.ZERO_UUID, isInternal, partitionMetadata, AUTHORIZED_OPERATIONS_OMITTED);
         }
 
@@ -306,12 +344,15 @@ public class MetadataResponse extends AbstractResponse {
 
         @Override
         public boolean equals(final Object o) {
-            if (this == o)
-                return true;
-            if (o == null || getClass() != o.getClass())
-                return false;
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
             final TopicMetadata that = (TopicMetadata) o;
-            return isInternal == that.isInternal && error == that.error && Objects.equals(topic, that.topic) && Objects.equals(topicId, that.topicId) && Objects.equals(partitionMetadata, that.partitionMetadata) && Objects.equals(authorizedOperations, that.authorizedOperations);
+            return isInternal == that.isInternal &&
+                error == that.error &&
+                Objects.equals(topic, that.topic) &&
+                Objects.equals(topicId, that.topicId) &&
+                Objects.equals(partitionMetadata, that.partitionMetadata) &&
+                Objects.equals(authorizedOperations, that.authorizedOperations);
         }
 
         @Override
@@ -321,7 +362,14 @@ public class MetadataResponse extends AbstractResponse {
 
         @Override
         public String toString() {
-            return "TopicMetadata{" + "error=" + error + ", topic='" + topic + '\'' + ", topicId='" + topicId + '\'' + ", isInternal=" + isInternal + ", partitionMetadata=" + partitionMetadata + ", authorizedOperations=" + authorizedOperations + '}';
+            return "TopicMetadata{" +
+                "error=" + error +
+                ", topic='" + topic + '\'' +
+                ", topicId='" + topicId + '\'' +
+                ", isInternal=" + isInternal +
+                ", partitionMetadata=" + partitionMetadata +
+                ", authorizedOperations=" + authorizedOperations +
+                '}';
         }
     }
 
@@ -335,7 +383,13 @@ public class MetadataResponse extends AbstractResponse {
         public final List<Integer> inSyncReplicaIds;
         public final List<Integer> offlineReplicaIds;
 
-        public PartitionMetadata(Errors error, TopicPartition topicPartition, Optional<Integer> leaderId, Optional<Integer> leaderEpoch, List<Integer> replicaIds, List<Integer> inSyncReplicaIds, List<Integer> offlineReplicaIds) {
+        public PartitionMetadata(Errors error,
+                                 TopicPartition topicPartition,
+                                 Optional<Integer> leaderId,
+                                 Optional<Integer> leaderEpoch,
+                                 List<Integer> replicaIds,
+                                 List<Integer> inSyncReplicaIds,
+                                 List<Integer> offlineReplicaIds) {
             this.error = error;
             this.topicPartition = topicPartition;
             this.leaderId = leaderId;
@@ -354,12 +408,25 @@ public class MetadataResponse extends AbstractResponse {
         }
 
         public PartitionMetadata withoutLeaderEpoch() {
-            return new PartitionMetadata(error, topicPartition, leaderId, Optional.empty(), replicaIds, inSyncReplicaIds, offlineReplicaIds);
+            return new PartitionMetadata(error,
+                    topicPartition,
+                    leaderId,
+                    Optional.empty(),
+                    replicaIds,
+                    inSyncReplicaIds,
+                    offlineReplicaIds);
         }
 
         @Override
         public String toString() {
-            return "PartitionMetadata(" + "error=" + error + ", partition=" + topicPartition + ", leader=" + leaderId + ", leaderEpoch=" + leaderEpoch + ", replicas=" + Utils.join(replicaIds, ",") + ", isr=" + Utils.join(inSyncReplicaIds, ",") + ", offlineReplicas=" + Utils.join(offlineReplicaIds, ",") + ')';
+            return "PartitionMetadata(" +
+                    "error=" + error +
+                    ", partition=" + topicPartition +
+                    ", leader=" + leaderId +
+                    ", leaderEpoch=" + leaderEpoch +
+                    ", replicas=" + replicaIds.stream().map(Object::toString).collect(Collectors.joining(",")) +
+                    ", isr=" + inSyncReplicaIds.stream().map(Object::toString).collect(Collectors.joining(",")) +
+                    ", offlineReplicas=" + offlineReplicaIds.stream().map(Object::toString).collect(Collectors.joining(",")) + ')';
         }
     }
 
@@ -375,7 +442,8 @@ public class MetadataResponse extends AbstractResponse {
         }
 
         private Map<Integer, Node> createBrokers(MetadataResponseData data) {
-            return data.brokers().valuesList().stream().map(b -> new Node(b.nodeId(), b.host(), b.port(), b.rack())).collect(Collectors.toMap(Node::id, Function.identity()));
+            return data.brokers().valuesList().stream().map(b -> new Node(b.nodeId(), b.host(), b.port(), b.rack()))
+                    .collect(Collectors.toMap(Node::id, Function.identity()));
         }
 
         private Collection<TopicMetadata> createTopicMetadata(MetadataResponseData data) {
@@ -396,25 +464,47 @@ public class MetadataResponse extends AbstractResponse {
 
                     Optional<Integer> leaderEpoch = RequestUtils.getLeaderEpoch(partitionMetadata.leaderEpoch());
                     TopicPartition topicPartition = new TopicPartition(topic, partitionIndex);
-                    partitionMetadataList.add(new PartitionMetadata(partitionError, topicPartition, leaderIdOpt, leaderEpoch, partitionMetadata.replicaNodes(), partitionMetadata.isrNodes(), partitionMetadata.offlineReplicas()));
+                    partitionMetadataList.add(new PartitionMetadata(partitionError, topicPartition, leaderIdOpt,
+                            leaderEpoch, partitionMetadata.replicaNodes(), partitionMetadata.isrNodes(),
+                            partitionMetadata.offlineReplicas()));
                 }
 
-                topicMetadataList.add(new TopicMetadata(topicError, topic, topicId, isInternal, partitionMetadataList, topicMetadata.topicAuthorizedOperations()));
+                topicMetadataList.add(new TopicMetadata(topicError, topic, topicId, isInternal, partitionMetadataList,
+                        topicMetadata.topicAuthorizedOperations()));
             }
             return topicMetadataList;
         }
 
     }
 
-    public static MetadataResponse prepareResponse(short version, int throttleTimeMs, Collection<Node> brokers, String clusterId, int controllerId, List<MetadataResponseTopic> topics, int clusterAuthorizedOperations) {
-        return prepareResponse(hasReliableLeaderEpochs(version), throttleTimeMs, brokers, clusterId, controllerId, topics, clusterAuthorizedOperations);
+    public static MetadataResponse prepareResponse(short version,
+                                                   int throttleTimeMs,
+                                                   Collection<Node> brokers,
+                                                   String clusterId,
+                                                   int controllerId,
+                                                   List<MetadataResponseTopic> topics,
+                                                   int clusterAuthorizedOperations) {
+        return prepareResponse(hasReliableLeaderEpochs(version), throttleTimeMs, brokers, clusterId, controllerId,
+                topics, clusterAuthorizedOperations);
     }
 
     // Visible for testing
-    public static MetadataResponse prepareResponse(boolean hasReliableEpoch, int throttleTimeMs, Collection<Node> brokers, String clusterId, int controllerId, List<MetadataResponseTopic> topics, int clusterAuthorizedOperations) {
+    public static MetadataResponse prepareResponse(boolean hasReliableEpoch,
+                                                   int throttleTimeMs,
+                                                   Collection<Node> brokers,
+                                                   String clusterId,
+                                                   int controllerId,
+                                                   List<MetadataResponseTopic> topics,
+                                                   int clusterAuthorizedOperations) {
         MetadataResponseData responseData = new MetadataResponseData();
         responseData.setThrottleTimeMs(throttleTimeMs);
-        brokers.forEach(broker -> responseData.brokers().add(new MetadataResponseBroker().setNodeId(broker.id()).setHost(broker.host()).setPort(broker.port()).setRack(broker.rack())));
+        brokers.forEach(broker ->
+            responseData.brokers().add(new MetadataResponseBroker()
+                .setNodeId(broker.id())
+                .setHost(broker.host())
+                .setPort(broker.port())
+                .setRack(broker.rack()))
+        );
 
         responseData.setClusterId(clusterId);
         responseData.setControllerId(controllerId);

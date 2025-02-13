@@ -18,10 +18,10 @@ package org.apache.kafka.streams.scala
 
 import org.apache.kafka.streams.KeyValue
 import org.apache.kafka.streams.kstream._
-import org.apache.kafka.streams.processor.ProcessorContext
-
-import java.lang.{Iterable => JIterable}
 import scala.jdk.CollectionConverters._
+import java.lang.{Iterable => JIterable}
+
+import org.apache.kafka.streams.processor.ProcessorContext
 
 /**
  * Implicit classes that offer conversions of Scala function literals to SAM (Single Abstract Method) objects in Java.
@@ -39,7 +39,6 @@ private[scala] object FunctionsCompatConversions {
 
   implicit class MapperFromFunction[T, U, VR](val f: (T, U) => VR) extends AnyVal {
     def asKeyValueMapper: KeyValueMapper[T, U, VR] = (key: T, value: U) => f(key, value)
-
     def asValueJoiner: ValueJoiner[T, U, VR] = (value1: T, value2: U) => f(value1, value2)
   }
 
@@ -87,48 +86,54 @@ private[scala] object FunctionsCompatConversions {
     def asInitializer: Initializer[VA] = () => f()
   }
 
+  @deprecated(
+    since = "4.0.0"
+  )
   implicit class TransformerSupplierFromFunction[K, V, VO](val f: () => Transformer[K, V, VO]) extends AnyVal {
     def asTransformerSupplier: TransformerSupplier[K, V, VO] = () => f()
   }
 
+  @deprecated(
+    since = "4.0.0"
+  )
   implicit class TransformerSupplierAsJava[K, V, VO](val supplier: TransformerSupplier[K, V, Iterable[VO]])
-    extends AnyVal {
+      extends AnyVal {
     def asJava: TransformerSupplier[K, V, JIterable[VO]] = () => {
       val innerTransformer = supplier.get()
       new Transformer[K, V, JIterable[VO]] {
         override def transform(key: K, value: V): JIterable[VO] = innerTransformer.transform(key, value).asJava
-
         override def init(context: ProcessorContext): Unit = innerTransformer.init(context)
-
         override def close(): Unit = innerTransformer.close()
       }
     }
   }
 
+  @deprecated(
+    since = "4.0.0"
+  )
   implicit class ValueTransformerSupplierAsJava[V, VO](val supplier: ValueTransformerSupplier[V, Iterable[VO]])
-    extends AnyVal {
+      extends AnyVal {
     def asJava: ValueTransformerSupplier[V, JIterable[VO]] = () => {
       val innerTransformer = supplier.get()
       new ValueTransformer[V, JIterable[VO]] {
         override def transform(value: V): JIterable[VO] = innerTransformer.transform(value).asJava
-
         override def init(context: ProcessorContext): Unit = innerTransformer.init(context)
-
         override def close(): Unit = innerTransformer.close()
       }
     }
   }
 
+  @deprecated(
+    since = "4.0.0"
+  )
   implicit class ValueTransformerSupplierWithKeyAsJava[K, V, VO](
-                                                                  val supplier: ValueTransformerWithKeySupplier[K, V, Iterable[VO]]
-                                                                ) extends AnyVal {
+    val supplier: ValueTransformerWithKeySupplier[K, V, Iterable[VO]]
+  ) extends AnyVal {
     def asJava: ValueTransformerWithKeySupplier[K, V, JIterable[VO]] = () => {
       val innerTransformer = supplier.get()
       new ValueTransformerWithKey[K, V, JIterable[VO]] {
         override def transform(key: K, value: V): JIterable[VO] = innerTransformer.transform(key, value).asJava
-
         override def init(context: ProcessorContext): Unit = innerTransformer.init(context)
-
         override def close(): Unit = innerTransformer.close()
       }
     }

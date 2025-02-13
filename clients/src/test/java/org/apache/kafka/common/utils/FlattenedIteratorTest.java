@@ -19,6 +19,8 @@ package org.apache.kafka.common.utils;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -28,88 +30,87 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class FlattenedIteratorTest {
 
-	@Test
-	public void testNestedLists() {
-		List<List<String>> list = asList(
-				asList("foo", "a", "bc"),
-				asList("ddddd"),
-				asList("", "bar2", "baz45"));
+    @Test
+    public void testNestedLists() {
+        List<List<String>> list = asList(
+            asList("foo", "a", "bc"),
+            Collections.singletonList("ddddd"),
+            asList("", "bar2", "baz45"));
 
-		Iterable<String> flattenedIterable = () -> new FlattenedIterator<>(list.iterator(), l -> l.iterator());
-		List<String> flattened = new ArrayList<>();
-		flattenedIterable.forEach(flattened::add);
+        Iterable<String> flattenedIterable = () -> new FlattenedIterator<>(list.iterator(), List::iterator);
+        List<String> flattened = new ArrayList<>();
+        flattenedIterable.forEach(flattened::add);
 
-		assertEquals(list.stream().flatMap(l -> l.stream()).collect(Collectors.toList()), flattened);
+        assertEquals(list.stream().flatMap(Collection::stream).collect(Collectors.toList()), flattened);
 
-		// Ensure we can iterate multiple times
-		List<String> flattened2 = new ArrayList<>();
-		flattenedIterable.forEach(flattened2::add);
+        // Ensure we can iterate multiple times
+        List<String> flattened2 = new ArrayList<>();
+        flattenedIterable.forEach(flattened2::add);
 
-		assertEquals(flattened, flattened2);
-	}
+        assertEquals(flattened, flattened2);
+    }
 
-	@Test
-	public void testEmptyList() {
-		List<List<String>> list = emptyList();
+    @Test
+    public void testEmptyList() {
+        List<List<String>> list = emptyList();
 
-		Iterable<String> flattenedIterable = () -> new FlattenedIterator<>(list.iterator(), l -> l.iterator());
-		List<String> flattened = new ArrayList<>();
-		flattenedIterable.forEach(flattened::add);
+        Iterable<String> flattenedIterable = () -> new FlattenedIterator<>(list.iterator(), List::iterator);
+        List<String> flattened = new ArrayList<>();
+        flattenedIterable.forEach(flattened::add);
 
-		assertEquals(emptyList(), flattened);
-	}
+        assertEquals(emptyList(), flattened);
+    }
 
-	@Test
-	public void testNestedSingleEmptyList() {
-		List<List<String>> list = asList(emptyList());
+    @Test
+    public void testNestedSingleEmptyList() {
+        List<List<String>> list = Collections.singletonList(emptyList());
 
-		Iterable<String> flattenedIterable = () -> new FlattenedIterator<>(list.iterator(), l -> l.iterator());
-		List<String> flattened = new ArrayList<>();
-		flattenedIterable.forEach(flattened::add);
+        Iterable<String> flattenedIterable = () -> new FlattenedIterator<>(list.iterator(), List::iterator);
+        List<String> flattened = new ArrayList<>();
+        flattenedIterable.forEach(flattened::add);
 
-		assertEquals(emptyList(), flattened);
-	}
+        assertEquals(emptyList(), flattened);
+    }
 
-	@Test
-	public void testEmptyListFollowedByNonEmpty() {
-		List<List<String>> list = asList(
-				emptyList(),
-				asList("boo", "b", "de"));
+    @Test
+    public void testEmptyListFollowedByNonEmpty() {
+        List<List<String>> list = asList(
+            emptyList(),
+            asList("boo", "b", "de"));
 
-		Iterable<String> flattenedIterable = () -> new FlattenedIterator<>(list.iterator(), l -> l.iterator());
-		List<String> flattened = new ArrayList<>();
-		flattenedIterable.forEach(flattened::add);
+        Iterable<String> flattenedIterable = () -> new FlattenedIterator<>(list.iterator(), List::iterator);
+        List<String> flattened = new ArrayList<>();
+        flattenedIterable.forEach(flattened::add);
 
-		assertEquals(list.stream().flatMap(l -> l.stream()).collect(Collectors.toList()), flattened);
-	}
+        assertEquals(list.stream().flatMap(Collection::stream).collect(Collectors.toList()), flattened);
+    }
 
-	@Test
-	public void testEmptyListInBetweenNonEmpty() {
-		List<List<String>> list = asList(
-				asList("aadwdwdw"),
-				emptyList(),
-				asList("ee", "aa", "dd"));
+    @Test
+    public void testEmptyListInBetweenNonEmpty() {
+        List<List<String>> list = asList(
+            Collections.singletonList("aadwdwdw"),
+            emptyList(),
+            asList("ee", "aa", "dd"));
 
-		Iterable<String> flattenedIterable = () -> new FlattenedIterator<>(list.iterator(), l -> l.iterator());
-		List<String> flattened = new ArrayList<>();
-		flattenedIterable.forEach(flattened::add);
+        Iterable<String> flattenedIterable = () -> new FlattenedIterator<>(list.iterator(), List::iterator);
+        List<String> flattened = new ArrayList<>();
+        flattenedIterable.forEach(flattened::add);
 
-		assertEquals(list.stream().flatMap(l -> l.stream()).collect(Collectors.toList()), flattened);
-	}
+        assertEquals(list.stream().flatMap(Collection::stream).collect(Collectors.toList()), flattened);
+    }
 
-	@Test
-	public void testEmptyListAtTheEnd() {
-		List<List<String>> list = asList(
-				asList("ee", "dd"),
-				asList("e"),
-				emptyList());
+    @Test
+    public void testEmptyListAtTheEnd() {
+        List<List<String>> list = asList(
+            asList("ee", "dd"),
+            Collections.singletonList("e"),
+            emptyList());
 
-		Iterable<String> flattenedIterable = () -> new FlattenedIterator<>(list.iterator(), l -> l.iterator());
-		List<String> flattened = new ArrayList<>();
-		flattenedIterable.forEach(flattened::add);
+        Iterable<String> flattenedIterable = () -> new FlattenedIterator<>(list.iterator(), List::iterator);
+        List<String> flattened = new ArrayList<>();
+        flattenedIterable.forEach(flattened::add);
 
-		assertEquals(list.stream().flatMap(l -> l.stream()).collect(Collectors.toList()), flattened);
-	}
+        assertEquals(list.stream().flatMap(Collection::stream).collect(Collectors.toList()), flattened);
+    }
 
 }
-

@@ -21,21 +21,23 @@ import org.apache.kafka.common.utils.Time;
 import java.util.Comparator;
 import java.util.Optional;
 import java.util.PriorityQueue;
-import java.util.concurrent.*;
+import java.util.concurrent.Delayed;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
 
 /**
  * A mock scheduler that executes tasks synchronously using a mock time instance. Tasks are executed synchronously when
  * the time is advanced. This class is meant to be used in conjunction with MockTime.
- * <p>
+ *
  * Example usage
  * <code>
- * val time = new MockTime
- * time.scheduler.schedule("a task", println("hello world: " + time.milliseconds), delay = 1000)
- * time.sleep(1001) // this should cause our scheduled task to fire
+ *   val time = new MockTime
+ *   time.scheduler.schedule("a task", println("hello world: " + time.milliseconds), delay = 1000)
+ *   time.sleep(1001) // this should cause our scheduled task to fire
  * </code>
- * <p>
+ *
  * Incrementing the time to the exact next execution time of a task will result in that task executing (it as if execution itself takes no time).
  */
 public class MockScheduler implements Scheduler {
@@ -101,12 +103,12 @@ public class MockScheduler implements Scheduler {
         }
 
         @Override
-        public Void get() throws InterruptedException, ExecutionException {
+        public Void get() {
             return null;
         }
 
         @Override
-        public Void get(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
+        public Void get(long timeout, TimeUnit unit) {
             return null;
         }
 
@@ -124,8 +126,7 @@ public class MockScheduler implements Scheduler {
     }
 
     @Override
-    public void startup() {
-    }
+    public void startup() {}
 
     @Override
     public ScheduledFuture<?> schedule(String name, Runnable task, long delayMs, long periodMs) {
@@ -145,8 +146,7 @@ public class MockScheduler implements Scheduler {
     }
 
     @Override
-    public void resizeThreadPool(int newSize) {
-    }
+    public void resizeThreadPool(int newSize) {}
 
     /**
      * Check for any tasks that need to execute. Since this is a mock scheduler this check only occurs

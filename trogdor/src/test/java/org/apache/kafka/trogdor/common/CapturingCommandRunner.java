@@ -17,13 +17,16 @@
 
 package org.apache.kafka.trogdor.common;
 
-import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.trogdor.basic.BasicPlatform;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
 public class CapturingCommandRunner implements BasicPlatform.CommandRunner {
     private static final Logger log = LoggerFactory.getLogger(CapturingCommandRunner.class);
@@ -41,16 +44,16 @@ public class CapturingCommandRunner implements BasicPlatform.CommandRunner {
     }
 
     @Override
-    public String run(Node curNode, String[] command) throws IOException {
-        String line = Utils.join(command, " ");
+    public String run(Node curNode, String[] command) {
+        String line = String.join(" ", command);
         synchronized (this) {
             getOrCreate(curNode.name()).add(line);
         }
-        log.debug("RAN {}: {}", curNode, Utils.join(command, " "));
+        log.debug("RAN {}: {}", curNode, String.join(" ", command));
         return "";
     }
 
     public synchronized List<String> lines(String nodeName) {
-        return new ArrayList<String>(getOrCreate(nodeName));
+        return new ArrayList<>(getOrCreate(nodeName));
     }
 }

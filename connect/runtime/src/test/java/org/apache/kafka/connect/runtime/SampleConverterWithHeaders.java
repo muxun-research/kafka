@@ -18,6 +18,8 @@ package org.apache.kafka.connect.runtime;
 
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.Headers;
+import org.apache.kafka.common.utils.AppInfoParser;
+import org.apache.kafka.connect.components.Versioned;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaAndValue;
 import org.apache.kafka.connect.errors.DataException;
@@ -29,8 +31,13 @@ import java.util.Map;
 /**
  * This is a simple Converter implementation that uses "encoding" header to encode/decode strings via provided charset name
  */
-public class SampleConverterWithHeaders implements Converter {
+public class SampleConverterWithHeaders implements Converter, Versioned {
     private static final String HEADER_ENCODING = "encoding";
+
+    @Override
+    public String version() {
+        return AppInfoParser.getVersion();
+    }
 
     @Override
     public void configure(Map<String, ?> configs, boolean isKey) {

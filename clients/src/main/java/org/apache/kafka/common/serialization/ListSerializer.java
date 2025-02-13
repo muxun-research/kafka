@@ -20,13 +20,18 @@ import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.utils.Utils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 
 import static org.apache.kafka.common.serialization.Serdes.ListSerde.SerializationStrategy;
 
@@ -34,13 +39,18 @@ public class ListSerializer<Inner> implements Serializer<List<Inner>> {
 
     final Logger log = LoggerFactory.getLogger(ListSerializer.class);
 
-    private static final List<Class<? extends Serializer<?>>> FIXED_LENGTH_SERIALIZERS = Arrays.asList(ShortSerializer.class, IntegerSerializer.class, FloatSerializer.class, LongSerializer.class, DoubleSerializer.class, UUIDSerializer.class);
+    private static final List<Class<? extends Serializer<?>>> FIXED_LENGTH_SERIALIZERS = Arrays.asList(
+        ShortSerializer.class,
+        IntegerSerializer.class,
+        FloatSerializer.class,
+        LongSerializer.class,
+        DoubleSerializer.class,
+        UUIDSerializer.class);
 
     private Serializer<Inner> inner;
     private SerializationStrategy serStrategy;
 
-    public ListSerializer() {
-    }
+    public ListSerializer() {}
 
     public ListSerializer(Serializer<Inner> inner) {
         if (inner == null) {
@@ -100,7 +110,8 @@ public class ListSerializer<Inner> implements Serializer<List<Inner>> {
         if (data == null) {
             return null;
         }
-        try (final ByteArrayOutputStream baos = new ByteArrayOutputStream(); final DataOutputStream out = new DataOutputStream(baos)) {
+        try (final ByteArrayOutputStream baos = new ByteArrayOutputStream();
+             final DataOutputStream out = new DataOutputStream(baos)) {
             out.writeByte(serStrategy.ordinal()); // write serialization strategy flag
             if (serStrategy == SerializationStrategy.CONSTANT_SIZE) {
                 // In CONSTANT_SIZE strategy, indexes of null entries are encoded in a null index list

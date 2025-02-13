@@ -19,14 +19,17 @@ package kafka.server
 import kafka.utils.TestUtils
 import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord, RecordMetadata}
 import org.apache.kafka.common.config.TopicConfig
+import org.apache.kafka.common.{TopicPartition, Uuid}
+import org.apache.kafka.common.message.FetchResponseData
 import org.apache.kafka.common.record.Record
 import org.apache.kafka.common.requests.{FetchRequest, FetchResponse}
 import org.apache.kafka.common.serialization.StringSerializer
-import org.apache.kafka.common.{TopicPartition, Uuid}
+import org.apache.kafka.server.config.ServerConfigs
 import org.junit.jupiter.api.AfterEach
 
 import java.util
 import java.util.{Optional, Properties}
+import scala.collection.Seq
 import scala.jdk.CollectionConverters._
 
 class BaseFetchRequestTest extends BaseRequestTest {
@@ -34,7 +37,7 @@ class BaseFetchRequestTest extends BaseRequestTest {
   protected var producer: KafkaProducer[String, String] = _
 
   override def brokerPropertyOverrides(properties: Properties): Unit = {
-    properties.put(KafkaConfig.FetchMaxBytes, Int.MaxValue.toString)
+    properties.put(ServerConfigs.FETCH_MAX_BYTES_CONFIG, Int.MaxValue.toString)
   }
 
   @AfterEach
@@ -45,15 +48,15 @@ class BaseFetchRequestTest extends BaseRequestTest {
   }
 
   protected def createConsumerFetchRequest(
-                                            maxResponseBytes: Int,
-                                            maxPartitionBytes: Int,
-                                            topicPartitions: Seq[TopicPartition],
-                                            offsetMap: Map[TopicPartition, Long],
-                                            version: Short,
-                                            maxWaitMs: Int = Int.MaxValue,
-                                            minBytes: Int = 0,
-                                            rackId: String = ""
-                                          ): FetchRequest = {
+    maxResponseBytes: Int,
+    maxPartitionBytes: Int,
+    topicPartitions: Seq[TopicPartition],
+    offsetMap: Map[TopicPartition, Long],
+    version: Short,
+    maxWaitMs: Int = Int.MaxValue,
+    minBytes: Int = 0,
+    rackId: String = ""
+  ): FetchRequest = {
     FetchRequest.Builder.forConsumer(version, maxWaitMs, minBytes, createPartitionMap(maxPartitionBytes, topicPartitions, offsetMap))
       .setMaxBytes(maxResponseBytes)
       .rackId(rackId)
@@ -66,7 +69,7 @@ class BaseFetchRequestTest extends BaseRequestTest {
     topicPartitions.foreach { tp =>
       partitionMap.put(tp,
         new FetchRequest.PartitionData(getTopicIds().getOrElse(tp.topic, Uuid.ZERO_UUID), offsetMap.getOrElse(tp, 0), 0L, maxPartitionBytes,
-          Optional.empty()))
+        Optional.empty()))
     }
     partitionMap
   }

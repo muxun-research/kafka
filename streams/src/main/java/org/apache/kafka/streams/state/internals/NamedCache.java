@@ -22,6 +22,7 @@ import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
 import org.apache.kafka.streams.processor.internals.metrics.TaskMetrics;
 import org.apache.kafka.streams.state.internals.metrics.NamedCacheMetrics;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,7 +59,7 @@ class NamedCache {
         totalCacheSizeSensor = TaskMetrics.totalCacheSizeBytesSensor(Thread.currentThread().getName(), taskName, streamsMetrics);
     }
 
-    synchronized final String name() {
+    final synchronized String name() {
         return name;
     }
 

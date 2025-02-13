@@ -17,7 +17,9 @@
 package org.apache.kafka.streams.state.internals;
 
 import org.apache.kafka.streams.errors.ProcessorStateException;
-import org.apache.kafka.streams.processor.ProcessorContext;
+import org.apache.kafka.streams.processor.StateStoreContext;
+import org.apache.kafka.streams.query.Position;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,7 +27,15 @@ import java.io.File;
 import java.io.IOException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.NavigableMap;
+import java.util.SimpleTimeZone;
+import java.util.TreeMap;
 
 abstract class AbstractSegments<S extends Segment> implements Segments<S> {
     private static final Logger log = LoggerFactory.getLogger(AbstractSegments.class);
@@ -35,6 +45,7 @@ abstract class AbstractSegments<S extends Segment> implements Segments<S> {
     private final long retentionPeriod;
     private final long segmentInterval;
     private final SimpleDateFormat formatter;
+    Position position;
 
     AbstractSegments(final String name, final long retentionPeriod, final long segmentInterval) {
         this.name = name;
@@ -43,6 +54,10 @@ abstract class AbstractSegments<S extends Segment> implements Segments<S> {
         // Create a date formatter. Formatted timestamps are used as segment name suffixes
         this.formatter = new SimpleDateFormat("yyyyMMddHHmm");
         this.formatter.setTimeZone(new SimpleTimeZone(0, "UTC"));
+    }
+
+    public void setPosition(final Position position) {
+        this.position = position;
     }
 
     @Override
@@ -60,14 +75,14 @@ abstract class AbstractSegments<S extends Segment> implements Segments<S> {
     }
 
     @Override
-    public S getSegmentForTimestamp(final long timestamp) {
+    public S segmentForTimestamp(final long timestamp) {
         return segments.get(segmentId(timestamp));
     }
 
     @Override
     public S getOrCreateSegmentIfLive(final long segmentId,
-									  final ProcessorContext context,
-									  final long streamTime) {
+                                      final StateStoreContext context,
+                                      final long streamTime) {
         final long minLiveTimestamp = streamTime - retentionPeriod;
         final long minLiveSegment = segmentId(minLiveTimestamp);
 
@@ -79,19 +94,19 @@ abstract class AbstractSegments<S extends Segment> implements Segments<S> {
         }
     }
 
-	@Override
-	public void openExisting(final ProcessorContext context, final long streamTime) {
-		try {
-			final File dir = new File(context.stateDir(), name);
-			if (dir.exists()) {
-				final String[] list = dir.list();
-				if (list != null) {
-					Arrays.stream(list)
-							.map(segment -> segmentIdFromSegmentName(segment, dir))
-							.sorted() // open segments in the id order
-							.filter(segmentId -> segmentId >= 0)
-							.forEach(segmentId -> getOrCreateSegment(segmentId, context));
-				}
+    @Override
+    public void openExisting(final StateStoreContext context, final long streamTime) {
+        try {
+            final File dir = new File(context.stateDir(), name);
+            if (dir.exists()) {
+                final String[] list = dir.list();
+                if (list != null) {
+                    Arrays.stream(list)
+                            .map(segment -> segmentIdFromSegmentName(segment, dir))
+                            .sorted() // open segments in the id order
+                            .filter(segmentId -> segmentId >= 0)
+                            .forEach(segmentId -> getOrCreateSegment(segmentId, context));
+                }
             } else {
                 if (!dir.mkdir()) {
                     throw new ProcessorStateException(String.format("dir %s doesn't exist and cannot be created for segments %s", dir, name));
@@ -104,45 +119,45 @@ abstract class AbstractSegments<S extends Segment> implements Segments<S> {
         cleanupExpiredSegments(streamTime);
     }
 
-	@Override
-	public List<S> segments(final long timeFrom, final long timeTo, final boolean forward) {
-		final List<S> result = new ArrayList<>();
-		final NavigableMap<Long, S> segmentsInRange;
-		if (forward) {
-			segmentsInRange = segments.subMap(
-					segmentId(timeFrom), true,
-					segmentId(timeTo), true
-			);
-		} else {
-			segmentsInRange = segments.subMap(
-					segmentId(timeFrom), true,
-					segmentId(timeTo), true
-			).descendingMap();
-		}
-		for (final S segment : segmentsInRange.values()) {
-			if (segment.isOpen()) {
-				result.add(segment);
-			}
-		}
-		return result;
-	}
+    @Override
+    public List<S> segments(final long timeFrom, final long timeTo, final boolean forward) {
+        final List<S> result = new ArrayList<>();
+        final NavigableMap<Long, S> segmentsInRange;
+        if (forward) {
+            segmentsInRange = segments.subMap(
+                segmentId(timeFrom), true,
+                segmentId(timeTo), true
+            );
+        } else {
+            segmentsInRange = segments.subMap(
+                segmentId(timeFrom), true,
+                segmentId(timeTo), true
+            ).descendingMap();
+        }
+        for (final S segment : segmentsInRange.values()) {
+            if (segment.isOpen()) {
+                result.add(segment);
+            }
+        }
+        return result;
+    }
 
-	@Override
-	public List<S> allSegments(final boolean forward) {
-		final List<S> result = new ArrayList<>();
-		final Collection<S> values;
-		if (forward) {
-			values = segments.values();
-		} else {
-			values = segments.descendingMap().values();
-		}
-		for (final S segment : values) {
-			if (segment.isOpen()) {
-				result.add(segment);
-			}
-		}
-		return result;
-	}
+    @Override
+    public List<S> allSegments(final boolean forward) {
+        final List<S> result = new ArrayList<>();
+        final Collection<S> values;
+        if (forward) {
+            values = segments.values();
+        } else {
+            values = segments.descendingMap().values();
+        }
+        for (final S segment : values) {
+            if (segment.isOpen()) {
+                result.add(segment);
+            }
+        }
+        return result;
+    }
 
     @Override
     public void flush() {
@@ -161,7 +176,8 @@ abstract class AbstractSegments<S extends Segment> implements Segments<S> {
 
     protected void cleanupExpiredSegments(final long streamTime) {
         final long minLiveSegment = segmentId(streamTime - retentionPeriod);
-        final Iterator<Map.Entry<Long, S>> toRemove = segments.headMap(minLiveSegment, false).entrySet().iterator();
+        final Iterator<Map.Entry<Long, S>> toRemove =
+            segments.headMap(minLiveSegment, false).entrySet().iterator();
 
         while (toRemove.hasNext()) {
             final Map.Entry<Long, S> next = toRemove.next();

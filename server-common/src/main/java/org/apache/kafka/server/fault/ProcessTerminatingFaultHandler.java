@@ -18,6 +18,7 @@
 package org.apache.kafka.server.fault;
 
 import org.apache.kafka.common.utils.Exit;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,7 +27,7 @@ import java.util.Objects;
 /**
  * This is a fault handler which terminates the JVM process.
  */
-final public class ProcessTerminatingFaultHandler implements FaultHandler {
+public final class ProcessTerminatingFaultHandler implements FaultHandler {
     private static final Logger log = LoggerFactory.getLogger(ProcessTerminatingFaultHandler.class);
 
     private final Runnable action;
@@ -63,18 +64,17 @@ final public class ProcessTerminatingFaultHandler implements FaultHandler {
 
     public static final class Builder {
         private boolean shouldHalt = true;
-        private Runnable action = () -> {
-        };
+        private Runnable action = () -> { };
 
         /**
          * Set if halt or exit should be used.
-         * <p>
+         * <br>
          * When {@code value} is {@code false} {@code Exit.exit} is called, otherwise {@code Exit.halt} is
          * called. The default value is {@code true}.
-         * <p>
+         * <br>
          * The default implementation of {@code Exit.exit} calls {@code Runtime.exit} which
          * blocks on all of the shutdown hooks executing.
-         * <p>
+         * <br>
          * The default implementation of {@code Exit.halt} calls {@code Runtime.halt} which
          * forcibly terminates the JVM.
          */

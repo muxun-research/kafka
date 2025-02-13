@@ -24,9 +24,14 @@ import org.apache.kafka.streams.processor.TaskId;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
 import org.apache.kafka.streams.processor.internals.metrics.ThreadMetrics;
 import org.apache.kafka.streams.state.internals.ThreadCache;
+
 import org.slf4j.Logger;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.apache.kafka.streams.internals.StreamsConfigUtils.eosEnabled;
 
@@ -41,7 +46,14 @@ class StandbyTaskCreator {
     private final Sensor createTaskSensor;
     private final boolean stateUpdaterEnabled;
 
-    StandbyTaskCreator(final TopologyMetadata topologyMetadata, final StreamsConfig applicationConfig, final StreamsMetricsImpl streamsMetrics, final StateDirectory stateDirectory, final ChangelogReader storeChangelogReader, final String threadId, final Logger log, final boolean stateUpdaterEnabled) {
+    StandbyTaskCreator(final TopologyMetadata topologyMetadata,
+                       final StreamsConfig applicationConfig,
+                       final StreamsMetricsImpl streamsMetrics,
+                       final StateDirectory stateDirectory,
+                       final ChangelogReader storeChangelogReader,
+                       final String threadId,
+                       final Logger log,
+                       final boolean stateUpdaterEnabled) {
         this.topologyMetadata = topologyMetadata;
         this.applicationConfig = applicationConfig;
         this.streamsMetrics = streamsMetrics;
@@ -52,7 +64,11 @@ class StandbyTaskCreator {
 
         createTaskSensor = ThreadMetrics.createTaskSensor(threadId, streamsMetrics);
 
-        dummyCache = new ThreadCache(new LogContext(String.format("stream-thread [%s] ", Thread.currentThread().getName())), 0, streamsMetrics);
+        dummyCache = new ThreadCache(
+            new LogContext(String.format("stream-thread [%s] ", Thread.currentThread().getName())),
+            0,
+            streamsMetrics
+        );
     }
 
     // TODO: convert to StandbyTask when we remove TaskManager#StateMachineTask with mocks
@@ -65,13 +81,32 @@ class StandbyTaskCreator {
             final ProcessorTopology topology = topologyMetadata.buildSubtopology(taskId);
 
             if (topology.hasStateWithChangelogs()) {
-                final ProcessorStateManager stateManager = new ProcessorStateManager(taskId, Task.TaskType.STANDBY, eosEnabled(applicationConfig), getLogContext(taskId), stateDirectory, storeChangelogReader, topology.storeToChangelogTopic(), partitions, stateUpdaterEnabled);
+                final ProcessorStateManager stateManager = new ProcessorStateManager(
+                    taskId,
+                    Task.TaskType.STANDBY,
+                    eosEnabled(applicationConfig),
+                    getLogContext(taskId),
+                    stateDirectory,
+                    storeChangelogReader,
+                    topology.storeToChangelogTopic(),
+                    partitions,
+                    stateUpdaterEnabled);
 
-                final InternalProcessorContext<Object, Object> context = new ProcessorContextImpl(taskId, applicationConfig, stateManager, streamsMetrics, dummyCache);
+                final InternalProcessorContext<?, ?> context = new ProcessorContextImpl(
+                    taskId,
+                    applicationConfig,
+                    stateManager,
+                    streamsMetrics,
+                    dummyCache
+                );
 
                 createdTasks.add(createStandbyTask(taskId, partitions, topology, stateManager, context));
             } else {
-                log.trace("Skipped standby task {} with assigned partitions {} " + "since it does not have any state stores to materialize", taskId, partitions);
+                log.trace(
+                    "Skipped standby task {} with assigned partitions {} " +
+                        "since it does not have any state stores to materialize",
+                    taskId, partitions
+                );
             }
         }
         return createdTasks;
@@ -82,7 +117,8 @@ class StandbyTaskCreator {
      *       in the future we when we have fixed partitions -> tasks mapping,
      *       we should always reuse the input partition and hence no need validations
      */
-    StandbyTask createStandbyTaskFromActive(final StreamTask streamTask, final Set<TopicPartition> inputPartitions) {
+    StandbyTask createStandbyTaskFromActive(final StreamTask streamTask,
+                                            final Set<TopicPartition> inputPartitions) {
         if (!inputPartitions.equals(streamTask.inputPartitions)) {
             log.warn("Detected unmatched input partitions for task {} when recycling it from active to standby", streamTask.id);
         }
@@ -90,15 +126,39 @@ class StandbyTaskCreator {
         streamTask.prepareRecycle();
         streamTask.stateMgr.transitionTaskType(Task.TaskType.STANDBY, getLogContext(streamTask.id));
 
-        final StandbyTask task = new StandbyTask(streamTask.id, inputPartitions, streamTask.topology, streamTask.config, streamsMetrics, streamTask.stateMgr, stateDirectory, dummyCache, streamTask.processorContext);
+        final StandbyTask task = new StandbyTask(
+            streamTask.id,
+            inputPartitions,
+            streamTask.topology,
+            streamTask.config,
+            streamsMetrics,
+            streamTask.stateMgr,
+            stateDirectory,
+            dummyCache,
+            streamTask.processorContext
+        );
 
         log.trace("Created standby task {} from recycled active task with assigned partitions {}", task.id, inputPartitions);
         createTaskSensor.record();
         return task;
     }
 
-    StandbyTask createStandbyTask(final TaskId taskId, final Set<TopicPartition> inputPartitions, final ProcessorTopology topology, final ProcessorStateManager stateManager, final InternalProcessorContext<Object, Object> context) {
-        final StandbyTask task = new StandbyTask(taskId, inputPartitions, topology, topologyMetadata.getTaskConfigFor(taskId), streamsMetrics, stateManager, stateDirectory, dummyCache, context);
+    StandbyTask createStandbyTask(final TaskId taskId,
+                                  final Set<TopicPartition> inputPartitions,
+                                  final ProcessorTopology topology,
+                                  final ProcessorStateManager stateManager,
+                                  final InternalProcessorContext<?, ?> context) {
+        final StandbyTask task = new StandbyTask(
+            taskId,
+            inputPartitions,
+            topology,
+            topologyMetadata.taskConfig(taskId),
+            streamsMetrics,
+            stateManager,
+            stateDirectory,
+            dummyCache,
+            context
+        );
 
         log.trace("Created standby task {} with assigned partitions {}", taskId, inputPartitions);
         createTaskSensor.record();

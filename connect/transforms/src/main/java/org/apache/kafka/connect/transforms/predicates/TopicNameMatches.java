@@ -18,6 +18,8 @@ package org.apache.kafka.connect.transforms.predicates;
 
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigException;
+import org.apache.kafka.common.utils.AppInfoParser;
+import org.apache.kafka.connect.components.Versioned;
 import org.apache.kafka.connect.connector.ConnectRecord;
 import org.apache.kafka.connect.transforms.util.RegexValidator;
 import org.apache.kafka.connect.transforms.util.SimpleConfig;
@@ -30,51 +32,56 @@ import java.util.regex.PatternSyntaxException;
  * A predicate which is true for records with a topic name that matches the configured regular expression.
  * @param <R> The type of connect record.
  */
-public class TopicNameMatches<R extends ConnectRecord<R>> implements Predicate<R> {
+public class TopicNameMatches<R extends ConnectRecord<R>> implements Predicate<R>, Versioned {
 
-	private static final String PATTERN_CONFIG = "pattern";
+    private static final String PATTERN_CONFIG = "pattern";
 
-	public static final String OVERVIEW_DOC = "A predicate which is true for records with a topic name that matches the configured regular expression.";
+    public static final String OVERVIEW_DOC = "A predicate which is true for records with a topic name that matches the configured regular expression.";
 
-	public static final ConfigDef CONFIG_DEF = new ConfigDef()
-			.define(PATTERN_CONFIG, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE,
-					ConfigDef.CompositeValidator.of(new ConfigDef.NonEmptyString(), new RegexValidator()),
-					ConfigDef.Importance.MEDIUM,
-					"A Java regular expression for matching against the name of a record's topic.");
-	private Pattern pattern;
+    public static final ConfigDef CONFIG_DEF = new ConfigDef()
+            .define(PATTERN_CONFIG, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE,
+            ConfigDef.CompositeValidator.of(new ConfigDef.NonEmptyString(), new RegexValidator()),
+            ConfigDef.Importance.MEDIUM,
+            "A Java regular expression for matching against the name of a record's topic.");
+    private Pattern pattern;
 
-	@Override
-	public ConfigDef config() {
-		return CONFIG_DEF;
-	}
+    @Override
+    public String version() {
+        return AppInfoParser.getVersion();
+    }
 
-	@Override
-	public boolean test(R record) {
-		return record.topic() != null && pattern.matcher(record.topic()).matches();
-	}
+    @Override
+    public ConfigDef config() {
+        return CONFIG_DEF;
+    }
 
-	@Override
-	public void close() {
+    @Override
+    public boolean test(R record) {
+        return record.topic() != null && pattern.matcher(record.topic()).matches();
+    }
 
-	}
+    @Override
+    public void close() {
 
-	@Override
-	public void configure(Map<String, ?> configs) {
-		SimpleConfig simpleConfig = new SimpleConfig(config(), configs);
-		Pattern result;
-		String value = simpleConfig.getString(PATTERN_CONFIG);
-		try {
-			result = Pattern.compile(value);
-		} catch (PatternSyntaxException e) {
-			throw new ConfigException(PATTERN_CONFIG, value, "entry must be a Java-compatible regular expression: " + e.getMessage());
-		}
-		this.pattern = result;
-	}
+    }
 
-	@Override
-	public String toString() {
-		return "TopicNameMatches{" +
-				"pattern=" + pattern +
-				'}';
-	}
+    @Override
+    public void configure(Map<String, ?> configs) {
+        SimpleConfig simpleConfig = new SimpleConfig(config(), configs);
+        Pattern result;
+        String value = simpleConfig.getString(PATTERN_CONFIG);
+        try {
+            result = Pattern.compile(value);
+        } catch (PatternSyntaxException e) {
+            throw new ConfigException(PATTERN_CONFIG, value, "entry must be a Java-compatible regular expression: " + e.getMessage());
+        }
+        this.pattern = result;
+    }
+
+    @Override
+    public String toString() {
+        return "TopicNameMatches{" +
+                "pattern=" + pattern +
+                '}';
+    }
 }

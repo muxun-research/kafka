@@ -19,13 +19,19 @@ package org.apache.kafka.common.security;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.config.types.Password;
 import org.apache.kafka.common.network.ListenerName;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 import javax.security.auth.login.AppConfigurationEntry;
 import javax.security.auth.login.Configuration;
-import java.util.*;
-import java.util.stream.Collectors;
 
 import static org.apache.kafka.common.security.JaasUtils.DISALLOWED_LOGIN_MODULES_CONFIG;
 import static org.apache.kafka.common.security.JaasUtils.DISALLOWED_LOGIN_MODULES_DEFAULT;
@@ -71,14 +77,14 @@ public class JaasContext {
     /**
      * Returns an instance of this class.
      *
-     * If JAAS configuration property @link SaslConfigs#SASL_JAAS_CONFIG} is specified,
+     * If JAAS configuration property {@link SaslConfigs#SASL_JAAS_CONFIG} is specified,
      * the configuration object is created by parsing the property value. Otherwise, the default Configuration
      * is returned. The context name is always `KafkaClient`.
      *
      */
     public static JaasContext loadClientContext(Map<String, ?> configs) {
         Password dynamicJaasConfig = (Password) configs.get(SaslConfigs.SASL_JAAS_CONFIG);
-		return load(JaasContext.Type.CLIENT, null, GLOBAL_CONTEXT_NAME_CLIENT, dynamicJaasConfig);
+        return load(JaasContext.Type.CLIENT, null, GLOBAL_CONTEXT_NAME_CLIENT, dynamicJaasConfig);
     }
 
     static JaasContext load(JaasContext.Type contextType, String listenerContextName,
@@ -98,18 +104,24 @@ public class JaasContext {
     }
 
     private static void throwIfLoginModuleIsNotAllowed(AppConfigurationEntry appConfigurationEntry) {
-        Set<String> disallowedLoginModuleList = Arrays.stream(System.getProperty(DISALLOWED_LOGIN_MODULES_CONFIG, DISALLOWED_LOGIN_MODULES_DEFAULT).split(",")).map(String::trim).collect(Collectors.toSet());
+        Set<String> disallowedLoginModuleList = Arrays.stream(
+                System.getProperty(DISALLOWED_LOGIN_MODULES_CONFIG, DISALLOWED_LOGIN_MODULES_DEFAULT).split(","))
+                .map(String::trim)
+                .collect(Collectors.toSet());
         String loginModuleName = appConfigurationEntry.getLoginModuleName().trim();
         if (disallowedLoginModuleList.contains(loginModuleName)) {
-            throw new IllegalArgumentException(loginModuleName + " is not allowed. Update System property '" + DISALLOWED_LOGIN_MODULES_CONFIG + "' to allow " + loginModuleName);
+            throw new IllegalArgumentException(loginModuleName + " is not allowed. Update System property '"
+                    + DISALLOWED_LOGIN_MODULES_CONFIG + "' to allow " + loginModuleName);
         }
     }
 
-    private static JaasContext defaultContext(JaasContext.Type contextType, String listenerContextName, String globalContextName) {
+    private static JaasContext defaultContext(JaasContext.Type contextType, String listenerContextName,
+                                              String globalContextName) {
         String jaasConfigFile = System.getProperty(JaasUtils.JAVA_LOGIN_CONFIG_PARAM);
         if (jaasConfigFile == null) {
             if (contextType == Type.CLIENT) {
-                LOG.debug("System property '" + JaasUtils.JAVA_LOGIN_CONFIG_PARAM + "' and Kafka SASL property '" + SaslConfigs.SASL_JAAS_CONFIG + "' are not set, using default JAAS configuration.");
+                LOG.debug("System property '" + JaasUtils.JAVA_LOGIN_CONFIG_PARAM + "' and Kafka SASL property '" +
+                        SaslConfigs.SASL_JAAS_CONFIG + "' are not set, using default JAAS configuration.");
             } else {
                 LOG.debug("System property '" + JaasUtils.JAVA_LOGIN_CONFIG_PARAM + "' is not set, using default JAAS " +
                         "configuration.");
@@ -132,7 +144,9 @@ public class JaasContext {
 
         if (configEntries == null) {
             String listenerNameText = listenerContextName == null ? "" : " or '" + listenerContextName + "'";
-            String errorMessage = "Could not find a '" + globalContextName + "'" + listenerNameText + " entry in the JAAS " + "configuration. System property '" + JaasUtils.JAVA_LOGIN_CONFIG_PARAM + "' is " + (jaasConfigFile == null ? "not set" : jaasConfigFile);
+            String errorMessage = "Could not find a '" + globalContextName + "'" + listenerNameText + " entry in the JAAS " +
+                    "configuration. System property '" + JaasUtils.JAVA_LOGIN_CONFIG_PARAM + "' is " +
+                    (jaasConfigFile == null ? "not set" : jaasConfigFile);
             throw new IllegalArgumentException(errorMessage);
         }
 
@@ -161,7 +175,7 @@ public class JaasContext {
         AppConfigurationEntry[] entries = configuration.getAppConfigurationEntry(name);
         if (entries == null)
             throw new IllegalArgumentException("Could not find a '" + name + "' entry in this JAAS configuration.");
-        this.configurationEntries = Collections.unmodifiableList(new ArrayList<>(Arrays.asList(entries)));
+        this.configurationEntries = List.of(entries);
         this.dynamicJaasConfig = dynamicJaasConfig;
     }
 

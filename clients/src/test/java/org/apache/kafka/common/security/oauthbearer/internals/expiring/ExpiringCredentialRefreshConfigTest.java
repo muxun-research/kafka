@@ -18,6 +18,7 @@ package org.apache.kafka.common.security.oauthbearer.internals.expiring;
 
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.SaslConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;

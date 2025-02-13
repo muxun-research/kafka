@@ -28,16 +28,17 @@ import java.nio.channels.SelectionKey;
  */
 public interface ChannelBuilder extends AutoCloseable, Configurable {
 
-	/**
-	 * returns a Channel with TransportLayer and Authenticator configured.
-	 * @param id             channel id
-	 * @param key            SelectionKey
-	 * @param maxReceiveSize max size of a single receive buffer to allocate
-	 * @param memoryPool     memory pool from which to allocate buffers, or null for none
-	 * @return KafkaChannel
-	 */
-	KafkaChannel buildChannel(String id, SelectionKey key, int maxReceiveSize,
-							  MemoryPool memoryPool, ChannelMetadataRegistry metadataRegistry) throws KafkaException;
+    /**
+     * returns a Channel with TransportLayer and Authenticator configured.
+     * @param  id  channel id
+     * @param  key SelectionKey
+     * @param  maxReceiveSize max size of a single receive buffer to allocate
+     * @param  memoryPool memory pool from which to allocate buffers, or null for none
+     * @param  metadataRegistry registry which stores the metadata about the channels
+     * @return KafkaChannel
+     */
+    KafkaChannel buildChannel(String id, SelectionKey key, int maxReceiveSize,
+                              MemoryPool memoryPool, ChannelMetadataRegistry metadataRegistry) throws KafkaException;
 
     /**
      * Closes ChannelBuilder

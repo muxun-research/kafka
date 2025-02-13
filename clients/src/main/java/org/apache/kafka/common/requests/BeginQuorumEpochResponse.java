@@ -17,14 +17,12 @@
 
 package org.apache.kafka.common.requests;
 
-import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.message.BeginQuorumEpochResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
 
 import java.nio.ByteBuffer;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -49,10 +47,6 @@ public class BeginQuorumEpochResponse extends AbstractResponse {
         this.data = data;
     }
 
-    public static BeginQuorumEpochResponseData singletonResponse(Errors topLevelError, TopicPartition topicPartition, Errors partitionLevelError, int leaderEpoch, int leaderId) {
-        return new BeginQuorumEpochResponseData().setErrorCode(topLevelError.code()).setTopics(Collections.singletonList(new BeginQuorumEpochResponseData.TopicData().setTopicName(topicPartition.topic()).setPartitions(Collections.singletonList(new BeginQuorumEpochResponseData.PartitionData().setErrorCode(partitionLevelError.code()).setLeaderId(leaderId).setLeaderEpoch(leaderEpoch)))));
-    }
-
     @Override
     public Map<Errors, Integer> errorCounts() {
         Map<Errors, Integer> errors = new HashMap<>();
@@ -61,7 +55,8 @@ public class BeginQuorumEpochResponse extends AbstractResponse {
 
         for (BeginQuorumEpochResponseData.TopicData topicResponse : data.topics()) {
             for (BeginQuorumEpochResponseData.PartitionData partitionResponse : topicResponse.partitions()) {
-                errors.compute(Errors.forCode(partitionResponse.errorCode()), (error, count) -> count == null ? 1 : count + 1);
+                errors.compute(Errors.forCode(partitionResponse.errorCode()),
+                    (error, count) -> count == null ? 1 : count + 1);
             }
         }
         return errors;

@@ -53,7 +53,7 @@ public class SyncGroupRequest extends AbstractRequest {
         }
     }
 
-	private final SyncGroupRequestData data;
+    private final SyncGroupRequestData data;
 
     public SyncGroupRequest(SyncGroupRequestData data, short version) {
         super(ApiKeys.SYNC_GROUP, version);
@@ -62,37 +62,37 @@ public class SyncGroupRequest extends AbstractRequest {
 
     @Override
     public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-		return new SyncGroupResponse(new SyncGroupResponseData()
-				.setErrorCode(Errors.forException(e).code())
-				.setAssignment(new byte[0])
-				.setThrottleTimeMs(throttleTimeMs));
-	}
+        return new SyncGroupResponse(new SyncGroupResponseData()
+                .setErrorCode(Errors.forException(e).code())
+                .setAssignment(new byte[0])
+                .setThrottleTimeMs(throttleTimeMs));
+    }
 
-	public Map<String, ByteBuffer> groupAssignments() {
-		Map<String, ByteBuffer> groupAssignments = new HashMap<>();
-		for (SyncGroupRequestData.SyncGroupRequestAssignment assignment : data.assignments()) {
-			groupAssignments.put(assignment.memberId(), ByteBuffer.wrap(assignment.assignment()));
-		}
-		return groupAssignments;
-	}
+    public Map<String, ByteBuffer> groupAssignments() {
+        Map<String, ByteBuffer> groupAssignments = new HashMap<>();
+        for (SyncGroupRequestData.SyncGroupRequestAssignment assignment : data.assignments()) {
+            groupAssignments.put(assignment.memberId(), ByteBuffer.wrap(assignment.assignment()));
+        }
+        return groupAssignments;
+    }
 
-	/**
-	 * ProtocolType and ProtocolName are mandatory since version 5. This methods verifies that
-	 * they are defined for version 5 or higher, or returns true otherwise for older versions.
-	 */
-	public boolean areMandatoryProtocolTypeAndNamePresent() {
-		if (version() >= 5)
-			return data.protocolType() != null && data.protocolName() != null;
-		else
-			return true;
-	}
+    /**
+     * ProtocolType and ProtocolName are mandatory since version 5. This method verifies that
+     * they are defined for version 5 or higher, or returns true otherwise for older versions.
+     */
+    public boolean areMandatoryProtocolTypeAndNamePresent() {
+        if (version() >= 5)
+            return data.protocolType() != null && data.protocolName() != null;
+        else
+            return true;
+    }
 
-	public static SyncGroupRequest parse(ByteBuffer buffer, short version) {
-		return new SyncGroupRequest(new SyncGroupRequestData(new ByteBufferAccessor(buffer), version), version);
-	}
+    public static SyncGroupRequest parse(ByteBuffer buffer, short version) {
+        return new SyncGroupRequest(new SyncGroupRequestData(new ByteBufferAccessor(buffer), version), version);
+    }
 
-	@Override
-	public SyncGroupRequestData data() {
-		return data;
-	}
+    @Override
+    public SyncGroupRequestData data() {
+        return data;
+    }
 }

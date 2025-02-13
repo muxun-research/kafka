@@ -23,7 +23,12 @@ import org.apache.kafka.clients.NetworkClient;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.Node;
-import org.apache.kafka.common.errors.*;
+import org.apache.kafka.common.errors.AuthenticationException;
+import org.apache.kafka.common.errors.DisconnectException;
+import org.apache.kafka.common.errors.InvalidTopicException;
+import org.apache.kafka.common.errors.TimeoutException;
+import org.apache.kafka.common.errors.TopicAuthorizationException;
+import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.internals.ClusterResourceListeners;
 import org.apache.kafka.common.message.HeartbeatRequestData;
 import org.apache.kafka.common.message.HeartbeatResponseData;
@@ -35,25 +40,35 @@ import org.apache.kafka.common.requests.RequestTestUtils;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.test.TestUtils;
+
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.Collections;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 public class ConsumerNetworkClientTest {
 
-    private String topicName = "test";
-    private MockTime time = new MockTime(1);
-    private Cluster cluster = TestUtils.singletonCluster(topicName, 1);
-    private Node node = cluster.nodes().get(0);
-    private Metadata metadata = new Metadata(100, 50000, new LogContext(),
+    private final String topicName = "test";
+    private final MockTime time = new MockTime(1);
+    private final Cluster cluster = TestUtils.singletonCluster(topicName, 1);
+    private final Node node = cluster.nodes().get(0);
+    private final Metadata metadata = new Metadata(100, 100, 50000, new LogContext(),
             new ClusterResourceListeners());
     private MockClient client = new MockClient(time, metadata);
     private ConsumerNetworkClient consumerClient = new ConsumerNetworkClient(new LogContext(),
@@ -76,22 +91,22 @@ public class ConsumerNetworkClientTest {
         assertEquals(Errors.NONE, response.error());
     }
 
-	@Test
-	public void sendWithinBackoffPeriodAfterAuthenticationFailure() {
-		client.authenticationFailed(node, 300);
-		client.prepareResponse(heartbeatResponse(Errors.NONE));
-		final RequestFuture<ClientResponse> future = consumerClient.send(node, heartbeat());
-		consumerClient.poll(future);
-		assertTrue(future.failed());
-		assertTrue(future.exception() instanceof AuthenticationException, "Expected only an authentication error.");
+    @Test
+    public void sendWithinBackoffPeriodAfterAuthenticationFailure() {
+        client.authenticationFailed(node, 300);
+        client.prepareResponse(heartbeatResponse(Errors.NONE));
+        final RequestFuture<ClientResponse> future = consumerClient.send(node, heartbeat());
+        consumerClient.poll(future);
+        assertTrue(future.failed());
+        assertInstanceOf(AuthenticationException.class, future.exception(), "Expected only an authentication error.");
 
-		time.sleep(30); // wait less than the backoff period
-		assertTrue(client.connectionFailed(node));
+        time.sleep(30); // wait less than the backoff period
+        assertTrue(client.connectionFailed(node));
 
         final RequestFuture<ClientResponse> future2 = consumerClient.send(node, heartbeat());
         consumerClient.poll(future2);
-		assertTrue(future2.failed());
-		assertTrue(future2.exception() instanceof AuthenticationException, "Expected only an authentication error.");
+        assertTrue(future2.failed());
+        assertInstanceOf(AuthenticationException.class, future2.exception(), "Expected only an authentication error.");
     }
 
     @Test
@@ -116,7 +131,7 @@ public class ConsumerNetworkClientTest {
         consumerClient.disconnectAsync(node);
         consumerClient.pollNoWakeup();
         assertTrue(future.failed());
-        assertTrue(future.exception() instanceof DisconnectException);
+        assertInstanceOf(DisconnectException.class, future.exception());
     }
 
     @Test
@@ -128,7 +143,7 @@ public class ConsumerNetworkClientTest {
         consumerClient.disconnectAsync(node);
         consumerClient.pollNoWakeup();
         assertTrue(future.failed());
-        assertTrue(future.exception() instanceof DisconnectException);
+        assertInstanceOf(DisconnectException.class, future.exception());
     }
 
     @Test
@@ -148,7 +163,7 @@ public class ConsumerNetworkClientTest {
 
         assertFalse(consumerClient.hasPendingRequests());
         assertTrue(future.failed());
-        assertTrue(future.exception() instanceof TimeoutException);
+        assertInstanceOf(TimeoutException.class, future.exception());
     }
 
     @Test
@@ -194,11 +209,7 @@ public class ConsumerNetworkClientTest {
     public void wakeup() {
         RequestFuture<ClientResponse> future = consumerClient.send(node, heartbeat());
         consumerClient.wakeup();
-        try {
-            consumerClient.poll(time.timer(0));
-            fail();
-        } catch (WakeupException e) {
-        }
+        assertThrows(WakeupException.class, () -> consumerClient.poll(time.timer(0)));
 
         client.respond(heartbeatResponse(Errors.NONE));
         consumerClient.poll(future);
@@ -216,12 +227,12 @@ public class ConsumerNetworkClientTest {
         consumerClient.disconnectAsync(node);
         t.join();
         assertTrue(future.failed());
-        assertTrue(future.exception() instanceof DisconnectException);
+        assertInstanceOf(DisconnectException.class, future.exception());
     }
 
     @Test
     public void testAuthenticationExceptionPropagatedFromMetadata() {
-		metadata.fatalError(new AuthenticationException("Authentication failed"));
+        metadata.fatalError(new AuthenticationException("Authentication failed"));
         try {
             consumerClient.poll(time.timer(Duration.ZERO));
             fail("Expected authentication error thrown");
@@ -231,58 +242,69 @@ public class ConsumerNetworkClientTest {
         }
     }
 
-	@Test
+    @Test
     public void testInvalidTopicExceptionPropagatedFromMetadata() {
-		MetadataResponse metadataResponse = RequestTestUtils.metadataUpdateWith("clusterId", 1,
-				Collections.singletonMap("topic", Errors.INVALID_TOPIC_EXCEPTION), Collections.emptyMap());
-		metadata.updateWithCurrentRequestVersion(metadataResponse, false, time.milliseconds());
-		assertThrows(InvalidTopicException.class, () -> consumerClient.poll(time.timer(Duration.ZERO)));
-	}
+        MetadataResponse metadataResponse = RequestTestUtils.metadataUpdateWith("clusterId", 1,
+                Collections.singletonMap("topic", Errors.INVALID_TOPIC_EXCEPTION), Collections.emptyMap());
+        metadata.updateWithCurrentRequestVersion(metadataResponse, false, time.milliseconds());
+        assertThrows(InvalidTopicException.class, () -> consumerClient.poll(time.timer(Duration.ZERO)));
+    }
 
-	@Test
+    @Test
     public void testTopicAuthorizationExceptionPropagatedFromMetadata() {
-		MetadataResponse metadataResponse = RequestTestUtils.metadataUpdateWith("clusterId", 1,
-				Collections.singletonMap("topic", Errors.TOPIC_AUTHORIZATION_FAILED), Collections.emptyMap());
-		metadata.updateWithCurrentRequestVersion(metadataResponse, false, time.milliseconds());
-		assertThrows(TopicAuthorizationException.class, () -> consumerClient.poll(time.timer(Duration.ZERO)));
-	}
+        MetadataResponse metadataResponse = RequestTestUtils.metadataUpdateWith("clusterId", 1,
+                Collections.singletonMap("topic", Errors.TOPIC_AUTHORIZATION_FAILED), Collections.emptyMap());
+        metadata.updateWithCurrentRequestVersion(metadataResponse, false, time.milliseconds());
+        assertThrows(TopicAuthorizationException.class, () -> consumerClient.poll(time.timer(Duration.ZERO)));
+    }
 
     @Test
     public void testMetadataFailurePropagated() {
         KafkaException metadataException = new KafkaException();
-		metadata.fatalError(metadataException);
-        try {
-            consumerClient.poll(time.timer(Duration.ZERO));
-            fail("Expected poll to throw exception");
-        } catch (Exception e) {
-            assertEquals(metadataException, e);
-        }
+        metadata.fatalError(metadataException);
+        Exception exc = assertThrows(Exception.class, () -> consumerClient.poll(time.timer(Duration.ZERO)));
+        assertEquals(metadataException, exc);
     }
 
+    @Disabled("KAFKA-17554")
     @Test
     public void testFutureCompletionOutsidePoll() throws Exception {
         // Tests the scenario in which the request that is being awaited in one thread
         // is received and completed in another thread.
+        
+        final CountDownLatch t1TheardCountDownLatch = new CountDownLatch(1);
+        final CountDownLatch t2ThreadCountDownLatch = new CountDownLatch(2);
 
         final RequestFuture<ClientResponse> future = consumerClient.send(node, heartbeat());
         consumerClient.pollNoWakeup(); // dequeue and send the request
 
         client.enableBlockingUntilWakeup(2);
-        Thread t1 = new Thread(() -> consumerClient.pollNoWakeup());
+        Thread t1 = new Thread(() ->  {
+            t1TheardCountDownLatch.countDown();
+            consumerClient.pollNoWakeup();
+            t2ThreadCountDownLatch.countDown();
+        });
+        
         t1.start();
 
-        // Sleep a little so that t1 is blocking in poll
-        Thread.sleep(50);
-
-        Thread t2 = new Thread(() -> consumerClient.poll(future));
+        Thread t2 = new Thread(() -> {
+            try {
+                t2ThreadCountDownLatch.await();
+                consumerClient.poll(future);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        });
         t2.start();
-
-        // Sleep a little so that t2 is awaiting the network client lock
-        Thread.sleep(50);
-
+        
         // Simulate a network response and return from the poll in t1
         client.respond(heartbeatResponse(Errors.NONE));
+        // Wait for t1 to block in poll
+        t1TheardCountDownLatch.await();
+        
         client.wakeup();
+        // while t1 is blocked in poll, t2 should be able to complete the future
+        t2ThreadCountDownLatch.countDown();
 
         // Both threads should complete since t1 should wakeup t2
         t1.join();

@@ -28,7 +28,15 @@ import org.apache.kafka.common.requests.MetadataResponse;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.test.TestUtils;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Consumer;
@@ -50,7 +58,8 @@ public class MockClient implements KafkaClient {
         public FutureResponse(Node node,
                               RequestMatcher requestMatcher,
                               AbstractResponse responseBody,
-                              boolean disconnected, boolean isUnsupportedRequest) {
+                              boolean disconnected,
+                              boolean isUnsupportedRequest) {
             this.node = node;
             this.requestMatcher = requestMatcher;
             this.responseBody = responseBody;
@@ -62,6 +71,7 @@ public class MockClient implements KafkaClient {
 
     private int correlation;
     private Runnable wakeupHook;
+    private boolean advanceTimeDuringPoll;
     private final Time time;
     private final MockMetadataUpdater metadataUpdater;
     private final Map<String, ConnectionState> connections = new HashMap<>();
@@ -129,7 +139,11 @@ public class MockClient implements KafkaClient {
 
     @Override
     public long pollDelayMs(Node node, long now) {
-        return connectionDelay(node, now);
+        return connectionState(node.idString()).pollDelayMs(now);
+    }
+
+    public void advanceTimeDuringPoll(boolean advanceTimeDuringPoll) {
+        this.advanceTimeDuringPoll = advanceTimeDuringPoll;
     }
 
     public void backoff(Node node, long durationMs) {
@@ -190,7 +204,8 @@ public class MockClient implements KafkaClient {
             ClientRequest request = iter.next();
             if (request.destination().equals(node)) {
                 short version = request.requestBuilder().latestAllowedVersion();
-                responses.add(new ClientResponse(request.makeHeader(version), request.callback(), request.destination(), request.createdTimeMs(), now, true, null, null, null));
+                responses.add(new ClientResponse(request.makeHeader(version), request.callback(), request.destination(),
+                        request.createdTimeMs(), now, true, null, null, null));
                 if (!allowLateResponses)
                     iter.remove();
             }
@@ -208,7 +223,8 @@ public class MockClient implements KafkaClient {
             throw new IllegalStateException("Cannot send " + request + " since the destination is not ready");
 
         // Check if the request is directed to a node with a pending authentication error.
-        for (Iterator<Map.Entry<Node, Long>> authErrorIter = pendingAuthenticationErrors.entrySet().iterator(); authErrorIter.hasNext(); ) {
+        for (Iterator<Map.Entry<Node, Long>> authErrorIter =
+             pendingAuthenticationErrors.entrySet().iterator(); authErrorIter.hasNext(); ) {
             Map.Entry<Node, Long> entry = authErrorIter.next();
             Node node = entry.getKey();
             long backoffMs = entry.getValue();
@@ -218,8 +234,10 @@ public class MockClient implements KafkaClient {
                 // for the affected node.
                 authenticationFailed(node, backoffMs);
                 AbstractRequest.Builder<?> builder = request.requestBuilder();
-                short version = nodeApiVersions.latestUsableVersion(request.apiKey(), builder.oldestAllowedVersion(), builder.latestAllowedVersion());
-                ClientResponse resp = new ClientResponse(request.makeHeader(version), request.callback(), request.destination(), request.createdTimeMs(), time.milliseconds(), true, null,
+                short version = nodeApiVersions.latestUsableVersion(request.apiKey(), builder.oldestAllowedVersion(),
+                    builder.latestAllowedVersion());
+                ClientResponse resp = new ClientResponse(request.makeHeader(version), request.callback(), request.destination(),
+                    request.createdTimeMs(), time.milliseconds(), true, null,
                         new AuthenticationException("Authentication failed"), null);
                 responses.add(resp);
                 return;
@@ -234,21 +252,28 @@ public class MockClient implements KafkaClient {
             AbstractRequest.Builder<?> builder = request.requestBuilder();
 
             try {
-                short version = nodeApiVersions.latestUsableVersion(request.apiKey(), builder.oldestAllowedVersion(), builder.latestAllowedVersion());
+                short version = nodeApiVersions.latestUsableVersion(request.apiKey(), builder.oldestAllowedVersion(),
+                        builder.latestAllowedVersion());
+
+
+                AbstractRequest abstractRequest = request.requestBuilder().build(version);
+                if (!futureResp.requestMatcher.matches(abstractRequest))
+                    throw new IllegalStateException("Request matcher did not match next-in-line request "
+                            + abstractRequest + " with prepared response " + futureResp.responseBody);
 
                 UnsupportedVersionException unsupportedVersionException = null;
                 if (futureResp.isUnsupportedRequest) {
-                    unsupportedVersionException = new UnsupportedVersionException("Api " + request.apiKey() + " with version " + version);
-                } else {
-                    AbstractRequest abstractRequest = request.requestBuilder().build(version);
-                    if (!futureResp.requestMatcher.matches(abstractRequest))
-                        throw new IllegalStateException("Request matcher did not match next-in-line request " + abstractRequest + " with prepared response " + futureResp.responseBody);
+                    unsupportedVersionException = new UnsupportedVersionException(
+                            "Api " + request.apiKey() + " with version " + version);
                 }
 
-                ClientResponse resp = new ClientResponse(request.makeHeader(version), request.callback(), request.destination(), request.createdTimeMs(), time.milliseconds(), futureResp.disconnected, unsupportedVersionException, null, futureResp.responseBody);
+                ClientResponse resp = new ClientResponse(request.makeHeader(version), request.callback(), request.destination(),
+                        request.createdTimeMs(), time.milliseconds(), futureResp.disconnected,
+                        unsupportedVersionException, null, futureResp.responseBody);
                 responses.add(resp);
             } catch (UnsupportedVersionException unsupportedVersionException) {
-                ClientResponse resp = new ClientResponse(request.makeHeader(builder.latestAllowedVersion()), request.callback(), request.destination(), request.createdTimeMs(), time.milliseconds(), false, unsupportedVersionException, null, null);
+                ClientResponse resp = new ClientResponse(request.makeHeader(builder.latestAllowedVersion()), request.callback(), request.destination(),
+                        request.createdTimeMs(), time.milliseconds(), false, unsupportedVersionException, null, null);
                 responses.add(resp);
             }
             iterator.remove();
@@ -300,7 +325,7 @@ public class MockClient implements KafkaClient {
         checkTimeoutOfPendingRequests(now);
 
         // We skip metadata updates if all nodes are currently blacked out
-        if (metadataUpdater.isUpdateNeeded() && leastLoadedNode(now) != null) {
+        if (metadataUpdater.isUpdateNeeded() && leastLoadedNode(now).node() != null) {
             MetadataUpdate metadataUpdate = metadataUpdates.poll();
             if (metadataUpdate != null) {
                 metadataUpdater.update(time, metadataUpdate);
@@ -314,6 +339,12 @@ public class MockClient implements KafkaClient {
         while ((response = this.responses.poll()) != null) {
             response.onComplete();
             copy.add(response);
+        }
+
+        // In real life, if poll() is called and we get to the end with no responses,
+        // time equal to timeoutMs would have passed.
+        if (advanceTimeDuringPoll) {
+            time.sleep(timeoutMs);
         }
 
         return copy;
@@ -408,7 +439,7 @@ public class MockClient implements KafkaClient {
     /**
      * Prepare a response for a request matching the provided matcher. If the matcher does not
      * match, {@link KafkaClient#send(ClientRequest, long)} will throw IllegalStateException
-     * @param matcher  The matcher to apply
+     * @param matcher The matcher to apply
      * @param response The response body
      */
     public void prepareResponse(RequestMatcher matcher, AbstractResponse response) {
@@ -434,8 +465,8 @@ public class MockClient implements KafkaClient {
     /**
      * Prepare a response for a request matching the provided matcher. If the matcher does not
      * match, {@link KafkaClient#send(ClientRequest, long)} will throw IllegalStateException.
-     * @param matcher      The request matcher to apply
-     * @param response     The response body
+     * @param matcher The request matcher to apply
+     * @param response The response body
      * @param disconnected Whether the request was disconnected
      */
     public void prepareResponse(RequestMatcher matcher, AbstractResponse response, boolean disconnected) {
@@ -460,7 +491,10 @@ public class MockClient implements KafkaClient {
     }
 
     public void waitForRequests(final int minRequests, long maxWaitMs) throws InterruptedException {
-        TestUtils.waitForCondition(() -> requests.size() >= minRequests, maxWaitMs, "Expected requests have not been sent");
+        TestUtils.waitForCondition(
+                () -> requests.size() >= minRequests,
+                maxWaitMs,
+                "Expected requests have not been sent");
     }
 
     public void reset() {
@@ -566,13 +600,13 @@ public class MockClient implements KafkaClient {
     }
 
     @Override
-    public Node leastLoadedNode(long now) {
+    public LeastLoadedNode leastLoadedNode(long now) {
         // Consistent with NetworkClient, we do not return nodes awaiting reconnect backoff
         for (Node node : metadataUpdater.fetchNodes()) {
             if (!connectionState(node.idString()).isBackingOff(now))
-                return node;
+                return new LeastLoadedNode(node, true);
         }
-        return null;
+        return new LeastLoadedNode(null, false);
     }
 
     public void setWakeupHook(Runnable wakeupHook) {
@@ -623,11 +657,9 @@ public class MockClient implements KafkaClient {
 
         void update(Time time, MetadataUpdate update);
 
-        default void updateWithCurrentMetadata(Time time) {
-        }
+        default void updateWithCurrentMetadata(Time time) {}
 
-        default void close() {
-        }
+        default void close() {}
     }
 
     private static class NoOpMetadataUpdater implements MockMetadataUpdater {
@@ -649,7 +681,6 @@ public class MockClient implements KafkaClient {
 
     private static class StaticMetadataUpdater extends NoOpMetadataUpdater {
         private final List<Node> nodes;
-
         public StaticMetadataUpdater(List<Node> nodes) {
             this.nodes = nodes;
         }
@@ -773,6 +804,13 @@ public class MockClient implements KafkaClient {
                 return backingOffUntilMs - now;
 
             return 0;
+        }
+
+        long pollDelayMs(long now) {
+            if (notThrottled(now))
+                return connectionDelay(now);
+
+            return throttledUntilMs - now;
         }
 
         boolean ready(long now) {

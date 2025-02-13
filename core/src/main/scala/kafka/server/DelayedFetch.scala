@@ -17,15 +17,20 @@
 
 package kafka.server
 
+import com.yammer.metrics.core.Meter
+import kafka.utils.Logging
+
+import java.util.concurrent.TimeUnit
 import org.apache.kafka.common.TopicIdPartition
 import org.apache.kafka.common.errors._
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.requests.FetchRequest.PartitionData
 import org.apache.kafka.common.requests.OffsetsForLeaderEpochResponse.{UNDEFINED_EPOCH, UNDEFINED_EPOCH_OFFSET}
 import org.apache.kafka.server.metrics.KafkaMetricsGroup
-import org.apache.kafka.storage.internals.log.{FetchIsolation, FetchParams, FetchPartitionData, LogOffsetMetadata}
+import org.apache.kafka.server.purgatory.DelayedOperation
+import org.apache.kafka.server.storage.log.{FetchIsolation, FetchParams, FetchPartitionData}
+import org.apache.kafka.storage.internals.log.LogOffsetMetadata
 
-import java.util.concurrent.TimeUnit
 import scala.collection._
 import scala.jdk.CollectionConverters._
 
@@ -43,12 +48,12 @@ case class FetchPartitionStatus(startOffsetMetadata: LogOffsetMetadata, fetchInf
  * in the fetch operation purgatory
  */
 class DelayedFetch(
-                    params: FetchParams,
-                    fetchPartitionStatus: Seq[(TopicIdPartition, FetchPartitionStatus)],
-                    replicaManager: ReplicaManager,
-                    quota: ReplicaQuota,
-                    responseCallback: Seq[(TopicIdPartition, FetchPartitionData)] => Unit
-                  ) extends DelayedOperation(params.maxWaitMs) {
+  params: FetchParams,
+  fetchPartitionStatus: Seq[(TopicIdPartition, FetchPartitionStatus)],
+  replicaManager: ReplicaManager,
+  quota: ReplicaQuota,
+  responseCallback: Seq[(TopicIdPartition, FetchPartitionData)] => Unit
+) extends DelayedOperation(params.maxWaitMs) with Logging {
 
   override def toString: String = {
     s"DelayedFetch(params=$params" +
@@ -89,19 +94,19 @@ class DelayedFetch(
             // Go directly to the check for Case G if the message offsets are the same. If the log segment
             // has just rolled, then the high watermark offset will remain the same but be on the old segment,
             // which would incorrectly be seen as an instance of Case F.
-            if (endOffset.messageOffset != fetchOffset.messageOffset) {
-              if (endOffset.onOlderSegment(fetchOffset)) {
-                // Case F, this can happen when the new fetch operation is on a truncated leader
-                debug(s"Satisfying fetch $this since it is fetching later segments of partition $topicIdPartition.")
-                return forceComplete()
-              } else if (fetchOffset.onOlderSegment(endOffset)) {
+            if (fetchOffset.messageOffset > endOffset.messageOffset) {
+              // Case F, this can happen when the new fetch operation is on a truncated leader
+              debug(s"Satisfying fetch $this since it is fetching later segments of partition $topicIdPartition.")
+              return forceComplete()
+            } else if (fetchOffset.messageOffset < endOffset.messageOffset) {
+              if (fetchOffset.onOlderSegment(endOffset)) {
                 // Case F, this can happen when the fetch operation is falling behind the current segment
                 // or the partition has just rolled a new segment
                 debug(s"Satisfying fetch $this immediately since it is fetching older segments.")
                 // We will not force complete the fetch request if a replica should be throttled.
                 if (!params.isFromFollower || !replicaManager.shouldLeaderThrottle(quota, partition, params.replicaId))
                   return forceComplete()
-              } else if (fetchOffset.messageOffset < endOffset.messageOffset) {
+              } else if (fetchOffset.onSameSegment(endOffset)) {
                 // we take the partition fetch size as upper bound when accumulating the bytes (skip if a throttled partition)
                 val bytesAvailable = math.min(endOffset.positionDiff(fetchOffset), fetchStatus.fetchInfo.maxBytes)
                 if (!params.isFromFollower || !replicaManager.shouldLeaderThrottle(quota, partition, params.replicaId))
@@ -113,8 +118,8 @@ class DelayedFetch(
             fetchStatus.fetchInfo.lastFetchedEpoch.ifPresent { fetchEpoch =>
               val epochEndOffset = partition.lastOffsetForLeaderEpoch(fetchLeaderEpoch, fetchEpoch, fetchOnlyFromLeader = false)
               if (epochEndOffset.errorCode != Errors.NONE.code()
-                || epochEndOffset.endOffset == UNDEFINED_EPOCH_OFFSET
-                || epochEndOffset.leaderEpoch == UNDEFINED_EPOCH) {
+                  || epochEndOffset.endOffset == UNDEFINED_EPOCH_OFFSET
+                  || epochEndOffset.leaderEpoch == UNDEFINED_EPOCH) {
                 debug(s"Could not obtain last offset for leader epoch for partition $topicIdPartition, epochEndOffset=$epochEndOffset.")
                 return forceComplete()
               } else if (epochEndOffset.leaderEpoch < fetchEpoch || epochEndOffset.endOffset < fetchStatus.fetchInfo.fetchOffset) {
@@ -125,7 +130,7 @@ class DelayedFetch(
             }
           }
         } catch {
-          case _: NotLeaderOrFollowerException => // Case A or Case B
+          case _: NotLeaderOrFollowerException =>  // Case A or Case B
             debug(s"Broker is no longer the leader or follower of $topicIdPartition, satisfy $this immediately")
             return forceComplete()
           case _: UnknownTopicOrPartitionException => // Case C
@@ -143,7 +148,7 @@ class DelayedFetch(
 
     // Case G
     if (accumulatedSize >= params.minBytes)
-      forceComplete()
+       forceComplete()
     else
       false
   }
@@ -184,7 +189,7 @@ class DelayedFetch(
 object DelayedFetchMetrics {
   private val metricsGroup = new KafkaMetricsGroup(DelayedFetchMetrics.getClass)
   private val FetcherTypeKey = "fetcherType"
-  val followerExpiredRequestMeter = metricsGroup.newMeter("ExpiresPerSec", "requests", TimeUnit.SECONDS, Map(FetcherTypeKey -> "follower").asJava)
-  val consumerExpiredRequestMeter = metricsGroup.newMeter("ExpiresPerSec", "requests", TimeUnit.SECONDS, Map(FetcherTypeKey -> "consumer").asJava)
+  val followerExpiredRequestMeter: Meter = metricsGroup.newMeter("ExpiresPerSec", "requests", TimeUnit.SECONDS, Map(FetcherTypeKey -> "follower").asJava)
+  val consumerExpiredRequestMeter: Meter = metricsGroup.newMeter("ExpiresPerSec", "requests", TimeUnit.SECONDS, Map(FetcherTypeKey -> "consumer").asJava)
 }
 

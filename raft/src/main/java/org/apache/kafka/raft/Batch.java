@@ -23,7 +23,7 @@ import java.util.Objects;
 
 /**
  * A batch of records.
- * <p>
+ *
  * This type contains a list of records `T` along with the information associated with those records.
  */
 public final class Batch<T> implements Iterable<T> {
@@ -35,7 +35,15 @@ public final class Batch<T> implements Iterable<T> {
     private final List<T> records;
     private final List<ControlRecord> controlRecords;
 
-    private Batch(long baseOffset, int epoch, long appendTimestamp, int sizeInBytes, long lastOffset, List<T> records, List<ControlRecord> controlRecords) {
+    private Batch(
+        long baseOffset,
+        int epoch,
+        long appendTimestamp,
+        int sizeInBytes,
+        long lastOffset,
+        List<T> records,
+        List<ControlRecord> controlRecords
+    ) {
         this.baseOffset = baseOffset;
         this.epoch = epoch;
         this.appendTimestamp = appendTimestamp;
@@ -101,55 +109,117 @@ public final class Batch<T> implements Iterable<T> {
 
     @Override
     public String toString() {
-        return "Batch(" + "baseOffset=" + baseOffset + ", epoch=" + epoch + ", appendTimestamp=" + appendTimestamp + ", sizeInBytes=" + sizeInBytes + ", lastOffset=" + lastOffset + ", records=" + records + ", controlRecords=" + controlRecords + ')';
+        return "Batch(" +
+            "baseOffset=" + baseOffset +
+            ", epoch=" + epoch +
+            ", appendTimestamp=" + appendTimestamp +
+            ", sizeInBytes=" + sizeInBytes +
+            ", lastOffset=" + lastOffset +
+            ", records=" + records +
+            ", controlRecords=" + controlRecords +
+            ')';
     }
 
     @Override
     public boolean equals(Object o) {
-        if (this == o)
-            return true;
-        if (o == null || getClass() != o.getClass())
-            return false;
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
         Batch<?> batch = (Batch<?>) o;
-        return baseOffset == batch.baseOffset && epoch == batch.epoch && appendTimestamp == batch.appendTimestamp && sizeInBytes == batch.sizeInBytes && lastOffset == batch.lastOffset && Objects.equals(records, batch.records) && Objects.equals(controlRecords, batch.controlRecords);
+        return baseOffset == batch.baseOffset &&
+            epoch == batch.epoch &&
+            appendTimestamp == batch.appendTimestamp &&
+            sizeInBytes == batch.sizeInBytes &&
+            lastOffset == batch.lastOffset &&
+            Objects.equals(records, batch.records) &&
+            Objects.equals(controlRecords, batch.controlRecords);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(baseOffset, epoch, appendTimestamp, sizeInBytes, lastOffset, records, controlRecords);
+        return Objects.hash(
+            baseOffset,
+            epoch,
+            appendTimestamp,
+            sizeInBytes,
+            lastOffset,
+            records,
+            controlRecords
+        );
     }
 
     /**
      * Create a control batch without any data records.
-     * <p>
+     *
      * Internally this is used to propagate offset information for control batches which do not decode to the type T.
-     * @param baseOffset      offset of the batch
-     * @param epoch           epoch of the leader that created this batch
+     *
+     * @param baseOffset offset of the batch
+     * @param epoch epoch of the leader that created this batch
      * @param appendTimestamp timestamp in milliseconds of when the batch was appended
-     * @param sizeInBytes     number of bytes used by this batch
-     * @param records         the list of records in this batch
+     * @param sizeInBytes number of bytes used by this batch
+     * @param records the list of records in this batch
      */
-    public static <T> Batch<T> control(long baseOffset, int epoch, long appendTimestamp, int sizeInBytes, List<ControlRecord> records) {
+    public static <T> Batch<T> control(
+        long baseOffset,
+        int epoch,
+        long appendTimestamp,
+        int sizeInBytes,
+        List<ControlRecord> records
+    ) {
         if (records.isEmpty()) {
-            throw new IllegalArgumentException(String.format("Control batch must contain at least one record; baseOffset = %s; epoch = %s", baseOffset, epoch));
+            throw new IllegalArgumentException(
+                String.format(
+                    "Control batch must contain at least one record; baseOffset = %d; epoch = %d",
+                    baseOffset,
+                    epoch
+                )
+            );
         }
 
-        return new Batch<>(baseOffset, epoch, appendTimestamp, sizeInBytes, baseOffset + records.size() - 1, Collections.emptyList(), records);
+        return new Batch<>(
+            baseOffset,
+            epoch,
+            appendTimestamp,
+            sizeInBytes,
+            baseOffset + records.size() - 1,
+            Collections.emptyList(),
+            records
+        );
     }
 
     /**
      * Create a data batch with the given base offset, epoch and records.
-     * @param baseOffset      offset of the first record in the batch
-     * @param epoch           epoch of the leader that created this batch
+     *
+     * @param baseOffset offset of the first record in the batch
+     * @param epoch epoch of the leader that created this batch
      * @param appendTimestamp timestamp in milliseconds of when the batch was appended
-     * @param sizeInBytes     number of bytes used by this batch
-     * @param records         the list of records in this batch
+     * @param sizeInBytes number of bytes used by this batch
+     * @param records the list of records in this batch
      */
-    public static <T> Batch<T> data(long baseOffset, int epoch, long appendTimestamp, int sizeInBytes, List<T> records) {
+    public static <T> Batch<T> data(
+        long baseOffset,
+        int epoch,
+        long appendTimestamp,
+        int sizeInBytes,
+        List<T> records
+    ) {
         if (records.isEmpty()) {
-            throw new IllegalArgumentException(String.format("Batch must contain at least one record; baseOffset = %s; epoch = %s", baseOffset, epoch));
+            throw new IllegalArgumentException(
+                String.format(
+                    "Batch must contain at least one record; baseOffset = %d; epoch = %d",
+                    baseOffset,
+                    epoch
+                )
+            );
         }
 
-        return new Batch<>(baseOffset, epoch, appendTimestamp, sizeInBytes, baseOffset + records.size() - 1, records, Collections.emptyList());
+        return new Batch<>(
+            baseOffset,
+            epoch,
+            appendTimestamp,
+            sizeInBytes,
+            baseOffset + records.size() - 1,
+            records,
+            Collections.emptyList()
+        );
     }
 }

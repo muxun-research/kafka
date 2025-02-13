@@ -27,7 +27,11 @@ import org.apache.kafka.streams.kstream.ForeachAction;
 import org.apache.kafka.streams.processor.TaskMetadata;
 import org.apache.kafka.streams.processor.ThreadMetadata;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Properties;
+import java.util.Set;
 
 public class StreamsUpgradeToCooperativeRebalanceTest {
 
@@ -55,27 +59,29 @@ public class StreamsUpgradeToCooperativeRebalanceTest {
         final String sinkTopic = streamsProperties.getProperty("sink.topic", "sink");
         final String taskDelimiter = streamsProperties.getProperty("task.delimiter", "#");
         final int reportInterval = Integer.parseInt(streamsProperties.getProperty("report.interval", "100"));
-        final String upgradePhase = streamsProperties.getProperty("upgrade.phase", "");
+        final String upgradePhase = streamsProperties.getProperty("upgrade.phase",  "");
 
         final StreamsBuilder builder = new StreamsBuilder();
 
-        builder.<String, String>stream(sourceTopic).peek(new ForeachAction<String, String>() {
-            int recordCounter = 0;
+        builder.<String, String>stream(sourceTopic)
+            .peek(new ForeachAction<String, String>() {
+                int recordCounter = 0;
 
-            @Override
-            public void apply(final String key, final String value) {
-                if (recordCounter++ % reportInterval == 0) {
-                    System.out.println(String.format("%sProcessed %d records so far", upgradePhase, recordCounter));
-                    System.out.flush();
+                @Override
+                public void apply(final String key, final String value) {
+                    if (recordCounter++ % reportInterval == 0) {
+                        System.out.printf("%sProcessed %d records so far%n", upgradePhase, recordCounter);
+                        System.out.flush();
+                    }
                 }
             }
-        }).to(sinkTopic);
+            ).to(sinkTopic);
 
         final KafkaStreams streams = new KafkaStreams(builder.build(), config);
 
         streams.setStateListener((newState, oldState) -> {
             if (newState == State.RUNNING && oldState == State.REBALANCING) {
-                System.out.println(String.format("%sSTREAMS in a RUNNING State", upgradePhase));
+                System.out.printf("%sSTREAMS in a RUNNING State%n", upgradePhase);
                 final Set<ThreadMetadata> allThreadMetadata = streams.localThreadsMetadata();
                 final StringBuilder taskReportBuilder = new StringBuilder();
                 final List<String> activeTasks = new ArrayList<>();
@@ -95,7 +101,7 @@ public class StreamsUpgradeToCooperativeRebalanceTest {
             }
 
             if (newState == State.REBALANCING) {
-                System.out.println(String.format("%sStarting a REBALANCE", upgradePhase));
+                System.out.printf("%sStarting a REBALANCE%n", upgradePhase);
             }
         });
 
@@ -104,7 +110,7 @@ public class StreamsUpgradeToCooperativeRebalanceTest {
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             streams.close();
-            System.out.println(String.format("%sCOOPERATIVE-REBALANCE-TEST-CLIENT-CLOSED", upgradePhase));
+            System.out.printf("%sCOOPERATIVE-REBALANCE-TEST-CLIENT-CLOSED%n", upgradePhase);
             System.out.flush();
         }));
     }
@@ -117,8 +123,8 @@ public class StreamsUpgradeToCooperativeRebalanceTest {
             builder.setLength(builder.length() - 1);
         }
     }
-
-    private static void getTasks(final Set<TaskMetadata> taskMetadata, final List<String> taskList) {
+    private static void getTasks(final Set<TaskMetadata> taskMetadata,
+                                 final List<String> taskList) {
         for (final TaskMetadata task : taskMetadata) {
             final Set<TopicPartition> topicPartitions = task.topicPartitions();
             for (final TopicPartition topicPartition : topicPartitions) {

@@ -18,12 +18,13 @@ package org.apache.kafka.common.utils;
 
 import org.junit.jupiter.api.Test;
 
+import java.lang.management.ManagementFactory;
+
 import javax.management.MBeanException;
 import javax.management.MBeanServer;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 import javax.management.OperationsException;
-import java.lang.management.ManagementFactory;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -73,7 +74,7 @@ public class SanitizerTest {
         int getValue();
     }
 
-    public class TestStat implements TestStatMBean {
+    public static class TestStat implements TestStatMBean {
         public int getValue() {
             return 1;
         }

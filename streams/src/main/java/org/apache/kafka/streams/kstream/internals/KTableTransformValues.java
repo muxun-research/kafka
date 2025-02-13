@@ -42,7 +42,9 @@ class KTableTransformValues<K, V, VOut> implements KTableProcessorSupplier<K, V,
     private final String queryableName;
     private boolean sendOldValues = false;
 
-    KTableTransformValues(final KTableImpl<K, ?, V> parent, final ValueTransformerWithKeySupplier<? super K, ? super V, ? extends VOut> transformerSupplier, final String queryableName) {
+    KTableTransformValues(final KTableImpl<K, ?, V> parent,
+                          final ValueTransformerWithKeySupplier<? super K, ? super V, ? extends VOut> transformerSupplier,
+                          final String queryableName) {
         this.parent = Objects.requireNonNull(parent, "parent");
         this.transformerSupplier = Objects.requireNonNull(transformerSupplier, "transformerSupplier");
         this.queryableName = queryableName;
@@ -63,7 +65,9 @@ class KTableTransformValues<K, V, VOut> implements KTableProcessorSupplier<K, V,
             final KTableValueGetterSupplier<K, V> parentValueGetterSupplier = parent.valueGetterSupplier();
 
             public KTableValueGetter<K, VOut> get() {
-                return new KTableTransformValuesGetter(parentValueGetterSupplier.get(), transformerSupplier.get());
+                return new KTableTransformValuesGetter(
+                    parentValueGetterSupplier.get(),
+                    transformerSupplier.get());
             }
 
             @Override
@@ -74,8 +78,8 @@ class KTableTransformValues<K, V, VOut> implements KTableProcessorSupplier<K, V,
     }
 
     @Override
-	public boolean enableSendingOldValues(final boolean forceMaterialization) {
-		if (queryableName != null) {
+    public boolean enableSendingOldValues(final boolean forceMaterialization) {
+        if (queryableName != null) {
             sendOldValues = true;
             return true;
         }
@@ -102,7 +106,11 @@ class KTableTransformValues<K, V, VOut> implements KTableProcessorSupplier<K, V,
             valueTransformer.init(new ForwardingDisabledProcessorContext(internalProcessorContext));
             if (queryableName != null) {
                 store = new KeyValueStoreWrapper<>(context, queryableName);
-                tupleForwarder = new TimestampedTupleForwarder<>(store.getStore(), context, new TimestampedCacheFlushListener<>(context), sendOldValues);
+                tupleForwarder = new TimestampedTupleForwarder<>(
+                    store.store(),
+                    context,
+                    new TimestampedCacheFlushListener<>(context),
+                    sendOldValues);
             }
         }
 
@@ -135,7 +143,8 @@ class KTableTransformValues<K, V, VOut> implements KTableProcessorSupplier<K, V,
         private InternalProcessorContext internalProcessorContext;
         private final ValueTransformerWithKey<? super K, ? super V, ? extends VOut> valueTransformer;
 
-        KTableTransformValuesGetter(final KTableValueGetter<K, V> parentGetter, final ValueTransformerWithKey<? super K, ? super V, ? extends VOut> valueTransformer) {
+        KTableTransformValuesGetter(final KTableValueGetter<K, V> parentGetter,
+                                    final ValueTransformerWithKey<? super K, ? super V, ? extends VOut> valueTransformer) {
             this.parentGetter = Objects.requireNonNull(parentGetter, "parentGetter");
             this.valueTransformer = Objects.requireNonNull(valueTransformer, "valueTransformer");
         }
@@ -171,15 +180,21 @@ class KTableTransformValues<K, V, VOut> implements KTableProcessorSupplier<K, V,
         private ValueAndTimestamp<VOut> transformValue(final K key, final ValueAndTimestamp<V> valueAndTimestamp) {
             final ProcessorRecordContext currentContext = internalProcessorContext.recordContext();
 
-            internalProcessorContext.setRecordContext(new ProcessorRecordContext(valueAndTimestamp == null ? UNKNOWN : valueAndTimestamp.timestamp(), -1L, // we don't know the original offset
-                    // technically, we know the partition, but in the new `api.Processor` class,
-                    // we move to `RecordMetadata` than would be `null` for this case and thus
-                    // we won't have the partition information, so it's better to not provide it
-                    // here either, to not introduce a regression later on
-                    -1, null, // we don't know the upstream input topic
-                    new RecordHeaders()));
+            internalProcessorContext.setRecordContext(new ProcessorRecordContext(
+                valueAndTimestamp == null ? UNKNOWN : valueAndTimestamp.timestamp(),
+                -1L, // we don't know the original offset
+                // technically, we know the partition, but in the new `api.Processor` class,
+                // we move to `RecordMetadata` than would be `null` for this case and thus
+                // we won't have the partition information, so it's better to not provide it
+                // here either, to not introduce a regression later on
+                -1,
+                null, // we don't know the upstream input topic
+                new RecordHeaders()
+            ));
 
-            final ValueAndTimestamp<VOut> result = ValueAndTimestamp.make(valueTransformer.transform(key, getValueOrNull(valueAndTimestamp)), valueAndTimestamp == null ? UNKNOWN : valueAndTimestamp.timestamp());
+            final ValueAndTimestamp<VOut> result = ValueAndTimestamp.make(
+                valueTransformer.transform(key, getValueOrNull(valueAndTimestamp)),
+                valueAndTimestamp == null ? UNKNOWN : valueAndTimestamp.timestamp());
 
             internalProcessorContext.setRecordContext(currentContext);
 

@@ -6,7 +6,7 @@
  * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,28 +17,37 @@
 
 package kafka.server
 
-import kafka.server.metadata.MockConfigRepository
-import kafka.utils.{Log4jController, TestUtils}
+import java.util
+import java.util.Collections
+
+import kafka.utils.TestUtils
 import org.apache.kafka.clients.admin.AlterConfigOp.OpType
 import org.apache.kafka.common.config.ConfigResource.Type.{BROKER, BROKER_LOGGER, TOPIC, UNKNOWN}
-import org.apache.kafka.common.config.LogLevelConfig.VALID_LOG_LEVELS
-import org.apache.kafka.common.errors.{InvalidConfigurationException, InvalidRequestException}
+import org.apache.kafka.common.errors.InvalidRequestException
+import org.apache.kafka.common.message.{AlterConfigsRequestData, AlterConfigsResponseData, IncrementalAlterConfigsRequestData, IncrementalAlterConfigsResponseData}
+import org.apache.kafka.common.message.AlterConfigsRequestData.{AlterConfigsResource => LAlterConfigsResource}
+import org.apache.kafka.common.message.AlterConfigsRequestData.{AlterConfigsResourceCollection => LAlterConfigsResourceCollection}
+import org.apache.kafka.common.message.AlterConfigsRequestData.{AlterableConfigCollection => LAlterableConfigCollection}
+import org.apache.kafka.common.message.AlterConfigsResponseData.{AlterConfigsResourceResponse => LAlterConfigsResourceResponse}
+import org.apache.kafka.common.message.AlterConfigsRequestData.{AlterableConfig => LAlterableConfig}
+import org.apache.kafka.common.message.IncrementalAlterConfigsRequestData.{AlterConfigsResource => IAlterConfigsResource}
+import org.apache.kafka.common.message.IncrementalAlterConfigsRequestData.{AlterConfigsResourceCollection => IAlterConfigsResourceCollection}
+import org.apache.kafka.common.message.IncrementalAlterConfigsRequestData.{AlterableConfig => IAlterableConfig}
+import org.apache.kafka.common.message.IncrementalAlterConfigsRequestData.{AlterableConfigCollection => IAlterableConfigCollection}
+import org.apache.kafka.common.message.IncrementalAlterConfigsResponseData.{AlterConfigsResourceResponse => IAlterConfigsResourceResponse}
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.protocol.Errors.{INVALID_REQUEST, NONE}
 import org.apache.kafka.common.requests.ApiError
+import org.apache.kafka.metadata.MockConfigRepository
 import org.junit.jupiter.api.Assertions.{assertEquals, assertFalse, assertTrue}
 import org.junit.jupiter.api.{Assertions, Test}
 import org.slf4j.LoggerFactory
-
-import java.util
-import java.util.Collections
-import scala.jdk.CollectionConverters._
 
 class ConfigAdminManagerTest {
   val logger = LoggerFactory.getLogger(classOf[ConfigAdminManagerTest])
 
   def newConfigAdminManager(brokerId: Integer): ConfigAdminManager = {
-    val config = TestUtils.createBrokerConfig(nodeId = brokerId, zkConnect = null)
+    val config = TestUtils.createBrokerConfig(nodeId = brokerId)
     new ConfigAdminManager(brokerId, new KafkaConfig(config), new MockConfigRepository())
   }
 
@@ -86,7 +95,7 @@ class ConfigAdminManagerTest {
     assertEquals(new IncrementalAlterConfigsRequestData().setValidateOnly(true).
       setResources(new IAlterConfigsResourceCollection(util.Arrays.asList(
         topicA.duplicate()).iterator())),
-      ConfigAdminManager.copyWithoutPreprocessed(request, processed1))
+        ConfigAdminManager.copyWithoutPreprocessed(request, processed1))
     val processed2 = new util.IdentityHashMap[IAlterConfigsResource, ApiError]()
     assertEquals(new IncrementalAlterConfigsRequestData().setValidateOnly(true).
       setResources(new IAlterConfigsResourceCollection(util.Arrays.asList(
@@ -154,10 +163,10 @@ class ConfigAdminManagerTest {
     val preprocessed2 = new util.IdentityHashMap[IAlterConfigsResource, ApiError]()
     val persistentResponses2 = new IncrementalAlterConfigsResponseData().setResponses(
       util.Arrays.asList(new IAlterConfigsResourceResponse().
-        setResourceName("0").
-        setResourceType(BROKER.id()).
-        setErrorCode(NONE.code()).
-        setErrorMessage(null),
+          setResourceName("0").
+          setResourceType(BROKER.id()).
+          setErrorCode(NONE.code()).
+          setErrorMessage(null),
         new IAlterConfigsResourceResponse().
           setResourceName("a").
           setResourceType(TOPIC.id()).
@@ -166,10 +175,10 @@ class ConfigAdminManagerTest {
       ))
     assertEquals(new IncrementalAlterConfigsResponseData().setResponses(
       util.Arrays.asList(new IAlterConfigsResourceResponse().
-        setResourceName("0").
-        setResourceType(BROKER.id()).
-        setErrorCode(NONE.code()).
-        setErrorMessage(null),
+          setResourceName("0").
+          setResourceType(BROKER.id()).
+          setErrorCode(NONE.code()).
+          setErrorMessage(null),
         new IAlterConfigsResourceResponse().
           setResourceName("a").
           setResourceType(TOPIC.id()).
@@ -238,54 +247,13 @@ class ConfigAdminManagerTest {
     manager.validateResourceNameIsCurrentNodeId("5")
     assertEquals("Node id must be an integer, but it is: ",
       Assertions.assertThrows(classOf[InvalidRequestException],
-        () => manager.validateResourceNameIsCurrentNodeId("")).getMessage())
+        () => manager.validateResourceNameIsCurrentNodeId("")).getMessage)
     assertEquals("Unexpected broker id, expected 5, but received 3",
       Assertions.assertThrows(classOf[InvalidRequestException],
-        () => manager.validateResourceNameIsCurrentNodeId("3")).getMessage())
+        () => manager.validateResourceNameIsCurrentNodeId("3")).getMessage)
     assertEquals("Node id must be an integer, but it is: e",
       Assertions.assertThrows(classOf[InvalidRequestException],
-        () => manager.validateResourceNameIsCurrentNodeId("e")).getMessage())
-  }
-
-  @Test
-  def testValidateLogLevelConfigs(): Unit = {
-    val manager = newConfigAdminManager(5)
-    manager.validateLogLevelConfigs(util.Arrays.asList(new IAlterableConfig().
-      setName(logger.getName).
-      setConfigOperation(OpType.SET.id()).
-      setValue("TRACE")))
-    manager.validateLogLevelConfigs(util.Arrays.asList(new IAlterableConfig().
-      setName(logger.getName).
-      setConfigOperation(OpType.DELETE.id()).
-      setValue("")))
-    assertEquals("APPEND operation is not allowed for the BROKER_LOGGER resource",
-      Assertions.assertThrows(classOf[InvalidRequestException],
-        () => manager.validateLogLevelConfigs(util.Arrays.asList(new IAlterableConfig().
-          setName(logger.getName).
-          setConfigOperation(OpType.APPEND.id()).
-          setValue("TRACE")))).getMessage())
-    assertEquals(s"Cannot set the log level of ${logger.getName} to BOGUS as it is not " +
-      s"a supported log level. Valid log levels are ${VALID_LOG_LEVELS.asScala.mkString(", ")}",
-      Assertions.assertThrows(classOf[InvalidConfigurationException],
-        () => manager.validateLogLevelConfigs(util.Arrays.asList(new IAlterableConfig().
-          setName(logger.getName).
-          setConfigOperation(OpType.SET.id()).
-          setValue("BOGUS")))).getMessage())
-  }
-
-  @Test
-  def testValidateRootLogLevelConfigs(): Unit = {
-    val manager = newConfigAdminManager(5)
-    manager.validateLogLevelConfigs(util.Arrays.asList(new IAlterableConfig().
-      setName(Log4jController.ROOT_LOGGER).
-      setConfigOperation(OpType.SET.id()).
-      setValue("TRACE")))
-    assertEquals(s"Removing the log level of the ${Log4jController.ROOT_LOGGER} logger is not allowed",
-      Assertions.assertThrows(classOf[InvalidRequestException],
-        () => manager.validateLogLevelConfigs(util.Arrays.asList(new IAlterableConfig().
-          setName(Log4jController.ROOT_LOGGER).
-          setConfigOperation(OpType.DELETE.id()).
-          setValue("")))).getMessage())
+        () => manager.validateResourceNameIsCurrentNodeId("e")).getMessage)
   }
 
   def brokerLogger1Incremental(): IAlterConfigsResource = new IAlterConfigsResource().
@@ -309,11 +277,11 @@ class ConfigAdminManagerTest {
     val manager = newConfigAdminManager(1)
     val brokerLogger1 = brokerLogger1Incremental()
     assertEquals(Collections.singletonMap(brokerLogger1,
-      new ApiError(Errors.CLUSTER_AUTHORIZATION_FAILED, null)),
+        new ApiError(Errors.CLUSTER_AUTHORIZATION_FAILED, null)),
       manager.preprocess(new IncrementalAlterConfigsRequestData().
         setResources(new IAlterConfigsResourceCollection(util.Arrays.asList(
           brokerLogger1).iterator())),
-        (_, _) => false))
+          (_, _) => false))
   }
 
   @Test
@@ -346,9 +314,9 @@ class ConfigAdminManagerTest {
     val brokerLogger1a = brokerLogger1Incremental()
     val brokerLogger1b = brokerLogger1Incremental()
     val output = manager.preprocess(new IncrementalAlterConfigsRequestData().
-      setResources(new IAlterConfigsResourceCollection(util.Arrays.asList(
-        brokerLogger1a, brokerLogger1b).iterator())),
-      (_, _) => true)
+        setResources(new IAlterConfigsResourceCollection(util.Arrays.asList(
+          brokerLogger1a, brokerLogger1b).iterator())),
+        (_, _) => true)
     assertEquals(2, output.size())
     Seq(brokerLogger1a, brokerLogger1b).foreach(r =>
       assertEquals(new ApiError(INVALID_REQUEST, "Each resource must appear at most once."),
@@ -426,7 +394,7 @@ class ConfigAdminManagerTest {
     val unknown = unknownIncremental()
     assertEquals(Collections.singletonMap(unknown,
       new ApiError(INVALID_REQUEST, "Unknown resource type 0")),
-      manager.preprocess(new IncrementalAlterConfigsRequestData().
+        manager.preprocess(new IncrementalAlterConfigsRequestData().
         setResources(new IAlterConfigsResourceCollection(util.Arrays.asList(
           unknown).iterator())),
         (_, _) => false))

@@ -18,6 +18,7 @@ package org.apache.kafka.streams.state.internals;
 
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
+
 import org.rocksdb.RocksIterator;
 
 import java.util.Comparator;
@@ -53,7 +54,7 @@ class RocksDBRangeIterator extends RocksDbIterator {
     }
 
     @Override
-    public KeyValue<Bytes, byte[]> makeNext() {
+    protected KeyValue<Bytes, byte[]> makeNext() {
         final KeyValue<Bytes, byte[]> next = super.makeNext();
         if (next == null) {
             return allDone();
@@ -80,4 +81,3 @@ class RocksDBRangeIterator extends RocksDbIterator {
         }
     }
 }
-

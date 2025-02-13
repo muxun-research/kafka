@@ -14,7 +14,9 @@ package kafka.api
 
 import kafka.utils.TestUtils
 import org.apache.kafka.common.security.auth.SecurityProtocol
+import org.junit.jupiter.api.Timeout
 
+@Timeout(600)
 class SslConsumerTest extends BaseConsumerTest {
   override protected def securityProtocol = SecurityProtocol.SSL
 

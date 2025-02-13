@@ -17,19 +17,29 @@
 
 package org.apache.kafka.timeline;
 
-import java.util.*;
+import java.util.AbstractCollection;
+import java.util.AbstractSet;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * This is a hash map which can be snapshotted.
- * <p>
- * See {@SnapshottableHashTable} for more details about the implementation.
- * <p>
+ * <br>
+ * See {@link SnapshottableHashTable} for more details about the implementation.
+ * <br>
  * This class requires external synchronization.  Null keys and values are not supported.
- * @param <K> The key type of the set.
- * @param <V> The value type of the set.
+ *
+ * @param <K>   The key type of the set.
+ * @param <V>   The value type of the set.
  */
-public class TimelineHashMap<K, V> extends SnapshottableHashTable<TimelineHashMap.TimelineHashMapEntry<K, V>> implements Map<K, V> {
-    static class TimelineHashMapEntry<K, V> implements SnapshottableHashTable.ElementWithStartEpoch, Map.Entry<K, V> {
+public class TimelineHashMap<K, V>
+        extends SnapshottableHashTable<TimelineHashMap.TimelineHashMapEntry<K, V>>
+        implements Map<K, V> {
+    static class TimelineHashMapEntry<K, V>
+            implements SnapshottableHashTable.ElementWithStartEpoch, Map.Entry<K, V> {
         private final K key;
         private final V value;
         private long startEpoch;
@@ -73,8 +83,7 @@ public class TimelineHashMap<K, V> extends SnapshottableHashTable<TimelineHashMa
         @SuppressWarnings("unchecked")
         @Override
         public boolean equals(Object o) {
-            if (!(o instanceof TimelineHashMapEntry))
-                return false;
+            if (!(o instanceof TimelineHashMapEntry)) return false;
             TimelineHashMapEntry<K, V> other = (TimelineHashMapEntry<K, V>) o;
             return key.equals(other.key);
         }
@@ -118,9 +127,7 @@ public class TimelineHashMap<K, V> extends SnapshottableHashTable<TimelineHashMa
 
     @Override
     public boolean containsValue(Object value) {
-        Iterator<Entry<K, V>> iter = entrySet().iterator();
-        while (iter.hasNext()) {
-            Entry<K, V> e = iter.next();
+        for (Entry<K, V> e : entrySet()) {
             if (value.equals(e.getValue())) {
                 return true;
             }
@@ -134,7 +141,8 @@ public class TimelineHashMap<K, V> extends SnapshottableHashTable<TimelineHashMa
     }
 
     public V get(Object key, long epoch) {
-        Entry<K, V> entry = snapshottableGet(new TimelineHashMapEntry<>(key, null), epoch);
+        Entry<K, V> entry =
+            snapshottableGet(new TimelineHashMapEntry<>(key, null), epoch);
         if (entry == null) {
             return null;
         }
@@ -155,7 +163,8 @@ public class TimelineHashMap<K, V> extends SnapshottableHashTable<TimelineHashMa
 
     @Override
     public V remove(Object key) {
-        TimelineHashMapEntry<K, V> result = snapshottableRemove(new TimelineHashMapEntry<>(key, null));
+        TimelineHashMapEntry<K, V> result = snapshottableRemove(
+            new TimelineHashMapEntry<>(key, null));
         return result == null ? null : result.value;
     }
 
@@ -367,9 +376,8 @@ public class TimelineHashMap<K, V> extends SnapshottableHashTable<TimelineHashMa
     @Override
     public int hashCode() {
         int hash = 0;
-        Iterator<Entry<K, V>> iter = entrySet().iterator();
-        while (iter.hasNext()) {
-            hash += iter.next().hashCode();
+        for (Entry<K, V> kvEntry : entrySet()) {
+            hash += kvEntry.hashCode();
         }
         return hash;
     }
@@ -378,15 +386,12 @@ public class TimelineHashMap<K, V> extends SnapshottableHashTable<TimelineHashMa
     public boolean equals(Object o) {
         if (o == this)
             return true;
-        if (!(o instanceof Map))
+        if (!(o instanceof Map<?, ?> m))
             return false;
-        Map<?, ?> m = (Map<?, ?>) o;
         if (m.size() != size())
             return false;
         try {
-            Iterator<Entry<K, V>> iter = entrySet().iterator();
-            while (iter.hasNext()) {
-                Entry<K, V> entry = iter.next();
+            for (Entry<K, V> entry : entrySet()) {
                 if (!m.get(entry.getKey()).equals(entry.getValue())) {
                     return false;
                 }

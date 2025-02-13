@@ -42,6 +42,7 @@ public class LeftOrRightValue<V1, V2> {
     /**
      * Create a new {@link LeftOrRightValue} instance with the V1 value as {@code leftValue} and
      * V2 value as null.
+     *
      * @param leftValue the left V1 value
      * @param <V1>      the type of the value
      * @return a new {@link LeftOrRightValue} instance
@@ -53,6 +54,7 @@ public class LeftOrRightValue<V1, V2> {
     /**
      * Create a new {@link LeftOrRightValue} instance with the V2 value as {@code rightValue} and
      * V1 value as null.
+     *
      * @param rightValue the right V2 value
      * @param <V2>       the type of the value
      * @return a new {@link LeftOrRightValue} instance
@@ -61,29 +63,19 @@ public class LeftOrRightValue<V1, V2> {
         return new LeftOrRightValue<>(null, rightValue);
     }
 
-    /**
-     * Create a new {@link LeftOrRightValue} instance with the V value as {@code leftValue} if
-     * {@code isLeftSide} is True; otherwise {@code rightValue} if {@code isLeftSide} is False.
-     * @param value the V value (either V1 or V2 type)
-     * @param <V>   the type of the value
-     * @return a new {@link LeftOrRightValue} instance
-     */
-    public static <V> LeftOrRightValue make(final boolean isLeftSide, final V value) {
-        Objects.requireNonNull(value, "value is null");
-        return isLeftSide ? LeftOrRightValue.makeLeftValue(value) : LeftOrRightValue.makeRightValue(value);
-    }
-
-    public V1 getLeftValue() {
+    public V1 leftValue() {
         return leftValue;
     }
 
-    public V2 getRightValue() {
+    public V2 rightValue() {
         return rightValue;
     }
 
     @Override
     public String toString() {
-        return "<" + ((leftValue != null) ? "left," + leftValue : "right," + rightValue) + ">";
+        return "<"
+            + ((leftValue != null) ? "left," + leftValue : "right," + rightValue)
+            + ">";
     }
 
     @Override
@@ -95,7 +87,8 @@ public class LeftOrRightValue<V1, V2> {
             return false;
         }
         final LeftOrRightValue<?, ?> that = (LeftOrRightValue<?, ?>) o;
-        return Objects.equals(leftValue, that.leftValue) && Objects.equals(rightValue, that.rightValue);
+        return Objects.equals(leftValue, that.leftValue) &&
+            Objects.equals(rightValue, that.rightValue);
     }
 
     @Override

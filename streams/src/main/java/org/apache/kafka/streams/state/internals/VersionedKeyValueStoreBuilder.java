@@ -19,16 +19,28 @@ package org.apache.kafka.streams.state.internals;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.common.utils.Time;
-import org.apache.kafka.streams.state.*;
+import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.state.StoreBuilder;
+import org.apache.kafka.streams.state.VersionedBytesStore;
+import org.apache.kafka.streams.state.VersionedBytesStoreSupplier;
+import org.apache.kafka.streams.state.VersionedKeyValueStore;
 
 import java.util.Objects;
 
-public class VersionedKeyValueStoreBuilder<K, V> extends AbstractStoreBuilder<K, V, VersionedKeyValueStore<K, V>> {
+public class VersionedKeyValueStoreBuilder<K, V>
+    extends AbstractStoreBuilder<K, V, VersionedKeyValueStore<K, V>> {
 
     private final VersionedBytesStoreSupplier storeSupplier;
 
-    public VersionedKeyValueStoreBuilder(final VersionedBytesStoreSupplier storeSupplier, final Serde<K> keySerde, final Serde<V> valueSerde, final Time time) {
-        super(storeSupplier.name(), keySerde, valueSerde, time);
+    public VersionedKeyValueStoreBuilder(final VersionedBytesStoreSupplier storeSupplier,
+                                         final Serde<K> keySerde,
+                                         final Serde<V> valueSerde,
+                                         final Time time) {
+        super(
+            storeSupplier.name(),
+            keySerde,
+            valueSerde,
+            time);
         Objects.requireNonNull(storeSupplier, "storeSupplier can't be null");
         Objects.requireNonNull(storeSupplier.metricsScope(), "storeSupplier's metricsScope can't be null");
         this.storeSupplier = storeSupplier;
@@ -41,8 +53,12 @@ public class VersionedKeyValueStoreBuilder<K, V> extends AbstractStoreBuilder<K,
             throw new IllegalStateException("VersionedBytesStoreSupplier.get() must return an instance of VersionedBytesStore");
         }
 
-        return new MeteredVersionedKeyValueStore<>(maybeWrapLogging((VersionedBytesStore) store), // no caching layer for versioned stores
-                storeSupplier.metricsScope(), time, keySerde, valueSerde);
+        return new MeteredVersionedKeyValueStore<>(
+            maybeWrapLogging((VersionedBytesStore) store), // no caching layer for versioned stores
+            storeSupplier.metricsScope(),
+            time,
+            keySerde,
+            valueSerde);
     }
 
     @Override

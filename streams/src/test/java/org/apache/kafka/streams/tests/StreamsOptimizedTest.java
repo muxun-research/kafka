@@ -26,7 +26,15 @@ import org.apache.kafka.streams.KafkaStreams.State;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.Topology;
-import org.apache.kafka.streams.kstream.*;
+import org.apache.kafka.streams.kstream.Aggregator;
+import org.apache.kafka.streams.kstream.Consumed;
+import org.apache.kafka.streams.kstream.Initializer;
+import org.apache.kafka.streams.kstream.JoinWindows;
+import org.apache.kafka.streams.kstream.KStream;
+import org.apache.kafka.streams.kstream.Materialized;
+import org.apache.kafka.streams.kstream.Produced;
+import org.apache.kafka.streams.kstream.Reducer;
+import org.apache.kafka.streams.kstream.StreamJoined;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -73,14 +81,30 @@ public class StreamsOptimizedTest {
 
         final KStream<String, String> mappedStream = sourceStream.selectKey((k, v) -> keyFunction.apply(v));
 
-        final KStream<String, Long> countStream = mappedStream.groupByKey().count(Materialized.with(Serdes.String(), Serdes.Long())).toStream();
+        final KStream<String, Long> countStream = mappedStream.groupByKey()
+                                                               .count(Materialized.with(Serdes.String(),
+                                                                                        Serdes.Long())).toStream();
 
-        mappedStream.groupByKey().aggregate(initializer, aggregator, Materialized.with(Serdes.String(), Serdes.Integer())).toStream().peek((k, v) -> System.out.println(String.format("AGGREGATED key=%s value=%s", k, v))).to(aggregationTopic, Produced.with(Serdes.String(), Serdes.Integer()));
+        mappedStream.groupByKey().aggregate(
+            initializer,
+            aggregator,
+            Materialized.with(Serdes.String(), Serdes.Integer()))
+            .toStream()
+            .peek((k, v) -> System.out.printf("AGGREGATED key=%s value=%s%n", k, v))
+            .to(aggregationTopic, Produced.with(Serdes.String(), Serdes.Integer()));
 
 
-        mappedStream.groupByKey().reduce(reducer, Materialized.with(Serdes.String(), Serdes.String())).toStream().peek((k, v) -> System.out.println(String.format("REDUCED key=%s value=%s", k, v))).to(reduceTopic, Produced.with(Serdes.String(), Serdes.String()));
+        mappedStream.groupByKey()
+            .reduce(reducer, Materialized.with(Serdes.String(), Serdes.String()))
+            .toStream()
+            .peek((k, v) -> System.out.printf("REDUCED key=%s value=%s%n", k, v))
+            .to(reduceTopic, Produced.with(Serdes.String(), Serdes.String()));
 
-        mappedStream.join(countStream, (v1, v2) -> v1 + ":" + v2.toString(), JoinWindows.of(ofMillis(500)), StreamJoined.with(Serdes.String(), Serdes.String(), Serdes.Long())).peek((k, v) -> System.out.println(String.format("JOINED key=%s value=%s", k, v))).to(joinTopic, Produced.with(Serdes.String(), Serdes.String()));
+        mappedStream.join(countStream, (v1, v2) -> v1 + ":" + v2.toString(),
+            JoinWindows.of(ofMillis(500)),
+            StreamJoined.with(Serdes.String(), Serdes.String(), Serdes.Long()))
+            .peek((k, v) -> System.out.printf("JOINED key=%s value=%s%n", k, v))
+            .to(joinTopic, Produced.with(Serdes.String(), Serdes.String()));
 
         final Properties config = new Properties();
 
@@ -101,7 +125,7 @@ public class StreamsOptimizedTest {
         streams.setStateListener((newState, oldState) -> {
             if (oldState == State.REBALANCING && newState == State.RUNNING) {
                 final int repartitionTopicCount = getCountOfRepartitionTopicsFound(topology.describe().toString(), repartitionTopicPattern);
-                System.out.println(String.format("REBALANCING -> RUNNING with REPARTITION TOPIC COUNT=%d", repartitionTopicCount));
+                System.out.printf("REBALANCING -> RUNNING with REPARTITION TOPIC COUNT=%d%n", repartitionTopicCount);
                 System.out.flush();
             }
         });
@@ -119,12 +143,13 @@ public class StreamsOptimizedTest {
 
     }
 
-    private static int getCountOfRepartitionTopicsFound(final String topologyString, final Pattern repartitionTopicPattern) {
+    private static int getCountOfRepartitionTopicsFound(final String topologyString,
+                                                        final Pattern repartitionTopicPattern) {
         final Matcher matcher = repartitionTopicPattern.matcher(topologyString);
         final List<String> repartitionTopicsFound = new ArrayList<>();
         while (matcher.find()) {
             final String repartitionTopic = matcher.group();
-            System.out.println(String.format("REPARTITION TOPIC found -> %s", repartitionTopic));
+            System.out.printf("REPARTITION TOPIC found -> %s%n", repartitionTopic);
             repartitionTopicsFound.add(repartitionTopic);
         }
         return repartitionTopicsFound.size();

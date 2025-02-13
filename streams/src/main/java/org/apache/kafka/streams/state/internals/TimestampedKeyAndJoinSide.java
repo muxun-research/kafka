@@ -25,7 +25,7 @@ import java.util.Objects;
  * part of the left join (true) or right join (false). This class is only useful when a state
  * store needs to be shared between left and right processors, and each processor needs to
  * access the key of the other processor.
- * <p>
+ *
  * Note that it might be cleaner to have two layers for such usages: first a KeyAndJoinSide, where the Key
  * is in the form of a <timestamp, key>; but with the nested structure serdes would need extra byte array copies.
  * Since it is only used in a single place today we decided to combine them into a single type / serde.
@@ -42,25 +42,34 @@ public class TimestampedKeyAndJoinSide<K> {
     }
 
     /**
-     * Create a new {@link TimestampedKeyAndJoinSide} instance if the provide {@code key} is not {@code null}.
-     * @param leftSide True if the key is part of the left join side; False if it is from the right join side
+     * Create a new {@link TimestampedKeyAndJoinSide} instance for the left join side if the provide {@code key} is not {@code null}.
+     *
      * @param key      the key
      * @param <K>      the type of the key
-     * @return a new {@link TimestampedKeyAndJoinSide} instance if the provide {@code key} is not {@code null}
+     * @return a new {@link TimestampedKeyAndJoinSide} instance for the left join side if the provide {@code key} is not {@code null}
      */
-    public static <K> TimestampedKeyAndJoinSide<K> make(final boolean leftSide, final K key, final long timestamp) {
-        return new TimestampedKeyAndJoinSide<>(leftSide, key, timestamp);
+    public static <K> TimestampedKeyAndJoinSide<K> makeLeft(final K key, final long timestamp) {
+        return new TimestampedKeyAndJoinSide<>(true, key, timestamp);
     }
-
+    /**
+     * Create a new {@link TimestampedKeyAndJoinSide} instance for the right join side if the provide {@code key} is not {@code null}.
+     *
+     * @param key      the key
+     * @param <K>      the type of the key
+     * @return a new {@link TimestampedKeyAndJoinSide} instance for the right join side if the provide {@code key} is not {@code null}
+     */
+    public static <K> TimestampedKeyAndJoinSide<K> makeRight(final K key, final long timestamp) {
+        return new TimestampedKeyAndJoinSide<>(false, key, timestamp);
+    }
     public boolean isLeftSide() {
         return leftSide;
     }
 
-    public K getKey() {
+    public K key() {
         return key;
     }
 
-    public long getTimestamp() {
+    public long timestamp() {
         return timestamp;
     }
 
@@ -79,7 +88,9 @@ public class TimestampedKeyAndJoinSide<K> {
             return false;
         }
         final TimestampedKeyAndJoinSide<?> that = (TimestampedKeyAndJoinSide<?>) o;
-        return leftSide == that.leftSide && Objects.equals(key, that.key) && timestamp == that.timestamp;
+        return leftSide == that.leftSide &&
+            Objects.equals(key, that.key) &&
+            timestamp == that.timestamp;
     }
 
     @Override

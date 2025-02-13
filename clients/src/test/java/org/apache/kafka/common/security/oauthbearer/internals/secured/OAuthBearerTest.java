@@ -17,14 +17,16 @@
 
 package org.apache.kafka.common.security.oauthbearer.internals.secured;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.security.auth.AuthenticateCallbackHandler;
 import org.apache.kafka.common.security.authenticator.TestJaasConfig;
 import org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule;
 import org.apache.kafka.common.utils.Utils;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import org.jose4j.jwk.PublicJsonWebKey;
 import org.jose4j.jwk.RsaJsonWebKey;
 import org.jose4j.jwk.RsaJwkGenerator;
@@ -35,14 +37,24 @@ import org.junit.jupiter.api.function.Executable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.security.auth.login.AppConfigurationEntry;
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
 
+import javax.security.auth.login.AppConfigurationEntry;
+
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.mock;
@@ -55,32 +67,29 @@ public abstract class OAuthBearerTest {
 
     protected ObjectMapper mapper = new ObjectMapper();
 
-    protected void assertThrowsWithMessage(Class<? extends Exception> clazz, Executable executable, String substring) {
-        boolean failed = false;
-
-        try {
-            executable.execute();
-        } catch (Throwable t) {
-            failed = true;
-            assertTrue(clazz.isInstance(t), String.format("Test failed by exception %s, but expected %s", t.getClass(), clazz));
-
-            assertErrorMessageContains(t.getMessage(), substring);
-        }
-
-        if (!failed)
-            fail("Expected test to fail with " + clazz + " that contains the string " + substring);
+    protected void assertThrowsWithMessage(Class<? extends Exception> clazz,
+        Executable executable,
+        String substring) {
+        assertErrorMessageContains(assertThrows(clazz, executable).getMessage(), substring);
     }
 
     protected void assertErrorMessageContains(String actual, String expectedSubstring) {
-        assertTrue(actual.contains(expectedSubstring), String.format("Expected exception message (\"%s\") to contain substring (\"%s\")", actual, expectedSubstring));
+        assertTrue(actual.contains(expectedSubstring),
+            String.format("Expected exception message (\"%s\") to contain substring (\"%s\")",
+                actual,
+                expectedSubstring));
     }
 
-    protected void configureHandler(AuthenticateCallbackHandler handler, Map<String, ?> configs, Map<String, Object> jaasConfig) {
+    protected void configureHandler(AuthenticateCallbackHandler handler,
+        Map<String, ?> configs,
+        Map<String, Object> jaasConfig) {
         TestJaasConfig config = new TestJaasConfig();
         config.createOrUpdateEntry("KafkaClient", OAuthBearerLoginModule.class.getName(), jaasConfig);
         AppConfigurationEntry kafkaClient = config.getAppConfigurationEntry("KafkaClient")[0];
 
-        handler.configure(configs, OAuthBearerLoginModule.OAUTHBEARER_MECHANISM, Collections.singletonList(kafkaClient));
+        handler.configure(configs,
+            OAuthBearerLoginModule.OAUTHBEARER_MECHANISM,
+            Collections.singletonList(kafkaClient));
     }
 
     protected String createBase64JsonJwtSection(Consumer<ObjectNode> c) {
@@ -152,7 +161,11 @@ public abstract class OAuthBearerTest {
         return tmpDir;
     }
 
-    protected File createTempFile(File tmpDir, String prefix, String suffix, String contents) throws IOException {
+    protected File createTempFile(File tmpDir,
+        String prefix,
+        String suffix,
+        String contents)
+        throws IOException {
         File file = File.createTempFile(prefix, suffix, tmpDir);
         log.debug("Created new temp file {}", file);
         file.deleteOnExit();
@@ -186,7 +199,15 @@ public abstract class OAuthBearerTest {
     }
 
     protected PublicJsonWebKey createEcJwk() throws JoseException {
-        PublicJsonWebKey jwk = PublicJsonWebKey.Factory.newPublicJwk("{" + "  \"kty\": \"EC\"," + "  \"d\": \"Tk7qzHNnSBMioAU7NwZ9JugFWmWbUCyzeBRjVcTp_so\"," + "  \"use\": \"sig\"," + "  \"crv\": \"P-256\"," + "  \"kid\": \"key-1\"," + "  \"x\": \"qqeGjWmYZU5M5bBrRw1zqZcbPunoFVxsfaa9JdA0R5I\"," + "  \"y\": \"wnoj0YjheNP80XYh1SEvz1-wnKByEoHvb6KrDcjMuWc\"" + "}");
+        PublicJsonWebKey jwk = PublicJsonWebKey.Factory.newPublicJwk("{" +
+            "  \"kty\": \"EC\"," +
+            "  \"d\": \"Tk7qzHNnSBMioAU7NwZ9JugFWmWbUCyzeBRjVcTp_so\"," +
+            "  \"use\": \"sig\"," +
+            "  \"crv\": \"P-256\"," +
+            "  \"kid\": \"key-1\"," +
+            "  \"x\": \"qqeGjWmYZU5M5bBrRw1zqZcbPunoFVxsfaa9JdA0R5I\"," +
+            "  \"y\": \"wnoj0YjheNP80XYh1SEvz1-wnKByEoHvb6KrDcjMuWc\"" +
+            "}");
         jwk.setKeyId("key-1");
         return jwk;
     }

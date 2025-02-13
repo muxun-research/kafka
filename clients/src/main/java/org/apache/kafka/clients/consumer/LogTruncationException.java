@@ -31,24 +31,29 @@ import java.util.Map;
  */
 public class LogTruncationException extends OffsetOutOfRangeException {
 
-	private final Map<TopicPartition, OffsetAndMetadata> divergentOffsets;
+    private final Map<TopicPartition, OffsetAndMetadata> divergentOffsets;
 
-	public LogTruncationException(String message,
-								  Map<TopicPartition, Long> fetchOffsets,
-								  Map<TopicPartition, OffsetAndMetadata> divergentOffsets) {
-		super(message, fetchOffsets);
-		this.divergentOffsets = Collections.unmodifiableMap(divergentOffsets);
-	}
+    public LogTruncationException(Map<TopicPartition, Long> fetchOffsets,
+                                  Map<TopicPartition, OffsetAndMetadata> divergentOffsets) {
+        this("Truncated partitions detected with divergent offsets " + divergentOffsets, fetchOffsets, divergentOffsets);
+    }
 
-	/**
-	 * Get the divergent offsets for the partitions which were truncated. For each
-	 * partition, this is the first offset which is known to diverge from what the
-	 * consumer read.
-	 * <p>
-	 * Note that there is no guarantee that this offset will be known. It is necessary
-	 * to use {@link #partitions()} to see the set of partitions that were truncated
-	 * and then check for the presence of a divergent offset in this map.
-	 */
+    public LogTruncationException(String message,
+                                  Map<TopicPartition, Long> fetchOffsets,
+                                  Map<TopicPartition, OffsetAndMetadata> divergentOffsets) {
+        super(message, fetchOffsets);
+        this.divergentOffsets = Collections.unmodifiableMap(divergentOffsets);
+    }
+
+    /**
+     * Get the divergent offsets for the partitions which were truncated. For each
+     * partition, this is the first offset which is known to diverge from what the
+     * consumer read.
+     *
+     * Note that there is no guarantee that this offset will be known. It is necessary
+     * to use {@link #partitions()} to see the set of partitions that were truncated
+     * and then check for the presence of a divergent offset in this map.
+     */
     public Map<TopicPartition, OffsetAndMetadata> divergentOffsets() {
         return divergentOffsets;
     }

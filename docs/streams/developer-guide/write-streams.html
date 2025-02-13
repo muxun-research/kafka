@@ -81,7 +81,7 @@
               <tr class="row-even"><td><code class="docutils literal"><span class="pre">org.apache.kafka</span></code></td>
                   <td><code class="docutils literal"><span class="pre">kafka-streams-scala</span></code></td>
                   <td><code class="docutils literal"><span class="pre">{{fullDotVersion}}</span></code></td>
-                  <td>(Optional) Kafka Streams DSL for Scala library to write Scala Kafka Streams applications. When not using SBT you will need to suffix the artifact ID with the correct version of Scala your application is using (<code class="docutils literal"><span class="pre">_2.12</code></span>, <code class="docutils literal"><span class="pre">_2.13</code></span>)</td>
+                  <td>(Optional) Kafka Streams DSL for Scala library to write Scala Kafka Streams applications.  When not using SBT you will need to suffix the artifact ID with the correct version of Scala your application is using (<code class="docutils literal"><span class="pre">_2.12</code></span>, <code class="docutils literal"><span class="pre">_2.13</code></span>)</td>
               </tr>
               </tbody>
           </table>
@@ -110,17 +110,16 @@
     <div class="section" id="using-kafka-streams-within-your-application-code">
       <h2>Using Kafka Streams within your application code<a class="headerlink" href="#using-kafka-streams-within-your-application-code" title="Permalink to this headline"></a></h2>
       <p>You can call Kafka Streams from anywhere in your application code, but usually these calls are made within the <code class="docutils literal"><span class="pre">main()</span></code> method of
-          your application, or some variant thereof. The basic elements of defining a processing topology within your application
-          are described below.</p>
-        <p>First, you must create an instance of <code class="docutils literal"><span class="pre">KafkaStreams</span></code>.</p>
-        <ul class="simple">
-            <li>The first argument of the <code class="docutils literal"><span class="pre">KafkaStreams</span></code> constructor takes a topology (either <code class="docutils literal"><span class="pre">StreamsBuilder#build()</span></code> for the
-                <a class="reference internal" href="dsl-api.html#streams-developer-guide-dsl"><span class="std std-ref">DSL</span></a> or <code class="docutils literal"><span class="pre">Topology</span></code> for the
-                <a class="reference internal" href="processor-api.html#streams-developer-guide-processor-api"><span class="std std-ref">Processor API</span></a>) that is used to define a topology.
-            </li>
-            <li>The second argument is an instance of <code class="docutils literal"><span class="pre">java.util.Properties</span></code>, which defines the configuration for this specific topology.</li>
-        </ul>
-        <p>Code example:</p>
+        your application, or some variant thereof.  The basic elements of defining a processing topology within your application
+        are described below.</p>
+      <p>First, you must create an instance of <code class="docutils literal"><span class="pre">KafkaStreams</span></code>.</p>
+      <ul class="simple">
+        <li>The first argument of the <code class="docutils literal"><span class="pre">KafkaStreams</span></code> constructor takes a topology (either <code class="docutils literal"><span class="pre">StreamsBuilder#build()</span></code> for the
+          <a class="reference internal" href="dsl-api.html#streams-developer-guide-dsl"><span class="std std-ref">DSL</span></a> or <code class="docutils literal"><span class="pre">Topology</span></code> for the
+          <a class="reference internal" href="processor-api.html#streams-developer-guide-processor-api"><span class="std std-ref">Processor API</span></a>) that is used to define a topology.</li>
+        <li>The second argument is an instance of <code class="docutils literal"><span class="pre">java.util.Properties</span></code>, which defines the configuration for this specific topology.</li>
+      </ul>
+      <p>Code example:</p>
         <pre class="line-numbers"><code class="language-java">import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.kstream.StreamsBuilder;
 import org.apache.kafka.streams.processor.Topology;
@@ -143,49 +142,28 @@ Topology topology = ...; // when using the Processor API
 Properties props = ...;
 
 KafkaStreams streams = new KafkaStreams(topology, props);</code></pre>
-        <p>At this point, internal structures are initialized, but the processing is not started yet.
-            You have to explicitly start the Kafka Streams thread by calling the <code class="docutils literal"><span class="pre">KafkaStreams#start()</span></code> method:</p>
+      <p>At this point, internal structures are initialized, but the processing is not started yet.
+        You have to explicitly start the Kafka Streams thread by calling the <code class="docutils literal"><span class="pre">KafkaStreams#start()</span></code> method:</p>
         <pre class="line-numbers"><code class="language-java">// Start the Kafka Streams threads
 streams.start();</code></pre>
-        <p>If there are other instances of this stream processing application running elsewhere (e.g., on another machine), Kafka
-            Streams transparently re-assigns tasks from the existing instances to the new instance that you just started.
-            For more information, see <a class="reference internal" href="../architecture.html#streams_architecture_tasks"><span class="std std-ref">Stream Partitions and Tasks</span></a> and <a class="reference internal" href="../architecture.html#streams_architecture_threads"><span class="std std-ref">Threading Model</span></a>.</p>
-        <p>To catch any unexpected exceptions, you can set an <code class="docutils literal"><span class="pre">java.lang.Thread.UncaughtExceptionHandler</span></code> before you start the
-            application. This handler is called whenever a stream thread is terminated by an unexpected exception:</p>
-        <pre class="line-numbers"><code class="language-java">// Java 8+, using lambda expressions
-streams.setUncaughtExceptionHandler((Thread thread, Throwable throwable) -&gt; {
+      <p>If there are other instances of this stream processing application running elsewhere (e.g., on another machine), Kafka
+        Streams transparently re-assigns tasks from the existing instances to the new instance that you just started.
+        For more information, see <a class="reference internal" href="../architecture.html#streams_architecture_tasks"><span class="std std-ref">Stream Partitions and Tasks</span></a> and <a class="reference internal" href="../architecture.html#streams_architecture_threads"><span class="std std-ref">Threading Model</span></a>.</p>
+      <p>To catch any unexpected exceptions, you can set an <code class="docutils literal"><span class="pre">java.lang.Thread.UncaughtExceptionHandler</span></code> before you start the
+        application.  This handler is called whenever a stream thread is terminated by an unexpected exception:</p>
+        <pre class="line-numbers"><code class="language-java">streams.setUncaughtExceptionHandler((Thread thread, Throwable throwable) -&gt; {
   // here you should examine the throwable/exception and perform an appropriate action!
 });
-
-
-// Java 7
-streams.setUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
-  public void uncaughtException(Thread thread, Throwable throwable) {
-    // here you should examine the throwable/exception and perform an appropriate action!
-  }
-});</code></pre>
-        <p>To stop the application instance, call the <code class="docutils literal"><span class="pre">KafkaStreams#close()</span></code> method:</p>
+</code></pre>
+      <p>To stop the application instance, call the <code class="docutils literal"><span class="pre">KafkaStreams#close()</span></code> method:</p>
         <pre class="line-numbers"><code class="language-java">// Stop the Kafka Streams threads
 streams.close();</code></pre>
-        <p>To allow your application to gracefully shutdown in response to SIGTERM, it is recommended that you add a shutdown hook
-            and call <code class="docutils literal"><span class="pre">KafkaStreams#close</span></code>.</p>
-        <ul>
-            <li><p class="first">Here is a shutdown hook example in Java 8+:</p>
-                <pre class="line-numbers"><code class="language-java">// Add shutdown hook to stop the Kafka Streams threads.
+      <p>To allow your application to gracefully shutdown in response to SIGTERM, it is recommended that you add a shutdown hook
+        and call <code class="docutils literal"><span class="pre">KafkaStreams#close</span></code>.</p>
+      <p class="first">Here is a shutdown hook example in Java:</p>
+            <pre class="line-numbers"><code class="language-java">// Add shutdown hook to stop the Kafka Streams threads.
 // You can optionally provide a timeout to `close`.
 Runtime.getRuntime().addShutdownHook(new Thread(streams::close));</code></pre>
-            </li>
-            <li><p class="first">Here is a shutdown hook example in Java 7:</p>
-                <pre class="line-numbers"><code class="language-java">// Add shutdown hook to stop the Kafka Streams threads.
-// You can optionally provide a timeout to `close`.
-Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
-  @Override
-  public void run() {
-      streams.close();
-  }
-}));</code></pre>
-            </li>
-      </ul>
       <p>After an application is stopped, Kafka Streams will migrate any tasks that had been running in this instance to available remaining
         instances.</p>
 </div>
@@ -208,16 +186,16 @@ Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
 <!--#include virtual="../../../includes/_header.htm" -->
 <!--#include virtual="../../../includes/_top.htm" -->
 <div class="content documentation ">
-    <!--#include virtual="../../../includes/_nav.htm" -->
-    <div class="right">
-        <!--//#include virtual="../../../includes/_docs_banner.htm" -->
-        <ul class="breadcrumbs">
-            <li><a href="/documentation">Documentation</a></li>
-            <li><a href="/documentation/streams">Kafka Streams</a></li>
-            <li><a href="/documentation/streams/developer-guide/">Developer Guide</a></li>
-        </ul>
-        <div class="p-content"></div>
-    </div>
+  <!--#include virtual="../../../includes/_nav.htm" -->
+  <div class="right">
+    <!--//#include virtual="../../../includes/_docs_banner.htm" -->
+    <ul class="breadcrumbs">
+      <li><a href="/documentation">Documentation</a></li>
+      <li><a href="/documentation/streams">Kafka Streams</a></li>
+      <li><a href="/documentation/streams/developer-guide/">Developer Guide</a></li>
+    </ul>
+    <div class="p-content"></div>
+  </div>
 </div>
 <!--#include virtual="../../../includes/_footer.htm" -->
 <script>

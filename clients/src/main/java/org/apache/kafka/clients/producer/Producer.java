@@ -22,7 +22,9 @@ import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.errors.ProducerFencedException;
+import org.apache.kafka.common.metrics.KafkaMetric;
 
 import java.io.Closeable;
 import java.time.Duration;
@@ -37,46 +39,51 @@ import java.util.concurrent.Future;
  */
 public interface Producer<K, V> extends Closeable {
 
-	/**
-	 * See {@link KafkaProducer#initTransactions()}
-	 */
-	void initTransactions();
+    /**
+     * See {@link KafkaProducer#initTransactions()}
+     */
+    void initTransactions();
 
-	/**
-	 * See {@link KafkaProducer#beginTransaction()}
-	 */
-	void beginTransaction() throws ProducerFencedException;
+    /**
+     * See {@link KafkaProducer#beginTransaction()}
+     */
+    void beginTransaction() throws ProducerFencedException;
 
-	/**
-	 * See {@link KafkaProducer#sendOffsetsToTransaction(Map, String)}
-	 */
-	@Deprecated
-	void sendOffsetsToTransaction(Map<TopicPartition, OffsetAndMetadata> offsets, String consumerGroupId) throws ProducerFencedException;
+    /**
+     * See {@link KafkaProducer#sendOffsetsToTransaction(Map, ConsumerGroupMetadata)}
+     */
+    void sendOffsetsToTransaction(Map<TopicPartition, OffsetAndMetadata> offsets,
+                                  ConsumerGroupMetadata groupMetadata) throws ProducerFencedException;
 
-	/**
-	 * See {@link KafkaProducer#sendOffsetsToTransaction(Map, ConsumerGroupMetadata)}
-	 */
-	void sendOffsetsToTransaction(Map<TopicPartition, OffsetAndMetadata> offsets, ConsumerGroupMetadata groupMetadata) throws ProducerFencedException;
+    /**
+     * See {@link KafkaProducer#commitTransaction()}
+     */
+    void commitTransaction() throws ProducerFencedException;
 
-	/**
-	 * See {@link KafkaProducer#commitTransaction()}
-	 */
-	void commitTransaction() throws ProducerFencedException;
+    /**
+     * See {@link KafkaProducer#abortTransaction()}
+     */
+    void abortTransaction() throws ProducerFencedException;
 
-	/**
-	 * See {@link KafkaProducer#abortTransaction()}
-	 */
-	void abortTransaction() throws ProducerFencedException;
+    /**
+     * @see KafkaProducer#registerMetricForSubscription(KafkaMetric) 
+     */
+    void registerMetricForSubscription(KafkaMetric metric);
 
-	/**
-	 * See {@link KafkaProducer#send(ProducerRecord)}
-	 */
-	Future<RecordMetadata> send(ProducerRecord<K, V> record);
+    /**
+     * @see KafkaProducer#unregisterMetricFromSubscription(KafkaMetric) 
+     */
+    void unregisterMetricFromSubscription(KafkaMetric metric);
 
-	/**
-	 * See {@link KafkaProducer#send(ProducerRecord, Callback)}
-	 */
-	Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback);
+    /**
+     * See {@link KafkaProducer#send(ProducerRecord)}
+     */
+    Future<RecordMetadata> send(ProducerRecord<K, V> record);
+
+    /**
+     * See {@link KafkaProducer#send(ProducerRecord, Callback)}
+     */
+    Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback);
 
     /**
      * See {@link KafkaProducer#flush()}
@@ -92,6 +99,11 @@ public interface Producer<K, V> extends Closeable {
      * See {@link KafkaProducer#metrics()}
      */
     Map<MetricName, ? extends Metric> metrics();
+
+    /**
+     * See {@link KafkaProducer#clientInstanceId(Duration)}}
+     */
+    Uuid clientInstanceId(Duration timeout);
 
     /**
      * See {@link KafkaProducer#close()}

@@ -17,7 +17,6 @@
 package org.apache.kafka.clients.consumer.internals;
 
 import org.apache.kafka.clients.MockClient;
-import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
@@ -33,28 +32,41 @@ import org.apache.kafka.common.requests.MetadataResponse;
 import org.apache.kafka.common.requests.RequestTestUtils;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.MockTime;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import static java.util.Collections.singleton;
 import static java.util.Collections.singletonMap;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class TopicMetadataFetcherTest {
 
     private final String topicName = "test";
     private final Uuid topicId = Uuid.randomUuid();
-    private final Map<String, Uuid> topicIds = new HashMap<String, Uuid>() {
+    private final Map<String, Uuid> topicIds = new HashMap<>() {
         {
             put(topicName, topicId);
         }
     };
     private final TopicPartition tp0 = new TopicPartition(topicName, 0);
     private final int validLeaderEpoch = 0;
-    private final MetadataResponse initialUpdateResponse = RequestTestUtils.metadataUpdateWithIds(1, singletonMap(topicName, 4), topicIds);
+    private final MetadataResponse initialUpdateResponse =
+        RequestTestUtils.metadataUpdateWithIds(1, singletonMap(topicName, 4), topicIds);
 
     private MockTime time = new MockTime(1);
     private SubscriptionState subscriptions;
@@ -73,7 +85,9 @@ public class TopicMetadataFetcherTest {
         client.updateMetadata(initialUpdateResponse);
 
         // A dummy metadata update to ensure valid leader epoch.
-        metadata.updateWithCurrentRequestVersion(RequestTestUtils.metadataUpdateWithIds("dummy", 1, Collections.emptyMap(), singletonMap(topicName, 4), tp -> validLeaderEpoch, topicIds), false, 0L);
+        metadata.updateWithCurrentRequestVersion(RequestTestUtils.metadataUpdateWithIds("dummy", 1,
+            Collections.emptyMap(), singletonMap(topicName, 4),
+            tp -> validLeaderEpoch, topicIds), false, 0L);
     }
 
     @AfterEach
@@ -167,14 +181,30 @@ public class TopicMetadataFetcherTest {
             List<MetadataResponse.PartitionMetadata> partitions = item.partitionMetadata();
             List<MetadataResponse.PartitionMetadata> altPartitions = new ArrayList<>();
             for (MetadataResponse.PartitionMetadata p : partitions) {
-                altPartitions.add(new MetadataResponse.PartitionMetadata(p.error, p.topicPartition, Optional.empty(), //no leader
-                        Optional.empty(), p.replicaIds, p.inSyncReplicaIds, p.offlineReplicaIds));
+                altPartitions.add(new MetadataResponse.PartitionMetadata(
+                    p.error,
+                    p.topicPartition,
+                    Optional.empty(), //no leader
+                    Optional.empty(),
+                    p.replicaIds,
+                    p.inSyncReplicaIds,
+                    p.offlineReplicaIds
+                ));
             }
-            MetadataResponse.TopicMetadata alteredTopic = new MetadataResponse.TopicMetadata(item.error(), item.topic(), item.isInternal(), altPartitions);
+            MetadataResponse.TopicMetadata alteredTopic = new MetadataResponse.TopicMetadata(
+                item.error(),
+                item.topic(),
+                item.isInternal(),
+                altPartitions
+            );
             altTopics.add(alteredTopic);
         }
         Node controller = originalResponse.controller();
-        MetadataResponse altered = RequestTestUtils.metadataResponse(originalResponse.brokers(), originalResponse.clusterId(), controller != null ? controller.id() : MetadataResponse.NO_CONTROLLER_ID, altTopics);
+        MetadataResponse altered = RequestTestUtils.metadataResponse(
+            originalResponse.brokers(),
+            originalResponse.clusterId(),
+            controller != null ? controller.id() : MetadataResponse.NO_CONTROLLER_ID,
+            altTopics);
 
         client.prepareResponse(altered);
 
@@ -189,31 +219,42 @@ public class TopicMetadataFetcherTest {
     private MetadataResponse newMetadataResponse(Errors error) {
         List<MetadataResponse.PartitionMetadata> partitionsMetadata = new ArrayList<>();
         if (error == Errors.NONE) {
-            Optional<MetadataResponse.TopicMetadata> foundMetadata = initialUpdateResponse.topicMetadata().stream().filter(topicMetadata -> topicMetadata.topic().equals(topicName)).findFirst();
+            Optional<MetadataResponse.TopicMetadata> foundMetadata = initialUpdateResponse.topicMetadata()
+                    .stream()
+                    .filter(topicMetadata -> topicMetadata.topic().equals(topicName))
+                    .findFirst();
             foundMetadata.ifPresent(topicMetadata -> partitionsMetadata.addAll(topicMetadata.partitionMetadata()));
         }
 
-        MetadataResponse.TopicMetadata topicMetadata = new MetadataResponse.TopicMetadata(error, topicName, false, partitionsMetadata);
+        MetadataResponse.TopicMetadata topicMetadata = new MetadataResponse.TopicMetadata(error, topicName, false,
+                partitionsMetadata);
         List<Node> brokers = new ArrayList<>(initialUpdateResponse.brokers());
-        return RequestTestUtils.metadataResponse(brokers, initialUpdateResponse.clusterId(), initialUpdateResponse.controller().id(), Collections.singletonList(topicMetadata));
+        return RequestTestUtils.metadataResponse(brokers, initialUpdateResponse.clusterId(),
+                initialUpdateResponse.controller().id(), Collections.singletonList(topicMetadata));
     }
 
     private void buildFetcher() {
         MetricConfig metricConfig = new MetricConfig();
         long metadataExpireMs = Long.MAX_VALUE;
         long retryBackoffMs = 100;
+        long retryBackoffMaxMs = 1000;
         LogContext logContext = new LogContext();
-        SubscriptionState subscriptionState = new SubscriptionState(logContext, OffsetResetStrategy.EARLIEST);
+        SubscriptionState subscriptionState = new SubscriptionState(logContext, AutoOffsetResetStrategy.EARLIEST);
         buildDependencies(metricConfig, metadataExpireMs, subscriptionState, logContext);
-        topicMetadataFetcher = new TopicMetadataFetcher(logContext, consumerClient, retryBackoffMs);
+        topicMetadataFetcher = new TopicMetadataFetcher(logContext, consumerClient, retryBackoffMs, retryBackoffMaxMs);
     }
 
-    private void buildDependencies(MetricConfig metricConfig, long metadataExpireMs, SubscriptionState subscriptionState, LogContext logContext) {
+    private void buildDependencies(MetricConfig metricConfig,
+                                   long metadataExpireMs,
+                                   SubscriptionState subscriptionState,
+                                   LogContext logContext) {
         time = new MockTime(1);
         subscriptions = subscriptionState;
-        metadata = new ConsumerMetadata(0, metadataExpireMs, false, false, subscriptions, logContext, new ClusterResourceListeners());
+        metadata = new ConsumerMetadata(0, 0, metadataExpireMs, false, false,
+                subscriptions, logContext, new ClusterResourceListeners());
         client = new MockClient(time, metadata);
         metrics = new Metrics(metricConfig, time);
-        consumerClient = new ConsumerNetworkClient(logContext, client, metadata, time, 100, 1000, Integer.MAX_VALUE);
+        consumerClient = new ConsumerNetworkClient(logContext, client, metadata, time,
+                100, 1000, Integer.MAX_VALUE);
     }
 }

@@ -23,6 +23,8 @@ import org.apache.kafka.common.metrics.stats.Percentiles.BucketSizing;
 
 import java.util.Arrays;
 
+import java.util.Arrays;
+
 public class MetricsBench {
 
     public static void main(String[] args) {
@@ -41,7 +43,7 @@ public class MetricsBench {
             for (int i = 0; i < iters; i++)
                 parent.record(i);
             double elapsed = (System.nanoTime() - start) / (double) iters;
-            System.out.println(String.format("%.2f ns per metric recording.", elapsed));
+            System.out.printf("%.2f ns per metric recording.%n", elapsed);
         } finally {
             metrics.close();
         }

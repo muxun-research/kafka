@@ -6,7 +6,7 @@
  * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,22 +17,24 @@
 
 package kafka.server
 
+import java.net.{InetAddress, UnknownHostException}
+import java.nio.ByteBuffer
 import kafka.network.RequestChannel
 import org.apache.kafka.common.errors.{InvalidRequestException, PrincipalDeserializationException, UnsupportedVersionException}
 import org.apache.kafka.common.network.ClientInformation
 import org.apache.kafka.common.requests.{EnvelopeRequest, RequestContext, RequestHeader}
 import org.apache.kafka.common.security.auth.KafkaPrincipal
+import org.apache.kafka.network.metrics.RequestChannelMetrics
 
-import java.net.{InetAddress, UnknownHostException}
-import java.nio.ByteBuffer
-import scala.compat.java8.OptionConverters._
+import scala.jdk.OptionConverters.RichOptional
+
 
 object EnvelopeUtils {
   def handleEnvelopeRequest(
-                             request: RequestChannel.Request,
-                             requestChannelMetrics: RequestChannel.Metrics,
-                             handler: RequestChannel.Request => Unit
-                           ): Unit = {
+    request: RequestChannel.Request,
+    requestChannelMetrics: RequestChannelMetrics,
+    handler: RequestChannel.Request => Unit
+  ): Unit = {
     val envelope = request.body[EnvelopeRequest]
     val forwardedPrincipal = parseForwardedPrincipal(request.context, envelope.requestPrincipal)
     val forwardedClientAddress = parseForwardedClientAddress(envelope.clientAddress)
@@ -66,8 +68,8 @@ object EnvelopeUtils {
   }
 
   private def parseForwardedClientAddress(
-                                           address: Array[Byte]
-                                         ): InetAddress = {
+    address: Array[Byte]
+  ): InetAddress = {
     try {
       InetAddress.getByAddress(address)
     } catch {
@@ -77,11 +79,11 @@ object EnvelopeUtils {
   }
 
   private def parseForwardedRequest(
-                                     envelope: RequestChannel.Request,
-                                     forwardedContext: RequestContext,
-                                     buffer: ByteBuffer,
-                                     requestChannelMetrics: RequestChannel.Metrics
-                                   ): RequestChannel.Request = {
+    envelope: RequestChannel.Request,
+    forwardedContext: RequestContext,
+    buffer: ByteBuffer,
+    requestChannelMetrics: RequestChannelMetrics
+  ): RequestChannel.Request = {
     try {
       val forwardedRequest = new RequestChannel.Request(
         processor = envelope.processor,
@@ -106,8 +108,8 @@ object EnvelopeUtils {
   }
 
   private def parseForwardedRequestHeader(
-                                           buffer: ByteBuffer
-                                         ): RequestHeader = {
+    buffer: ByteBuffer
+  ): RequestHeader = {
     try {
       RequestHeader.parse(buffer)
     } catch {
@@ -120,10 +122,10 @@ object EnvelopeUtils {
   }
 
   private def parseForwardedPrincipal(
-                                       envelopeContext: RequestContext,
-                                       principalBytes: Array[Byte]
-                                     ): KafkaPrincipal = {
-    envelopeContext.principalSerde.asScala match {
+    envelopeContext: RequestContext,
+    principalBytes: Array[Byte]
+  ): KafkaPrincipal = {
+    envelopeContext.principalSerde.toScala match {
       case Some(serde) =>
         try {
           serde.deserialize(principalBytes)

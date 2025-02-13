@@ -21,10 +21,11 @@ import org.glassfish.jersey.server.ResourceConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.ws.rs.core.Configurable;
-import javax.ws.rs.core.Configuration;
 import java.util.Map;
 import java.util.Objects;
+
+import jakarta.ws.rs.core.Configurable;
+import jakarta.ws.rs.core.Configuration;
 
 /**
  * The implementation delegates to {@link ResourceConfig} so that we can handle duplicate

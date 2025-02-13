@@ -21,15 +21,19 @@ import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.utils.AppInfoParser;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.connect.connector.Task;
+import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceConnector;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Emits heartbeats to Kafka.
- * @see MirrorHeartbeatConfig for supported config properties.
+import static org.apache.kafka.connect.mirror.Heartbeat.SOURCE_CLUSTER_ALIAS_KEY;
+import static org.apache.kafka.connect.mirror.Heartbeat.TARGET_CLUSTER_ALIAS_KEY;
+
+/** Emits heartbeats to Kafka.
+ *
+ *  @see MirrorHeartbeatConfig for supported config properties.
  */
 public class MirrorHeartbeatConnector extends SourceConnector {
     private MirrorHeartbeatConfig config;
@@ -85,7 +89,37 @@ public class MirrorHeartbeatConnector extends SourceConnector {
         return AppInfoParser.getVersion();
     }
 
+    @Override
+    public boolean alterOffsets(Map<String, String> config, Map<Map<String, ?>, Map<String, ?>> offsets) {
+        for (Map.Entry<Map<String, ?>, Map<String, ?>> offsetEntry : offsets.entrySet()) {
+            Map<String, ?> sourceOffset = offsetEntry.getValue();
+            if (sourceOffset == null) {
+                // We allow tombstones for anything; if there's garbage in the offsets for the connector, we don't
+                // want to prevent users from being able to clean it up using the REST API
+                continue;
+            }
+
+            Map<String, ?> sourcePartition = offsetEntry.getKey();
+            if (sourcePartition == null) {
+                throw new ConnectException("Source partitions may not be null");
+            }
+
+            MirrorUtils.validateSourcePartitionString(sourcePartition, SOURCE_CLUSTER_ALIAS_KEY);
+            MirrorUtils.validateSourcePartitionString(sourcePartition, TARGET_CLUSTER_ALIAS_KEY);
+
+            MirrorUtils.validateSourceOffset(sourcePartition, sourceOffset, true);
+        }
+
+        // We don't actually use these offsets in the task class, so no additional effort is required beyond just validating
+        // the format of the user-supplied offsets
+        return true;
+    }
+
     private void createInternalTopics() {
-        MirrorUtils.createSinglePartitionCompactedTopic(config.heartbeatsTopic(), config.heartbeatsTopicReplicationFactor(), targetAdminClient);
+        MirrorUtils.createSinglePartitionCompactedTopic(
+                config.heartbeatsTopic(),
+                config.heartbeatsTopicReplicationFactor(),
+                targetAdminClient
+        );
     }
 }

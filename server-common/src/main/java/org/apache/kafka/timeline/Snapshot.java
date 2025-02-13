@@ -22,77 +22,77 @@ import java.util.Map;
 
 /**
  * A snapshot of some timeline data structures.
- * <p>
+ * <br>
  * The snapshot contains historical data for several timeline data structures.
  * We use an IdentityHashMap to store this data.  This way, we can easily drop all of
  * the snapshot data.
  */
 class Snapshot {
-	private final long epoch;
-	private IdentityHashMap<Revertable, Delta> map = new IdentityHashMap<>(4);
-	private Snapshot prev = this;
-	private Snapshot next = this;
+    private final long epoch;
+    private IdentityHashMap<Revertable, Delta> map = new IdentityHashMap<>(4);
+    private Snapshot prev = this;
+    private Snapshot next = this;
 
-	Snapshot(long epoch) {
-		this.epoch = epoch;
-	}
+    Snapshot(long epoch) {
+        this.epoch = epoch;
+    }
 
-	long epoch() {
-		return epoch;
-	}
+    long epoch() {
+        return epoch;
+    }
 
-	@SuppressWarnings("unchecked")
-	<T extends Delta> T getDelta(Revertable owner) {
-		return (T) map.get(owner);
-	}
+    @SuppressWarnings("unchecked")
+    <T extends Delta> T getDelta(Revertable owner) {
+        return (T) map.get(owner);
+    }
 
-	void setDelta(Revertable owner, Delta delta) {
-		map.put(owner, delta);
-	}
+    void setDelta(Revertable owner, Delta delta) {
+        map.put(owner, delta);
+    }
 
-	void handleRevert() {
-		for (Map.Entry<Revertable, Delta> entry : map.entrySet()) {
-			entry.getKey().executeRevert(epoch, entry.getValue());
-		}
-	}
+    void handleRevert() {
+        for (Map.Entry<Revertable, Delta> entry : map.entrySet()) {
+            entry.getKey().executeRevert(epoch, entry.getValue());
+        }
+    }
 
-	void mergeFrom(Snapshot source) {
-		// Merge the deltas from the source snapshot into this snapshot.
-		for (Map.Entry<Revertable, Delta> entry : source.map.entrySet()) {
-			// We first try to just copy over the object reference.  That will work if
-			//we have no entry at all for the given Revertable.
-			Delta destinationDelta = map.putIfAbsent(entry.getKey(), entry.getValue());
-			if (destinationDelta != null) {
-				// If we already have an entry for the Revertable, we need to merge the
-				// source delta into our delta.
-				destinationDelta.mergeFrom(epoch, entry.getValue());
-			}
-		}
-		// Delete the source snapshot to make sure nobody tries to reuse it.  We might now
-		// share some delta entries with it.
-		source.erase();
-	}
+    void mergeFrom(Snapshot source) {
+        // Merge the deltas from the source snapshot into this snapshot.
+        for (Map.Entry<Revertable, Delta> entry : source.map.entrySet()) {
+            // We first try to just copy over the object reference.  That will work if
+            //we have no entry at all for the given Revertable.
+            Delta destinationDelta = map.putIfAbsent(entry.getKey(), entry.getValue());
+            if (destinationDelta != null) {
+                // If we already have an entry for the Revertable, we need to merge the
+                // source delta into our delta.
+                destinationDelta.mergeFrom(epoch, entry.getValue());
+            }
+        }
+        // Delete the source snapshot to make sure nobody tries to reuse it.  We might now
+        // share some delta entries with it.
+        source.erase();
+    }
 
-	Snapshot prev() {
-		return prev;
-	}
+    Snapshot prev() {
+        return prev;
+    }
 
-	Snapshot next() {
-		return next;
-	}
+    Snapshot next() {
+        return next;
+    }
 
-	void appendNext(Snapshot newNext) {
-		newNext.prev = this;
-		newNext.next = next;
-		next.prev = newNext;
-		next = newNext;
-	}
+    void appendNext(Snapshot newNext) {
+        newNext.prev = this;
+        newNext.next = next;
+        next.prev = newNext;
+        next = newNext;
+    }
 
-	void erase() {
-		map = null;
-		next.prev = prev;
-		prev.next = next;
-		prev = this;
-		next = this;
-	}
+    void erase() {
+        map = null;
+        next.prev = prev;
+        prev.next = next;
+        prev = this;
+        next = this;
+    }
 }

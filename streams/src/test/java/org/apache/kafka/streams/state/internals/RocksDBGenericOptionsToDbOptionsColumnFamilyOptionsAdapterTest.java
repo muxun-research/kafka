@@ -17,31 +17,68 @@
 package org.apache.kafka.streams.state.internals;
 
 import org.apache.kafka.common.utils.LogCaptureAppender;
-import org.easymock.EasyMockRunner;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.rocksdb.*;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.invocation.Invocation;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
+import org.rocksdb.AbstractCompactionFilter;
 import org.rocksdb.AbstractCompactionFilter.Context;
+import org.rocksdb.AbstractCompactionFilterFactory;
+import org.rocksdb.AbstractWalFilter;
+import org.rocksdb.BuiltinComparator;
+import org.rocksdb.ColumnFamilyOptions;
+import org.rocksdb.CompactionPriority;
+import org.rocksdb.CompactionStyle;
+import org.rocksdb.ComparatorOptions;
+import org.rocksdb.CompressionType;
+import org.rocksdb.DBOptions;
+import org.rocksdb.Env;
+import org.rocksdb.InfoLogLevel;
+import org.rocksdb.LRUCache;
+import org.rocksdb.Logger;
+import org.rocksdb.Options;
+import org.rocksdb.PlainTableConfig;
+import org.rocksdb.RateLimiter;
+import org.rocksdb.RemoveEmptyValueCompactionFilter;
+import org.rocksdb.RocksDB;
+import org.rocksdb.SstFileManager;
+import org.rocksdb.StringAppendOperator;
+import org.rocksdb.VectorMemTableConfig;
+import org.rocksdb.WALRecoveryMode;
+import org.rocksdb.WalProcessingOption;
+import org.rocksdb.WriteBatch;
+import org.rocksdb.WriteBufferManager;
 import org.rocksdb.util.BytewiseComparator;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.easymock.EasyMock.*;
 import static org.hamcrest.CoreMatchers.hasItem;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.matchesPattern;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockingDetails;
 
 /**
  * The purpose of this test is, to catch interface changes if we upgrade {@link RocksDB}.
  * Using reflections, we make sure the {@link RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter} maps all
  * methods from {@link DBOptions} and {@link ColumnFamilyOptions} to/from {@link Options} correctly.
  */
-@RunWith(EasyMockRunner.class)
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)
 public class RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapterTest {
 
     private final List<String> walRelatedMethods = new LinkedList<String>() {
@@ -70,6 +107,12 @@ public class RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapterTest {
             add("notifyAll");
             add("toString");
             add("getOptionStringFromProps");
+            add("maxBackgroundCompactions");
+            add("setMaxBackgroundCompactions");
+            add("maxBackgroundFlushes");
+            add("setMaxBackgroundFlushes");
+            add("tablePropertiesCollectorFactory");
+            add("setTablePropertiesCollectorFactory");
             addAll(walRelatedMethods);
         }
     };
@@ -98,21 +141,21 @@ public class RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapterTest {
 
     private void verifyDBOptionsMethodCall(final Method method) throws Exception {
         final DBOptions mockedDbOptions = mock(DBOptions.class);
-        final RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter optionsFacadeDbOptions = new RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter(mockedDbOptions, new ColumnFamilyOptions());
+        final RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter optionsFacadeDbOptions
+            = new RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter(mockedDbOptions, new ColumnFamilyOptions());
 
         final Object[] parameters = getDBOptionsParameters(method.getParameterTypes());
 
         try {
-            reset(mockedDbOptions);
-            replay(mockedDbOptions);
             method.invoke(optionsFacadeDbOptions, parameters);
-            verify();
-            fail("Should have called DBOptions." + method.getName() + "()");
+            final Collection<Invocation> invocations = mockingDetails(mockedDbOptions).getInvocations();
+            final Set<String> invokedMethodNames = invocations.stream().map(invocation -> invocation.getMethod().getName()).collect(Collectors.toSet());
+            assertTrue(invokedMethodNames.contains(method.getName()), "Should have called DBOptions." + method.getName() + "()");
         } catch (final InvocationTargetException undeclaredMockMethodCall) {
             assertThat(undeclaredMockMethodCall.getCause(), instanceOf(AssertionError.class));
-            assertThat(undeclaredMockMethodCall.getCause().getMessage().trim(), matchesPattern("Unexpected method call DBOptions\\." + method.getName() + "((.*\n*)*):"));
+            assertThat(undeclaredMockMethodCall.getCause().getMessage().trim(),
+                matchesPattern("Unexpected method call DBOptions\\." + method.getName() + "((.*\n*)*):"));
         } finally {
-            resetToNice(mockedDbOptions);
             optionsFacadeDbOptions.close();
         }
     }
@@ -133,9 +176,6 @@ public class RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapterTest {
                     break;
                 case "java.util.Collection":
                     parameters[i] = new ArrayList<>();
-                    break;
-                case "org.rocksdb.AccessHint":
-                    parameters[i] = AccessHint.NONE;
                     break;
                 case "org.rocksdb.Cache":
                     parameters[i] = new LRUCache(1L);
@@ -204,21 +244,21 @@ public class RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapterTest {
 
     private void verifyColumnFamilyOptionsMethodCall(final Method method) throws Exception {
         final ColumnFamilyOptions mockedColumnFamilyOptions = mock(ColumnFamilyOptions.class);
-        final RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter optionsFacadeColumnFamilyOptions = new RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter(new DBOptions(), mockedColumnFamilyOptions);
+        final RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter optionsFacadeColumnFamilyOptions
+            = new RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter(new DBOptions(), mockedColumnFamilyOptions);
 
         final Object[] parameters = getColumnFamilyOptionsParameters(method.getParameterTypes());
 
         try {
-            reset(mockedColumnFamilyOptions);
-            replay(mockedColumnFamilyOptions);
             method.invoke(optionsFacadeColumnFamilyOptions, parameters);
-            verify();
-            fail("Should have called ColumnFamilyOptions." + method.getName() + "()");
+            final Collection<Invocation> invocations = mockingDetails(mockedColumnFamilyOptions).getInvocations();
+            final Set<String> invokedMethodNames = invocations.stream().map(invocation -> invocation.getMethod().getName()).collect(Collectors.toSet());
+            assertTrue(invokedMethodNames.contains(method.getName()), "Should have called ColumnFamilyOptions." + method.getName() + "()");
         } catch (final InvocationTargetException undeclaredMockMethodCall) {
             assertThat(undeclaredMockMethodCall.getCause(), instanceOf(AssertionError.class));
-            assertThat(undeclaredMockMethodCall.getCause().getMessage().trim(), matchesPattern("Unexpected method call ColumnFamilyOptions\\." + method.getName() + "(.*)"));
+            assertThat(undeclaredMockMethodCall.getCause().getMessage().trim(),
+                matchesPattern("Unexpected method call ColumnFamilyOptions\\." + method.getName() +  "(.*)"));
         } finally {
-            resetToNice(mockedColumnFamilyOptions);
             optionsFacadeColumnFamilyOptions.close();
         }
     }
@@ -300,7 +340,8 @@ public class RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapterTest {
 
         try (final LogCaptureAppender appender = LogCaptureAppender.createAndRegister(RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter.class)) {
 
-            try (RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter adapter = new RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter(new DBOptions(), new ColumnFamilyOptions())) {
+            try (RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter adapter =
+                     new RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter(new DBOptions(), new ColumnFamilyOptions())) {
                 for (final Method method : RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter.class.getDeclaredMethods()) {
                     if (walRelatedMethods.contains(method.getName())) {
                         method.invoke(adapter, getDBOptionsParameters(method.getParameterTypes()));
@@ -309,7 +350,10 @@ public class RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapterTest {
 
                 final List<String> walOptions = Arrays.asList("walDir", "walFilter", "walRecoveryMode", "walBytesPerSync", "walSizeLimitMB", "manualWalFlush", "maxTotalWalSize", "walTtlSeconds");
 
-                final Set<String> logMessages = appender.getEvents().stream().filter(e -> e.getLevel().equals("WARN")).map(LogCaptureAppender.Event::getMessage).collect(Collectors.toSet());
+                final Set<String> logMessages = appender.getEvents().stream()
+                    .filter(e -> e.getLevel().equals("WARN"))
+                    .map(LogCaptureAppender.Event::getMessage)
+                    .collect(Collectors.toSet());
 
                 walOptions.forEach(option -> assertThat(logMessages, hasItem(String.format("WAL is explicitly disabled by Streams in RocksDB. Setting option '%s' will be ignored", option))));
             }

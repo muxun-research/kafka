@@ -28,79 +28,67 @@ import java.util.Collections;
 
 public class VoteRequest extends AbstractRequest {
 
-	public static class Builder extends AbstractRequest.Builder<VoteRequest> {
-		private final VoteRequestData data;
+    public static class Builder extends AbstractRequest.Builder<VoteRequest> {
+        private final VoteRequestData data;
 
-		public Builder(VoteRequestData data) {
-			super(ApiKeys.VOTE);
-			this.data = data;
-		}
+        public Builder(VoteRequestData data) {
+            super(ApiKeys.VOTE);
+            this.data = data;
+        }
 
-		@Override
-		public VoteRequest build(short version) {
-			return new VoteRequest(data, version);
-		}
+        @Override
+        public VoteRequest build(short version) {
+            return new VoteRequest(data, version);
+        }
 
-		@Override
-		public String toString() {
-			return data.toString();
-		}
-	}
+        @Override
+        public String toString() {
+            return data.toString();
+        }
+    }
 
-	private final VoteRequestData data;
+    private final VoteRequestData data;
 
-	private VoteRequest(VoteRequestData data, short version) {
-		super(ApiKeys.VOTE, version);
-		this.data = data;
-	}
+    private VoteRequest(VoteRequestData data, short version) {
+        super(ApiKeys.VOTE, version);
+        this.data = data;
+    }
 
-	@Override
-	public VoteRequestData data() {
-		return data;
-	}
+    @Override
+    public VoteRequestData data() {
+        return data;
+    }
 
-	@Override
-	public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-		return new VoteResponse(new VoteResponseData()
-				.setErrorCode(Errors.forException(e).code()));
-	}
+    @Override
+    public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
+        return new VoteResponse(new VoteResponseData()
+            .setErrorCode(Errors.forException(e).code()));
+    }
 
-	public static VoteRequest parse(ByteBuffer buffer, short version) {
-		return new VoteRequest(new VoteRequestData(new ByteBufferAccessor(buffer), version), version);
-	}
+    public static VoteRequest parse(ByteBuffer buffer, short version) {
+        return new VoteRequest(new VoteRequestData(new ByteBufferAccessor(buffer), version), version);
+    }
 
-	public static VoteRequestData singletonRequest(TopicPartition topicPartition,
-												   int candidateEpoch,
-												   int candidateId,
-												   int lastEpoch,
-												   long lastEpochEndOffset) {
-		return singletonRequest(topicPartition,
-				null,
-				candidateEpoch,
-				candidateId,
-				lastEpoch,
-				lastEpochEndOffset);
-	}
-
-	public static VoteRequestData singletonRequest(TopicPartition topicPartition,
-												   String clusterId,
-												   int candidateEpoch,
-												   int candidateId,
-												   int lastEpoch,
-												   long lastEpochEndOffset) {
-		return new VoteRequestData()
-				.setClusterId(clusterId)
-				.setTopics(Collections.singletonList(
-						new VoteRequestData.TopicData()
-								.setTopicName(topicPartition.topic())
-								.setPartitions(Collections.singletonList(
-										new VoteRequestData.PartitionData()
-												.setPartitionIndex(topicPartition.partition())
-												.setCandidateEpoch(candidateEpoch)
-												.setCandidateId(candidateId)
-												.setLastOffsetEpoch(lastEpoch)
-												.setLastOffset(lastEpochEndOffset))
-								)));
-	}
-
+    public static VoteRequestData singletonRequest(TopicPartition topicPartition,
+                                                   String clusterId,
+                                                   int replicaEpoch,
+                                                   int replicaId,
+                                                   int lastEpoch,
+                                                   long lastEpochEndOffset,
+                                                   boolean preVote) {
+        return new VoteRequestData()
+                   .setClusterId(clusterId)
+                   .setTopics(Collections.singletonList(
+                       new VoteRequestData.TopicData()
+                           .setTopicName(topicPartition.topic())
+                           .setPartitions(Collections.singletonList(
+                               new VoteRequestData.PartitionData()
+                                   .setPartitionIndex(topicPartition.partition())
+                                   .setReplicaEpoch(replicaEpoch)
+                                   .setReplicaId(replicaId)
+                                   .setLastOffsetEpoch(lastEpoch)
+                                   .setLastOffset(lastEpochEndOffset)
+                                   .setPreVote(preVote))
+                           )));
+    }
 }

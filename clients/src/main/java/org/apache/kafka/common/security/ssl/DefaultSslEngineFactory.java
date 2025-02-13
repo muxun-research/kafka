@@ -22,35 +22,58 @@ import org.apache.kafka.common.config.SslConfigs;
 import org.apache.kafka.common.config.internals.BrokerSecurityConfigs;
 import org.apache.kafka.common.config.types.Password;
 import org.apache.kafka.common.errors.InvalidConfigurationException;
-import org.apache.kafka.common.network.Mode;
+import org.apache.kafka.common.network.ConnectionMode;
 import org.apache.kafka.common.security.auth.SslEngineFactory;
 import org.apache.kafka.common.utils.SecurityUtils;
 import org.apache.kafka.common.utils.Utils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.security.GeneralSecurityException;
+import java.security.Key;
+import java.security.KeyFactory;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.SecureRandom;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import javax.crypto.Cipher;
 import javax.crypto.EncryptedPrivateKeyInfo;
 import javax.crypto.SecretKey;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
-import javax.net.ssl.*;
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.security.*;
-import java.security.cert.Certificate;
-import java.security.cert.CertificateFactory;
-import java.security.spec.InvalidKeySpecException;
-import java.security.spec.PKCS8EncodedKeySpec;
-import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
+import javax.net.ssl.KeyManager;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
 
-public final class DefaultSslEngineFactory implements SslEngineFactory {
+public class DefaultSslEngineFactory implements SslEngineFactory {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultSslEngineFactory.class);
     public static final String PEM_TYPE = "PEM";
@@ -71,12 +94,12 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
 
     @Override
     public SSLEngine createClientSslEngine(String peerHost, int peerPort, String endpointIdentification) {
-        return createSslEngine(Mode.CLIENT, peerHost, peerPort, endpointIdentification);
+        return createSslEngine(ConnectionMode.CLIENT, peerHost, peerPort, endpointIdentification);
     }
 
     @Override
     public SSLEngine createServerSslEngine(String peerHost, int peerPort) {
-        return createSslEngine(Mode.SERVER, peerHost, peerPort, null);
+        return createSslEngine(ConnectionMode.SERVER, peerHost, peerPort, null);
     }
 
     @Override
@@ -87,10 +110,7 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
         if (truststore != null && truststore.modified()) {
             return true;
         }
-        if (keystore != null && keystore.modified()) {
-            return true;
-        }
-        return false;
+        return keystore != null && keystore.modified();
     }
 
     @Override
@@ -130,16 +150,26 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
             this.enabledProtocols = null;
         }
 
-        this.secureRandomImplementation = createSecureRandom((String) configs.get(SslConfigs.SSL_SECURE_RANDOM_IMPLEMENTATION_CONFIG));
+        this.secureRandomImplementation = createSecureRandom((String)
+                configs.get(SslConfigs.SSL_SECURE_RANDOM_IMPLEMENTATION_CONFIG));
 
-        this.sslClientAuth = createSslClientAuth((String) configs.get(BrokerSecurityConfigs.SSL_CLIENT_AUTH_CONFIG));
+        this.sslClientAuth = createSslClientAuth((String) configs.get(
+                BrokerSecurityConfigs.SSL_CLIENT_AUTH_CONFIG));
 
         this.kmfAlgorithm = (String) configs.get(SslConfigs.SSL_KEYMANAGER_ALGORITHM_CONFIG);
         this.tmfAlgorithm = (String) configs.get(SslConfigs.SSL_TRUSTMANAGER_ALGORITHM_CONFIG);
 
-        this.keystore = createKeystore((String) configs.get(SslConfigs.SSL_KEYSTORE_TYPE_CONFIG), (String) configs.get(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG), (Password) configs.get(SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG), (Password) configs.get(SslConfigs.SSL_KEY_PASSWORD_CONFIG), (Password) configs.get(SslConfigs.SSL_KEYSTORE_KEY_CONFIG), (Password) configs.get(SslConfigs.SSL_KEYSTORE_CERTIFICATE_CHAIN_CONFIG));
+        this.keystore = createKeystore((String) configs.get(SslConfigs.SSL_KEYSTORE_TYPE_CONFIG),
+                (String) configs.get(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG),
+                (Password) configs.get(SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG),
+                (Password) configs.get(SslConfigs.SSL_KEY_PASSWORD_CONFIG),
+                (Password) configs.get(SslConfigs.SSL_KEYSTORE_KEY_CONFIG),
+                (Password) configs.get(SslConfigs.SSL_KEYSTORE_CERTIFICATE_CHAIN_CONFIG));
 
-        this.truststore = createTruststore((String) configs.get(SslConfigs.SSL_TRUSTSTORE_TYPE_CONFIG), (String) configs.get(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG), (Password) configs.get(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG), (Password) configs.get(SslConfigs.SSL_TRUSTSTORE_CERTIFICATES_CONFIG));
+        this.truststore = createTruststore((String) configs.get(SslConfigs.SSL_TRUSTSTORE_TYPE_CONFIG),
+                (String) configs.get(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG),
+                (Password) configs.get(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG),
+                (Password) configs.get(SslConfigs.SSL_TRUSTSTORE_CERTIFICATES_CONFIG));
 
         this.sslContext = createSSLContext(keystore, truststore);
     }
@@ -154,14 +184,12 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
         return this.sslContext;
     }
 
-    private SSLEngine createSslEngine(Mode mode, String peerHost, int peerPort, String endpointIdentification) {
+    private SSLEngine createSslEngine(ConnectionMode connectionMode, String peerHost, int peerPort, String endpointIdentification) {
         SSLEngine sslEngine = sslContext.createSSLEngine(peerHost, peerPort);
-        if (cipherSuites != null)
-            sslEngine.setEnabledCipherSuites(cipherSuites);
-        if (enabledProtocols != null)
-            sslEngine.setEnabledProtocols(enabledProtocols);
+        if (cipherSuites != null) sslEngine.setEnabledCipherSuites(cipherSuites);
+        if (enabledProtocols != null) sslEngine.setEnabledProtocols(enabledProtocols);
 
-        if (mode == Mode.SERVER) {
+        if (connectionMode == ConnectionMode.SERVER) {
             sslEngine.setUseClientMode(false);
             switch (sslClientAuth) {
                 case REQUIRED:
@@ -183,13 +211,15 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
         }
         return sslEngine;
     }
-
     private static SslClientAuth createSslClientAuth(String key) {
         SslClientAuth auth = SslClientAuth.forConfig(key);
         if (auth != null) {
             return auth;
         }
-        log.warn("Unrecognized client authentication configuration {}.  Falling " + "back to NONE.  Recognized client authentication configurations are {}.", key, String.join(", ", SslClientAuth.VALUES.stream().map(Enum::name).collect(Collectors.toList())));
+        log.warn("Unrecognized client authentication configuration {}.  Falling " +
+                "back to NONE.  Recognized client authentication configurations are {}.",
+                key, SslClientAuth.VALUES.stream().
+                        map(Enum::name).collect(Collectors.joining(", ")));
         return SslClientAuth.NONE;
     }
 
@@ -214,7 +244,8 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
 
             KeyManager[] keyManagers = null;
             if (keystore != null || kmfAlgorithm != null) {
-                String kmfAlgorithm = this.kmfAlgorithm != null ? this.kmfAlgorithm : KeyManagerFactory.getDefaultAlgorithm();
+                String kmfAlgorithm = this.kmfAlgorithm != null ?
+                        this.kmfAlgorithm : KeyManagerFactory.getDefaultAlgorithm();
                 KeyManagerFactory kmf = KeyManagerFactory.getInstance(kmfAlgorithm);
                 if (keystore != null) {
                     kmf.init(keystore.get(), keystore.keyPassword());
@@ -225,16 +256,22 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
             }
 
             String tmfAlgorithm = this.tmfAlgorithm != null ? this.tmfAlgorithm : TrustManagerFactory.getDefaultAlgorithm();
-            TrustManagerFactory tmf = TrustManagerFactory.getInstance(tmfAlgorithm);
-            KeyStore ts = truststore == null ? null : truststore.get();
-            tmf.init(ts);
+            TrustManager[] trustManagers = getTrustManagers(truststore, tmfAlgorithm);
 
-            sslContext.init(keyManagers, tmf.getTrustManagers(), this.secureRandomImplementation);
-            log.debug("Created SSL context with keystore {}, truststore {}, provider {}.", keystore, truststore, sslContext.getProvider().getName());
+            sslContext.init(keyManagers, trustManagers, this.secureRandomImplementation);
+            log.debug("Created SSL context with keystore {}, truststore {}, provider {}.",
+                    keystore, truststore, sslContext.getProvider().getName());
             return sslContext;
         } catch (Exception e) {
             throw new KafkaException(e);
         }
+    }
+
+    protected TrustManager[] getTrustManagers(SecurityStore truststore, String tmfAlgorithm) throws NoSuchAlgorithmException, KeyStoreException {
+        TrustManagerFactory tmf = TrustManagerFactory.getInstance(tmfAlgorithm);
+        KeyStore ts = truststore == null ? null : truststore.get();
+        tmf.init(ts);
+        return tmf.getTrustManagers();
     }
 
     // Visibility to override for testing
@@ -292,9 +329,7 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
 
     interface SecurityStore {
         KeyStore get();
-
         char[] keyPassword();
-
         boolean modified();
     }
 
@@ -332,7 +367,7 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
          * Loads this keystore
          * @return the keystore
          * @throws KafkaException if the file could not be read or if the keystore could not be loaded
-         *                        using the specified configs (e.g. if the password or keystore type is invalid)
+         *   using the specified configs (e.g. if the password or keystore type is invalid)
          */
         protected KeyStore load(boolean isKeyStore) {
             try (InputStream in = Files.newInputStream(Paths.get(path))) {
@@ -362,7 +397,9 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
 
         @Override
         public String toString() {
-            return "SecurityStore(" + "path=" + path + ", modificationTime=" + (fileLastModifiedMs == null ? null : new Date(fileLastModifiedMs)) + ")";
+            return "SecurityStore(" +
+                    "path=" + path +
+                    ", modificationTime=" + (fileLastModifiedMs == null ? null : new Date(fileLastModifiedMs)) + ")";
         }
     }
 
@@ -375,7 +412,8 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
         protected KeyStore load(boolean isKeyStore) {
             try {
                 Password storeContents = new Password(Utils.readFileAsString(path));
-                PemStore pemStore = isKeyStore ? new PemStore(storeContents, storeContents, keyPassword) : new PemStore(storeContents);
+                PemStore pemStore = isKeyStore ? new PemStore(storeContents, storeContents, keyPassword) :
+                    new PemStore(storeContents);
                 return pemStore.keyStore;
             } catch (Exception e) {
                 throw new InvalidConfigurationException("Failed to load PEM SSL keystore " + path, e);
@@ -386,7 +424,11 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
     static class PemStore implements SecurityStore {
         private static final PemParser CERTIFICATE_PARSER = new PemParser("CERTIFICATE");
         private static final PemParser PRIVATE_KEY_PARSER = new PemParser("PRIVATE KEY");
-        private static final List<KeyFactory> KEY_FACTORIES = Arrays.asList(keyFactory("RSA"), keyFactory("DSA"), keyFactory("EC"));
+        private static final List<KeyFactory> KEY_FACTORIES = Arrays.asList(
+                keyFactory("RSA"),
+                keyFactory("DSA"),
+                keyFactory("EC")
+        );
 
         private final char[] keyPassword;
         private final KeyStore keyStore;
@@ -452,7 +494,8 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
 
             Certificate[] certs = new Certificate[certEntries.size()];
             for (int i = 0; i < certs.length; i++) {
-                certs[i] = CertificateFactory.getInstance("X.509").generateCertificate(new ByteArrayInputStream(certEntries.get(i)));
+                certs[i] = CertificateFactory.getInstance("X.509")
+                    .generateCertificate(new ByteArrayInputStream(certEntries.get(i)));
             }
             return certs;
         }
@@ -502,14 +545,14 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
     /**
      * Parser to process certificate/private key entries from PEM files
      * Examples:
-     * -----BEGIN CERTIFICATE-----
-     * Base64 cert
-     * -----END CERTIFICATE-----
-     * <p>
-     * -----BEGIN ENCRYPTED PRIVATE KEY-----
-     * Base64 private key
-     * -----END ENCRYPTED PRIVATE KEY-----
-     * Additional data may be included before headers, so we match all entries within the PEM.
+     *   -----BEGIN CERTIFICATE-----
+     *   Base64 cert
+     *   -----END CERTIFICATE-----
+     *
+     *   -----BEGIN ENCRYPTED PRIVATE KEY-----
+     *   Base64 private key
+     *   -----END ENCRYPTED PRIVATE KEY-----
+     *   Additional data may be included before headers, so we match all entries within the PEM.
      */
     static class PemParser {
         private final String name;
@@ -522,13 +565,16 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
 
             String encodingParams = "\\s*[^\\r\\n]*:[^\\r\\n]*[\\r\\n]+";
             String base64Pattern = "([a-zA-Z0-9/+=\\s]*)";
-            String patternStr = String.format(beginOrEndFormat, "BEGIN", nameIgnoreSpace) + String.format("(?:%s)*", encodingParams) + base64Pattern + String.format(beginOrEndFormat, "END", nameIgnoreSpace);
+            String patternStr =  String.format(beginOrEndFormat, "BEGIN", nameIgnoreSpace) +
+                String.format("(?:%s)*", encodingParams) +
+                base64Pattern +
+                String.format(beginOrEndFormat, "END", nameIgnoreSpace);
             pattern = Pattern.compile(patternStr);
         }
 
         private List<byte[]> pemEntries(String pem) {
             Matcher matcher = pattern.matcher(pem + "\n"); // allow last newline to be omitted in value
-            List<byte[]> entries = new ArrayList<>();
+            List<byte[]>  entries = new ArrayList<>();
             while (matcher.find()) {
                 String base64Str = matcher.group(1).replaceAll("\\s", "");
                 entries.add(Base64.getDecoder().decode(base64Str));

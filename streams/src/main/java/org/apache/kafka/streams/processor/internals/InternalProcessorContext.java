@@ -122,6 +122,6 @@ public interface InternalProcessorContext<KOut, VOut> extends ProcessorContext, 
 
     void setProcessorMetadata(final ProcessorMetadata metadata);
 
-    ProcessorMetadata getProcessorMetadata();
+    ProcessorMetadata processorMetadata();
 
 }

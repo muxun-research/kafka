@@ -22,12 +22,11 @@ import org.slf4j.LoggerFactory;
 import java.util.Map;
 
 /**
- * IdentityReplicationPolicy does not rename remote topics. This is useful for migrating
- * from legacy MM1, or for any use-case involving one-way replication.
+ * Alternative implementation of {@link ReplicationPolicy} that does not rename remote topics.
+ * This is useful for migrating from legacy MirrorMaker, or for any use-case involving one-way replication.
  * <p>
- * N.B. MirrorMaker is not able to prevent cycles when using this class, so take care that
- * your replication topology is acyclic. If migrating from MirrorMaker v1, this will likely
- * already be the case.
+ * N.B. MirrorMaker is not able to prevent cycles when using this replication policy, so take care that
+ * your replication topology is acyclic. If migrating from legacy MirrorMaker, this will likely already be the case.
  */
 public class IdentityReplicationPolicy extends DefaultReplicationPolicy {
     private static final Logger log = LoggerFactory.getLogger(IdentityReplicationPolicy.class);
@@ -46,10 +45,10 @@ public class IdentityReplicationPolicy extends DefaultReplicationPolicy {
     }
 
     /**
-     * Unlike DefaultReplicationPolicy, IdentityReplicationPolicy does not include the source
+     * Unlike {@link DefaultReplicationPolicy}, IdentityReplicationPolicy does not include the source
      * cluster alias in the remote topic name. Instead, topic names are unchanged.
      * <p>
-     * In the special case of heartbeats, we defer to DefaultReplicationPolicy.
+     * In the special case of heartbeats, we defer to {@link DefaultReplicationPolicy#formatRemoteTopic(String, String)}.
      */
     @Override
     public String formatRemoteTopic(String sourceClusterAlias, String topic) {
@@ -61,11 +60,11 @@ public class IdentityReplicationPolicy extends DefaultReplicationPolicy {
     }
 
     /**
-     * Unlike DefaultReplicationPolicy, IdentityReplicationPolicy cannot know the source of
-     * a remote topic based on its name alone. If `source.cluster.alias` is provided,
-     * `topicSource` will return that.
+     * Unlike {@link DefaultReplicationPolicy}, IdentityReplicationPolicy cannot know the source of
+     * a remote topic based on its name alone. If <code>source.cluster.alias</code> is provided,
+     * this method will return that.
      * <p>
-     * In the special case of heartbeats, we defer to DefaultReplicationPolicy.
+     * In the special case of heartbeats, we defer to {@link DefaultReplicationPolicy#topicSource(String)}.
      */
     @Override
     public String topicSource(String topic) {
@@ -77,9 +76,9 @@ public class IdentityReplicationPolicy extends DefaultReplicationPolicy {
     }
 
     /**
-     * Since any topic may be a "remote topic", this just returns `topic`.
+     * Since any topic may be a remote topic, this just returns `topic`.
      * <p>
-     * In the special case of heartbeats, we defer to DefaultReplicationPolicy.
+     * In the special case of heartbeats, we defer to {@link DefaultReplicationPolicy#upstreamTopic(String)}.
      */
     @Override
     public String upstreamTopic(String topic) {

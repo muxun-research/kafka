@@ -19,11 +19,11 @@ package org.apache.kafka.connect.integration;
 import org.apache.kafka.connect.runtime.SourceConnectorConfig;
 import org.apache.kafka.connect.storage.StringConverter;
 import org.apache.kafka.connect.util.clusters.EmbeddedConnectCluster;
-import org.apache.kafka.test.IntegrationTest;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.experimental.categories.Category;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -31,7 +31,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.stream.IntStream;
 
-import static org.apache.kafka.connect.integration.MonitorableSourceConnector.TOPIC_CONFIG;
+import static org.apache.kafka.connect.integration.TestableSourceConnector.TOPIC_CONFIG;
 import static org.apache.kafka.connect.runtime.ConnectorConfig.CONNECTOR_CLASS_CONFIG;
 import static org.apache.kafka.connect.runtime.ConnectorConfig.KEY_CONVERTER_CLASS_CONFIG;
 import static org.apache.kafka.connect.runtime.ConnectorConfig.NAME_CONFIG;
@@ -51,189 +51,183 @@ import static org.apache.kafka.connect.util.clusters.EmbeddedConnectCluster.DEFA
  * Integration test for source connectors with a focus on topic creation with custom properties by
  * the connector tasks.
  */
-@Category(IntegrationTest.class)
+@Tag("integration")
 public class SourceConnectorsIntegrationTest {
 
-	private static final int NUM_WORKERS = 3;
-	private static final int NUM_TASKS = 1;
-	private static final String FOO_TOPIC = "foo-topic";
-	private static final String FOO_CONNECTOR = "foo-source";
-	private static final String BAR_TOPIC = "bar-topic";
-	private static final String BAR_CONNECTOR = "bar-source";
-	private static final String FOO_GROUP = "foo";
-	private static final String BAR_GROUP = "bar";
-	private static final int DEFAULT_REPLICATION_FACTOR = DEFAULT_NUM_BROKERS;
-	private static final int DEFAULT_PARTITIONS = 1;
-	private static final int FOO_GROUP_REPLICATION_FACTOR = DEFAULT_NUM_BROKERS;
-	private static final int FOO_GROUP_PARTITIONS = 9;
+    private static final int NUM_WORKERS = 3;
+    private static final int NUM_TASKS = 1;
+    private static final String FOO_TOPIC = "foo-topic";
+    private static final String FOO_CONNECTOR = "foo-source";
+    private static final String BAR_TOPIC = "bar-topic";
+    private static final String BAR_CONNECTOR = "bar-source";
+    private static final String FOO_GROUP = "foo";
+    private static final String BAR_GROUP = "bar";
+    private static final int DEFAULT_REPLICATION_FACTOR = DEFAULT_NUM_BROKERS;
+    private static final int DEFAULT_PARTITIONS = 1;
+    private static final int FOO_GROUP_REPLICATION_FACTOR = DEFAULT_NUM_BROKERS;
+    private static final int FOO_GROUP_PARTITIONS = 9;
 
-	private EmbeddedConnectCluster.Builder connectBuilder;
-	private EmbeddedConnectCluster connect;
-	Map<String, String> workerProps = new HashMap<>();
-	Properties brokerProps = new Properties();
+    private EmbeddedConnectCluster.Builder connectBuilder;
+    private EmbeddedConnectCluster connect;
+    Map<String, String> workerProps = new HashMap<>();
+    Properties brokerProps = new Properties();
 
-	@Before
-	public void setup() {
-		// setup Connect worker properties
-		workerProps.put(CONNECTOR_CLIENT_POLICY_CLASS_CONFIG, "All");
+    @BeforeEach
+    public void setup() {
+        // setup Connect worker properties
+        workerProps.put(CONNECTOR_CLIENT_POLICY_CLASS_CONFIG, "All");
 
-		// setup Kafka broker properties
-		brokerProps.put("auto.create.topics.enable", String.valueOf(false));
+        // setup Kafka broker properties
+        brokerProps.put("auto.create.topics.enable", String.valueOf(false));
 
-		// build a Connect cluster backed by Kafka and Zk
-		connectBuilder = new EmbeddedConnectCluster.Builder()
-				.name("connect-cluster")
-				.numWorkers(NUM_WORKERS)
-				.workerProps(workerProps)
-				.brokerProps(brokerProps)
-				.maskExitProcedures(true); // true is the default, setting here as example
-	}
+        // build a Connect cluster backed by a Kafka KRaft cluster
+        connectBuilder = new EmbeddedConnectCluster.Builder()
+                .name("connect-cluster")
+                .numWorkers(NUM_WORKERS)
+                .workerProps(workerProps)
+                .brokerProps(brokerProps)
+                .maskExitProcedures(true); // true is the default, setting here as example
+    }
 
-	@After
-	public void close() {
-		// stop all Connect, Kafka and Zk threads.
-		connect.stop();
-	}
+    @AfterEach
+    public void close() {
+        // stop the Connect cluster and its backing Kafka cluster.
+        connect.stop();
+    }
 
-	@Test
-	public void testTopicsAreCreatedWhenAutoCreateTopicsIsEnabledAtTheBroker() throws InterruptedException {
-		brokerProps.put("auto.create.topics.enable", String.valueOf(true));
-		workerProps.put(TOPIC_CREATION_ENABLE_CONFIG, String.valueOf(false));
-		connect = connectBuilder.brokerProps(brokerProps).workerProps(workerProps).build();
-		// start the clusters
-		connect.start();
+    @Test
+    public void testTopicsAreCreatedWhenAutoCreateTopicsIsEnabledAtTheBroker() throws InterruptedException {
+        brokerProps.put("auto.create.topics.enable", String.valueOf(true));
+        workerProps.put(TOPIC_CREATION_ENABLE_CONFIG, String.valueOf(false));
+        connect = connectBuilder.brokerProps(brokerProps).workerProps(workerProps).build();
+        // start the clusters
+        connect.start();
 
-		connect.assertions().assertAtLeastNumWorkersAreUp(NUM_WORKERS, "Initial group of workers did not start in time.");
+        Map<String, String> fooProps = sourceConnectorPropsWithGroups(FOO_TOPIC);
 
-		Map<String, String> fooProps = sourceConnectorPropsWithGroups(FOO_TOPIC);
+        // start a source connector
+        connect.configureConnector(FOO_CONNECTOR, fooProps);
+        fooProps.put(NAME_CONFIG, FOO_CONNECTOR);
 
-		// start a source connector
-		connect.configureConnector(FOO_CONNECTOR, fooProps);
-		fooProps.put(NAME_CONFIG, FOO_CONNECTOR);
+        connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(fooProps.get(CONNECTOR_CLASS_CONFIG), fooProps, 0,
+                "Validating connector configuration produced an unexpected number or errors.");
 
-		connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(fooProps.get(CONNECTOR_CLASS_CONFIG), fooProps, 0,
-				"Validating connector configuration produced an unexpected number or errors.");
+        connect.assertions().assertConnectorAndAtLeastNumTasksAreRunning(FOO_CONNECTOR, NUM_TASKS,
+                "Connector tasks did not start in time.");
 
-		connect.assertions().assertConnectorAndAtLeastNumTasksAreRunning(FOO_CONNECTOR, NUM_TASKS,
-				"Connector tasks did not start in time.");
+        connect.assertions().assertTopicsExist(FOO_TOPIC);
+        connect.assertions().assertTopicSettings(FOO_TOPIC, DEFAULT_REPLICATION_FACTOR,
+                DEFAULT_PARTITIONS, "Topic " + FOO_TOPIC + " does not have the expected settings");
+    }
 
-		connect.assertions().assertTopicsExist(FOO_TOPIC);
-		connect.assertions().assertTopicSettings(FOO_TOPIC, DEFAULT_REPLICATION_FACTOR,
-				DEFAULT_PARTITIONS, "Topic " + FOO_TOPIC + " does not have the expected settings");
-	}
+    @Test
+    public void testTopicsAreCreatedWhenTopicCreationIsEnabled() throws InterruptedException {
+        connect = connectBuilder.build();
+        // start the clusters
+        connect.start();
 
-	@Test
-	public void testTopicsAreCreatedWhenTopicCreationIsEnabled() throws InterruptedException {
-		connect = connectBuilder.build();
-		// start the clusters
-		connect.start();
+        Map<String, String> fooProps = sourceConnectorPropsWithGroups(FOO_TOPIC);
 
-		connect.assertions().assertAtLeastNumWorkersAreUp(NUM_WORKERS, "Initial group of workers did not start in time.");
+        // start a source connector
+        connect.configureConnector(FOO_CONNECTOR, fooProps);
+        fooProps.put(NAME_CONFIG, FOO_CONNECTOR);
 
-		Map<String, String> fooProps = sourceConnectorPropsWithGroups(FOO_TOPIC);
+        connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(fooProps.get(CONNECTOR_CLASS_CONFIG), fooProps, 0,
+                "Validating connector configuration produced an unexpected number or errors.");
 
-		// start a source connector
-		connect.configureConnector(FOO_CONNECTOR, fooProps);
-		fooProps.put(NAME_CONFIG, FOO_CONNECTOR);
+        connect.assertions().assertConnectorAndAtLeastNumTasksAreRunning(FOO_CONNECTOR, NUM_TASKS,
+                "Connector tasks did not start in time.");
 
-		connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(fooProps.get(CONNECTOR_CLASS_CONFIG), fooProps, 0,
-				"Validating connector configuration produced an unexpected number or errors.");
+        connect.assertions().assertTopicsExist(FOO_TOPIC);
+        connect.assertions().assertTopicSettings(FOO_TOPIC, FOO_GROUP_REPLICATION_FACTOR,
+                FOO_GROUP_PARTITIONS, "Topic " + FOO_TOPIC + " does not have the expected settings");
+    }
 
-		connect.assertions().assertConnectorAndAtLeastNumTasksAreRunning(FOO_CONNECTOR, NUM_TASKS,
-				"Connector tasks did not start in time.");
+    @Test
+    public void testSwitchingToTopicCreationEnabled() throws InterruptedException {
+        workerProps.put(TOPIC_CREATION_ENABLE_CONFIG, String.valueOf(false));
+        connect = connectBuilder.build();
+        // start the clusters
+        connect.start();
 
-		connect.assertions().assertTopicsExist(FOO_TOPIC);
-		connect.assertions().assertTopicSettings(FOO_TOPIC, FOO_GROUP_REPLICATION_FACTOR,
-				FOO_GROUP_PARTITIONS, "Topic " + FOO_TOPIC + " does not have the expected settings");
-	}
+        connect.kafka().createTopic(BAR_TOPIC, DEFAULT_PARTITIONS, DEFAULT_REPLICATION_FACTOR, Collections.emptyMap());
 
-	@Test
-	public void testSwitchingToTopicCreationEnabled() throws InterruptedException {
-		workerProps.put(TOPIC_CREATION_ENABLE_CONFIG, String.valueOf(false));
-		connect = connectBuilder.build();
-		// start the clusters
-		connect.start();
+        connect.assertions().assertTopicsExist(BAR_TOPIC);
+        connect.assertions().assertTopicSettings(BAR_TOPIC, DEFAULT_REPLICATION_FACTOR,
+                DEFAULT_PARTITIONS, "Topic " + BAR_TOPIC + " does not have the expected settings");
 
-		connect.kafka().createTopic(BAR_TOPIC, DEFAULT_PARTITIONS, DEFAULT_REPLICATION_FACTOR, Collections.emptyMap());
+        Map<String, String> barProps = defaultSourceConnectorProps(BAR_TOPIC);
+        // start a source connector with topic creation properties
+        connect.configureConnector(BAR_CONNECTOR, barProps);
+        barProps.put(NAME_CONFIG, BAR_CONNECTOR);
 
-		connect.assertions().assertTopicsExist(BAR_TOPIC);
-		connect.assertions().assertTopicSettings(BAR_TOPIC, DEFAULT_REPLICATION_FACTOR,
-				DEFAULT_PARTITIONS, "Topic " + BAR_TOPIC + " does not have the expected settings");
+        Map<String, String> fooProps = sourceConnectorPropsWithGroups(FOO_TOPIC);
+        // start a source connector without topic creation properties
+        connect.configureConnector(FOO_CONNECTOR, fooProps);
+        fooProps.put(NAME_CONFIG, FOO_CONNECTOR);
 
-		connect.assertions().assertAtLeastNumWorkersAreUp(NUM_WORKERS, "Initial group of workers did not start in time.");
+        connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(fooProps.get(CONNECTOR_CLASS_CONFIG), fooProps, 0,
+                "Validating connector configuration produced an unexpected number or errors.");
 
-		Map<String, String> barProps = defaultSourceConnectorProps(BAR_TOPIC);
-		// start a source connector with topic creation properties
-		connect.configureConnector(BAR_CONNECTOR, barProps);
-		barProps.put(NAME_CONFIG, BAR_CONNECTOR);
+        connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(barProps.get(CONNECTOR_CLASS_CONFIG), barProps, 0,
+                "Validating connector configuration produced an unexpected number or errors.");
 
-		Map<String, String> fooProps = sourceConnectorPropsWithGroups(FOO_TOPIC);
-		// start a source connector without topic creation properties
-		connect.configureConnector(FOO_CONNECTOR, fooProps);
-		fooProps.put(NAME_CONFIG, FOO_CONNECTOR);
+        connect.assertions().assertConnectorAndAtLeastNumTasksAreRunning(FOO_CONNECTOR, NUM_TASKS,
+                "Connector tasks did not start in time.");
 
-		connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(fooProps.get(CONNECTOR_CLASS_CONFIG), fooProps, 0,
-				"Validating connector configuration produced an unexpected number or errors.");
+        connect.assertions().assertConnectorAndAtLeastNumTasksAreRunning(BAR_CONNECTOR, NUM_TASKS,
+                "Connector tasks did not start in time.");
 
-		connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(barProps.get(CONNECTOR_CLASS_CONFIG), barProps, 0,
-				"Validating connector configuration produced an unexpected number or errors.");
+        connect.assertions().assertTopicsExist(BAR_TOPIC);
+        connect.assertions().assertTopicSettings(BAR_TOPIC, DEFAULT_REPLICATION_FACTOR,
+                DEFAULT_PARTITIONS, "Topic " + BAR_TOPIC + " does not have the expected settings");
 
-		connect.assertions().assertConnectorAndAtLeastNumTasksAreRunning(FOO_CONNECTOR, NUM_TASKS,
-				"Connector tasks did not start in time.");
+        connect.assertions().assertTopicsDoNotExist(FOO_TOPIC);
 
-		connect.assertions().assertConnectorAndAtLeastNumTasksAreRunning(BAR_CONNECTOR, NUM_TASKS,
-				"Connector tasks did not start in time.");
+        connect.healthyWorkers().forEach(w -> connect.removeWorker(w));
 
-		connect.assertions().assertTopicsExist(BAR_TOPIC);
-		connect.assertions().assertTopicSettings(BAR_TOPIC, DEFAULT_REPLICATION_FACTOR,
-				DEFAULT_PARTITIONS, "Topic " + BAR_TOPIC + " does not have the expected settings");
+        workerProps.put(TOPIC_CREATION_ENABLE_CONFIG, String.valueOf(true));
 
-		connect.assertions().assertTopicsDoNotExist(FOO_TOPIC);
+        IntStream.range(0, 3).forEach(i -> connect.addWorker());
+        connect.assertions().assertAtLeastNumWorkersAreUp(NUM_WORKERS, "Workers did not start in time after cluster was rolled.");
 
-		connect.activeWorkers().forEach(w -> connect.removeWorker(w));
+        connect.assertions().assertConnectorAndAtLeastNumTasksAreRunning(FOO_CONNECTOR, NUM_TASKS,
+                "Connector tasks did not start in time.");
 
-		workerProps.put(TOPIC_CREATION_ENABLE_CONFIG, String.valueOf(true));
+        connect.assertions().assertConnectorAndAtLeastNumTasksAreRunning(BAR_CONNECTOR, NUM_TASKS,
+                "Connector tasks did not start in time.");
 
-		IntStream.range(0, 3).forEach(i -> connect.addWorker());
-		connect.assertions().assertAtLeastNumWorkersAreUp(NUM_WORKERS, "Initial group of workers did not start in time.");
+        connect.assertions().assertTopicsExist(FOO_TOPIC);
+        connect.assertions().assertTopicSettings(FOO_TOPIC, FOO_GROUP_REPLICATION_FACTOR,
+                FOO_GROUP_PARTITIONS, "Topic " + FOO_TOPIC + " does not have the expected settings");
+        connect.assertions().assertTopicsExist(BAR_TOPIC);
+        connect.assertions().assertTopicSettings(BAR_TOPIC, DEFAULT_REPLICATION_FACTOR,
+                DEFAULT_PARTITIONS, "Topic " + BAR_TOPIC + " does not have the expected settings");
+    }
 
-		connect.assertions().assertConnectorAndAtLeastNumTasksAreRunning(FOO_CONNECTOR, NUM_TASKS,
-				"Connector tasks did not start in time.");
+    private Map<String, String> defaultSourceConnectorProps(String topic) {
+        // setup up props for the source connector
+        Map<String, String> props = new HashMap<>();
+        props.put(CONNECTOR_CLASS_CONFIG, TestableSourceConnector.class.getSimpleName());
+        props.put(TASKS_MAX_CONFIG, String.valueOf(NUM_TASKS));
+        props.put(TOPIC_CONFIG, topic);
+        props.put("throughput", String.valueOf(10));
+        props.put("messages.per.poll", String.valueOf(10));
+        props.put(KEY_CONVERTER_CLASS_CONFIG, StringConverter.class.getName());
+        props.put(VALUE_CONVERTER_CLASS_CONFIG, StringConverter.class.getName());
+        return props;
+    }
 
-		connect.assertions().assertConnectorAndAtLeastNumTasksAreRunning(BAR_CONNECTOR, NUM_TASKS,
-				"Connector tasks did not start in time.");
-
-		connect.assertions().assertTopicsExist(FOO_TOPIC);
-		connect.assertions().assertTopicSettings(FOO_TOPIC, FOO_GROUP_REPLICATION_FACTOR,
-				FOO_GROUP_PARTITIONS, "Topic " + FOO_TOPIC + " does not have the expected settings");
-		connect.assertions().assertTopicsExist(BAR_TOPIC);
-		connect.assertions().assertTopicSettings(BAR_TOPIC, DEFAULT_REPLICATION_FACTOR,
-				DEFAULT_PARTITIONS, "Topic " + BAR_TOPIC + " does not have the expected settings");
-	}
-
-	private Map<String, String> defaultSourceConnectorProps(String topic) {
-		// setup up props for the source connector
-		Map<String, String> props = new HashMap<>();
-		props.put(CONNECTOR_CLASS_CONFIG, MonitorableSourceConnector.class.getSimpleName());
-		props.put(TASKS_MAX_CONFIG, String.valueOf(NUM_TASKS));
-		props.put(TOPIC_CONFIG, topic);
-		props.put("throughput", String.valueOf(10));
-		props.put("messages.per.poll", String.valueOf(10));
-		props.put(KEY_CONVERTER_CLASS_CONFIG, StringConverter.class.getName());
-		props.put(VALUE_CONVERTER_CLASS_CONFIG, StringConverter.class.getName());
-		return props;
-	}
-
-	private Map<String, String> sourceConnectorPropsWithGroups(String topic) {
-		// setup up props for the source connector
-		Map<String, String> props = defaultSourceConnectorProps(topic);
-		props.put(TOPIC_CREATION_GROUPS_CONFIG, String.join(",", FOO_GROUP, BAR_GROUP));
-		props.put(DEFAULT_TOPIC_CREATION_PREFIX + REPLICATION_FACTOR_CONFIG, String.valueOf(DEFAULT_REPLICATION_FACTOR));
-		props.put(DEFAULT_TOPIC_CREATION_PREFIX + PARTITIONS_CONFIG, String.valueOf(DEFAULT_PARTITIONS));
-		props.put(SourceConnectorConfig.TOPIC_CREATION_PREFIX + FOO_GROUP + "." + INCLUDE_REGEX_CONFIG, FOO_TOPIC);
-		props.put(SourceConnectorConfig.TOPIC_CREATION_PREFIX + FOO_GROUP + "." + EXCLUDE_REGEX_CONFIG, BAR_TOPIC);
-		props.put(SourceConnectorConfig.TOPIC_CREATION_PREFIX + FOO_GROUP + "." + PARTITIONS_CONFIG,
-				String.valueOf(FOO_GROUP_PARTITIONS));
-		return props;
-	}
+    private Map<String, String> sourceConnectorPropsWithGroups(String topic) {
+        // setup up props for the source connector
+        Map<String, String> props = defaultSourceConnectorProps(topic);
+        props.put(TOPIC_CREATION_GROUPS_CONFIG, String.join(",", FOO_GROUP, BAR_GROUP));
+        props.put(DEFAULT_TOPIC_CREATION_PREFIX + REPLICATION_FACTOR_CONFIG, String.valueOf(DEFAULT_REPLICATION_FACTOR));
+        props.put(DEFAULT_TOPIC_CREATION_PREFIX + PARTITIONS_CONFIG, String.valueOf(DEFAULT_PARTITIONS));
+        props.put(SourceConnectorConfig.TOPIC_CREATION_PREFIX + FOO_GROUP + "." + INCLUDE_REGEX_CONFIG, FOO_TOPIC);
+        props.put(SourceConnectorConfig.TOPIC_CREATION_PREFIX + FOO_GROUP + "." + EXCLUDE_REGEX_CONFIG, BAR_TOPIC);
+        props.put(SourceConnectorConfig.TOPIC_CREATION_PREFIX + FOO_GROUP + "." + PARTITIONS_CONFIG,
+                String.valueOf(FOO_GROUP_PARTITIONS));
+        return props;
+    }
 }

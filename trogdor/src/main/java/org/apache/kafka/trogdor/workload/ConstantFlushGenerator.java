@@ -16,59 +16,59 @@
  */
 
 package org.apache.kafka.trogdor.workload;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.common.errors.InterruptException;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.common.errors.InterruptException;
 
 /**
  * This generator will flush the producer after a specific number of messages.  This is useful to simulate a specific
  * number of messages in a batch regardless of the message size, since batch flushing is not exposed in the
  * KafkaProducer client code.
- * <p>
+ *
  * WARNING: This does not directly control when KafkaProducer will batch, this only makes best effort.  This also
  * cannot tell when a KafkaProducer batch is closed.  If the KafkaProducer sends a batch before this executes, this
  * will continue to execute on its own cadence.  To alleviate this, make sure to set `linger.ms` to allow for at least
  * `messagesPerFlush` messages to be generated, and make sure to set `batch.size` to allow for all these messages.
- * <p>
+ *
  * Here is an example spec:
- * <p>
+ *
  * {
- * "type": "constant",
- * "messagesPerFlush": 16
+ *    "type": "constant",
+ *    "messagesPerFlush": 16
  * }
- * <p>
+ *
  * This example will flush the producer every 16 messages.
  */
 
 public class ConstantFlushGenerator implements FlushGenerator {
-	private final int messagesPerFlush;
-	private int messageTracker = 0;
+    private final int messagesPerFlush;
+    private int messageTracker = 0;
 
-	@JsonCreator
-	public ConstantFlushGenerator(@JsonProperty("messagesPerFlush") int messagesPerFlush) {
-		this.messagesPerFlush = messagesPerFlush;
-	}
+    @JsonCreator
+    public ConstantFlushGenerator(@JsonProperty("messagesPerFlush") int messagesPerFlush) {
+        this.messagesPerFlush = messagesPerFlush;
+    }
 
-	@JsonProperty
-	public int messagesPerFlush() {
-		return messagesPerFlush;
-	}
+    @JsonProperty
+    public int messagesPerFlush() {
+        return messagesPerFlush;
+    }
 
-	@Override
-	public synchronized <K, V> void increment(KafkaProducer<K, V> producer) {
-		// Increment the message tracker.
-		messageTracker += 1;
+    @Override
+    public synchronized <K, V> void increment(KafkaProducer<K, V> producer) {
+        // Increment the message tracker.
+        messageTracker += 1;
 
-		// Flush when we reach the desired number of messages.
-		if (messageTracker >= messagesPerFlush) {
-			messageTracker = 0;
-			try {
-				producer.flush();
-			} catch (InterruptException e) {
-				// Ignore flush interruption exceptions.
-			}
-		}
-	}
+        // Flush when we reach the desired number of messages.
+        if (messageTracker >= messagesPerFlush) {
+            messageTracker = 0;
+            try {
+                producer.flush();
+            } catch (InterruptException e) {
+                // Ignore flush interruption exceptions.
+            }
+        }
+    }
 }

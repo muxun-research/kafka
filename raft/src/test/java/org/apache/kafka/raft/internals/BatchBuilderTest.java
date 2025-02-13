@@ -16,111 +16,111 @@
  */
 package org.apache.kafka.raft.internals;
 
+import org.apache.kafka.common.compress.Compression;
 import org.apache.kafka.common.record.CompressionType;
 import org.apache.kafka.common.record.MemoryRecords;
 import org.apache.kafka.common.record.MutableRecordBatch;
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.common.utils.Utils;
+
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BatchBuilderTest {
-	private StringSerde serde = new StringSerde();
-	private MockTime time = new MockTime();
+    private final StringSerde serde = new StringSerde();
+    private final MockTime time = new MockTime();
 
-	@ParameterizedTest
-	@EnumSource(CompressionType.class)
-	void testBuildBatch(CompressionType compressionType) {
-		ByteBuffer buffer = ByteBuffer.allocate(1024);
-		long baseOffset = 57;
-		long logAppendTime = time.milliseconds();
-		boolean isControlBatch = false;
-		int leaderEpoch = 15;
+    @ParameterizedTest
+    @EnumSource(CompressionType.class)
+    void testBuildBatch(CompressionType compressionType) {
+        ByteBuffer buffer = ByteBuffer.allocate(1024);
+        long baseOffset = 57;
+        long logAppendTime = time.milliseconds();
+        int leaderEpoch = 15;
+        Compression compression = Compression.of(compressionType).build();
+        BatchBuilder<String> builder = new BatchBuilder<>(
+            buffer,
+            serde,
+            compression,
+            baseOffset,
+            logAppendTime,
+            leaderEpoch,
+            buffer.limit()
+        );
 
-		BatchBuilder<String> builder = new BatchBuilder<>(
-				buffer,
-				serde,
-				compressionType,
-				baseOffset,
-				logAppendTime,
-				isControlBatch,
-				leaderEpoch,
-				buffer.limit()
-		);
+        List<String> records = Arrays.asList(
+            "a",
+            "ap",
+            "app",
+            "appl",
+            "apple"
+        );
 
-		List<String> records = Arrays.asList(
-				"a",
-				"ap",
-				"app",
-				"appl",
-				"apple"
-		);
+        records.forEach(record -> builder.appendRecord(record, null));
+        MemoryRecords builtRecordSet = builder.build();
+        assertTrue(builder.bytesNeeded(Collections.singletonList("a"), null).isPresent());
+        assertThrows(IllegalStateException.class, () -> builder.appendRecord("a", null));
 
-		records.forEach(record -> builder.appendRecord(record, null));
-		MemoryRecords builtRecordSet = builder.build();
-		assertTrue(builder.bytesNeeded(Arrays.asList("a"), null).isPresent());
-		assertThrows(IllegalStateException.class, () -> builder.appendRecord("a", null));
+        List<MutableRecordBatch> builtBatches = Utils.toList(builtRecordSet.batchIterator());
+        assertEquals(1, builtBatches.size());
+        assertEquals(records, builder.records());
 
-		List<MutableRecordBatch> builtBatches = Utils.toList(builtRecordSet.batchIterator());
-		assertEquals(1, builtBatches.size());
-		assertEquals(records, builder.records());
+        MutableRecordBatch batch = builtBatches.get(0);
+        assertEquals(5, batch.countOrNull());
+        assertEquals(compressionType, batch.compressionType());
+        assertEquals(baseOffset, batch.baseOffset());
+        assertEquals(logAppendTime, batch.maxTimestamp());
+        assertFalse(batch.isControlBatch());
+        assertEquals(leaderEpoch, batch.partitionLeaderEpoch());
 
-		MutableRecordBatch batch = builtBatches.get(0);
-		assertEquals(5, batch.countOrNull());
-		assertEquals(compressionType, batch.compressionType());
-		assertEquals(baseOffset, batch.baseOffset());
-		assertEquals(logAppendTime, batch.maxTimestamp());
-		assertEquals(isControlBatch, batch.isControlBatch());
-		assertEquals(leaderEpoch, batch.partitionLeaderEpoch());
-
-		List<String> builtRecords = Utils.toList(batch).stream()
-				.map(record -> Utils.utf8(record.value()))
-				.collect(Collectors.toList());
-		assertEquals(records, builtRecords);
-	}
+        List<String> builtRecords = Utils.toList(batch).stream()
+            .map(record -> Utils.utf8(record.value()))
+            .collect(Collectors.toList());
+        assertEquals(records, builtRecords);
+    }
 
 
-	@ParameterizedTest
-	@ValueSource(ints = {128, 157, 256, 433, 512, 777, 1024})
-	public void testHasRoomForUncompressed(int batchSize) {
-		ByteBuffer buffer = ByteBuffer.allocate(batchSize);
-		long baseOffset = 57;
-		long logAppendTime = time.milliseconds();
-		boolean isControlBatch = false;
-		int leaderEpoch = 15;
+    @ParameterizedTest
+    @ValueSource(ints = {128, 157, 256, 433, 512, 777, 1024})
+    public void testHasRoomForUncompressed(int batchSize) {
+        ByteBuffer buffer = ByteBuffer.allocate(batchSize);
+        long baseOffset = 57;
+        long logAppendTime = time.milliseconds();
+        int leaderEpoch = 15;
 
-		BatchBuilder<String> builder = new BatchBuilder<>(
-				buffer,
-				serde,
-				CompressionType.NONE,
-				baseOffset,
-				logAppendTime,
-				isControlBatch,
-				leaderEpoch,
-				buffer.limit()
-		);
+        BatchBuilder<String> builder = new BatchBuilder<>(
+            buffer,
+            serde,
+            Compression.NONE,
+            baseOffset,
+            logAppendTime,
+            leaderEpoch,
+            buffer.limit()
+        );
 
-		String record = "i am a record";
+        String record = "i am a record";
 
-		while (!builder.bytesNeeded(Arrays.asList(record), null).isPresent()) {
-			builder.appendRecord(record, null);
-		}
+        while (builder.bytesNeeded(Collections.singletonList(record), null).isEmpty()) {
+            builder.appendRecord(record, null);
+        }
 
-		// Approximate size should be exact when compression is not used
-		int sizeInBytes = builder.approximateSizeInBytes();
-		MemoryRecords records = builder.build();
-		assertEquals(sizeInBytes, records.sizeInBytes());
-		assertTrue(sizeInBytes <= batchSize, "Built batch size "
-				+ sizeInBytes + " is larger than max batch size " + batchSize);
-	}
+        // Approximate size should be exact when compression is not used
+        int sizeInBytes = builder.approximateSizeInBytes();
+        MemoryRecords records = builder.build();
+        assertEquals(sizeInBytes, records.sizeInBytes());
+        assertTrue(sizeInBytes <= batchSize, "Built batch size "
+            + sizeInBytes + " is larger than max batch size " + batchSize);
+    }
 }

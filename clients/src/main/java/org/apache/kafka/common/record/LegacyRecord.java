@@ -123,16 +123,8 @@ public final class LegacyRecord {
         return sizeInBytes() >= RECORD_OVERHEAD_V0 && checksum() == computeChecksum();
     }
 
-    public Long wrapperRecordTimestamp() {
-        return wrapperRecordTimestamp;
-    }
-
-    public TimestampType wrapperRecordTimestampType() {
-        return wrapperRecordTimestampType;
-    }
-
     /**
-     * Throw an InvalidRecordException if isValid is false for this record
+     * Throw an CorruptRecordException if isValid is false for this record
      */
     public void ensureValid() {
         if (sizeInBytes() < RECORD_OVERHEAD_V0)
@@ -385,8 +377,7 @@ public final class LegacyRecord {
                               ByteBuffer value,
                               CompressionType compressionType,
                               TimestampType timestampType) {
-        try {
-            DataOutputStream out = new DataOutputStream(new ByteBufferOutputStream(buffer));
+        try (DataOutputStream out = new DataOutputStream(new ByteBufferOutputStream(buffer))) {
             write(out, magic, timestamp, key, value, compressionType, timestampType);
         } catch (IOException e) {
             throw new KafkaException(e);

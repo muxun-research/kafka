@@ -30,20 +30,23 @@ public class StoreQueryParameters<T> {
     private final String storeName;
     private final QueryableStoreType<T> queryableStoreType;
 
-    protected StoreQueryParameters(final String storeName, final QueryableStoreType<T> queryableStoreType, final Integer partition, final boolean staleStores) {
+    protected StoreQueryParameters(final String storeName, final QueryableStoreType<T>  queryableStoreType, final Integer partition, final boolean staleStores) {
         this.storeName = storeName;
         this.queryableStoreType = queryableStoreType;
         this.partition = partition;
         this.staleStores = staleStores;
     }
 
-    public static <T> StoreQueryParameters<T> fromNameAndType(final String storeName, final QueryableStoreType<T> queryableStoreType) {
+    public static <T> StoreQueryParameters<T> fromNameAndType(final String storeName,
+                                                              final QueryableStoreType<T>  queryableStoreType) {
         return new StoreQueryParameters<>(storeName, queryableStoreType, null, false);
     }
 
     /**
      * Set a specific partition that should be queried exclusively.
-     * @param partition The specific integer partition to be fetched from the stores list by using {@link StoreQueryParameters}.
+     *
+     * @param partition   The specific integer partition to be fetched from the stores list by using {@link StoreQueryParameters}.
+     *
      * @return StoreQueryParameters a new {@code StoreQueryParameters} instance configured with the specified partition
      */
     public StoreQueryParameters<T> withPartition(final Integer partition) {
@@ -52,6 +55,7 @@ public class StoreQueryParameters<T> {
 
     /**
      * Enable querying of stale state stores, i.e., allow to query active tasks during restore as well as standby tasks.
+     *
      * @return StoreQueryParameters a new {@code StoreQueryParameters} instance configured with serving from stale stores enabled
      */
     public StoreQueryParameters<T> enableStaleStores() {
@@ -60,6 +64,7 @@ public class StoreQueryParameters<T> {
 
     /**
      * Get the name of the state store that should be queried.
+     *
      * @return String state store name
      */
     public String storeName() {
@@ -68,6 +73,7 @@ public class StoreQueryParameters<T> {
 
     /**
      * Get the queryable store type for which key is queried by the user.
+     *
      * @return QueryableStoreType type of queryable store
      */
     public QueryableStoreType<T> queryableStoreType() {
@@ -78,6 +84,7 @@ public class StoreQueryParameters<T> {
      * Get the store partition that will be queried.
      * If the method returns {@code null}, it would mean that no specific partition has been requested,
      * so all the local partitions for the store will be queried.
+     *
      * @return Integer partition
      */
     public Integer partition() {
@@ -86,6 +93,7 @@ public class StoreQueryParameters<T> {
 
     /**
      * Get the flag staleStores. If {@code true}, include standbys and recovering stores along with running stores.
+     *
      * @return boolean staleStores
      */
     public boolean staleStoresEnabled() {
@@ -97,13 +105,21 @@ public class StoreQueryParameters<T> {
         if (!(obj instanceof StoreQueryParameters)) {
             return false;
         }
-        final StoreQueryParameters storeQueryParameters = (StoreQueryParameters) obj;
-        return Objects.equals(storeQueryParameters.partition, partition) && Objects.equals(storeQueryParameters.staleStores, staleStores) && Objects.equals(storeQueryParameters.storeName, storeName) && Objects.equals(storeQueryParameters.queryableStoreType, queryableStoreType);
+        final StoreQueryParameters<?> storeQueryParameters = (StoreQueryParameters<?>) obj;
+        return Objects.equals(storeQueryParameters.partition, partition)
+                && Objects.equals(storeQueryParameters.staleStores, staleStores)
+                && Objects.equals(storeQueryParameters.storeName, storeName)
+                && Objects.equals(storeQueryParameters.queryableStoreType, queryableStoreType);
     }
 
     @Override
     public String toString() {
-        return "StoreQueryParameters {" + "partition=" + partition + ", staleStores=" + staleStores + ", storeName=" + storeName + ", queryableStoreType=" + queryableStoreType + '}';
+        return "StoreQueryParameters {" +
+                "partition=" + partition +
+                ", staleStores=" + staleStores +
+                ", storeName=" + storeName +
+                ", queryableStoreType=" + queryableStoreType +
+                '}';
     }
 
     @Override

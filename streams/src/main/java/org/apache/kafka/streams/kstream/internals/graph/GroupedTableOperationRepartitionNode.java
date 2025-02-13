@@ -29,43 +29,42 @@ import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 public class GroupedTableOperationRepartitionNode<K, V> extends BaseRepartitionNode<K, V> {
 
 
-	private GroupedTableOperationRepartitionNode(final String nodeName,
-												 final Serde<K> keySerde,
-												 final Serde<V> valueSerde,
-												 final String sinkName,
-												 final String sourceName,
-												 final String repartitionTopic,
-												 final ProcessorParameters<K, V, ?, ?> processorParameters) {
-
-		super(
-				nodeName,
-				sourceName,
-				processorParameters,
-				keySerde,
-				valueSerde,
-				sinkName,
-				repartitionTopic,
-				null,
-				InternalTopicProperties.empty()
-		);
+    private GroupedTableOperationRepartitionNode(final String nodeName,
+                                                 final Serde<K> keySerde,
+                                                 final Serde<V> valueSerde,
+                                                 final String sinkName,
+                                                 final String sourceName,
+                                                 final String repartitionTopic,
+                                                 final ProcessorParameters<K, V, K, V> processorParameters) {
+        super(
+            nodeName,
+            sourceName,
+            processorParameters,
+            keySerde,
+            valueSerde,
+            sinkName,
+            repartitionTopic,
+            null,
+            InternalTopicProperties.empty()
+        );
     }
 
-	@Override
-	Serializer<V> valueSerializer() {
-		final Serializer<V> valueSerializer = super.valueSerializer();
-		return unsafeCastChangedToValueSerializer(valueSerializer);
-	}
+    @Override
+    Serializer<V> valueSerializer() {
+        final Serializer<V> valueSerializer = super.valueSerializer();
+        return unsafeCastChangedToValueSerializer(valueSerializer);
+    }
 
     @SuppressWarnings("unchecked")
     private Serializer<V> unsafeCastChangedToValueSerializer(final Serializer<V> valueSerializer) {
         return (Serializer<V>) new ChangedSerializer<>(valueSerializer);
     }
 
-	@Override
-	Deserializer<V> valueDeserializer() {
-		final Deserializer<? extends V> valueDeserializer = super.valueDeserializer();
-		return unsafeCastChangedToValueDeserializer(valueDeserializer);
-	}
+    @Override
+    Deserializer<V> valueDeserializer() {
+        final Deserializer<? extends V> valueDeserializer = super.valueDeserializer();
+        return unsafeCastChangedToValueDeserializer(valueDeserializer);
+    }
 
     @SuppressWarnings("unchecked")
     private Deserializer<V> unsafeCastChangedToValueDeserializer(final Deserializer<? extends V> valueDeserializer) {
@@ -79,43 +78,41 @@ public class GroupedTableOperationRepartitionNode<K, V> extends BaseRepartitionN
 
     @Override
     public void writeToTopology(final InternalTopologyBuilder topologyBuilder) {
-		topologyBuilder.addInternalTopic(repartitionTopic, internalTopicProperties);
+        topologyBuilder.addInternalTopic(repartitionTopic, internalTopicProperties);
 
         topologyBuilder.addSink(
-				sinkName,
-				repartitionTopic,
-				keySerializer(),
-				valueSerializer(),
-				null,
-				parentNodeNames()
-		);
+            sinkName,
+            repartitionTopic,
+            keySerializer(),
+            valueSerializer(),
+            null,
+            parentNodeNames()
+        );
 
         topologyBuilder.addSource(
-				null,
-				sourceName,
-				new FailOnInvalidTimestamp(),
-				keyDeserializer(),
-				valueDeserializer(),
-				repartitionTopic
-		);
-
+            null,
+            sourceName,
+            new FailOnInvalidTimestamp(),
+            keyDeserializer(),
+            valueDeserializer(),
+            repartitionTopic
+        );
     }
 
-    public static <K1, V1> GroupedTableOperationRepartitionNodeBuilder<K1, V1> groupedTableOperationNodeBuilder() {
+    public static <K, V> GroupedTableOperationRepartitionNodeBuilder<K, V> groupedTableOperationNodeBuilder() {
         return new GroupedTableOperationRepartitionNodeBuilder<>();
     }
 
-	public static final class GroupedTableOperationRepartitionNodeBuilder<K, V> extends BaseRepartitionNodeBuilder<K, V, GroupedTableOperationRepartitionNode<K, V>> {
-
-		@Override
-		public GroupedTableOperationRepartitionNode<K, V> build() {
-			return new GroupedTableOperationRepartitionNode<>(
-					nodeName,
-					keySerde,
-					valueSerde,
-					sinkName,
-					sourceName,
-					repartitionTopic,
+    public static final class GroupedTableOperationRepartitionNodeBuilder<K, V> extends BaseRepartitionNodeBuilder<K, V, GroupedTableOperationRepartitionNode<K, V>> {
+        @Override
+        public GroupedTableOperationRepartitionNode<K, V> build() {
+            return new GroupedTableOperationRepartitionNode<>(
+                nodeName,
+                keySerde,
+                valueSerde,
+                sinkName,
+                sourceName,
+                repartitionTopic,
                 processorParameters
             );
         }

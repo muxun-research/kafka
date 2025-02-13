@@ -48,6 +48,7 @@ import org.apache.kafka.trogdor.agent.AgentClient;
 import org.apache.kafka.trogdor.common.Node;
 import org.apache.kafka.trogdor.rest.*;
 import org.apache.kafka.trogdor.task.TaskSpec;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -169,7 +170,7 @@ public final class NodeManager {
         public void run() {
             rescheduleNextHeartbeat(HEARTBEAT_DELAY_MS);
             try {
-                AgentStatusResponse agentStatus = null;
+                AgentStatusResponse agentStatus;
                 try {
                     agentStatus = client.status();
                 } catch (ConnectException e) {

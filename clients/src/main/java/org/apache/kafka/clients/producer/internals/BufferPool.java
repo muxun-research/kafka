@@ -51,9 +51,7 @@ public class BufferPool {
     private final ReentrantLock lock;
     private final Deque<ByteBuffer> free;
     private final Deque<Condition> waiters;
-    /**
-     * Total available memory is the sum of nonPooledAvailableMemory and the number of byte buffers in free * poolableSize.
-     */
+    /** Total available memory is the sum of nonPooledAvailableMemory and the number of byte buffers in free * poolableSize.  */
     private long nonPooledAvailableMemory;
     private final Metrics metrics;
     private final Time time;
@@ -62,10 +60,11 @@ public class BufferPool {
 
     /**
      * Create a new buffer pool
-     * @param memory        The maximum amount of memory that this buffer pool can allocate
-     * @param poolableSize  The buffer size to cache in the free list rather than deallocating
-     * @param metrics       instance of Metrics
-     * @param time          time instance
+     *
+     * @param memory The maximum amount of memory that this buffer pool can allocate
+     * @param poolableSize The buffer size to cache in the free list rather than deallocating
+     * @param metrics instance of Metrics
+     * @param time time instance
      * @param metricGrpName logical group name for metrics
      */
     public BufferPool(long memory, int poolableSize, Metrics metrics, Time time, String metricGrpName) {
@@ -78,16 +77,18 @@ public class BufferPool {
         this.metrics = metrics;
         this.time = time;
         this.waitTime = this.metrics.sensor(WAIT_TIME_SENSOR_NAME);
-        MetricName rateMetricName = metrics.metricName("bufferpool-wait-ratio", metricGrpName, "The fraction of time an appender waits for space allocation.");
-        MetricName totalMetricName = metrics.metricName("bufferpool-wait-time-total", metricGrpName, "*Deprecated* The total time an appender waits for space allocation.");
-        MetricName totalNsMetricName = metrics.metricName("bufferpool-wait-time-ns-total", metricGrpName, "The total time in nanoseconds an appender waits for space allocation.");
+        MetricName rateMetricName = metrics.metricName("bufferpool-wait-ratio",
+                                                   metricGrpName,
+                                                   "The fraction of time an appender waits for space allocation.");
+        MetricName totalNsMetricName = metrics.metricName("bufferpool-wait-time-ns-total",
+                                                    metricGrpName,
+                                                    "The total time in nanoseconds an appender waits for space allocation.");
 
         Sensor bufferExhaustedRecordSensor = metrics.sensor("buffer-exhausted-records");
         MetricName bufferExhaustedRateMetricName = metrics.metricName("buffer-exhausted-rate", metricGrpName, "The average per-second number of record sends that are dropped due to buffer exhaustion");
         MetricName bufferExhaustedTotalMetricName = metrics.metricName("buffer-exhausted-total", metricGrpName, "The total number of record sends that are dropped due to buffer exhaustion");
         bufferExhaustedRecordSensor.add(new Meter(bufferExhaustedRateMetricName, bufferExhaustedTotalMetricName));
 
-        this.waitTime.add(new Meter(TimeUnit.NANOSECONDS, rateMetricName, totalMetricName));
         this.waitTime.add(new Meter(TimeUnit.NANOSECONDS, rateMetricName, totalNsMetricName));
         this.closed = false;
     }
@@ -105,7 +106,10 @@ public class BufferPool {
      */
     public ByteBuffer allocate(int size, long maxTimeToBlockMs) throws InterruptedException {
         if (size > this.totalMemory)
-            throw new IllegalArgumentException("Attempt to allocate " + size + " bytes, but there is a hard limit of " + this.totalMemory + " on memory allocations.");
+            throw new IllegalArgumentException("Attempt to allocate " + size
+                                               + " bytes, but there is a hard limit of "
+                                               + this.totalMemory
+                                               + " on memory allocations.");
 
         ByteBuffer buffer = null;
         this.lock.lock();
@@ -154,7 +158,9 @@ public class BufferPool {
 
                         if (waitingTimeElapsed) {
                             this.metrics.sensor("buffer-exhausted-records").record();
-                            throw new BufferExhaustedException("Failed to allocate " + size + " bytes within the configured max blocking time " + maxTimeToBlockMs + " ms. Total memory: " + totalMemory() + " bytes. Available memory: " + availableMemory() + " bytes. Poolable size: " + poolableSize() + " bytes");
+                            throw new BufferExhaustedException("Failed to allocate " + size + " bytes within the configured max blocking time "
+                                + maxTimeToBlockMs + " ms. Total memory: " + totalMemory() + " bytes. Available memory: " + availableMemory()
+                                + " bytes. Poolable size: " + poolableSize() + " bytes");
                         }
 
                         remainingTimeToBlockNs -= timeNs;

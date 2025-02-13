@@ -36,11 +36,11 @@ import java.util.List;
  * <code>RefreshingHttpsJwksVerificationKeyResolver</code> is a
  * {@link VerificationKeyResolver} implementation that will periodically refresh the
  * JWKS using its {@link HttpsJwks} instance.
- * <p>
+ *
  * A <a href="https://datatracker.ietf.org/doc/html/rfc7517#section-5">JWKS (JSON Web Key Set)</a>
  * is a JSON document provided by the OAuth/OIDC provider that lists the keys used to sign the JWTs
  * it issues.
- * <p>
+ *
  * Here is a sample JWKS JSON document:
  *
  * <pre>
@@ -65,15 +65,16 @@ import java.util.List;
  *   ]
  * }
  * </pre>
- * <p>
+ *
  * Without going into too much detail, the array of keys enumerates the key data that the provider
  * is using to sign the JWT. The key ID (<code>kid</code>) is referenced by the JWT's header in
  * order to match up the JWT's signing key with the key in the JWKS. During the validation step of
  * the broker, the jose4j OAuth library will use the contents of the appropriate key in the JWKS
  * to validate the signature.
- * <p>
+ *
  * Given that the JWKS is referenced by the JWT, the JWKS must be made available by the
  * OAuth/OIDC provider so that a JWT can be validated.
+ *
  * @see CloseableVerificationKeyResolver
  * @see VerificationKeyResolver
  * @see RefreshingHttpsJwks
@@ -136,15 +137,15 @@ public class RefreshingHttpsJwksVerificationKeyResolver implements CloseableVeri
             if (refreshingHttpsJwks.maybeExpediteRefresh(keyId))
                 log.debug("Refreshing JWKs from {} as no suitable verification key for JWS w/ header {} was found in {}", refreshingHttpsJwks.getLocation(), jws.getHeaders().getFullHeaderAsJsonString(), jwks);
 
-            StringBuilder sb = new StringBuilder();
-            sb.append("Unable to find a suitable verification key for JWS w/ header ").append(jws.getHeaders().getFullHeaderAsJsonString());
-            sb.append(" from JWKs ").append(jwks).append(" obtained from ").append(refreshingHttpsJwks.getLocation());
-            throw new UnresolvableKeyException(sb.toString());
+            String sb = "Unable to find a suitable verification key for JWS w/ header " + jws.getHeaders().getFullHeaderAsJsonString() +
+                    " from JWKs " + jwks + " obtained from " +
+                    refreshingHttpsJwks.getLocation();
+            throw new UnresolvableKeyException(sb);
         } catch (JoseException | IOException e) {
-            StringBuilder sb = new StringBuilder();
-            sb.append("Unable to find a suitable verification key for JWS w/ header ").append(jws.getHeaders().getFullHeaderAsJsonString());
-            sb.append(" due to an unexpected exception (").append(e).append(") while obtaining or using keys from JWKS endpoint at ").append(refreshingHttpsJwks.getLocation());
-            throw new UnresolvableKeyException(sb.toString(), e);
+            String sb = "Unable to find a suitable verification key for JWS w/ header " + jws.getHeaders().getFullHeaderAsJsonString() +
+                    " due to an unexpected exception (" + e + ") while obtaining or using keys from JWKS endpoint at " +
+                    refreshingHttpsJwks.getLocation();
+            throw new UnresolvableKeyException(sb, e);
         }
     }
 

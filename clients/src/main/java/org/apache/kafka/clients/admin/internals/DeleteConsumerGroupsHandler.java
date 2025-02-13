@@ -25,9 +25,16 @@ import org.apache.kafka.common.requests.DeleteGroupsRequest;
 import org.apache.kafka.common.requests.DeleteGroupsResponse;
 import org.apache.kafka.common.requests.FindCoordinatorRequest.CoordinatorType;
 import org.apache.kafka.common.utils.LogContext;
+
 import org.slf4j.Logger;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class DeleteConsumerGroupsHandler extends AdminApiHandler.Batched<CoordinatorKey, Void> {
@@ -35,7 +42,9 @@ public class DeleteConsumerGroupsHandler extends AdminApiHandler.Batched<Coordin
     private final Logger log;
     private final AdminApiLookupStrategy<CoordinatorKey> lookupStrategy;
 
-    public DeleteConsumerGroupsHandler(LogContext logContext) {
+    public DeleteConsumerGroupsHandler(
+        LogContext logContext
+    ) {
         this.log = logContext.logger(DeleteConsumerGroupsHandler.class);
         this.lookupStrategy = new CoordinatorStrategy(CoordinatorType.GROUP, logContext);
     }
@@ -50,23 +59,35 @@ public class DeleteConsumerGroupsHandler extends AdminApiHandler.Batched<Coordin
         return lookupStrategy;
     }
 
-    public static AdminApiFuture.SimpleAdminApiFuture<CoordinatorKey, Void> newFuture(Collection<String> groupIds) {
+    public static AdminApiFuture.SimpleAdminApiFuture<CoordinatorKey, Void> newFuture(
+        Collection<String> groupIds
+    ) {
         return AdminApiFuture.forKeys(buildKeySet(groupIds));
     }
 
     private static Set<CoordinatorKey> buildKeySet(Collection<String> groupIds) {
-        return groupIds.stream().map(CoordinatorKey::byGroupId).collect(Collectors.toSet());
+        return groupIds.stream()
+            .map(CoordinatorKey::byGroupId)
+            .collect(Collectors.toSet());
     }
 
     @Override
-    public DeleteGroupsRequest.Builder buildBatchedRequest(int coordinatorId, Set<CoordinatorKey> keys) {
+    public DeleteGroupsRequest.Builder buildBatchedRequest(
+        int coordinatorId,
+        Set<CoordinatorKey> keys
+    ) {
         List<String> groupIds = keys.stream().map(key -> key.idValue).collect(Collectors.toList());
-        DeleteGroupsRequestData data = new DeleteGroupsRequestData().setGroupsNames(groupIds);
+        DeleteGroupsRequestData data = new DeleteGroupsRequestData()
+            .setGroupsNames(groupIds);
         return new DeleteGroupsRequest.Builder(data);
     }
 
     @Override
-    public ApiResult<CoordinatorKey, Void> handleResponse(Node coordinator, Set<CoordinatorKey> groupIds, AbstractResponse abstractResponse) {
+    public ApiResult<CoordinatorKey, Void> handleResponse(
+        Node coordinator,
+        Set<CoordinatorKey> groupIds,
+        AbstractResponse abstractResponse
+    ) {
         final DeleteGroupsResponse response = (DeleteGroupsResponse) abstractResponse;
         final Map<CoordinatorKey, Void> completed = new HashMap<>();
         final Map<CoordinatorKey, Throwable> failed = new HashMap<>();
@@ -86,7 +107,12 @@ public class DeleteConsumerGroupsHandler extends AdminApiHandler.Batched<Coordin
         return new ApiResult<>(completed, failed, new ArrayList<>(groupsToUnmap));
     }
 
-    private void handleError(CoordinatorKey groupId, Errors error, Map<CoordinatorKey, Throwable> failed, Set<CoordinatorKey> groupsToUnmap) {
+    private void handleError(
+        CoordinatorKey groupId,
+        Errors error,
+        Map<CoordinatorKey, Throwable> failed,
+        Set<CoordinatorKey> groupsToUnmap
+    ) {
         switch (error) {
             case GROUP_AUTHORIZATION_FAILED:
             case INVALID_GROUP_ID:
@@ -98,14 +124,16 @@ public class DeleteConsumerGroupsHandler extends AdminApiHandler.Batched<Coordin
 
             case COORDINATOR_LOAD_IN_PROGRESS:
                 // If the coordinator is in the middle of loading, then we just need to retry
-                log.debug("`DeleteConsumerGroups` request for group id {} failed because the coordinator " + "is still in the process of loading state. Will retry", groupId.idValue);
+                log.debug("`DeleteConsumerGroups` request for group id {} failed because the coordinator " +
+                    "is still in the process of loading state. Will retry", groupId.idValue);
                 break;
 
             case COORDINATOR_NOT_AVAILABLE:
             case NOT_COORDINATOR:
                 // If the coordinator is unavailable or there was a coordinator change, then we unmap
                 // the key so that we retry the `FindCoordinator` request
-                log.debug("`DeleteConsumerGroups` request for group id {} returned error {}. " + "Will attempt to find the coordinator again and retry", groupId.idValue, error);
+                log.debug("`DeleteConsumerGroups` request for group id {} returned error {}. " +
+                    "Will attempt to find the coordinator again and retry", groupId.idValue, error);
                 groupsToUnmap.add(groupId);
                 break;
 

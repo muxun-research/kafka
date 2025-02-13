@@ -17,6 +17,7 @@
 package org.apache.kafka.common.security.oauthbearer.internals.unsecured;
 
 import org.apache.kafka.common.utils.Utils;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -29,14 +30,14 @@ public class OAuthBearerScopeUtilsTest {
     public void validScope() {
         for (String validScope : new String[] {"", "   ", "scope1", " scope1 ", "scope1 Scope2", "scope1   Scope2"}) {
             List<String> parsedScope = OAuthBearerScopeUtils.parseScope(validScope);
-			if (Utils.isBlank(validScope)) {
-				assertTrue(parsedScope.isEmpty());
-			} else if (validScope.contains("Scope2")) {
-				assertTrue(parsedScope.size() == 2 && parsedScope.get(0).equals("scope1")
-						&& parsedScope.get(1).equals("Scope2"));
-			} else {
-				assertTrue(parsedScope.size() == 1 && parsedScope.get(0).equals("scope1"));
-			}
+            if (Utils.isBlank(validScope)) {
+                assertTrue(parsedScope.isEmpty());
+            } else if (validScope.contains("Scope2")) {
+                assertTrue(parsedScope.size() == 2 && parsedScope.get(0).equals("scope1")
+                        && parsedScope.get(1).equals("Scope2"));
+            } else {
+                assertTrue(parsedScope.size() == 1 && parsedScope.get(0).equals("scope1"));
+            }
         }
     }
 

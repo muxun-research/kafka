@@ -19,6 +19,7 @@ package org.apache.kafka.shell.command;
 
 import org.apache.kafka.image.node.MetadataNode;
 import org.apache.kafka.shell.state.MetadataShellState;
+
 import org.jline.reader.Candidate;
 
 import java.util.ArrayList;
@@ -33,8 +34,10 @@ public final class CommandUtils {
      * Convert a list of paths into the effective list of paths which should be used.
      * Empty strings will be removed.  If no paths are given, the current working
      * directory will be used.
-     * @param paths The input paths.  Non-null.
-     * @return The output paths.
+     *
+     * @param paths     The input paths.  Non-null.
+     *
+     * @return          The output paths.
      */
     public static List<String> getEffectivePaths(List<String> paths) {
         List<String> effectivePaths = new ArrayList<>();
@@ -51,8 +54,9 @@ public final class CommandUtils {
 
     /**
      * Generate a list of potential completions for a prefix of a command name.
-     * @param commandPrefix The command prefix.  Non-null.
-     * @param candidates    The list to add the output completions to.
+     *
+     * @param commandPrefix     The command prefix.  Non-null.
+     * @param candidates        The list to add the output completions to.
      */
     public static void completeCommand(String commandPrefix, List<Candidate> candidates) {
         String command = Commands.TYPES.ceilingKey(commandPrefix);
@@ -70,9 +74,9 @@ public final class CommandUtils {
     public static List<String> splitPath(String path) {
         List<String> results = new ArrayList<>();
         String[] components = path.split("/");
-        for (int i = 0; i < components.length; i++) {
-            if (!components[i].isEmpty()) {
-                results.add(components[i]);
+        for (String component : components) {
+            if (!component.isEmpty()) {
+                results.add(component);
             }
         }
         return results;
@@ -82,7 +86,7 @@ public final class CommandUtils {
         List<String> output = new ArrayList<>();
         for (String string : input) {
             if (string.equals("..")) {
-                if (output.size() > 0) {
+                if (!output.isEmpty()) {
                     output.remove(output.size() - 1);
                 }
             } else if (!string.equals(".")) {
@@ -94,16 +98,23 @@ public final class CommandUtils {
 
     /**
      * Generate a list of potential completions for a path.
-     * @param state      The MetadataShellState.
-     * @param pathPrefix The path prefix.  Non-null.
-     * @param candidates The list to add the output completions to.
+     *
+     * @param state             The MetadataShellState.
+     * @param pathPrefix        The path prefix.  Non-null.
+     * @param candidates        The list to add the output completions to.
      */
-    public static void completePath(MetadataShellState state, String pathPrefix, List<Candidate> candidates) throws Exception {
+    public static void completePath(
+        MetadataShellState state,
+        String pathPrefix,
+        List<Candidate> candidates
+    ) {
         state.visit(data -> {
-            String absolutePath = pathPrefix.startsWith("/") ? pathPrefix : data.workingDirectory() + "/" + pathPrefix;
+            String absolutePath = pathPrefix.startsWith("/") ?
+                pathPrefix : data.workingDirectory() + "/" + pathPrefix;
             List<String> pathComponents = stripDotPathComponents(splitPath(absolutePath));
             MetadataNode directory = data.root();
-            int numDirectories = pathPrefix.endsWith("/") ? pathComponents.size() : pathComponents.size() - 1;
+            int numDirectories = pathPrefix.endsWith("/") ?
+                pathComponents.size() : pathComponents.size() - 1;
             for (int i = 0; i < numDirectories; i++) {
                 MetadataNode node = directory.child(pathComponents.get(i));
                 if (node == null || !node.isDirectory()) {
@@ -133,7 +144,8 @@ public final class CommandUtils {
                     candidateBuilder.append("/");
                     complete = false;
                 }
-                candidates.add(new Candidate(candidateBuilder.toString(), candidateBuilder.toString(), null, null, null, null, complete));
+                candidates.add(new Candidate(candidateBuilder.toString(),
+                    candidateBuilder.toString(), null, null, null, null, complete));
                 candidate = children.higher(candidate);
             }
         });

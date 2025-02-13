@@ -23,6 +23,7 @@ import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.server.common.ApiMessageAndVersion;
 import org.apache.kafka.server.common.MetadataVersion;
 import org.apache.kafka.test.TestUtils;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -30,20 +31,23 @@ import java.io.File;
 import java.util.List;
 import java.util.Optional;
 
-import static java.util.Arrays.asList;
-import static java.util.Collections.unmodifiableList;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 
 @Timeout(40)
 public class BootstrapDirectoryTest {
-    final static List<ApiMessageAndVersion> SAMPLE_RECORDS1 = unmodifiableList(asList(new ApiMessageAndVersion(new FeatureLevelRecord().setName(MetadataVersion.FEATURE_NAME).setFeatureLevel((short) 7), (short) 0), new ApiMessageAndVersion(new NoOpRecord(), (short) 0), new ApiMessageAndVersion(new NoOpRecord(), (short) 0)));
+    static final List<ApiMessageAndVersion> SAMPLE_RECORDS1 = List.of(
+            new ApiMessageAndVersion(new FeatureLevelRecord().
+                    setName(MetadataVersion.FEATURE_NAME).
+                    setFeatureLevel((short) 7), (short) 0),
+            new ApiMessageAndVersion(new NoOpRecord(), (short) 0),
+            new ApiMessageAndVersion(new NoOpRecord(), (short) 0));
 
     static class BootstrapTestDirectory implements AutoCloseable {
         File directory = null;
 
-        synchronized BootstrapTestDirectory createDirectory() throws Exception {
+        synchronized BootstrapTestDirectory createDirectory() {
             directory = TestUtils.tempDirectory("BootstrapTestDirectory");
             return this;
         }
@@ -68,34 +72,43 @@ public class BootstrapDirectoryTest {
     @Test
     public void testReadFromEmptyConfiguration() throws Exception {
         try (BootstrapTestDirectory testDirectory = new BootstrapTestDirectory().createDirectory()) {
-            assertEquals(BootstrapMetadata.fromVersion(MetadataVersion.latest(), "the default bootstrap"), new BootstrapDirectory(testDirectory.path(), Optional.empty()).read());
+            assertEquals(BootstrapMetadata.fromVersion(MetadataVersion.latestProduction(),
+                    "the default bootstrap"),
+                new BootstrapDirectory(testDirectory.path(), Optional.empty()).read());
         }
     }
 
     @Test
     public void testReadFromConfigurationWithAncientVersion() throws Exception {
         try (BootstrapTestDirectory testDirectory = new BootstrapTestDirectory().createDirectory()) {
-            assertEquals(BootstrapMetadata.fromVersion(MetadataVersion.MINIMUM_BOOTSTRAP_VERSION, "the minimum version bootstrap with metadata.version 3.3-IV0"), new BootstrapDirectory(testDirectory.path(), Optional.of("2.7")).read());
+            assertEquals(BootstrapMetadata.fromVersion(MetadataVersion.MINIMUM_BOOTSTRAP_VERSION,
+                    "the minimum version bootstrap with metadata.version 3.3-IV0"),
+                new BootstrapDirectory(testDirectory.path(), Optional.of("3.0")).read());
         }
     }
 
     @Test
     public void testReadFromConfiguration() throws Exception {
         try (BootstrapTestDirectory testDirectory = new BootstrapTestDirectory().createDirectory()) {
-            assertEquals(BootstrapMetadata.fromVersion(MetadataVersion.IBP_3_3_IV2, "the configured bootstrap with metadata.version 3.3-IV2"), new BootstrapDirectory(testDirectory.path(), Optional.of("3.3-IV2")).read());
+            assertEquals(BootstrapMetadata.fromVersion(MetadataVersion.IBP_3_3_IV2,
+                    "the configured bootstrap with metadata.version 3.3-IV2"),
+                new BootstrapDirectory(testDirectory.path(), Optional.of("3.3-IV2")).read());
         }
     }
 
     @Test
-    public void testMissingDirectory() throws Exception {
-        assertEquals("No such directory as ./non/existent/directory", assertThrows(RuntimeException.class, () -> new BootstrapDirectory("./non/existent/directory", Optional.empty()).read()).getMessage());
+    public void testMissingDirectory() {
+        assertEquals("No such directory as ./non/existent/directory",
+            assertThrows(RuntimeException.class, () ->
+                new BootstrapDirectory("./non/existent/directory", Optional.empty()).read()).getMessage());
     }
 
     @Test
     public void testReadFromConfigurationFile() throws Exception {
         try (BootstrapTestDirectory testDirectory = new BootstrapTestDirectory().createDirectory()) {
             BootstrapDirectory directory = new BootstrapDirectory(testDirectory.path(), Optional.of("3.0-IV0"));
-            BootstrapMetadata metadata = BootstrapMetadata.fromRecords(SAMPLE_RECORDS1, "the binary bootstrap metadata file: " + testDirectory.binaryBootstrapPath());
+            BootstrapMetadata metadata = BootstrapMetadata.fromRecords(SAMPLE_RECORDS1,
+                    "the binary bootstrap metadata file: " + testDirectory.binaryBootstrapPath());
             directory.writeBinaryFile(metadata);
             assertEquals(metadata, directory.read());
         }

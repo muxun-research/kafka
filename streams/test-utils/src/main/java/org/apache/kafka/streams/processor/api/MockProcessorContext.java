@@ -25,9 +25,14 @@ import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.StreamsMetrics;
 import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.TopologyTestDriver;
-import org.apache.kafka.streams.kstream.Transformer;
-import org.apache.kafka.streams.kstream.ValueTransformer;
-import org.apache.kafka.streams.processor.*;
+import org.apache.kafka.streams.processor.Cancellable;
+import org.apache.kafka.streams.processor.CommitCallback;
+import org.apache.kafka.streams.processor.PunctuationType;
+import org.apache.kafka.streams.processor.Punctuator;
+import org.apache.kafka.streams.processor.StateRestoreCallback;
+import org.apache.kafka.streams.processor.StateStore;
+import org.apache.kafka.streams.processor.StateStoreContext;
+import org.apache.kafka.streams.processor.TaskId;
 import org.apache.kafka.streams.processor.internals.ClientUtils;
 import org.apache.kafka.streams.processor.internals.RecordCollector;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
@@ -36,13 +41,21 @@ import org.apache.kafka.streams.state.internals.InMemoryKeyValueStore;
 
 import java.io.File;
 import java.time.Duration;
-import java.util.*;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Properties;
 
-import static org.apache.kafka.common.utils.Utils.*;
+import static org.apache.kafka.common.utils.Utils.mkEntry;
+import static org.apache.kafka.common.utils.Utils.mkMap;
+import static org.apache.kafka.common.utils.Utils.mkProperties;
 
 /**
- * {@link MockProcessorContext} is a mock of {@link ProcessorContext} for users to test their {@link Processor},
- * {@link Transformer}, and {@link ValueTransformer} implementations.
+ * {@link MockProcessorContext} is a mock of {@link ProcessorContext} for users to test their {@link Processor}
+ * implementations.
  * <p>
  * The tests for this class (org.apache.kafka.streams.MockProcessorContextTest) include several behavioral
  * tests that serve as example usage.
@@ -149,8 +162,9 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
 
         /**
          * The child this data was forwarded to.
+         *
          * @return If present, the child name the record was forwarded to.
-         * If empty, the forward was a broadcast.
+         *         If empty, the forward was a broadcast.
          */
         public Optional<String> childName() {
             return childName;
@@ -158,6 +172,7 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
 
         /**
          * The record that was forwarded.
+         *
          * @return The forwarded record. Not null.
          */
         public Record<K, V> record() {
@@ -166,17 +181,19 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
 
         @Override
         public String toString() {
-            return "CapturedForward{" + "record=" + record + ", childName=" + childName + '}';
+            return "CapturedForward{" +
+                "record=" + record +
+                ", childName=" + childName +
+                '}';
         }
 
         @Override
         public boolean equals(final Object o) {
-            if (this == o)
-                return true;
-            if (o == null || getClass() != o.getClass())
-                return false;
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
             final CapturedForward<?, ?> that = (CapturedForward<?, ?>) o;
-            return Objects.equals(record, that.record) && Objects.equals(childName, that.childName);
+            return Objects.equals(record, that.record) &&
+                Objects.equals(childName, that.childName);
         }
 
         @Override
@@ -194,7 +211,14 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
      * {@link InMemoryKeyValueStore}, so the stateDir won't matter.
      */
     public MockProcessorContext() {
-        this(mkProperties(mkMap(mkEntry(StreamsConfig.APPLICATION_ID_CONFIG, ""), mkEntry(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, ""))), new TaskId(0, 0), null);
+        this(
+            mkProperties(mkMap(
+                mkEntry(StreamsConfig.APPLICATION_ID_CONFIG, ""),
+                mkEntry(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "")
+            )),
+            new TaskId(0, 0),
+            null
+        );
     }
 
     /**
@@ -202,6 +226,7 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
      * Most unit tests using this mock won't need to know the taskId,
      * and most unit tests should be able to get by with the
      * {@link InMemoryKeyValueStore}, so the stateDir won't matter.
+     *
      * @param config a Properties object, used to configure the context and the processor.
      */
     public MockProcessorContext(final Properties config) {
@@ -210,6 +235,7 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
 
     /**
      * Create a {@link MockProcessorContext} with a specified taskId and null stateDir.
+     *
      * @param config   a {@link Properties} object, used to configure the context and the processor.
      * @param taskId   a {@link TaskId}, which the context makes available via {@link MockProcessorContext#taskId()}.
      * @param stateDir a {@link File}, which the context makes available viw {@link MockProcessorContext#stateDir()}.
@@ -226,7 +252,12 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
         final MetricConfig metricConfig = new MetricConfig();
         metricConfig.recordLevel(Sensor.RecordingLevel.DEBUG);
         final String threadId = Thread.currentThread().getName();
-        metrics = new StreamsMetricsImpl(new Metrics(metricConfig), threadId, streamsConfig.getString(StreamsConfig.BUILT_IN_METRICS_VERSION_CONFIG), Time.SYSTEM);
+        metrics = new StreamsMetricsImpl(
+            new Metrics(metricConfig),
+            threadId,
+            "processId",
+            Time.SYSTEM
+        );
         TaskMetrics.droppedRecordsSensor(threadId, taskId.toString(), metrics);
     }
 
@@ -281,7 +312,13 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
 
     @Override
     public File stateDir() {
-        return Objects.requireNonNull(stateDir, "The stateDir constructor argument was needed (probably for a state store) but not supplied. " + "You can either reconfigure your test so that it doesn't need access to the disk " + "(such as using an in-memory store), or use the full MockProcessorContext constructor to supply " + "a non-null stateDir argument.");
+        return Objects.requireNonNull(
+            stateDir,
+            "The stateDir constructor argument was needed (probably for a state store) but not supplied. " +
+                "You can either reconfigure your test so that it doesn't need access to the disk " +
+                "(such as using an in-memory store), or use the full MockProcessorContext constructor to supply " +
+                "a non-null stateDir argument."
+        );
     }
 
     @Override
@@ -294,11 +331,14 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
     /**
      * The context exposes these metadata for use in the processor. Normally, they are set by the Kafka Streams framework,
      * but for the purpose of driving unit tests, you can set them directly.
+     *
      * @param topic     A topic name
      * @param partition A partition number
      * @param offset    A record offset
      */
-    public void setRecordMetadata(final String topic, final int partition, final long offset) {
+    public void setRecordMetadata(final String topic,
+                                  final int partition,
+                                  final long offset) {
         recordMetadata = new MockRecordMetadata(topic, partition, offset);
     }
 
@@ -328,7 +368,9 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
     }
 
     @Override
-    public Cancellable schedule(final Duration interval, final PunctuationType type, final Punctuator callback) {
+    public Cancellable schedule(final Duration interval,
+                                final PunctuationType type,
+                                final Punctuator callback) {
         final CapturedPunctuator capturedPunctuator = new CapturedPunctuator(interval, type, callback);
 
         punctuators.add(capturedPunctuator);
@@ -338,6 +380,7 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
 
     /**
      * Get the punctuators scheduled so far. The returned list is not affected by subsequent calls to {@code schedule(...)}.
+     *
      * @return A list of captured punctuators.
      */
     public List<CapturedPunctuator> scheduledPunctuators() {
@@ -358,6 +401,7 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
      * Get all the forwarded data this context has observed. The returned list will not be
      * affected by subsequent interactions with the context. The data in the list is in the same order as the calls to
      * {@code forward(...)}.
+     *
      * @return A list of records that were previously passed to the context.
      */
     public List<CapturedForward<? extends KForward, ? extends VForward>> forwarded() {
@@ -368,13 +412,14 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
      * Get all the forwarded data this context has observed for a specific child by name.
      * The returned list will not be affected by subsequent interactions with the context.
      * The data in the list is in the same order as the calls to {@code forward(...)}.
+     *
      * @param childName The child name to retrieve forwards for
      * @return A list of records that were previously passed to the context.
      */
     public List<CapturedForward<? extends KForward, ? extends VForward>> forwarded(final String childName) {
         final LinkedList<CapturedForward<? extends KForward, ? extends VForward>> result = new LinkedList<>();
         for (final CapturedForward<? extends KForward, ? extends VForward> capture : capturedForwards) {
-            if (!capture.childName().isPresent() || capture.childName().equals(Optional.of(childName))) {
+            if (capture.childName().isEmpty() || capture.childName().equals(Optional.of(childName))) {
                 result.add(capture);
             }
         }
@@ -395,6 +440,7 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
 
     /**
      * Whether {@link ProcessorContext#commit()} has been called in this context.
+     *
      * @return {@code true} iff {@link ProcessorContext#commit()} has been called in this context since construction or reset.
      */
     public boolean committed() {
@@ -413,7 +459,11 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
         // This interface is assumed by state stores that add change-logging.
         // Rather than risk a mysterious ClassCastException during unit tests, throw an explanatory exception.
 
-        throw new UnsupportedOperationException("MockProcessorContext does not provide record collection. " + "For processor unit tests, use an in-memory state store with change-logging disabled. " + "Alternatively, use the TopologyTestDriver for testing processor/store/topology integration.");
+        throw new UnsupportedOperationException(
+            "MockProcessorContext does not provide record collection. " +
+                "For processor unit tests, use an in-memory state store with change-logging disabled. " +
+                "Alternatively, use the TopologyTestDriver for testing processor/store/topology integration."
+        );
     }
 
     /**
@@ -460,13 +510,15 @@ public class MockProcessorContext<KForward, VForward> implements ProcessorContex
             }
 
             @Override
-            public void register(final StateStore store, final StateRestoreCallback stateRestoreCallback) {
-                register(store, stateRestoreCallback, () -> {
-                });
+            public void register(final StateStore store,
+                                 final StateRestoreCallback stateRestoreCallback) {
+                register(store, stateRestoreCallback, () -> { });
             }
 
             @Override
-            public void register(final StateStore store, final StateRestoreCallback stateRestoreCallback, final CommitCallback checkpoint) {
+            public void register(final StateStore store,
+                                 final StateRestoreCallback stateRestoreCallback,
+                                 final CommitCallback checkpoint) {
                 stateStores.put(store.name(), store);
             }
 

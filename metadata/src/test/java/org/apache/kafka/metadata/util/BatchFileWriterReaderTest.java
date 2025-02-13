@@ -25,15 +25,18 @@ import org.apache.kafka.metadata.util.BatchFileReader.BatchAndType;
 import org.apache.kafka.raft.Batch;
 import org.apache.kafka.server.common.ApiMessageAndVersion;
 import org.apache.kafka.test.TestUtils;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-final public class BatchFileWriterReaderTest {
+public final class BatchFileWriterReaderTest {
     @Test
     public void testHeaderFooter() throws Exception {
         File tempFile = TestUtils.tempFile();
@@ -42,12 +45,18 @@ final public class BatchFileWriterReaderTest {
         tempFile.delete();
 
         try (BatchFileWriter writer = BatchFileWriter.open(tempPath)) {
-            ApiMessageAndVersion message = new ApiMessageAndVersion(new TopicRecord().setName("bar").setTopicId(Uuid.fromString("cxBT72dK4si8Ied1iP4wBA")), (short) 0);
+            ApiMessageAndVersion message = new ApiMessageAndVersion(
+                new TopicRecord()
+                    .setName("bar")
+                    .setTopicId(Uuid.fromString("cxBT72dK4si8Ied1iP4wBA")),
+                (short) 0
+            );
 
             writer.append(message);
         }
 
-        try (BatchFileReader reader = new BatchFileReader.Builder().setPath(tempPath.toString()).build()) {
+        try (BatchFileReader reader = new BatchFileReader.Builder()
+                .setPath(tempPath.toString()).build()) {
             // Check the SnapshotHeaderRecord
             long currentOffset = 0;
             assertTrue(reader.hasNext());
@@ -96,7 +105,7 @@ final public class BatchFileWriterReaderTest {
             assertEquals(0, apiMessageAndVersion.version());
 
             SnapshotFooterRecord footerRecord = (SnapshotFooterRecord) apiMessageAndVersion.message();
-            assertEquals(0, headerRecord.version());
+            assertEquals(0, footerRecord.version());
         }
     }
 }

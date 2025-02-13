@@ -28,7 +28,11 @@ import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.ThreadMetadata;
 import org.apache.kafka.streams.errors.StreamsUncaughtExceptionHandler;
-import org.apache.kafka.streams.kstream.*;
+import org.apache.kafka.streams.kstream.Consumed;
+import org.apache.kafka.streams.kstream.KStream;
+import org.apache.kafka.streams.kstream.Materialized;
+import org.apache.kafka.streams.kstream.Produced;
+import org.apache.kafka.streams.kstream.ValueMapper;
 import org.apache.kafka.streams.state.KeyValueBytesStoreSupplier;
 import org.apache.kafka.streams.state.Stores;
 
@@ -42,9 +46,9 @@ public class StreamsStandByReplicaTest {
 
     public static void main(final String[] args) throws IOException {
         if (args.length < 2) {
-			System.err.println("StreamsStandByReplicaTest are expecting two parameters: " +
-					"propFile, additionalConfigs; but only see " + args.length + " parameter");
-			Exit.exit(1);
+            System.err.println("StreamsStandByReplicaTest are expecting two parameters: " +
+                "propFile, additionalConfigs; but only see " + args.length + " parameter");
+            Exit.exit(1);
         }
 
         System.out.println("StreamsTest instance started");
@@ -56,10 +60,10 @@ public class StreamsStandByReplicaTest {
         final String kafka = streamsProperties.getProperty(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG);
 
         if (kafka == null) {
-			System.err.println("No bootstrap kafka servers specified in " + StreamsConfig.BOOTSTRAP_SERVERS_CONFIG);
-			Exit.exit(1);
+            System.err.println("No bootstrap kafka servers specified in " + StreamsConfig.BOOTSTRAP_SERVERS_CONFIG);
+            Exit.exit(1);
         }
-
+        
         streamsProperties.put(StreamsConfig.APPLICATION_ID_CONFIG, "kafka-streams-standby-tasks");
         streamsProperties.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 100L);
         streamsProperties.put(StreamsConfig.NUM_STANDBY_REPLICAS_CONFIG, 1);
@@ -70,8 +74,8 @@ public class StreamsStandByReplicaTest {
 
         if (additionalConfigs == null) {
             System.err.println("additional configs are not provided");
-			System.err.flush();
-			Exit.exit(1);
+            System.err.flush();
+            Exit.exit(1);
         }
 
         final Map<String, String> updated = SystemTestUtil.parseConfigs(additionalConfigs);
@@ -82,25 +86,27 @@ public class StreamsStandByReplicaTest {
         final String sinkTopic2 = updated.remove("sinkTopic2");
 
         if (sourceTopic == null || sinkTopic1 == null || sinkTopic2 == null) {
-            System.err.println(String.format(
-                "one or more required topics null sourceTopic[%s], sinkTopic1[%s], sinkTopic2[%s]",
+            System.err.printf(
+                "one or more required topics null sourceTopic[%s], sinkTopic1[%s], sinkTopic2[%s]%n",
                 sourceTopic,
                 sinkTopic1,
-                sinkTopic2));
-			System.err.flush();
-			Exit.exit(1);
+                sinkTopic2);
+            System.err.flush();
+            Exit.exit(1);
         }
 
         streamsProperties.putAll(updated);
 
         if (!confirmCorrectConfigs(streamsProperties)) {
-            System.err.println(String.format("ERROR: Did not have all required configs expected  to contain %s, %s,  %s,  %s",
-                                             StreamsConfig.consumerPrefix(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG),
-                                             StreamsConfig.producerPrefix(ProducerConfig.RETRIES_CONFIG),
-                                             StreamsConfig.producerPrefix(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG),
-                                             StreamsConfig.producerPrefix(ProducerConfig.MAX_BLOCK_MS_CONFIG)));
+            System.err.printf(
+                    "ERROR: Did not have all required configs expected  to contain %s, %s,  %s,  %s%n",
+                    StreamsConfig.consumerPrefix(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG),
+                    StreamsConfig.producerPrefix(ProducerConfig.RETRIES_CONFIG),
+                    StreamsConfig.producerPrefix(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG),
+                    StreamsConfig.producerPrefix(ProducerConfig.MAX_BLOCK_MS_CONFIG)
+            );
 
-			Exit.exit(1);
+            Exit.exit(1);
         }
 
         final StreamsBuilder builder = new StreamsBuilder();
@@ -124,12 +130,12 @@ public class StreamsStandByReplicaTest {
 
         final KafkaStreams streams = new KafkaStreams(builder.build(), streamsProperties);
 
-		streams.setUncaughtExceptionHandler(e -> {
-			System.err.println("FATAL: An unexpected exception " + e);
-			e.printStackTrace(System.err);
-			System.err.flush();
-			return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_CLIENT;
-		});
+        streams.setUncaughtExceptionHandler(e -> {
+            System.err.println("FATAL: An unexpected exception " + e);
+            e.printStackTrace(System.err);
+            System.err.flush();
+            return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_CLIENT;
+        });
 
         streams.setStateListener((newState, oldState) -> {
             if (newState == KafkaStreams.State.RUNNING && oldState == KafkaStreams.State.REBALANCING) {
@@ -145,10 +151,10 @@ public class StreamsStandByReplicaTest {
         System.out.println("Start Kafka Streams");
         streams.start();
 
-		Exit.addShutdownHook("streams-shutdown-hook", () -> {
-			shutdown(streams);
-			System.out.println("Shut down streams now");
-		});
+        Exit.addShutdownHook("streams-shutdown-hook", () -> {
+            shutdown(streams);
+            System.out.println("Shut down streams now");
+        });
     }
 
     private static void shutdown(final KafkaStreams streams) {

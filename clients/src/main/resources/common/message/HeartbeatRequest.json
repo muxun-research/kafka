@@ -16,10 +16,7 @@
 {
   "apiKey": 12,
   "type": "request",
-  "listeners": [
-    "zkBroker",
-    "broker"
-  ],
+  "listeners": ["broker"],
   "name": "HeartbeatRequest",
   // Version 1 and version 2 are the same as version 0.
   //
@@ -29,32 +26,14 @@
   "validVersions": "0-4",
   "flexibleVersions": "4+",
   "fields": [
-    {
-      "name": "GroupId",
-      "type": "string",
-      "versions": "0+",
-      "entityType": "groupId",
-      "about": "The group id."
-    },
-    {
-      "name": "GenerationId",
-      "type": "int32",
-      "versions": "0+",
-      "about": "The generation of the group."
-    },
-    {
-      "name": "MemberId",
-      "type": "string",
-      "versions": "0+",
-      "about": "The member ID."
-    },
-    {
-      "name": "GroupInstanceId",
-      "type": "string",
-      "versions": "3+",
-      "nullableVersions": "3+",
-      "default": "null",
-      "about": "The unique identifier of the consumer instance provided by end user."
-    }
+    { "name": "GroupId", "type": "string", "versions": "0+", "entityType": "groupId",
+      "about": "The group id." },
+    { "name": "GenerationId", "type": "int32", "versions": "0+",
+      "about": "The generation of the group." },
+    { "name": "MemberId", "type": "string", "versions": "0+",
+      "about": "The member ID." },
+    { "name": "GroupInstanceId", "type": "string", "versions": "3+",
+      "nullableVersions": "3+", "default": "null",
+      "about": "The unique identifier of the consumer instance provided by end user." }
   ]
 }

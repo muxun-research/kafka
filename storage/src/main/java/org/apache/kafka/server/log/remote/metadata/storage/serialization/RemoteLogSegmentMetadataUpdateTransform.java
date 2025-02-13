@@ -21,13 +21,21 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.server.common.ApiMessageAndVersion;
 import org.apache.kafka.server.log.remote.metadata.storage.generated.RemoteLogSegmentMetadataUpdateRecord;
 import org.apache.kafka.server.log.remote.storage.RemoteLogSegmentId;
+import org.apache.kafka.server.log.remote.storage.RemoteLogSegmentMetadata.CustomMetadata;
 import org.apache.kafka.server.log.remote.storage.RemoteLogSegmentMetadataUpdate;
 import org.apache.kafka.server.log.remote.storage.RemoteLogSegmentState;
+
+import java.util.Optional;
 
 public class RemoteLogSegmentMetadataUpdateTransform implements RemoteLogMetadataTransform<RemoteLogSegmentMetadataUpdate> {
 
     public ApiMessageAndVersion toApiMessageAndVersion(RemoteLogSegmentMetadataUpdate segmentMetadataUpdate) {
-        RemoteLogSegmentMetadataUpdateRecord record = new RemoteLogSegmentMetadataUpdateRecord().setRemoteLogSegmentId(createRemoteLogSegmentIdEntry(segmentMetadataUpdate)).setBrokerId(segmentMetadataUpdate.brokerId()).setEventTimestampMs(segmentMetadataUpdate.eventTimestampMs()).setRemoteLogSegmentState(segmentMetadataUpdate.state().id());
+        RemoteLogSegmentMetadataUpdateRecord record = new RemoteLogSegmentMetadataUpdateRecord()
+                .setRemoteLogSegmentId(createRemoteLogSegmentIdEntry(segmentMetadataUpdate))
+                .setBrokerId(segmentMetadataUpdate.brokerId())
+                .setEventTimestampMs(segmentMetadataUpdate.eventTimestampMs())
+                .setRemoteLogSegmentState(segmentMetadataUpdate.state().id());
+        segmentMetadataUpdate.customMetadata().ifPresent(md -> record.setCustomMetadata(md.value()));
 
         return new ApiMessageAndVersion(record, record.highestSupportedVersion());
     }
@@ -35,13 +43,22 @@ public class RemoteLogSegmentMetadataUpdateTransform implements RemoteLogMetadat
     public RemoteLogSegmentMetadataUpdate fromApiMessageAndVersion(ApiMessageAndVersion apiMessageAndVersion) {
         RemoteLogSegmentMetadataUpdateRecord record = (RemoteLogSegmentMetadataUpdateRecord) apiMessageAndVersion.message();
         RemoteLogSegmentMetadataUpdateRecord.RemoteLogSegmentIdEntry entry = record.remoteLogSegmentId();
-        TopicIdPartition topicIdPartition = new TopicIdPartition(entry.topicIdPartition().id(), new TopicPartition(entry.topicIdPartition().name(), entry.topicIdPartition().partition()));
+        TopicIdPartition topicIdPartition = new TopicIdPartition(entry.topicIdPartition().id(),
+                new TopicPartition(entry.topicIdPartition().name(), entry.topicIdPartition().partition()));
 
-        return new RemoteLogSegmentMetadataUpdate(new RemoteLogSegmentId(topicIdPartition, entry.id()), record.eventTimestampMs(), RemoteLogSegmentState.forId(record.remoteLogSegmentState()), record.brokerId());
+        Optional<CustomMetadata> customMetadata = Optional.ofNullable(record.customMetadata()).map(CustomMetadata::new);
+        return new RemoteLogSegmentMetadataUpdate(new RemoteLogSegmentId(topicIdPartition, entry.id()),
+                record.eventTimestampMs(), customMetadata, RemoteLogSegmentState.forId(record.remoteLogSegmentState()), record.brokerId());
     }
 
     private RemoteLogSegmentMetadataUpdateRecord.RemoteLogSegmentIdEntry createRemoteLogSegmentIdEntry(RemoteLogSegmentMetadataUpdate data) {
-        return new RemoteLogSegmentMetadataUpdateRecord.RemoteLogSegmentIdEntry().setId(data.remoteLogSegmentId().id()).setTopicIdPartition(new RemoteLogSegmentMetadataUpdateRecord.TopicIdPartitionEntry().setName(data.remoteLogSegmentId().topicIdPartition().topic()).setPartition(data.remoteLogSegmentId().topicIdPartition().partition()).setId(data.remoteLogSegmentId().topicIdPartition().topicId()));
+        return new RemoteLogSegmentMetadataUpdateRecord.RemoteLogSegmentIdEntry()
+                .setId(data.remoteLogSegmentId().id())
+                .setTopicIdPartition(
+                        new RemoteLogSegmentMetadataUpdateRecord.TopicIdPartitionEntry()
+                                .setName(data.remoteLogSegmentId().topicIdPartition().topic())
+                                .setPartition(data.remoteLogSegmentId().topicIdPartition().partition())
+                                .setId(data.remoteLogSegmentId().topicIdPartition().topicId()));
     }
 
 }

@@ -57,6 +57,12 @@ public class ChangeLoggingVersionedKeyValueBytesStore extends ChangeLoggingKeyVa
 
     @Override
     public void log(final Bytes key, final byte[] value, final long timestamp) {
-        context.logChange(name(), key, value, timestamp, wrapped().getPosition());
+        internalContext.logChange(
+            name(),
+            key,
+            value,
+            timestamp,
+            wrapped().getPosition()
+        );
     }
 }

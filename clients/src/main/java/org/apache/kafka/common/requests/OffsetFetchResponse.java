@@ -19,39 +19,57 @@ package org.apache.kafka.common.requests;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.message.OffsetFetchResponseData;
-import org.apache.kafka.common.message.OffsetFetchResponseData.*;
+import org.apache.kafka.common.message.OffsetFetchResponseData.OffsetFetchResponseGroup;
+import org.apache.kafka.common.message.OffsetFetchResponseData.OffsetFetchResponsePartition;
+import org.apache.kafka.common.message.OffsetFetchResponseData.OffsetFetchResponsePartitions;
+import org.apache.kafka.common.message.OffsetFetchResponseData.OffsetFetchResponseTopic;
+import org.apache.kafka.common.message.OffsetFetchResponseData.OffsetFetchResponseTopics;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.kafka.common.record.RecordBatch.NO_PARTITION_LEADER_EPOCH;
 
 /**
  * Possible error codes:
- * <p>
+ *
  * - Partition errors:
- * - {@link Errors#UNKNOWN_TOPIC_OR_PARTITION}
- * - {@link Errors#TOPIC_AUTHORIZATION_FAILED}
- * - {@link Errors#UNSTABLE_OFFSET_COMMIT}
- * <p>
+ *   - {@link Errors#UNKNOWN_TOPIC_OR_PARTITION}
+ *   - {@link Errors#TOPIC_AUTHORIZATION_FAILED}
+ *   - {@link Errors#UNSTABLE_OFFSET_COMMIT}
+ *
  * - Group or coordinator errors:
- * - {@link Errors#COORDINATOR_LOAD_IN_PROGRESS}
- * - {@link Errors#COORDINATOR_NOT_AVAILABLE}
- * - {@link Errors#NOT_COORDINATOR}
- * - {@link Errors#GROUP_AUTHORIZATION_FAILED}
+ *   - {@link Errors#COORDINATOR_LOAD_IN_PROGRESS}
+ *   - {@link Errors#COORDINATOR_NOT_AVAILABLE}
+ *   - {@link Errors#NOT_COORDINATOR}
+ *   - {@link Errors#GROUP_AUTHORIZATION_FAILED}
+ *   - {@link Errors#UNKNOWN_MEMBER_ID}
+ *   - {@link Errors#STALE_MEMBER_EPOCH}
  */
 public class OffsetFetchResponse extends AbstractResponse {
     public static final long INVALID_OFFSET = -1L;
     public static final String NO_METADATA = "";
     public static final PartitionData UNKNOWN_PARTITION = new PartitionData(INVALID_OFFSET,
-                                                                            Optional.empty(), NO_METADATA, Errors.UNKNOWN_TOPIC_OR_PARTITION);
-    public static final PartitionData UNAUTHORIZED_PARTITION = new PartitionData(INVALID_OFFSET, Optional.empty(), NO_METADATA, Errors.TOPIC_AUTHORIZATION_FAILED);
-    private static final List<Errors> PARTITION_ERRORS = Arrays.asList(Errors.UNKNOWN_TOPIC_OR_PARTITION, Errors.TOPIC_AUTHORIZATION_FAILED);
+                                                                            Optional.empty(),
+                                                                            NO_METADATA,
+                                                                            Errors.UNKNOWN_TOPIC_OR_PARTITION);
+    public static final PartitionData UNAUTHORIZED_PARTITION = new PartitionData(INVALID_OFFSET,
+                                                                                 Optional.empty(),
+                                                                                 NO_METADATA,
+                                                                                 Errors.TOPIC_AUTHORIZATION_FAILED);
+    private static final List<Errors> PARTITION_ERRORS = Arrays.asList(
+        Errors.UNKNOWN_TOPIC_OR_PARTITION, Errors.TOPIC_AUTHORIZATION_FAILED);
 
     private final OffsetFetchResponseData data;
     private final Errors error;
@@ -63,7 +81,10 @@ public class OffsetFetchResponse extends AbstractResponse {
         public final Errors error;
         public final Optional<Integer> leaderEpoch;
 
-        public PartitionData(long offset, Optional<Integer> leaderEpoch, String metadata, Errors error) {
+        public PartitionData(long offset,
+                             Optional<Integer> leaderEpoch,
+                             String metadata,
+                             Errors error) {
             this.offset = offset;
             this.leaderEpoch = leaderEpoch;
             this.metadata = metadata;
@@ -79,7 +100,10 @@ public class OffsetFetchResponse extends AbstractResponse {
             if (!(other instanceof PartitionData))
                 return false;
             PartitionData otherPartition = (PartitionData) other;
-            return Objects.equals(this.offset, otherPartition.offset) && Objects.equals(this.leaderEpoch, otherPartition.leaderEpoch) && Objects.equals(this.metadata, otherPartition.metadata) && Objects.equals(this.error, otherPartition.error);
+            return Objects.equals(this.offset, otherPartition.offset)
+                   && Objects.equals(this.leaderEpoch, otherPartition.leaderEpoch)
+                   && Objects.equals(this.metadata, otherPartition.metadata)
+                   && Objects.equals(this.error, otherPartition.error);
         }
 
         @Override
@@ -118,23 +142,36 @@ public class OffsetFetchResponse extends AbstractResponse {
         Map<String, OffsetFetchResponseTopic> offsetFetchResponseTopicMap = new HashMap<>();
         for (Map.Entry<TopicPartition, PartitionData> entry : responseData.entrySet()) {
             String topicName = entry.getKey().topic();
-            OffsetFetchResponseTopic topic = offsetFetchResponseTopicMap.getOrDefault(topicName, new OffsetFetchResponseTopic().setName(topicName));
+            OffsetFetchResponseTopic topic = offsetFetchResponseTopicMap.getOrDefault(
+                topicName, new OffsetFetchResponseTopic().setName(topicName));
             PartitionData partitionData = entry.getValue();
-            topic.partitions().add(new OffsetFetchResponsePartition().setPartitionIndex(entry.getKey().partition()).setErrorCode(partitionData.error.code()).setCommittedOffset(partitionData.offset).setCommittedLeaderEpoch(partitionData.leaderEpoch.orElse(NO_PARTITION_LEADER_EPOCH)).setMetadata(partitionData.metadata));
+            topic.partitions().add(new OffsetFetchResponsePartition()
+                                       .setPartitionIndex(entry.getKey().partition())
+                                       .setErrorCode(partitionData.error.code())
+                                       .setCommittedOffset(partitionData.offset)
+                                       .setCommittedLeaderEpoch(
+                                           partitionData.leaderEpoch.orElse(NO_PARTITION_LEADER_EPOCH))
+                                       .setMetadata(partitionData.metadata)
+            );
             offsetFetchResponseTopicMap.put(topicName, topic);
         }
 
-        this.data = new OffsetFetchResponseData().setTopics(new ArrayList<>(offsetFetchResponseTopicMap.values())).setErrorCode(error.code()).setThrottleTimeMs(throttleTimeMs);
+        this.data = new OffsetFetchResponseData()
+            .setTopics(new ArrayList<>(offsetFetchResponseTopicMap.values()))
+            .setErrorCode(error.code())
+            .setThrottleTimeMs(throttleTimeMs);
         this.error = error;
     }
 
     /**
      * Constructor with throttle time for version 8 and above.
      * @param throttleTimeMs The time in milliseconds that this response was throttled
-     * @param errors         Potential coordinator or group level error code
-     * @param responseData   Fetched offset information grouped by topic-partition and by group
+     * @param errors Potential coordinator or group level error code
+     * @param responseData Fetched offset information grouped by topic-partition and by group
      */
-    public OffsetFetchResponse(int throttleTimeMs, Map<String, Errors> errors, Map<String, Map<TopicPartition, PartitionData>> responseData) {
+    public OffsetFetchResponse(int throttleTimeMs,
+                               Map<String, Errors> errors,
+                               Map<String, Map<TopicPartition, PartitionData>> responseData) {
         super(ApiKeys.OFFSET_FETCH);
         List<OffsetFetchResponseGroup> groupList = new ArrayList<>();
         for (Entry<String, Map<TopicPartition, PartitionData>> entry : responseData.entrySet()) {
@@ -143,15 +180,28 @@ public class OffsetFetchResponse extends AbstractResponse {
             Map<String, OffsetFetchResponseTopics> offsetFetchResponseTopicsMap = new HashMap<>();
             for (Entry<TopicPartition, PartitionData> partitionEntry : partitionDataMap.entrySet()) {
                 String topicName = partitionEntry.getKey().topic();
-                OffsetFetchResponseTopics topic = offsetFetchResponseTopicsMap.getOrDefault(topicName, new OffsetFetchResponseTopics().setName(topicName));
+                OffsetFetchResponseTopics topic =
+                    offsetFetchResponseTopicsMap.getOrDefault(topicName,
+                        new OffsetFetchResponseTopics().setName(topicName));
                 PartitionData partitionData = partitionEntry.getValue();
-                topic.partitions().add(new OffsetFetchResponsePartitions().setPartitionIndex(partitionEntry.getKey().partition()).setErrorCode(partitionData.error.code()).setCommittedOffset(partitionData.offset).setCommittedLeaderEpoch(partitionData.leaderEpoch.orElse(NO_PARTITION_LEADER_EPOCH)).setMetadata(partitionData.metadata));
+                topic.partitions().add(new OffsetFetchResponsePartitions()
+                    .setPartitionIndex(partitionEntry.getKey().partition())
+                    .setErrorCode(partitionData.error.code())
+                    .setCommittedOffset(partitionData.offset)
+                    .setCommittedLeaderEpoch(
+                        partitionData.leaderEpoch.orElse(NO_PARTITION_LEADER_EPOCH))
+                    .setMetadata(partitionData.metadata));
                 offsetFetchResponseTopicsMap.put(topicName, topic);
             }
-            groupList.add(new OffsetFetchResponseGroup().setGroupId(groupName).setTopics(new ArrayList<>(offsetFetchResponseTopicsMap.values())).setErrorCode(errors.get(groupName).code()));
+            groupList.add(new OffsetFetchResponseGroup()
+                .setGroupId(groupName)
+                .setTopics(new ArrayList<>(offsetFetchResponseTopicsMap.values()))
+                .setErrorCode(errors.get(groupName).code()));
             groupLevelErrors.put(groupName, errors.get(groupName));
         }
-        this.data = new OffsetFetchResponseData().setGroups(groupList).setThrottleTimeMs(throttleTimeMs);
+        this.data = new OffsetFetchResponseData()
+            .setGroups(groupList)
+            .setThrottleTimeMs(throttleTimeMs);
         this.error = null;
     }
 
@@ -168,7 +218,9 @@ public class OffsetFetchResponse extends AbstractResponse {
             }
         } else {
             if (groups.size() != 1) {
-                throw new UnsupportedVersionException("Version " + version + " of OffsetFetchResponse only supports one group.");
+                throw new UnsupportedVersionException(
+                    "Version " + version + " of OffsetFetchResponse only supports one group."
+                );
             }
 
             OffsetFetchResponseGroup group = groups.get(0);
@@ -185,9 +237,19 @@ public class OffsetFetchResponse extends AbstractResponse {
                     if (version < 2 && group.errorCode() != Errors.NONE.code()) {
                         // Versions prior to version 2 do not support a top level error. Therefore,
                         // we put it at the partition level.
-                        newPartition = new OffsetFetchResponsePartition().setPartitionIndex(partition.partitionIndex()).setErrorCode(group.errorCode()).setCommittedOffset(INVALID_OFFSET).setMetadata(NO_METADATA).setCommittedLeaderEpoch(NO_PARTITION_LEADER_EPOCH);
+                        newPartition = new OffsetFetchResponsePartition()
+                            .setPartitionIndex(partition.partitionIndex())
+                            .setErrorCode(group.errorCode())
+                            .setCommittedOffset(INVALID_OFFSET)
+                            .setMetadata(NO_METADATA)
+                            .setCommittedLeaderEpoch(NO_PARTITION_LEADER_EPOCH);
                     } else {
-                        newPartition = new OffsetFetchResponsePartition().setPartitionIndex(partition.partitionIndex()).setErrorCode(partition.errorCode()).setCommittedOffset(partition.committedOffset()).setMetadata(partition.metadata()).setCommittedLeaderEpoch(partition.committedLeaderEpoch());
+                        newPartition = new OffsetFetchResponsePartition()
+                            .setPartitionIndex(partition.partitionIndex())
+                            .setErrorCode(partition.errorCode())
+                            .setCommittedOffset(partition.committedOffset())
+                            .setMetadata(partition.metadata())
+                            .setCommittedLeaderEpoch(partition.committedLeaderEpoch());
                     }
 
                     newTopic.partitions().add(newPartition);
@@ -270,12 +332,16 @@ public class OffsetFetchResponse extends AbstractResponse {
                 updateErrorCounts(counts, entry.getValue());
             }
             for (OffsetFetchResponseGroup group : data.groups()) {
-                group.topics().forEach(topic -> topic.partitions().forEach(partition -> updateErrorCounts(counts, Errors.forCode(partition.errorCode()))));
+                group.topics().forEach(topic ->
+                    topic.partitions().forEach(partition ->
+                        updateErrorCounts(counts, Errors.forCode(partition.errorCode()))));
             }
         } else {
             // built response with v0-v7
             updateErrorCounts(counts, error);
-            data.topics().forEach(topic -> topic.partitions().forEach(partition -> updateErrorCounts(counts, Errors.forCode(partition.errorCode()))));
+            data.topics().forEach(topic ->
+                topic.partitions().forEach(partition ->
+                    updateErrorCounts(counts, Errors.forCode(partition.errorCode()))));
         }
         return counts;
     }
@@ -285,7 +351,12 @@ public class OffsetFetchResponse extends AbstractResponse {
         Map<TopicPartition, PartitionData> responseData = new HashMap<>();
         for (OffsetFetchResponseTopic topic : data.topics()) {
             for (OffsetFetchResponsePartition partition : topic.partitions()) {
-                responseData.put(new TopicPartition(topic.name(), partition.partitionIndex()), new PartitionData(partition.committedOffset(), RequestUtils.getLeaderEpoch(partition.committedLeaderEpoch()), partition.metadata(), Errors.forCode(partition.errorCode())));
+                responseData.put(new TopicPartition(topic.name(), partition.partitionIndex()),
+                                 new PartitionData(partition.committedOffset(),
+                                                   RequestUtils.getLeaderEpoch(partition.committedLeaderEpoch()),
+                                                   partition.metadata(),
+                                                   Errors.forCode(partition.errorCode()))
+                );
             }
         }
         return responseData;
@@ -293,10 +364,20 @@ public class OffsetFetchResponse extends AbstractResponse {
 
     private Map<TopicPartition, PartitionData> buildResponseData(String groupId) {
         Map<TopicPartition, PartitionData> responseData = new HashMap<>();
-        OffsetFetchResponseGroup group = data.groups().stream().filter(g -> g.groupId().equals(groupId)).collect(Collectors.toList()).get(0);
+        OffsetFetchResponseGroup group = data
+            .groups()
+            .stream()
+            .filter(g -> g.groupId().equals(groupId))
+            .collect(Collectors.toList())
+            .get(0);
         for (OffsetFetchResponseTopics topic : group.topics()) {
             for (OffsetFetchResponsePartitions partition : topic.partitions()) {
-                responseData.put(new TopicPartition(topic.name(), partition.partitionIndex()), new PartitionData(partition.committedOffset(), RequestUtils.getLeaderEpoch(partition.committedLeaderEpoch()), partition.metadata(), Errors.forCode(partition.errorCode())));
+                responseData.put(new TopicPartition(topic.name(), partition.partitionIndex()),
+                    new PartitionData(partition.committedOffset(),
+                        RequestUtils.getLeaderEpoch(partition.committedLeaderEpoch()),
+                        partition.metadata(),
+                        Errors.forCode(partition.errorCode()))
+                );
             }
         }
         return responseData;

@@ -100,16 +100,15 @@ public final class WordCountTransformerDemo {
                         }
                     }
                 }
-
-                @Override
-                public void close() {
-                }
             };
         }
 
         @Override
         public Set<StoreBuilder<?>> stores() {
-            return Collections.singleton(Stores.keyValueStoreBuilder(Stores.inMemoryKeyValueStore("Counts"), Serdes.String(), Serdes.Integer()));
+            return Collections.singleton(Stores.keyValueStoreBuilder(
+                Stores.inMemoryKeyValueStore("Counts"),
+                Serdes.String(),
+                Serdes.Integer()));
         }
     }
 
@@ -126,15 +125,17 @@ public final class WordCountTransformerDemo {
         props.putIfAbsent(StreamsConfig.APPLICATION_ID_CONFIG, "streams-wordcount-transformer");
         props.putIfAbsent(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
         props.putIfAbsent(StreamsConfig.STATESTORE_CACHE_MAX_BYTES_CONFIG, 0);
-        props.putIfAbsent(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
-        props.putIfAbsent(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
+        props.putIfAbsent(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.StringSerde.class);
+        props.putIfAbsent(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.StringSerde.class);
 
         // setting offset reset to earliest so that we can re-run the demo code with the same pre-loaded data
         props.putIfAbsent(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
 
         final StreamsBuilder builder = new StreamsBuilder();
 
-        builder.<String, String>stream("streams-plaintext-input").process(new MyProcessorSupplier()).to("streams-wordcount-processor-output");
+        builder.<String, String>stream("streams-plaintext-input")
+                .process(new MyProcessorSupplier())
+                .to("streams-wordcount-processor-output");
 
         final KafkaStreams streams = new KafkaStreams(builder.build(), props);
         final CountDownLatch latch = new CountDownLatch(1);

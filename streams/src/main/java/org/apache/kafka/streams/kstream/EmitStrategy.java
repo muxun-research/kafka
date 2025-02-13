@@ -19,6 +19,7 @@ package org.apache.kafka.streams.kstream;
 import org.apache.kafka.streams.kstream.internals.UnlimitedWindow;
 import org.apache.kafka.streams.kstream.internals.emitstrategy.WindowCloseStrategy;
 import org.apache.kafka.streams.kstream.internals.emitstrategy.WindowUpdateStrategy;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,7 +34,8 @@ public interface EmitStrategy {
     Logger log = LoggerFactory.getLogger(EmitStrategy.class);
 
     enum StrategyType {
-        ON_WINDOW_UPDATE(0, new WindowUpdateStrategy()), ON_WINDOW_CLOSE(1, new WindowCloseStrategy());
+        ON_WINDOW_UPDATE(0, new WindowUpdateStrategy()),
+        ON_WINDOW_CLOSE(1, new WindowCloseStrategy());
 
         private final short code;
         private final EmitStrategy strategy;
@@ -51,12 +53,13 @@ public interface EmitStrategy {
             this.strategy = strategy;
         }
 
-        private final static Map<Short, EmitStrategy> TYPE_TO_STRATEGY = new HashMap<>();
+        private static final Map<Short, EmitStrategy> TYPE_TO_STRATEGY = new HashMap<>();
 
         static {
             for (final StrategyType type : StrategyType.values()) {
                 if (TYPE_TO_STRATEGY.put(type.code(), type.strategy()) != null)
-                    throw new IllegalStateException("Code " + type.code() + " for type " + type + " has already been used");
+                    throw new IllegalStateException("Code " + type.code() + " for type " +
+                            type + " has already been used");
             }
         }
 
@@ -66,7 +69,8 @@ public interface EmitStrategy {
     }
 
     /**
-     * Returns the strategy type
+     * Returns the strategy type.
+     *
      * @return Emit strategy type
      */
     StrategyType type();
@@ -78,12 +82,14 @@ public interface EmitStrategy {
      *
      * <p>This strategy should only be used for windows which can close. An exception will be thrown
      * if it's used with {@link UnlimitedWindow}.
-     * @return WindowCloseStrategy instance
+     *
      * @see TimeWindows
      * @see SlidingWindows
      * @see SessionWindows
      * @see UnlimitedWindows
      * @see WindowUpdateStrategy
+     *
+     * @return "window close" {@code EmitStrategy} instance
      */
     static EmitStrategy onWindowClose() {
         return new WindowCloseStrategy();
@@ -92,12 +98,14 @@ public interface EmitStrategy {
     /**
      * This strategy indicates that the aggregated result for a window will be emitted every time
      * when there's an update to the window instead of when the window closes.
-     * @return WindowCloseStrategy instance
+     *
      * @see TimeWindows
      * @see SlidingWindows
      * @see SessionWindows
      * @see UnlimitedWindows
      * @see WindowCloseStrategy
+     *
+     * @return "window update" {@code EmitStrategy} instance
      */
     static EmitStrategy onWindowUpdate() {
         return new WindowUpdateStrategy();

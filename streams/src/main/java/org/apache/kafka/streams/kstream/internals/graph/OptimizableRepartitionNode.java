@@ -25,25 +25,25 @@ import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 
 public class OptimizableRepartitionNode<K, V> extends BaseRepartitionNode<K, V> {
 
-	private OptimizableRepartitionNode(final String nodeName,
-									   final String sourceName,
-									   final ProcessorParameters<K, V, ?, ?> processorParameters,
-									   final Serde<K> keySerde,
-									   final Serde<V> valueSerde,
-									   final String sinkName,
-									   final String repartitionTopic,
-									   final StreamPartitioner<K, V> partitioner) {
-		super(
-				nodeName,
-				sourceName,
-				processorParameters,
-				keySerde,
-				valueSerde,
-				sinkName,
-				repartitionTopic,
-				partitioner,
-				InternalTopicProperties.empty()
-		);
+    private OptimizableRepartitionNode(final String nodeName,
+                                       final String sourceName,
+                                       final ProcessorParameters<K, V, K, V> processorParameters,
+                                       final Serde<K> keySerde,
+                                       final Serde<V> valueSerde,
+                                       final String sinkName,
+                                       final String repartitionTopic,
+                                       final StreamPartitioner<K, V> partitioner) {
+        super(
+            nodeName,
+            sourceName,
+            processorParameters,
+            keySerde,
+            valueSerde,
+            sinkName,
+            repartitionTopic,
+            partitioner,
+            InternalTopicProperties.empty()
+        );
     }
 
     public Serde<K> keySerde() {
@@ -65,27 +65,27 @@ public class OptimizableRepartitionNode<K, V> extends BaseRepartitionNode<K, V> 
 
     @Override
     public void writeToTopology(final InternalTopologyBuilder topologyBuilder) {
-		topologyBuilder.addInternalTopic(repartitionTopic, internalTopicProperties);
+        topologyBuilder.addInternalTopic(repartitionTopic, internalTopicProperties);
 
         processorParameters.addProcessorTo(topologyBuilder, parentNodeNames());
 
         topologyBuilder.addSink(
-				sinkName,
-				repartitionTopic,
-				keySerializer(),
-				valueSerializer(),
-				partitioner,
-				processorParameters.processorName()
-		);
+            sinkName,
+            repartitionTopic,
+            keySerializer(),
+            valueSerializer(),
+            partitioner,
+            processorParameters.processorName()
+        );
 
         topologyBuilder.addSource(
-				null,
-				sourceName,
-				new FailOnInvalidTimestamp(),
-				keyDeserializer(),
-				valueDeserializer(),
-				repartitionTopic
-		);
+            null,
+            sourceName,
+            new FailOnInvalidTimestamp(),
+            keyDeserializer(),
+            valueDeserializer(),
+            repartitionTopic
+        );
 
     }
 
@@ -93,23 +93,19 @@ public class OptimizableRepartitionNode<K, V> extends BaseRepartitionNode<K, V> 
         return new OptimizableRepartitionNodeBuilder<>();
     }
 
-
-	public static final class OptimizableRepartitionNodeBuilder<K, V> extends BaseRepartitionNodeBuilder<K, V, OptimizableRepartitionNode<K, V>> {
-
-		@Override
-		public OptimizableRepartitionNode<K, V> build() {
-
-			return new OptimizableRepartitionNode<>(
-					nodeName,
-					sourceName,
-					processorParameters,
-					keySerde,
-					valueSerde,
-					sinkName,
-					repartitionTopic,
-					partitioner
-			);
-
+    public static final class OptimizableRepartitionNodeBuilder<K, V> extends BaseRepartitionNodeBuilder<K, V, OptimizableRepartitionNode<K, V>> {
+        @Override
+        public OptimizableRepartitionNode<K, V> build() {
+            return new OptimizableRepartitionNode<>(
+                nodeName,
+                sourceName,
+                processorParameters,
+                keySerde,
+                valueSerde,
+                sinkName,
+                repartitionTopic,
+                partitioner
+            );
         }
     }
 }

@@ -17,10 +17,11 @@
 
 package org.apache.kafka.trogdor.workload;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.common.errors.InterruptException;
+
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.Random;
 
@@ -61,7 +62,8 @@ public class GaussianFlushGenerator implements FlushGenerator {
     private int flushSize = 0;
 
     @JsonCreator
-    public GaussianFlushGenerator(@JsonProperty("messagesPerFlushAverage") int messagesPerFlushAverage, @JsonProperty("messagesPerFlushDeviation") double messagesPerFlushDeviation) {
+    public GaussianFlushGenerator(@JsonProperty("messagesPerFlushAverage") int messagesPerFlushAverage,
+                                  @JsonProperty("messagesPerFlushDeviation") double messagesPerFlushDeviation) {
         this.messagesPerFlushAverage = messagesPerFlushAverage;
         this.messagesPerFlushDeviation = messagesPerFlushDeviation;
         calculateFlushSize();

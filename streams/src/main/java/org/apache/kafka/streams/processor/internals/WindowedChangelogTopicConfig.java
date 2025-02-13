@@ -46,11 +46,12 @@ public class WindowedChangelogTopicConfig extends InternalTopicConfig {
      * Get the configured properties for this topic. If no retentionMs override is provided from
      * the topic configs, then we add additionalRetentionMs to work out the desired retention
      * when cleanup.policy=compact,delete
+     *
      * @param additionalRetentionMs - added to retention to allow for clock drift etc
      * @return Properties to be used when creating the topic
      */
-	@Override
-	public Map<String, String> getProperties(final Map<String, String> defaultProperties, final long additionalRetentionMs) {
+    @Override
+    public Map<String, String> properties(final Map<String, String> defaultProperties, final long additionalRetentionMs) {
         // internal topic config overridden rule: library overrides < global config overrides < per-topic config overrides
         final Map<String, String> topicConfig = new HashMap<>(WINDOWED_STORE_CHANGELOG_TOPIC_DEFAULT_OVERRIDES);
 
@@ -80,24 +81,24 @@ public class WindowedChangelogTopicConfig extends InternalTopicConfig {
             return false;
         }
         final WindowedChangelogTopicConfig that = (WindowedChangelogTopicConfig) o;
-		return Objects.equals(name, that.name) &&
-				Objects.equals(topicConfigs, that.topicConfigs) &&
-				Objects.equals(retentionMs, that.retentionMs) &&
-				Objects.equals(enforceNumberOfPartitions, that.enforceNumberOfPartitions);
+        return Objects.equals(name, that.name) &&
+               Objects.equals(topicConfigs, that.topicConfigs) &&
+               Objects.equals(retentionMs, that.retentionMs) &&
+               Objects.equals(enforceNumberOfPartitions, that.enforceNumberOfPartitions);
     }
 
     @Override
     public int hashCode() {
-		return Objects.hash(name, topicConfigs, retentionMs, enforceNumberOfPartitions);
+        return Objects.hash(name, topicConfigs, retentionMs, enforceNumberOfPartitions);
     }
 
     @Override
     public String toString() {
         return "WindowedChangelogTopicConfig(" +
-				"name=" + name +
-				", topicConfigs=" + topicConfigs +
-				", retentionMs=" + retentionMs +
-				", enforceNumberOfPartitions=" + enforceNumberOfPartitions +
-				")";
+                "name=" + name +
+                ", topicConfigs=" + topicConfigs +
+                ", retentionMs=" + retentionMs +
+                ", enforceNumberOfPartitions=" + enforceNumberOfPartitions +
+                ")";
     }
 }

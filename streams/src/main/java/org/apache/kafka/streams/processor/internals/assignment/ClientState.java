@@ -18,17 +18,35 @@ package org.apache.kafka.streams.processor.internals.assignment;
 
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.streams.processor.TaskId;
+import org.apache.kafka.streams.processor.assignment.KafkaStreamsAssignment;
+import org.apache.kafka.streams.processor.assignment.ProcessId;
 import org.apache.kafka.streams.processor.internals.Task;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.time.Instant;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.SortedMap;
+import java.util.SortedSet;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
-import static java.util.Collections.*;
+import static java.util.Collections.emptyMap;
+import static java.util.Collections.unmodifiableMap;
+import static java.util.Collections.unmodifiableSet;
 import static java.util.Comparator.comparing;
 import static java.util.Comparator.comparingLong;
 import static org.apache.kafka.common.utils.Utils.union;
+import static org.apache.kafka.streams.processor.assignment.KafkaStreamsAssignment.AssignedTask.Type.ACTIVE;
+import static org.apache.kafka.streams.processor.assignment.KafkaStreamsAssignment.AssignedTask.Type.STANDBY;
 import static org.apache.kafka.streams.processor.internals.assignment.SubscriptionInfo.UNKNOWN_OFFSET_SUM;
 
 public class ClientState {
@@ -46,42 +64,80 @@ public class ClientState {
     private final ClientStateTask previousActiveTasks = new ClientStateTask(null, new TreeMap<>());
     private final ClientStateTask previousStandbyTasks = new ClientStateTask(null, null);
     private final ClientStateTask revokingActiveTasks = new ClientStateTask(null, new TreeMap<>());
+    private final ProcessId processId;
 
+    private Optional<Instant> followupRebalanceDeadline = Optional.empty();
     private int capacity;
 
     public ClientState() {
-        this(0);
+        this(null, 0);
     }
 
-    public ClientState(final Map<String, String> clientTags) {
-        this(0, clientTags);
+    public ClientState(final ProcessId processId, final Map<String, String> clientTags) {
+        this(processId, 0, clientTags);
     }
 
     ClientState(final int capacity) {
-        this(capacity, Collections.emptyMap());
+        this(null, capacity);
     }
 
-    ClientState(final int capacity, final Map<String, String> clientTags) {
-        previousStandbyTasks.taskIds(new TreeSet<>());
-        previousActiveTasks.taskIds(new TreeSet<>());
+    ClientState(final ProcessId processId, final int capacity) {
+        this(processId, capacity, Collections.emptyMap());
+    }
+
+    ClientState(final ProcessId processId, final int capacity, final Map<String, String> clientTags) {
+        previousStandbyTasks.setTaskIds(new TreeSet<>());
+        previousActiveTasks.setTaskIds(new TreeSet<>());
         taskOffsetSums = new TreeMap<>();
         taskLagTotals = new TreeMap<>();
         this.capacity = capacity;
+        this.processId = processId;
         this.clientTags = unmodifiableMap(clientTags);
     }
 
     // For testing only
-    public ClientState(final Set<TaskId> previousActiveTasks, final Set<TaskId> previousStandbyTasks, final Map<TaskId, Long> taskLagTotals, final Map<String, String> clientTags, final int capacity) {
-        this.previousStandbyTasks.taskIds(unmodifiableSet(new TreeSet<>(previousStandbyTasks)));
-        this.previousActiveTasks.taskIds(unmodifiableSet(new TreeSet<>(previousActiveTasks)));
+    public ClientState(final Set<TaskId> previousActiveTasks,
+                       final Set<TaskId> previousStandbyTasks,
+                       final Map<TaskId, Long> taskLagTotals,
+                       final Map<String, String> clientTags,
+                       final int capacity) {
+        this(previousActiveTasks, previousStandbyTasks, taskLagTotals, clientTags, capacity, null);
+    }
+
+    // For testing only
+    public ClientState(final Set<TaskId> previousActiveTasks,
+                       final Set<TaskId> previousStandbyTasks,
+                       final Map<TaskId, Long> taskLagTotals,
+                       final Map<String, String> clientTags,
+                       final int capacity,
+                       final ProcessId processId) {
+        this.previousStandbyTasks.setTaskIds(unmodifiableSet(new TreeSet<>(previousStandbyTasks)));
+        this.previousActiveTasks.setTaskIds(unmodifiableSet(new TreeSet<>(previousActiveTasks)));
         taskOffsetSums = emptyMap();
         this.taskLagTotals = unmodifiableMap(taskLagTotals);
         this.capacity = capacity;
         this.clientTags = unmodifiableMap(clientTags);
+        this.processId = processId;
     }
 
-    int capacity() {
+    // For testing only
+    public ClientState(final ClientState clientState) {
+        this(
+            new HashSet<>(clientState.previousActiveTasks.taskIds()),
+            new HashSet<>(clientState.previousStandbyTasks.taskIds()),
+            clientState.taskLagTotals,
+            clientState.clientTags,
+            clientState.capacity,
+            clientState.processId
+        );
+    }
+
+    public int capacity() {
         return capacity;
+    }
+
+    ProcessId processId() {
+        return processId;
     }
 
     public void incrementCapacity() {
@@ -90,6 +146,14 @@ public class ClientState {
 
     boolean reachedCapacity() {
         return assignedTaskCount() >= capacity;
+    }
+
+    public Optional<Instant> followupRebalanceDeadline() {
+        return followupRebalanceDeadline;
+    }
+
+    public void setFollowupRebalanceDeadline(final Instant followupRebalanceDeadline) {
+        this.followupRebalanceDeadline = Optional.of(followupRebalanceDeadline);
     }
 
     public Set<TaskId> activeTasks() {
@@ -108,11 +172,16 @@ public class ClientState {
         assignedActiveTasks.taskIds().addAll(tasks);
     }
 
+    public void assignStandbyTasks(final Collection<TaskId> tasks) {
+        assignedStandbyTasks.taskIds().addAll(tasks);
+    }
+
     public void assignActiveToConsumer(final TaskId task, final String consumer) {
         if (!assignedActiveTasks.taskIds().contains(task)) {
             throw new IllegalStateException("added not assign active task " + task + " to this client state.");
         }
-        assignedActiveTasks.consumerToTaskIds().computeIfAbsent(consumer, k -> new HashSet<>()).add(task);
+        assignedActiveTasks.consumerToTaskIds()
+                           .computeIfAbsent(consumer, k -> new HashSet<>()).add(task);
     }
 
     public void assignStandbyToConsumer(final TaskId task, final String consumer) {
@@ -132,7 +201,7 @@ public class ClientState {
         final Map<String, Set<TaskId>> consumerToPreviousStandbyTaskIds = new TreeMap<>();
         final Map<String, Set<TaskId>> consumerToPreviousActiveTaskIds = previousActiveTasks.consumerToTaskIds();
 
-        for (final Map.Entry<String, Set<TaskId>> entry : consumerToPreviousStatefulTaskIds.entrySet()) {
+        for (final Map.Entry<String, Set<TaskId>> entry: consumerToPreviousStatefulTaskIds.entrySet()) {
             final Set<TaskId> standbyTaskIds = new HashSet<>(entry.getValue());
             if (consumerToPreviousActiveTaskIds.containsKey(entry.getKey()))
                 standbyTaskIds.removeAll(consumerToPreviousActiveTaskIds.get(entry.getKey()));
@@ -180,6 +249,10 @@ public class ClientState {
         return assignedStandbyTasks.taskIds().contains(taskId);
     }
 
+    boolean hasActiveTask(final TaskId taskId) {
+        return assignedActiveTasks.taskIds().contains(taskId);
+    }
+
     int standbyTaskCount() {
         return assignedStandbyTasks.taskIds().size();
     }
@@ -203,7 +276,17 @@ public class ClientState {
         // Since we're copying it, it's not strictly necessary to make it unmodifiable also.
         // I'm just trying to prevent subtle bugs if we write code that thinks it can update
         // the assignment by updating the returned set.
-        return unmodifiableSet(union(() -> new HashSet<>(assignedActiveTaskIds.size() + assignedStandbyTaskIds.size()), assignedActiveTaskIds, assignedStandbyTaskIds));
+        return unmodifiableSet(
+            union(
+                () -> new HashSet<>(assignedActiveTaskIds.size() + assignedStandbyTaskIds.size()),
+                assignedActiveTaskIds,
+                assignedStandbyTaskIds
+            )
+        );
+    }
+
+    public boolean previouslyOwnedStandby(final TaskId task) {
+        return previousStandbyTasks.taskIds().contains(task);
     }
 
     public int assignedTaskCount() {
@@ -245,7 +328,9 @@ public class ClientState {
     Set<TaskId> previousAssignedTasks() {
         final Set<TaskId> previousActiveTaskIds = previousActiveTasks.taskIds();
         final Set<TaskId> previousStandbyTaskIds = previousStandbyTasks.taskIds();
-        return union(() -> new HashSet<>(previousActiveTaskIds.size() + previousStandbyTaskIds.size()), previousActiveTaskIds, previousStandbyTaskIds);
+        return union(() -> new HashSet<>(previousActiveTaskIds.size() + previousStandbyTaskIds.size()),
+                     previousActiveTaskIds,
+                     previousStandbyTaskIds);
     }
 
     // May return null
@@ -268,7 +353,8 @@ public class ClientState {
         consumerToPreviousStatefulTaskIds.put(consumerId, taskOffsetSums.keySet());
     }
 
-    public void initializePrevTasks(final Map<TopicPartition, TaskId> taskForPartitionMap, final boolean hasNamedTopologies) {
+    public void initializePrevTasks(final Map<TopicPartition, TaskId> taskForPartitionMap,
+                                    final boolean hasNamedTopologies) {
         if (!previousActiveTasks.taskIds().isEmpty() || !previousStandbyTasks.taskIds().isEmpty()) {
             throw new IllegalStateException("Already added previous tasks to this client state.");
         }
@@ -278,7 +364,8 @@ public class ClientState {
         initializeRemainingPrevTasksFromTaskOffsetSums();
     }
 
-    private void maybeFilterUnknownPrevTasksAndPartitions(final Map<TopicPartition, TaskId> taskForPartitionMap, final boolean hasNamedTopologies) {
+    private void maybeFilterUnknownPrevTasksAndPartitions(final Map<TopicPartition, TaskId> taskForPartitionMap,
+                                                          final boolean hasNamedTopologies) {
         // If this application uses named topologies, then it's possible for members to report tasks
         // or partitions in their subscription that belong to a named topology that the group leader
         // doesn't currently recognize, eg because it was just removed
@@ -292,7 +379,7 @@ public class ClientState {
     /**
      * Compute the lag for each stateful task, including tasks this client did not previously have.
      */
-    public void computeTaskLags(final UUID uuid, final Map<TaskId, Long> allTaskEndOffsetSums) {
+    public void computeTaskLags(final ProcessId uuid, final Map<TaskId, Long> allTaskEndOffsetSums) {
         if (!taskLagTotals.isEmpty()) {
             throw new IllegalStateException("Already computed task lags for this client.");
         }
@@ -307,7 +394,11 @@ public class ClientState {
             } else if (offsetSum == UNKNOWN_OFFSET_SUM) {
                 taskLagTotals.put(task, UNKNOWN_OFFSET_SUM);
             } else if (endOffsetSum < offsetSum) {
-                LOG.warn("Task " + task + " had endOffsetSum=" + endOffsetSum + " smaller than offsetSum=" + offsetSum + " on member " + uuid + ". This probably means the task is corrupted," + " which in turn indicates that it will need to restore from scratch if it gets assigned." + " The assignor will de-prioritize returning this task to this member in the hopes that" + " some other member may be able to re-use its state.");
+                LOG.warn("Task " + task + " had endOffsetSum=" + endOffsetSum + " smaller than offsetSum=" +
+                             offsetSum + " on member " + uuid + ". This probably means the task is corrupted," +
+                             " which in turn indicates that it will need to restore from scratch if it gets assigned." +
+                             " The assignor will de-prioritize returning this task to this member in the hopes that" +
+                             " some other member may be able to re-use its state.");
                 taskLagTotals.put(task, endOffsetSum);
             } else {
                 taskLagTotals.put(task, endOffsetSum - offsetSum);
@@ -318,8 +409,9 @@ public class ClientState {
     /**
      * Returns the total lag across all logged stores in the task. Equal to the end offset sum if this client
      * did not have any state for this task on disk.
+     *
      * @return end offset sum - offset sum
-     * Task.LATEST_OFFSET if this was previously an active running task on this client
+     *          Task.LATEST_OFFSET if this was previously an active running task on this client
      */
     public long lagFor(final TaskId task) {
         final Long totalLag = taskLagTotals.get(task);
@@ -381,13 +473,50 @@ public class ClientState {
         return consumerToPreviousStatefulTaskIds.keySet().toString();
     }
 
+    public Map<TaskId, Long> taskLagTotals() {
+        return taskLagTotals;
+    }
+
+    public SortedSet<TaskId> previousActiveTasks() {
+        return new TreeSet<>(previousActiveTasks.taskIds());
+    }
+
+    public SortedSet<TaskId> previousStandbyTasks() {
+        return new TreeSet<>(previousStandbyTasks.taskIds());
+    }
+
+    public SortedMap<String, Set<TaskId>> taskIdsByPreviousConsumer() {
+        return new TreeMap<>(consumerToPreviousStatefulTaskIds);
+    }
+
+    public void setAssignedTasks(final KafkaStreamsAssignment assignment) {
+        final Set<TaskId> activeTasks = assignment.tasks().values().stream()
+            .filter(task -> task.type() == ACTIVE).map(KafkaStreamsAssignment.AssignedTask::id)
+            .collect(Collectors.toSet());
+        final Set<TaskId> standbyTasks = assignment.tasks().values().stream()
+            .filter(task -> task.type() == STANDBY).map(KafkaStreamsAssignment.AssignedTask::id)
+            .collect(Collectors.toSet());
+        assignedActiveTasks.setTaskIds(activeTasks);
+        assignedStandbyTasks.setTaskIds(standbyTasks);
+    }
+
     public String currentAssignment() {
-        return "[activeTasks: (" + assignedActiveTasks.taskIds() + ") standbyTasks: (" + assignedStandbyTasks.taskIds() + ")]";
+        return "[activeTasks: (" + assignedActiveTasks.taskIds() +
+               ") standbyTasks: (" + assignedStandbyTasks.taskIds() + ")]";
     }
 
     @Override
     public String toString() {
-        return "[activeTasks: (" + assignedActiveTasks.taskIds() + ") standbyTasks: (" + assignedStandbyTasks.taskIds() + ") prevActiveTasks: (" + previousActiveTasks.taskIds() + ") prevStandbyTasks: (" + previousStandbyTasks.taskIds() + ") changelogOffsetTotalsByTask: (" + taskOffsetSums.entrySet() + ") taskLagTotals: (" + taskLagTotals.entrySet() + ") clientTags: (" + clientTags.entrySet() + ") capacity: " + capacity + " assigned: " + assignedTaskCount() + "]";
+        return "[activeTasks: (" + assignedActiveTasks.taskIds() +
+               ") standbyTasks: (" + assignedStandbyTasks.taskIds() +
+               ") prevActiveTasks: (" + previousActiveTasks.taskIds() +
+               ") prevStandbyTasks: (" + previousStandbyTasks.taskIds() +
+               ") changelogOffsetTotalsByTask: (" + taskOffsetSums.entrySet() +
+               ") taskLagTotals: (" + taskLagTotals.entrySet() +
+               ") clientTags: (" + clientTags.entrySet() +
+               ") capacity: " + capacity +
+               " assigned: " + assignedTaskCount() +
+               "]";
     }
 
     private boolean isStateful(final TaskId task) {

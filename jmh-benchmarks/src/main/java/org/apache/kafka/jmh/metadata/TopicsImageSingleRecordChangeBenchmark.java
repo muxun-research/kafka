@@ -22,7 +22,19 @@ import org.apache.kafka.common.metadata.PartitionRecord;
 import org.apache.kafka.common.metadata.TopicRecord;
 import org.apache.kafka.image.TopicsDelta;
 import org.apache.kafka.image.TopicsImage;
-import org.openjdk.jmh.annotations.*;
+
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Warmup;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -60,7 +72,14 @@ public class TopicsImageSingleRecordChangeBenchmark {
         topicsDelta.replay(newTopicRecord);
         ArrayList<Integer> replicas = TopicsImageSnapshotLoadBenchmark.getReplicas(totalTopicCount, partitionsPerTopic, replicationFactor, numReplicasPerBroker, 0);
         ArrayList<Integer> isr = new ArrayList<>(replicas);
-        PartitionRecord newPartitionRecord = new PartitionRecord().setPartitionId(0).setTopicId(newTopicUuid).setReplicas(replicas).setIsr(isr).setRemovingReplicas(Collections.emptyList()).setAddingReplicas(Collections.emptyList()).setLeader(0);
+        PartitionRecord newPartitionRecord = new PartitionRecord().
+            setPartitionId(0).
+            setTopicId(newTopicUuid).
+            setReplicas(replicas).
+            setIsr(isr).
+            setRemovingReplicas(Collections.emptyList()).
+            setAddingReplicas(Collections.emptyList()).
+            setLeader(0);
         topicsDelta.replay(newPartitionRecord);
         System.out.print("(Adding a single topic to metadata having " + totalTopicCount + " total topics) ");
     }

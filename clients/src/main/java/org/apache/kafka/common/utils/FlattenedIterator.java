@@ -23,23 +23,23 @@ import java.util.function.Function;
  * Provides a flattened iterator over the inner elements of an outer iterator.
  */
 public final class FlattenedIterator<O, I> extends AbstractIterator<I> {
-	private final Iterator<O> outerIterator;
-	private final Function<O, Iterator<I>> innerIteratorFunction;
-	private Iterator<I> innerIterator;
+    private final Iterator<O> outerIterator;
+    private final Function<O, Iterator<I>> innerIteratorFunction;
+    private Iterator<I> innerIterator;
 
-	public FlattenedIterator(Iterator<O> outerIterator, Function<O, Iterator<I>> innerIteratorFunction) {
-		this.outerIterator = outerIterator;
-		this.innerIteratorFunction = innerIteratorFunction;
-	}
+    public FlattenedIterator(Iterator<O> outerIterator, Function<O, Iterator<I>> innerIteratorFunction) {
+        this.outerIterator = outerIterator;
+        this.innerIteratorFunction = innerIteratorFunction;
+    }
 
-	@Override
-	public I makeNext() {
-		while (innerIterator == null || !innerIterator.hasNext()) {
-			if (outerIterator.hasNext())
-				innerIterator = innerIteratorFunction.apply(outerIterator.next());
-			else
-				return allDone();
-		}
-		return innerIterator.next();
-	}
+    @Override
+    protected I makeNext() {
+        while (innerIterator == null || !innerIterator.hasNext()) {
+            if (outerIterator.hasNext())
+                innerIterator = innerIteratorFunction.apply(outerIterator.next());
+            else
+                return allDone();
+        }
+        return innerIterator.next();
+    }
 }

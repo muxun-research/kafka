@@ -21,30 +21,29 @@ import java.util.Objects;
 
 
 public class BrokerRegistrationReply {
-	private final long epoch;
+    private final long epoch;
 
-	public BrokerRegistrationReply(long epoch) {
-		this.epoch = epoch;
-	}
+    public BrokerRegistrationReply(long epoch) {
+        this.epoch = epoch;
+    }
 
-	public long epoch() {
-		return epoch;
-	}
+    public long epoch() {
+        return epoch;
+    }
 
-	@Override
-	public int hashCode() {
-		return Objects.hash(epoch);
-	}
+    @Override
+    public int hashCode() {
+        return Objects.hash(epoch);
+    }
 
-	@Override
-	public boolean equals(Object o) {
-		if (!(o instanceof BrokerRegistrationReply)) return false;
-		BrokerRegistrationReply other = (BrokerRegistrationReply) o;
-		return other.epoch == epoch;
-	}
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof BrokerRegistrationReply other)) return false;
+        return other.epoch == epoch;
+    }
 
-	@Override
-	public String toString() {
-		return "BrokerRegistrationReply(epoch=" + epoch + ")";
-	}
+    @Override
+    public String toString() {
+        return "BrokerRegistrationReply(epoch=" + epoch + ")";
+    }
 }

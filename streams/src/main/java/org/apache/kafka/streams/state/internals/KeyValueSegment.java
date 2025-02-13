@@ -18,6 +18,7 @@ package org.apache.kafka.streams.state.internals;
 
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.common.utils.Utils;
+import org.apache.kafka.streams.query.Position;
 import org.apache.kafka.streams.state.internals.metrics.RocksDBMetricsRecorder;
 
 import java.io.File;
@@ -28,34 +29,36 @@ import java.util.Objects;
 class KeyValueSegment extends RocksDBStore implements Comparable<KeyValueSegment>, Segment {
     public final long id;
 
-	KeyValueSegment(final String segmentName,
-					final String windowName,
-					final long id,
-					final RocksDBMetricsRecorder metricsRecorder) {
-		super(segmentName, windowName, metricsRecorder);
-		this.id = id;
-	}
+    KeyValueSegment(final String segmentName,
+                    final String windowName,
+                    final long id,
+                    final Position position,
+                    final RocksDBMetricsRecorder metricsRecorder) {
+        super(segmentName, windowName, metricsRecorder);
+        this.id = id;
+        this.position = position;
+    }
 
-	@Override
-	public void destroy() throws IOException {
-		Utils.delete(dbDir);
-	}
+    @Override
+    public void destroy() throws IOException {
+        Utils.delete(dbDir);
+    }
 
-	@Override
-	public synchronized void deleteRange(final Bytes keyFrom, final Bytes keyTo) {
-		super.deleteRange(keyFrom, keyTo);
-	}
+    @Override
+    public synchronized void deleteRange(final Bytes keyFrom, final Bytes keyTo) {
+        super.deleteRange(keyFrom, keyTo);
+    }
 
-	@Override
-	public int compareTo(final KeyValueSegment segment) {
-		return Long.compare(id, segment.id);
-	}
+    @Override
+    public int compareTo(final KeyValueSegment segment) {
+        return Long.compare(id, segment.id);
+    }
 
-	@Override
-	public void openDB(final Map<String, Object> configs, final File stateDir) {
-		super.openDB(configs, stateDir);
-		// skip the registering step
-	}
+    @Override
+    public void openDB(final Map<String, Object> configs, final File stateDir) {
+        super.openDB(configs, stateDir);
+        // skip the registering step
+    }
 
     @Override
     public String toString() {

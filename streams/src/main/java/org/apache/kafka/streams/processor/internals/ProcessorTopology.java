@@ -17,13 +17,21 @@
 package org.apache.kafka.streams.processor.internals;
 
 import org.apache.kafka.streams.processor.StateStore;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 public class ProcessorTopology {
-    private final Logger log = LoggerFactory.getLogger(ProcessorTopology.class);
+    private static final Logger log = LoggerFactory.getLogger(ProcessorTopology.class);
 
     private final List<ProcessorNode<?, ?, ?, ?>> processorNodes;
     private final Map<String, SourceNode<?, ?>> sourceNodesByName;
@@ -36,8 +44,16 @@ public class ProcessorTopology {
     // the following contains entries for the entire topology, eg stores that do not belong to this ProcessorTopology
     private final List<StateStore> globalStateStores;
     private final Map<String, String> storeToChangelogTopic;
+    private final Map<String, Optional<InternalTopologyBuilder.ReprocessFactory<?, ?, ?, ?>>> storeNameToReprocessOnRestore;
 
-    public ProcessorTopology(final List<ProcessorNode<?, ?, ?, ?>> processorNodes, final Map<String, SourceNode<?, ?>> sourceNodesByTopic, final Map<String, SinkNode<?, ?>> sinksByTopic, final List<StateStore> stateStores, final List<StateStore> globalStateStores, final Map<String, String> storeToChangelogTopic, final Set<String> repartitionTopics) {
+    public ProcessorTopology(final List<ProcessorNode<?, ?, ?, ?>> processorNodes,
+                             final Map<String, SourceNode<?, ?>> sourceNodesByTopic,
+                             final Map<String, SinkNode<?, ?>> sinksByTopic,
+                             final List<StateStore> stateStores,
+                             final List<StateStore> globalStateStores,
+                             final Map<String, String> storeToChangelogTopic,
+                             final Set<String> repartitionTopics,
+                             final Map<String, Optional<InternalTopologyBuilder.ReprocessFactory<?, ?, ?, ?>>> storeNameToReprocessOnRestore) {
         this.processorNodes = Collections.unmodifiableList(processorNodes);
         this.sourceNodesByTopic = new HashMap<>(sourceNodesByTopic);
         this.sinksByTopic = Collections.unmodifiableMap(sinksByTopic);
@@ -45,6 +61,7 @@ public class ProcessorTopology {
         this.globalStateStores = Collections.unmodifiableList(globalStateStores);
         this.storeToChangelogTopic = Collections.unmodifiableMap(storeToChangelogTopic);
         this.repartitionTopics = Collections.unmodifiableSet(repartitionTopics);
+        this.storeNameToReprocessOnRestore = storeNameToReprocessOnRestore;
 
         this.terminalNodes = new HashSet<>();
         for (final ProcessorNode<?, ?, ?, ?> node : processorNodes) {
@@ -89,6 +106,10 @@ public class ProcessorTopology {
 
     public List<StateStore> stateStores() {
         return stateStores;
+    }
+
+    public Map<String, Optional<InternalTopologyBuilder.ReprocessFactory<?, ?, ?, ?>>> storeNameToReprocessOnRestore() {
+        return storeNameToReprocessOnRestore;
     }
 
     public List<StateStore> globalStateStores() {
@@ -138,15 +159,18 @@ public class ProcessorTopology {
 
             final List<String> updatedSourceTopics = allSourceTopicsByNodeName.get(sourceNodeName);
             if (updatedSourceTopics == null) {
-                log.error("Unable to find source node {} in updated topics map {}", sourceNodeName, allSourceTopicsByNodeName);
+                log.error("Unable to find source node {} in updated topics map {}",
+                          sourceNodeName, allSourceTopicsByNodeName);
                 throw new IllegalStateException("Node " + sourceNodeName + " not found in full topology");
             }
 
             log.trace("Updating source node {} with new topics {}", sourceNodeName, updatedSourceTopics);
             for (final String topic : updatedSourceTopics) {
                 if (sourceNodesByTopic.containsKey(topic)) {
-                    log.error("Tried to subscribe topic {} to two nodes when updating topics from {}", topic, allSourceTopicsByNodeName);
-                    throw new IllegalStateException("Topic " + topic + " was already registered to source node " + sourceNodesByTopic.get(topic).name());
+                    log.error("Tried to subscribe topic {} to two nodes when updating topics from {}",
+                              topic, allSourceTopicsByNodeName);
+                    throw new IllegalStateException("Topic " + topic + " was already registered to source node "
+                                                        + sourceNodesByTopic.get(topic).name());
                 }
                 sourceNodesByTopic.put(topic, sourceNode);
             }
@@ -203,7 +227,9 @@ public class ProcessorTopology {
         for (final Map.Entry<SourceNode<?, ?>, List<String>> sourceNodeEntry : sourceToTopics.entrySet()) {
             final SourceNode<?, ?> source = sourceNodeEntry.getKey();
             final List<String> topics = sourceNodeEntry.getValue();
-            sb.append(source.toString(indent + "\t")).append(topicsToString(indent + "\t", topics)).append(childrenToString(indent + "\t", source.children()));
+            sb.append(source.toString(indent + "\t"))
+                .append(topicsToString(indent + "\t", topics))
+                .append(childrenToString(indent + "\t", source.children()));
         }
         return sb.toString();
     }

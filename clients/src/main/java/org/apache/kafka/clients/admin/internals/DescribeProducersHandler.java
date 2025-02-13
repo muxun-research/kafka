@@ -32,9 +32,19 @@ import org.apache.kafka.common.requests.DescribeProducersRequest;
 import org.apache.kafka.common.requests.DescribeProducersResponse;
 import org.apache.kafka.common.utils.CollectionUtils;
 import org.apache.kafka.common.utils.LogContext;
+
 import org.slf4j.Logger;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class DescribeProducersHandler extends AdminApiHandler.Batched<TopicPartition, PartitionProducerState> {
@@ -42,7 +52,10 @@ public class DescribeProducersHandler extends AdminApiHandler.Batched<TopicParti
     private final DescribeProducersOptions options;
     private final AdminApiLookupStrategy<TopicPartition> lookupStrategy;
 
-    public DescribeProducersHandler(DescribeProducersOptions options, LogContext logContext) {
+    public DescribeProducersHandler(
+        DescribeProducersOptions options,
+        LogContext logContext
+    ) {
         this.options = options;
         this.log = logContext.logger(DescribeProducersHandler.class);
 
@@ -53,8 +66,11 @@ public class DescribeProducersHandler extends AdminApiHandler.Batched<TopicParti
         }
     }
 
-    public static AdminApiFuture.SimpleAdminApiFuture<TopicPartition, PartitionProducerState> newFuture(Collection<TopicPartition> topicPartitions) {
-        return AdminApiFuture.forKeys(new HashSet<>(topicPartitions));
+    public static PartitionLeaderStrategy.PartitionLeaderFuture<PartitionProducerState> newFuture(
+        Collection<TopicPartition> topicPartitions,
+        Map<TopicPartition, Integer> partitionLeaderCache
+    ) {
+        return new PartitionLeaderStrategy.PartitionLeaderFuture<>(new HashSet<>(topicPartitions), partitionLeaderCache);
     }
 
     @Override
@@ -68,54 +84,83 @@ public class DescribeProducersHandler extends AdminApiHandler.Batched<TopicParti
     }
 
     @Override
-    public DescribeProducersRequest.Builder buildBatchedRequest(int brokerId, Set<TopicPartition> topicPartitions) {
+    public DescribeProducersRequest.Builder buildBatchedRequest(
+        int brokerId,
+        Set<TopicPartition> topicPartitions
+    ) {
         DescribeProducersRequestData request = new DescribeProducersRequestData();
         DescribeProducersRequest.Builder builder = new DescribeProducersRequest.Builder(request);
 
-        CollectionUtils.groupPartitionsByTopic(topicPartitions, builder::addTopic, (topicRequest, partitionId) -> topicRequest.partitionIndexes().add(partitionId));
+        CollectionUtils.groupPartitionsByTopic(
+            topicPartitions,
+            builder::addTopic,
+            (topicRequest, partitionId) -> topicRequest.partitionIndexes().add(partitionId)
+        );
 
         return builder;
     }
 
-    private void handlePartitionError(TopicPartition topicPartition, ApiError apiError, Map<TopicPartition, Throwable> failed, List<TopicPartition> unmapped) {
+    private void handlePartitionError(
+        TopicPartition topicPartition,
+        ApiError apiError,
+        Map<TopicPartition, Throwable> failed,
+        List<TopicPartition> unmapped
+    ) {
         switch (apiError.error()) {
             case NOT_LEADER_OR_FOLLOWER:
                 if (options.brokerId().isPresent()) {
                     // Typically these errors are retriable, but if the user specified the brokerId
                     // explicitly, then they are fatal.
                     int brokerId = options.brokerId().getAsInt();
-                    log.error("Not leader error in `DescribeProducers` response for partition {} " + "for brokerId {} set in options", topicPartition, brokerId, apiError.exception());
-                    failed.put(topicPartition, apiError.error().exception("Failed to describe active producers " + "for partition " + topicPartition + " on brokerId " + brokerId));
+                    log.error("Not leader error in `DescribeProducers` response for partition {} " +
+                        "for brokerId {} set in options", topicPartition, brokerId, apiError.exception());
+                    failed.put(topicPartition, apiError.error().exception("Failed to describe active producers " +
+                        "for partition " + topicPartition + " on brokerId " + brokerId));
                 } else {
                     // Otherwise, we unmap the partition so that we can find the new leader
-                    log.debug("Not leader error in `DescribeProducers` response for partition {}. " + "Will retry later.", topicPartition);
+                    log.debug("Not leader error in `DescribeProducers` response for partition {}. " +
+                        "Will retry later.", topicPartition);
                     unmapped.add(topicPartition);
                 }
                 break;
 
             case UNKNOWN_TOPIC_OR_PARTITION:
-                log.debug("Unknown topic/partition error in `DescribeProducers` response for partition {}. " + "Will retry later.", topicPartition);
+                log.debug("Unknown topic/partition error in `DescribeProducers` response for partition {}. " +
+                    "Will retry later.", topicPartition);
                 break;
 
             case INVALID_TOPIC_EXCEPTION:
-                log.error("Invalid topic in `DescribeProducers` response for partition {}", topicPartition, apiError.exception());
-                failed.put(topicPartition, new InvalidTopicException("Failed to fetch metadata for partition " + topicPartition + " due to invalid topic error: " + apiError.messageWithFallback(), Collections.singleton(topicPartition.topic())));
+                log.error("Invalid topic in `DescribeProducers` response for partition {}",
+                    topicPartition, apiError.exception());
+                failed.put(topicPartition, new InvalidTopicException(
+                    "Failed to fetch metadata for partition " + topicPartition
+                        + " due to invalid topic error: " + apiError.messageWithFallback(),
+                    Collections.singleton(topicPartition.topic())));
                 break;
 
             case TOPIC_AUTHORIZATION_FAILED:
-                log.error("Authorization failed in `DescribeProducers` response for partition {}", topicPartition, apiError.exception());
-                failed.put(topicPartition, new TopicAuthorizationException("Failed to describe " + "active producers for partition " + topicPartition + " due to authorization failure on topic" + " `" + topicPartition.topic() + "`", Collections.singleton(topicPartition.topic())));
+                log.error("Authorization failed in `DescribeProducers` response for partition {}",
+                    topicPartition, apiError.exception());
+                failed.put(topicPartition, new TopicAuthorizationException("Failed to describe " +
+                    "active producers for partition " + topicPartition + " due to authorization failure on topic" +
+                    " `" + topicPartition.topic() + "`", Collections.singleton(topicPartition.topic())));
                 break;
 
             default:
-                log.error("Unexpected error in `DescribeProducers` response for partition {}", topicPartition, apiError.exception());
-                failed.put(topicPartition, apiError.error().exception("Failed to describe active " + "producers for partition " + topicPartition + " due to unexpected error"));
+                log.error("Unexpected error in `DescribeProducers` response for partition {}",
+                    topicPartition, apiError.exception());
+                failed.put(topicPartition, apiError.error().exception("Failed to describe active " +
+                    "producers for partition " + topicPartition + " due to unexpected error"));
                 break;
         }
     }
 
     @Override
-    public ApiResult<TopicPartition, PartitionProducerState> handleResponse(Node broker, Set<TopicPartition> keys, AbstractResponse abstractResponse) {
+    public ApiResult<TopicPartition, PartitionProducerState> handleResponse(
+        Node broker,
+        Set<TopicPartition> keys,
+        AbstractResponse abstractResponse
+    ) {
         DescribeProducersResponse response = (DescribeProducersResponse) abstractResponse;
         Map<TopicPartition, PartitionProducerState> completed = new HashMap<>();
         Map<TopicPartition, Throwable> failed = new HashMap<>();
@@ -123,7 +168,8 @@ public class DescribeProducersHandler extends AdminApiHandler.Batched<TopicParti
 
         for (DescribeProducersResponseData.TopicResponse topicResponse : response.data().topics()) {
             for (DescribeProducersResponseData.PartitionResponse partitionResponse : topicResponse.partitions()) {
-                TopicPartition topicPartition = new TopicPartition(topicResponse.name(), partitionResponse.partitionIndex());
+                TopicPartition topicPartition = new TopicPartition(
+                    topicResponse.name(), partitionResponse.partitionIndex());
 
                 Errors error = Errors.forCode(partitionResponse.errorCode());
                 if (error != Errors.NONE) {
@@ -132,12 +178,26 @@ public class DescribeProducersHandler extends AdminApiHandler.Batched<TopicParti
                     continue;
                 }
 
-                List<ProducerState> activeProducers = partitionResponse.activeProducers().stream().map(activeProducer -> {
-                    OptionalLong currentTransactionFirstOffset = activeProducer.currentTxnStartOffset() < 0 ? OptionalLong.empty() : OptionalLong.of(activeProducer.currentTxnStartOffset());
-                    OptionalInt coordinatorEpoch = activeProducer.coordinatorEpoch() < 0 ? OptionalInt.empty() : OptionalInt.of(activeProducer.coordinatorEpoch());
+                List<ProducerState> activeProducers = partitionResponse.activeProducers().stream()
+                    .map(activeProducer -> {
+                        OptionalLong currentTransactionFirstOffset =
+                            activeProducer.currentTxnStartOffset() < 0 ?
+                                OptionalLong.empty() :
+                                OptionalLong.of(activeProducer.currentTxnStartOffset());
+                        OptionalInt coordinatorEpoch =
+                            activeProducer.coordinatorEpoch() < 0 ?
+                                OptionalInt.empty() :
+                                OptionalInt.of(activeProducer.coordinatorEpoch());
 
-                    return new ProducerState(activeProducer.producerId(), activeProducer.producerEpoch(), activeProducer.lastSequence(), activeProducer.lastTimestamp(), coordinatorEpoch, currentTransactionFirstOffset);
-                }).collect(Collectors.toList());
+                        return new ProducerState(
+                            activeProducer.producerId(),
+                            activeProducer.producerEpoch(),
+                            activeProducer.lastSequence(),
+                            activeProducer.lastTimestamp(),
+                            coordinatorEpoch,
+                            currentTransactionFirstOffset
+                        );
+                    }).collect(Collectors.toList());
 
                 completed.put(topicPartition, new PartitionProducerState(activeProducers));
             }

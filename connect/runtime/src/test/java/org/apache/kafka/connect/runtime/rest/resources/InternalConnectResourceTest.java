@@ -16,45 +16,65 @@
  */
 package org.apache.kafka.connect.runtime.rest.resources;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.kafka.connect.errors.NotFoundException;
 import org.apache.kafka.connect.runtime.Herder;
 import org.apache.kafka.connect.runtime.rest.InternalRequestSignature;
 import org.apache.kafka.connect.runtime.rest.RestClient;
+import org.apache.kafka.connect.runtime.rest.RestRequestTimeout;
+import org.apache.kafka.connect.runtime.rest.RestServer;
 import org.apache.kafka.connect.util.Callback;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
-import org.mockito.junit.MockitoJUnitRunner;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.mockito.stubbing.Stubber;
 
-import javax.crypto.Mac;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.UriInfo;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThrows;
-import static org.mockito.Mockito.*;
+import javax.crypto.Mac;
 
-@RunWith(MockitoJUnitRunner.StrictStubs.class)
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.UriInfo;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.isNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)
 public class InternalConnectResourceTest {
 
     private static final Boolean FORWARD = true;
     private static final String CONNECTOR_NAME = "test";
     private static final HttpHeaders NULL_HEADERS = null;
     private static final List<Map<String, String>> TASK_CONFIGS = new ArrayList<>();
-
     static {
         TASK_CONFIGS.add(Collections.singletonMap("config", "value"));
         TASK_CONFIGS.add(Collections.singletonMap("config", "other_value"));
     }
-
     private static final String FENCE_PATH = "/connectors/" + CONNECTOR_NAME + "/fence";
     private static final String TASK_CONFIGS_PATH = "/connectors/" + CONNECTOR_NAME + "/tasks";
+    private static final RestRequestTimeout REST_REQUEST_TIMEOUT = RestRequestTimeout.constant(
+            RestServer.DEFAULT_REST_REQUEST_TIMEOUT_MS,
+            RestServer.DEFAULT_HEALTH_CHECK_TIMEOUT_MS
+    );
 
     @Mock
     private UriInfo uriInfo;
@@ -65,16 +85,22 @@ public class InternalConnectResourceTest {
 
     private InternalConnectResource internalResource;
 
-    @Before
+    @BeforeEach
     public void setup() {
-        internalResource = new InternalConnectResource(herder, restClient);
+        internalResource = new InternalConnectResource(herder, restClient, REST_REQUEST_TIMEOUT);
         internalResource.uriInfo = uriInfo;
     }
 
     @Test
     public void testPutConnectorTaskConfigsNoInternalRequestSignature() throws Throwable {
-        @SuppressWarnings("unchecked") final ArgumentCaptor<Callback<Void>> cb = ArgumentCaptor.forClass(Callback.class);
-        expectAndCallbackResult(cb, null).when(herder).putTaskConfigs(eq(CONNECTOR_NAME), eq(TASK_CONFIGS), cb.capture(), any());
+        @SuppressWarnings("unchecked")
+        final ArgumentCaptor<Callback<Void>> cb = ArgumentCaptor.forClass(Callback.class);
+        expectAndCallbackResult(cb, null).when(herder).putTaskConfigs(
+                eq(CONNECTOR_NAME),
+                eq(TASK_CONFIGS),
+                cb.capture(),
+                any()
+        );
         expectRequestPath(TASK_CONFIGS_PATH);
 
         internalResource.putTaskConfigs(CONNECTOR_NAME, NULL_HEADERS, FORWARD, serializeAsBytes(TASK_CONFIGS));
@@ -85,34 +111,58 @@ public class InternalConnectResourceTest {
         final String signatureAlgorithm = "HmacSHA256";
         final String encodedSignature = "Kv1/OSsxzdVIwvZ4e30avyRIVrngDfhzVUm/kAZEKc4=";
 
-        @SuppressWarnings("unchecked") final ArgumentCaptor<Callback<Void>> cb = ArgumentCaptor.forClass(Callback.class);
+        @SuppressWarnings("unchecked")
+        final ArgumentCaptor<Callback<Void>> cb = ArgumentCaptor.forClass(Callback.class);
         final ArgumentCaptor<InternalRequestSignature> signatureCapture = ArgumentCaptor.forClass(InternalRequestSignature.class);
-        expectAndCallbackResult(cb, null).when(herder).putTaskConfigs(eq(CONNECTOR_NAME), eq(TASK_CONFIGS), cb.capture(), signatureCapture.capture());
+        expectAndCallbackResult(cb, null).when(herder).putTaskConfigs(
+                eq(CONNECTOR_NAME),
+                eq(TASK_CONFIGS),
+                cb.capture(),
+                signatureCapture.capture()
+        );
 
         HttpHeaders headers = mock(HttpHeaders.class);
-        when(headers.getHeaderString(InternalRequestSignature.SIGNATURE_ALGORITHM_HEADER)).thenReturn(signatureAlgorithm);
-        when(headers.getHeaderString(InternalRequestSignature.SIGNATURE_HEADER)).thenReturn(encodedSignature);
+        when(headers.getHeaderString(InternalRequestSignature.SIGNATURE_ALGORITHM_HEADER))
+                .thenReturn(signatureAlgorithm);
+        when(headers.getHeaderString(InternalRequestSignature.SIGNATURE_HEADER))
+                .thenReturn(encodedSignature);
         expectRequestPath(TASK_CONFIGS_PATH);
 
         internalResource.putTaskConfigs(CONNECTOR_NAME, headers, FORWARD, serializeAsBytes(TASK_CONFIGS));
 
-        InternalRequestSignature expectedSignature = new InternalRequestSignature(serializeAsBytes(TASK_CONFIGS), Mac.getInstance(signatureAlgorithm), Base64.getDecoder().decode(encodedSignature));
-        assertEquals(expectedSignature, signatureCapture.getValue());
+        InternalRequestSignature expectedSignature = new InternalRequestSignature(
+                serializeAsBytes(TASK_CONFIGS),
+                Mac.getInstance(signatureAlgorithm),
+                Base64.getDecoder().decode(encodedSignature)
+        );
+        assertEquals(
+                expectedSignature,
+                signatureCapture.getValue()
+        );
     }
 
     @Test
     public void testPutConnectorTaskConfigsConnectorNotFound() {
-        @SuppressWarnings("unchecked") final ArgumentCaptor<Callback<Void>> cb = ArgumentCaptor.forClass(Callback.class);
-        expectAndCallbackException(cb, new NotFoundException("not found")).when(herder).putTaskConfigs(eq(CONNECTOR_NAME), eq(TASK_CONFIGS), cb.capture(), any());
+        @SuppressWarnings("unchecked")
+        final ArgumentCaptor<Callback<Void>> cb = ArgumentCaptor.forClass(Callback.class);
+        expectAndCallbackException(cb, new NotFoundException("not found")).when(herder).putTaskConfigs(
+                eq(CONNECTOR_NAME),
+                eq(TASK_CONFIGS),
+                cb.capture(),
+                any()
+        );
         expectRequestPath(TASK_CONFIGS_PATH);
 
-        assertThrows(NotFoundException.class, () -> internalResource.putTaskConfigs(CONNECTOR_NAME, NULL_HEADERS, FORWARD, serializeAsBytes(TASK_CONFIGS)));
+        assertThrows(NotFoundException.class, () -> internalResource.putTaskConfigs(CONNECTOR_NAME, NULL_HEADERS,
+                FORWARD, serializeAsBytes(TASK_CONFIGS)));
     }
 
     @Test
     public void testFenceZombiesNoInternalRequestSignature() throws Throwable {
-        @SuppressWarnings("unchecked") final ArgumentCaptor<Callback<Void>> cb = ArgumentCaptor.forClass(Callback.class);
-        expectAndCallbackResult(cb, null).when(herder).fenceZombieSourceTasks(eq(CONNECTOR_NAME), cb.capture(), isNull());
+        @SuppressWarnings("unchecked")
+        final ArgumentCaptor<Callback<Void>> cb = ArgumentCaptor.forClass(Callback.class);
+        expectAndCallbackResult(cb, null)
+                .when(herder).fenceZombieSourceTasks(eq(CONNECTOR_NAME), cb.capture(), isNull());
         expectRequestPath(FENCE_PATH);
 
         internalResource.fenceZombies(CONNECTOR_NAME, NULL_HEADERS, FORWARD, serializeAsBytes(null));
@@ -123,29 +173,43 @@ public class InternalConnectResourceTest {
         final String signatureAlgorithm = "HmacSHA256";
         final String encodedSignature = "Kv1/OSsxzdVIwvZ4e30avyRIVrngDfhzVUm/kAZEKc4=";
 
-        @SuppressWarnings("unchecked") final ArgumentCaptor<Callback<Void>> cb = ArgumentCaptor.forClass(Callback.class);
+        @SuppressWarnings("unchecked")
+        final ArgumentCaptor<Callback<Void>> cb = ArgumentCaptor.forClass(Callback.class);
         final ArgumentCaptor<InternalRequestSignature> signatureCapture = ArgumentCaptor.forClass(InternalRequestSignature.class);
-        expectAndCallbackResult(cb, null).when(herder).fenceZombieSourceTasks(eq(CONNECTOR_NAME), cb.capture(), signatureCapture.capture());
+        expectAndCallbackResult(cb, null)
+                .when(herder).fenceZombieSourceTasks(eq(CONNECTOR_NAME), cb.capture(), signatureCapture.capture());
 
         HttpHeaders headers = mock(HttpHeaders.class);
-        when(headers.getHeaderString(InternalRequestSignature.SIGNATURE_ALGORITHM_HEADER)).thenReturn(signatureAlgorithm);
-        when(headers.getHeaderString(InternalRequestSignature.SIGNATURE_HEADER)).thenReturn(encodedSignature);
+        when(headers.getHeaderString(InternalRequestSignature.SIGNATURE_ALGORITHM_HEADER))
+                .thenReturn(signatureAlgorithm);
+        when(headers.getHeaderString(InternalRequestSignature.SIGNATURE_HEADER))
+                .thenReturn(encodedSignature);
         expectRequestPath(FENCE_PATH);
 
         internalResource.fenceZombies(CONNECTOR_NAME, headers, FORWARD, serializeAsBytes(null));
 
-        InternalRequestSignature expectedSignature = new InternalRequestSignature(serializeAsBytes(null), Mac.getInstance(signatureAlgorithm), Base64.getDecoder().decode(encodedSignature));
-        assertEquals(expectedSignature, signatureCapture.getValue());
+        InternalRequestSignature expectedSignature = new InternalRequestSignature(
+                serializeAsBytes(null),
+                Mac.getInstance(signatureAlgorithm),
+                Base64.getDecoder().decode(encodedSignature)
+        );
+        assertEquals(
+                expectedSignature,
+                signatureCapture.getValue()
+        );
     }
 
     @Test
-    public void testFenceZombiesConnectorNotFound() throws Throwable {
-        @SuppressWarnings("unchecked") final ArgumentCaptor<Callback<Void>> cb = ArgumentCaptor.forClass(Callback.class);
+    public void testFenceZombiesConnectorNotFound() {
+        @SuppressWarnings("unchecked")
+        final ArgumentCaptor<Callback<Void>> cb = ArgumentCaptor.forClass(Callback.class);
 
-        expectAndCallbackException(cb, new NotFoundException("not found")).when(herder).fenceZombieSourceTasks(eq(CONNECTOR_NAME), cb.capture(), any());
+        expectAndCallbackException(cb, new NotFoundException("not found"))
+                .when(herder).fenceZombieSourceTasks(eq(CONNECTOR_NAME), cb.capture(), any());
         expectRequestPath(FENCE_PATH);
 
-        assertThrows(NotFoundException.class, () -> internalResource.fenceZombies(CONNECTOR_NAME, NULL_HEADERS, FORWARD, serializeAsBytes(null)));
+        assertThrows(NotFoundException.class,
+                () -> internalResource.fenceZombies(CONNECTOR_NAME, NULL_HEADERS, FORWARD, serializeAsBytes(null)));
     }
 
     private <T> byte[] serializeAsBytes(final T value) throws IOException {

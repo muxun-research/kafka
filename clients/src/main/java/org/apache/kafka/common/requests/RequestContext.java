@@ -34,160 +34,189 @@ import java.util.Optional;
 import static org.apache.kafka.common.protocol.ApiKeys.API_VERSIONS;
 
 public class RequestContext implements AuthorizableRequestContext {
-	public final RequestHeader header;
-	public final String connectionId;
-	public final InetAddress clientAddress;
-	public final KafkaPrincipal principal;
-	public final ListenerName listenerName;
-	public final SecurityProtocol securityProtocol;
-	public final ClientInformation clientInformation;
-	public final boolean fromPrivilegedListener;
-	public final Optional<KafkaPrincipalSerde> principalSerde;
+    public final RequestHeader header;
+    public final String connectionId;
+    public final InetAddress clientAddress;
+    public final Optional<Integer> clientPort;
+    public final KafkaPrincipal principal;
+    public final ListenerName listenerName;
+    public final SecurityProtocol securityProtocol;
+    public final ClientInformation clientInformation;
+    public final boolean fromPrivilegedListener;
+    public final Optional<KafkaPrincipalSerde> principalSerde;
 
-	public RequestContext(RequestHeader header,
-						  String connectionId,
-						  InetAddress clientAddress,
-						  KafkaPrincipal principal,
-						  ListenerName listenerName,
-						  SecurityProtocol securityProtocol,
-						  ClientInformation clientInformation,
-						  boolean fromPrivilegedListener) {
-		this(header,
-				connectionId,
-				clientAddress,
-				principal,
-				listenerName,
-				securityProtocol,
-				clientInformation,
-				fromPrivilegedListener,
-				Optional.empty());
-	}
+    public RequestContext(RequestHeader header,
+                          String connectionId,
+                          InetAddress clientAddress,
+                          KafkaPrincipal principal,
+                          ListenerName listenerName,
+                          SecurityProtocol securityProtocol,
+                          ClientInformation clientInformation,
+                          boolean fromPrivilegedListener) {
+        this(header,
+            connectionId,
+            clientAddress,
+            Optional.empty(),
+            principal,
+            listenerName,
+            securityProtocol,
+            clientInformation,
+            fromPrivilegedListener,
+            Optional.empty());
+    }
 
-	public RequestContext(RequestHeader header,
-						  String connectionId,
-						  InetAddress clientAddress,
-						  KafkaPrincipal principal,
-						  ListenerName listenerName,
-						  SecurityProtocol securityProtocol,
-						  ClientInformation clientInformation,
-						  boolean fromPrivilegedListener,
-						  Optional<KafkaPrincipalSerde> principalSerde) {
-		this.header = header;
-		this.connectionId = connectionId;
-		this.clientAddress = clientAddress;
-		this.principal = principal;
-		this.listenerName = listenerName;
-		this.securityProtocol = securityProtocol;
-		this.clientInformation = clientInformation;
-		this.fromPrivilegedListener = fromPrivilegedListener;
-		this.principalSerde = principalSerde;
-	}
+    public RequestContext(RequestHeader header,
+        String connectionId,
+        InetAddress clientAddress,
+        Optional<Integer> clientPort,
+        KafkaPrincipal principal,
+        ListenerName listenerName,
+        SecurityProtocol securityProtocol,
+        ClientInformation clientInformation,
+        boolean fromPrivilegedListener) {
+        this(header,
+            connectionId,
+            clientAddress,
+            clientPort,
+            principal,
+            listenerName,
+            securityProtocol,
+            clientInformation,
+            fromPrivilegedListener,
+            Optional.empty());
+    }
 
-	public RequestAndSize parseRequest(ByteBuffer buffer) {
-		if (isUnsupportedApiVersionsRequest()) {
-			// Unsupported ApiVersion requests are treated as v0 requests and are not parsed
-			ApiVersionsRequest apiVersionsRequest = new ApiVersionsRequest(new ApiVersionsRequestData(), (short) 0, header.apiVersion());
-			return new RequestAndSize(apiVersionsRequest, 0);
-		} else {
-			ApiKeys apiKey = header.apiKey();
-			try {
-				short apiVersion = header.apiVersion();
-				return AbstractRequest.parseRequest(apiKey, apiVersion, buffer);
-			} catch (Throwable ex) {
-				throw new InvalidRequestException("Error getting request for apiKey: " + apiKey +
-						", apiVersion: " + header.apiVersion() +
-						", connectionId: " + connectionId +
-						", listenerName: " + listenerName +
-						", principal: " + principal, ex);
-			}
-		}
-	}
+    public RequestContext(RequestHeader header,
+                          String connectionId,
+                          InetAddress clientAddress,
+                          Optional<Integer> clientPort,
+                          KafkaPrincipal principal,
+                          ListenerName listenerName,
+                          SecurityProtocol securityProtocol,
+                          ClientInformation clientInformation,
+                          boolean fromPrivilegedListener,
+                          Optional<KafkaPrincipalSerde> principalSerde) {
+        this.header = header;
+        this.connectionId = connectionId;
+        this.clientAddress = clientAddress;
+        this.clientPort = clientPort;
+        this.principal = principal;
+        this.listenerName = listenerName;
+        this.securityProtocol = securityProtocol;
+        this.clientInformation = clientInformation;
+        this.fromPrivilegedListener = fromPrivilegedListener;
+        this.principalSerde = principalSerde;
+    }
 
-	/**
-	 * Build a {@link Send} for direct transmission of the provided response
-	 * over the network.
-	 */
-	public Send buildResponseSend(AbstractResponse body) {
-		return body.toSend(header.toResponseHeader(), apiVersion());
-	}
+    public RequestAndSize parseRequest(ByteBuffer buffer) {
+        if (isUnsupportedApiVersionsRequest()) {
+            // Unsupported ApiVersion requests are treated as v0 requests and are not parsed
+            ApiVersionsRequest apiVersionsRequest = new ApiVersionsRequest(new ApiVersionsRequestData(), (short) 0, header.apiVersion());
+            return new RequestAndSize(apiVersionsRequest, 0);
+        } else {
+            ApiKeys apiKey = header.apiKey();
+            try {
+                short apiVersion = header.apiVersion();
+                return AbstractRequest.parseRequest(apiKey, apiVersion, buffer);
+            } catch (Throwable ex) {
+                throw new InvalidRequestException("Error getting request for apiKey: " + apiKey +
+                        ", apiVersion: " + header.apiVersion() +
+                        ", connectionId: " + connectionId +
+                        ", listenerName: " + listenerName +
+                        ", principal: " + principal, ex);
+            }
+        }
+    }
 
-	/**
-	 * Serialize a response into a {@link ByteBuffer}. This is used when the response
-	 * will be encapsulated in an {@link EnvelopeResponse}. The buffer will contain
-	 * both the serialized {@link ResponseHeader} as well as the bytes from the response.
-	 * There is no `size` prefix unlike the output from {@link #buildResponseSend(AbstractResponse)}.
-	 * <p>
-	 * Note that envelope requests are reserved only for APIs which have set the
-	 * {@link ApiKeys#forwardable} flag. Notably the `Fetch` API cannot be forwarded,
-	 * so we do not lose the benefit of "zero copy" transfers from disk.
-	 */
-	public ByteBuffer buildResponseEnvelopePayload(AbstractResponse body) {
-		return body.serializeWithHeader(header.toResponseHeader(), apiVersion());
-	}
+    /**
+     * Build a {@link Send} for direct transmission of the provided response
+     * over the network.
+     */
+    public Send buildResponseSend(AbstractResponse body) {
+        return body.toSend(header.toResponseHeader(), apiVersion());
+    }
 
-	private boolean isUnsupportedApiVersionsRequest() {
-		return header.apiKey() == API_VERSIONS && !API_VERSIONS.isVersionSupported(header.apiVersion());
-	}
+    /**
+     * Serialize a response into a {@link ByteBuffer}. This is used when the response
+     * will be encapsulated in an {@link EnvelopeResponse}. The buffer will contain
+     * both the serialized {@link ResponseHeader} as well as the bytes from the response.
+     * There is no `size` prefix unlike the output from {@link #buildResponseSend(AbstractResponse)}.
+     *
+     * Note that envelope requests are reserved only for APIs which have set the
+     * {@link ApiKeys#forwardable} flag. Notably the `Fetch` API cannot be forwarded,
+     * so we do not lose the benefit of "zero copy" transfers from disk.
+     */
+    public ByteBuffer buildResponseEnvelopePayload(AbstractResponse body) {
+        return body.serializeWithHeader(header.toResponseHeader(), apiVersion());
+    }
 
-	public short apiVersion() {
-		// Use v0 when serializing an unhandled ApiVersion response
-		if (isUnsupportedApiVersionsRequest())
-			return 0;
-		return header.apiVersion();
-	}
+    private boolean isUnsupportedApiVersionsRequest() {
+        return header.apiKey() == API_VERSIONS && !header.isApiVersionSupported();
+    }
 
-	@Override
-	public String listenerName() {
-		return listenerName.value();
-	}
+    public short apiVersion() {
+        // Use v0 when serializing an unhandled ApiVersion response
+        if (isUnsupportedApiVersionsRequest())
+            return 0;
+        return header.apiVersion();
+    }
 
-	@Override
-	public SecurityProtocol securityProtocol() {
-		return securityProtocol;
-	}
+    public String connectionId() {
+        return connectionId;
+    }
 
-	@Override
-	public KafkaPrincipal principal() {
-		return principal;
-	}
+    @Override
+    public String listenerName() {
+        return listenerName.value();
+    }
 
-	@Override
-	public InetAddress clientAddress() {
-		return clientAddress;
-	}
+    @Override
+    public SecurityProtocol securityProtocol() {
+        return securityProtocol;
+    }
 
-	@Override
-	public int requestType() {
-		return header.apiKey().id;
-	}
+    @Override
+    public KafkaPrincipal principal() {
+        return principal;
+    }
 
-	@Override
-	public int requestVersion() {
-		return header.apiVersion();
-	}
+    @Override
+    public InetAddress clientAddress() {
+        return clientAddress;
+    }
 
-	@Override
-	public String clientId() {
-		return header.clientId();
-	}
+    @Override
+    public int requestType() {
+        return header.apiKey().id;
+    }
 
-	@Override
-	public int correlationId() {
-		return header.correlationId();
-	}
+    @Override
+    public int requestVersion() {
+        return header.apiVersion();
+    }
 
-	@Override
-	public String toString() {
-		return "RequestContext(" +
-				"header=" + header +
-				", connectionId='" + connectionId + '\'' +
-				", clientAddress=" + clientAddress +
-				", principal=" + principal +
-				", listenerName=" + listenerName +
-				", securityProtocol=" + securityProtocol +
-				", clientInformation=" + clientInformation +
-				", fromPrivilegedListener=" + fromPrivilegedListener +
-				", principalSerde=" + principalSerde +
-				')';
-	}
+    @Override
+    public String clientId() {
+        return header.clientId();
+    }
+
+    @Override
+    public int correlationId() {
+        return header.correlationId();
+    }
+
+    @Override
+    public String toString() {
+        return "RequestContext(" +
+            "header=" + header +
+            ", connectionId='" + connectionId + '\'' +
+            ", clientAddress=" + clientAddress +
+            ", principal=" + principal +
+            ", listenerName=" + listenerName +
+            ", securityProtocol=" + securityProtocol +
+            ", clientInformation=" + clientInformation +
+            ", fromPrivilegedListener=" + fromPrivilegedListener +
+            ", principalSerde=" + principalSerde +
+            ')';
+    }
 }

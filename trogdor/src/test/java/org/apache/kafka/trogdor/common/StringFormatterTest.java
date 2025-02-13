@@ -19,20 +19,16 @@ package org.apache.kafka.trogdor.common;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.time.ZoneOffset;
 import java.util.Arrays;
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.kafka.trogdor.common.StringFormatter.dateString;
 import static org.apache.kafka.trogdor.common.StringFormatter.durationString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-@Timeout(value = 120000, unit = MILLISECONDS)
+@Timeout(value = 120)
 public class StringFormatterTest {
-    private static final Logger log = LoggerFactory.getLogger(StringFormatterTest.class);
 
     @Test
     public void testDateString() {
@@ -52,6 +48,13 @@ public class StringFormatterTest {
 
     @Test
     public void testPrettyPrintGrid() {
-        assertEquals(String.format("ANIMAL  NUMBER INDEX %n" + "lion    1      12345 %n" + "manatee 50     1     %n"), StringFormatter.prettyPrintGrid(Arrays.asList(Arrays.asList("ANIMAL", "NUMBER", "INDEX"), Arrays.asList("lion", "1", "12345"), Arrays.asList("manatee", "50", "1"))));
+        assertEquals(String.format(
+                "ANIMAL  NUMBER INDEX %n" +
+                "lion    1      12345 %n" +
+                "manatee 50     1     %n"),
+            StringFormatter.prettyPrintGrid(
+                Arrays.asList(Arrays.asList("ANIMAL", "NUMBER", "INDEX"),
+                    Arrays.asList("lion", "1", "12345"),
+                    Arrays.asList("manatee", "50", "1"))));
     }
 }

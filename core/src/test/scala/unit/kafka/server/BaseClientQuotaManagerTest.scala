@@ -16,8 +16,10 @@
  */
 package kafka.server
 
+import java.net.InetAddress
+import java.util
+import java.util.Collections
 import kafka.network.RequestChannel
-import kafka.network.RequestChannel.Session
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.memory.MemoryPool
 import org.apache.kafka.common.metrics.{MetricConfig, Metrics}
@@ -27,12 +29,11 @@ import org.apache.kafka.common.requests.FetchRequest.PartitionData
 import org.apache.kafka.common.requests.{AbstractRequest, FetchRequest, RequestContext, RequestHeader}
 import org.apache.kafka.common.security.auth.{KafkaPrincipal, SecurityProtocol}
 import org.apache.kafka.common.utils.MockTime
+import org.apache.kafka.network.Session
+import org.apache.kafka.network.metrics.RequestChannelMetrics
+import org.apache.kafka.server.quota.ThrottleCallback
 import org.junit.jupiter.api.AfterEach
 import org.mockito.Mockito.mock
-
-import java.net.InetAddress
-import java.util
-import java.util.Collections
 
 class BaseClientQuotaManagerTest {
   protected val time = new MockTime
@@ -46,7 +47,6 @@ class BaseClientQuotaManagerTest {
 
   protected def callback: ThrottleCallback = new ThrottleCallback {
     override def startThrottling(): Unit = {}
-
     override def endThrottling(): Unit = {
       // Count how many times this callback is called for notifyThrottlingDone().
       numCallbacks += 1
@@ -58,19 +58,19 @@ class BaseClientQuotaManagerTest {
 
     val request = builder.build()
     val buffer = request.serializeWithHeader(new RequestHeader(builder.apiKey, request.version, "", 0))
-    val requestChannelMetrics: RequestChannel.Metrics = mock(classOf[RequestChannel.Metrics])
+    val requestChannelMetrics: RequestChannelMetrics = mock(classOf[RequestChannelMetrics])
 
     // read the header from the buffer first so that the body can be read next from the Request constructor
     val header = RequestHeader.parse(buffer)
     val context = new RequestContext(header, "1", InetAddress.getLocalHost, KafkaPrincipal.ANONYMOUS,
       listenerName, SecurityProtocol.PLAINTEXT, ClientInformation.EMPTY, false)
-    (request, new RequestChannel.Request(processor = 1, context = context, startTimeNanos = 0, MemoryPool.NONE, buffer,
+    (request, new RequestChannel.Request(processor = 1, context = context, startTimeNanos =  0, MemoryPool.NONE, buffer,
       requestChannelMetrics))
   }
 
   protected def buildSession(user: String): Session = {
     val principal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, user)
-    Session(principal, null)
+    new Session(principal, null)
   }
 
   protected def maybeRecord(quotaManager: ClientQuotaManager, user: String, clientId: String, value: Double): Int = {

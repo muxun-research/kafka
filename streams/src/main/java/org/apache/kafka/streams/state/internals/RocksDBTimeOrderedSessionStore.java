@@ -30,7 +30,9 @@ import org.apache.kafka.streams.state.internals.PrefixedSessionKeySchemas.TimeFi
 
 import java.util.Objects;
 
-public class RocksDBTimeOrderedSessionStore extends WrappedStateStore<RocksDBTimeOrderedSessionSegmentedBytesStore, Object, Object> implements SessionStore<Bytes, byte[]> {
+public class RocksDBTimeOrderedSessionStore
+    extends WrappedStateStore<RocksDBTimeOrderedSessionSegmentedBytesStore, Object, Object>
+    implements SessionStore<Bytes, byte[]> {
 
     private StateStoreContext stateStoreContext;
 
@@ -40,50 +42,94 @@ public class RocksDBTimeOrderedSessionStore extends WrappedStateStore<RocksDBTim
     }
 
     @Override
-    public void init(final StateStoreContext context, final StateStore root) {
-        wrapped().init(context, root);
-        this.stateStoreContext = context;
+    public void init(final StateStoreContext stateStoreContext, final StateStore root) {
+        wrapped().init(stateStoreContext, root);
+        this.stateStoreContext = stateStoreContext;
     }
 
     @Override
-    public <R> QueryResult<R> query(final Query<R> query, final PositionBound positionBound, final QueryConfig config) {
+    public <R> QueryResult<R> query(final Query<R> query,
+                                    final PositionBound positionBound,
+                                    final QueryConfig config) {
 
-        return StoreQueryUtils.handleBasicQueries(query, positionBound, config, this, getPosition(), stateStoreContext);
+        return StoreQueryUtils.handleBasicQueries(
+            query,
+            positionBound,
+            config,
+            this,
+            getPosition(),
+            stateStoreContext
+        );
     }
 
     @Override
-    public KeyValueIterator<Windowed<Bytes>, byte[]> findSessions(final long earliestSessionEndTime, final long latestSessionEndTime) {
+    public KeyValueIterator<Windowed<Bytes>, byte[]> findSessions(final long earliestSessionEndTime,
+                                                                  final long latestSessionEndTime) {
         final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().fetchSessions(earliestSessionEndTime, latestSessionEndTime);
         return new WrappedSessionStoreIterator(bytesIterator, TimeFirstSessionKeySchema::from);
     }
 
     @Override
-    public KeyValueIterator<Windowed<Bytes>, byte[]> findSessions(final Bytes key, final long earliestSessionEndTime, final long latestSessionStartTime) {
-        final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().fetch(key, earliestSessionEndTime, latestSessionStartTime);
+    public KeyValueIterator<Windowed<Bytes>, byte[]> findSessions(final Bytes key,
+                                                                  final long earliestSessionEndTime,
+                                                                  final long latestSessionStartTime) {
+        final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().fetch(
+            key,
+            earliestSessionEndTime,
+            latestSessionStartTime
+        );
         return new WrappedSessionStoreIterator(bytesIterator, TimeFirstSessionKeySchema::from);
     }
 
     @Override
-    public KeyValueIterator<Windowed<Bytes>, byte[]> backwardFindSessions(final Bytes key, final long earliestSessionEndTime, final long latestSessionStartTime) {
-        final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().backwardFetch(key, earliestSessionEndTime, latestSessionStartTime);
+    public KeyValueIterator<Windowed<Bytes>, byte[]> backwardFindSessions(final Bytes key,
+                                                                          final long earliestSessionEndTime,
+                                                                          final long latestSessionStartTime) {
+        final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().backwardFetch(
+            key,
+            earliestSessionEndTime,
+            latestSessionStartTime
+        );
         return new WrappedSessionStoreIterator(bytesIterator, TimeFirstSessionKeySchema::from);
     }
 
     @Override
-    public KeyValueIterator<Windowed<Bytes>, byte[]> findSessions(final Bytes keyFrom, final Bytes keyTo, final long earliestSessionEndTime, final long latestSessionStartTime) {
-        final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().fetch(keyFrom, keyTo, earliestSessionEndTime, latestSessionStartTime);
+    public KeyValueIterator<Windowed<Bytes>, byte[]> findSessions(final Bytes keyFrom,
+                                                                  final Bytes keyTo,
+                                                                  final long earliestSessionEndTime,
+                                                                  final long latestSessionStartTime) {
+        final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().fetch(
+            keyFrom,
+            keyTo,
+            earliestSessionEndTime,
+            latestSessionStartTime
+        );
         return new WrappedSessionStoreIterator(bytesIterator, TimeFirstSessionKeySchema::from);
     }
 
     @Override
-    public KeyValueIterator<Windowed<Bytes>, byte[]> backwardFindSessions(final Bytes keyFrom, final Bytes keyTo, final long earliestSessionEndTime, final long latestSessionStartTime) {
-        final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().backwardFetch(keyFrom, keyTo, earliestSessionEndTime, latestSessionStartTime);
+    public KeyValueIterator<Windowed<Bytes>, byte[]> backwardFindSessions(final Bytes keyFrom,
+                                                                          final Bytes keyTo,
+                                                                          final long earliestSessionEndTime,
+                                                                          final long latestSessionStartTime) {
+        final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().backwardFetch(
+            keyFrom,
+            keyTo,
+            earliestSessionEndTime,
+            latestSessionStartTime
+        );
         return new WrappedSessionStoreIterator(bytesIterator, TimeFirstSessionKeySchema::from);
     }
 
     @Override
-    public byte[] fetchSession(final Bytes key, final long sessionStartTime, final long sessiontEndTime) {
-        return wrapped().fetchSession(key, sessionStartTime, sessiontEndTime);
+    public byte[] fetchSession(final Bytes key,
+                               final long sessionStartTime,
+                               final long sessiontEndTime) {
+        return wrapped().fetchSession(
+            key,
+            sessionStartTime,
+            sessiontEndTime
+        );
     }
 
     @Override

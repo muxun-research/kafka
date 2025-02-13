@@ -18,6 +18,8 @@ package org.apache.kafka.streams.processor.internals.assignment;
 
 import org.apache.kafka.streams.errors.TaskAssignmentException;
 import org.apache.kafka.streams.processor.TaskId;
+import org.apache.kafka.streams.processor.assignment.ProcessId;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,16 +42,26 @@ public class LegacySubscriptionInfoSerde {
 
     private final int usedVersion;
     private final int latestSupportedVersion;
-    private final UUID processId;
+    private final ProcessId processId;
     private final Set<TaskId> prevTasks;
     private final Set<TaskId> standbyTasks;
     private final String userEndPoint;
 
-    public LegacySubscriptionInfoSerde(final int version, final int latestSupportedVersion, final UUID processId, final Set<TaskId> prevTasks, final Set<TaskId> standbyTasks, final String userEndPoint) {
+    public LegacySubscriptionInfoSerde(final int version,
+                                       final int latestSupportedVersion,
+                                       final ProcessId processId,
+                                       final Set<TaskId> prevTasks,
+                                       final Set<TaskId> standbyTasks,
+                                       final String userEndPoint) {
         if (latestSupportedVersion == UNKNOWN && (version < 1 || version > 2)) {
-            throw new IllegalArgumentException("Only versions 1 and 2 are expected to use an UNKNOWN (-1) latest supported version. " + "Got " + version + ".");
+            throw new IllegalArgumentException(
+                "Only versions 1 and 2 are expected to use an UNKNOWN (-1) latest supported version. " +
+                    "Got " + version + "."
+            );
         } else if (latestSupportedVersion != UNKNOWN && (version < 1 || version > latestSupportedVersion)) {
-            throw new IllegalArgumentException("version must be between 1 and " + latestSupportedVersion + "; was: " + version);
+            throw new IllegalArgumentException(
+                "version must be between 1 and " + latestSupportedVersion + "; was: " + version
+            );
         }
         usedVersion = version;
         this.latestSupportedVersion = latestSupportedVersion;
@@ -68,7 +80,7 @@ public class LegacySubscriptionInfoSerde {
         return latestSupportedVersion;
     }
 
-    public UUID processId() {
+    public ProcessId processId() {
         return processId;
     }
 
@@ -91,16 +103,18 @@ public class LegacySubscriptionInfoSerde {
         if (usedVersion == 3 || usedVersion == 4 || usedVersion == 5 || usedVersion == 6) {
             final byte[] endPointBytes = prepareUserEndPoint(this.userEndPoint);
 
-            final ByteBuffer buf = ByteBuffer.allocate(4 + // used version
+            final ByteBuffer buf = ByteBuffer.allocate(
+                4 + // used version
                     4 + // latest supported version version
                     16 + // client ID
                     4 + prevTasks.size() * 8 + // length + prev tasks
                     4 + standbyTasks.size() * 8 + // length + standby tasks
-                    4 + endPointBytes.length);
+                    4 + endPointBytes.length
+            );
 
             buf.putInt(usedVersion); // used version
             buf.putInt(LATEST_SUPPORTED_VERSION); // supported version
-            encodeClientUUID(buf, processId());
+            encodeClientUUID(buf, processId().id());
             encodeTasks(buf, prevTasks, usedVersion);
             encodeTasks(buf, standbyTasks, usedVersion);
             encodeUserEndPoint(buf, endPointBytes);
@@ -111,14 +125,16 @@ public class LegacySubscriptionInfoSerde {
         } else if (usedVersion == 2) {
             final byte[] endPointBytes = prepareUserEndPoint(this.userEndPoint);
 
-            final ByteBuffer buf = ByteBuffer.allocate(4 + // version
+            final ByteBuffer buf = ByteBuffer.allocate(
+                4 + // version
                     16 + // client ID
                     4 + prevTasks.size() * 8 + // length + prev tasks
                     4 + standbyTasks.size() * 8 + // length + standby tasks
-                    4 + endPointBytes.length);
+                    4 + endPointBytes.length
+            );
 
             buf.putInt(2); // version
-            encodeClientUUID(buf, processId());
+            encodeClientUUID(buf, processId().id());
             encodeTasks(buf, prevTasks, usedVersion);
             encodeTasks(buf, standbyTasks, usedVersion);
             encodeUserEndPoint(buf, endPointBytes);
@@ -127,19 +143,22 @@ public class LegacySubscriptionInfoSerde {
 
             return buf;
         } else if (usedVersion == 1) {
-            final ByteBuffer buf1 = ByteBuffer.allocate(4 + // version
+            final ByteBuffer buf1 = ByteBuffer.allocate(
+                4 + // version
                     16 + // client ID
                     4 + prevTasks.size() * 8 + // length + prev tasks
-                    4 + standbyTasks.size() * 8);
+                    4 + standbyTasks.size() * 8
+            );
 
             buf1.putInt(1); // version
-            encodeClientUUID(buf1, processId());
+            encodeClientUUID(buf1, processId().id());
             encodeTasks(buf1, prevTasks, usedVersion);
             encodeTasks(buf1, standbyTasks, usedVersion);
             buf1.rewind();
             return buf1;
         } else {
-            throw new IllegalStateException("Unknown metadata version: " + usedVersion + "; latest supported version: " + LATEST_SUPPORTED_VERSION);
+            throw new IllegalStateException("Unknown metadata version: " + usedVersion
+                                                + "; latest supported version: " + LATEST_SUPPORTED_VERSION);
         }
     }
 
@@ -148,14 +167,17 @@ public class LegacySubscriptionInfoSerde {
         buf.putLong(processId.getLeastSignificantBits());
     }
 
-    public static void encodeTasks(final ByteBuffer buf, final Collection<TaskId> taskIds, final int version) {
+    public static void encodeTasks(final ByteBuffer buf,
+                                   final Collection<TaskId> taskIds,
+                                   final int version) {
         buf.putInt(taskIds.size());
         for (final TaskId id : taskIds) {
             writeTaskIdTo(id, buf, version);
         }
     }
 
-    public static void encodeUserEndPoint(final ByteBuffer buf, final byte[] endPointBytes) {
+    public static void encodeUserEndPoint(final ByteBuffer buf,
+                                          final byte[] endPointBytes) {
         if (endPointBytes != null) {
             buf.putInt(endPointBytes.length);
             buf.put(endPointBytes);
@@ -181,19 +203,19 @@ public class LegacySubscriptionInfoSerde {
         final int usedVersion = data.getInt();
         if (usedVersion > 2 && usedVersion < 7) {
             final int latestSupportedVersion = data.getInt();
-            final UUID processId = decodeProcessId(data);
+            final ProcessId processId = decodeProcessId(data);
             final Set<TaskId> prevTasks = decodeTasks(data, usedVersion);
             final Set<TaskId> standbyTasks = decodeTasks(data, usedVersion);
             final String userEndPoint = decodeUserEndpoint(data);
             return new LegacySubscriptionInfoSerde(usedVersion, latestSupportedVersion, processId, prevTasks, standbyTasks, userEndPoint);
         } else if (usedVersion == 2) {
-            final UUID processId = decodeProcessId(data);
+            final ProcessId processId = decodeProcessId(data);
             final Set<TaskId> prevTasks = decodeTasks(data, usedVersion);
             final Set<TaskId> standbyTasks = decodeTasks(data, usedVersion);
             final String userEndPoint = decodeUserEndpoint(data);
             return new LegacySubscriptionInfoSerde(2, UNKNOWN, processId, prevTasks, standbyTasks, userEndPoint);
         } else if (usedVersion == 1) {
-            final UUID processId = decodeProcessId(data);
+            final ProcessId processId = decodeProcessId(data);
             final Set<TaskId> prevTasks = decodeTasks(data, usedVersion);
             final Set<TaskId> standbyTasks = decodeTasks(data, usedVersion);
             return new LegacySubscriptionInfoSerde(1, UNKNOWN, processId, prevTasks, standbyTasks, null);
@@ -220,8 +242,8 @@ public class LegacySubscriptionInfoSerde {
         return prevTasks;
     }
 
-    private static UUID decodeProcessId(final ByteBuffer data) {
-        return new UUID(data.getLong(), data.getLong());
+    private static ProcessId decodeProcessId(final ByteBuffer data) {
+        return new ProcessId(new UUID(data.getLong(), data.getLong()));
     }
 
     @Override
@@ -237,7 +259,12 @@ public class LegacySubscriptionInfoSerde {
     public boolean equals(final Object o) {
         if (o instanceof LegacySubscriptionInfoSerde) {
             final LegacySubscriptionInfoSerde other = (LegacySubscriptionInfoSerde) o;
-            return usedVersion == other.usedVersion && latestSupportedVersion == other.latestSupportedVersion && processId.equals(other.processId) && prevTasks.equals(other.prevTasks) && standbyTasks.equals(other.standbyTasks) && userEndPoint != null ? userEndPoint.equals(other.userEndPoint) : other.userEndPoint == null;
+            return usedVersion == other.usedVersion &&
+                latestSupportedVersion == other.latestSupportedVersion &&
+                processId.equals(other.processId) &&
+                prevTasks.equals(other.prevTasks) &&
+                standbyTasks.equals(other.standbyTasks) &&
+                userEndPoint != null ? userEndPoint.equals(other.userEndPoint) : other.userEndPoint == null;
         } else {
             return false;
         }
@@ -245,6 +272,11 @@ public class LegacySubscriptionInfoSerde {
 
     @Override
     public String toString() {
-        return "[version=" + usedVersion + ", supported version=" + latestSupportedVersion + ", process ID=" + processId + ", prev tasks=" + prevTasks + ", standby tasks=" + standbyTasks + ", user endpoint=" + userEndPoint + "]";
+        return "[version=" + usedVersion
+            + ", supported version=" + latestSupportedVersion
+            + ", process ID=" + processId
+            + ", prev tasks=" + prevTasks
+            + ", standby tasks=" + standbyTasks
+            + ", user endpoint=" + userEndPoint + "]";
     }
 }

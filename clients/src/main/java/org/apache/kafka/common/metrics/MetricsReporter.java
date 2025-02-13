@@ -32,45 +32,46 @@ import java.util.Set;
  */
 public interface MetricsReporter extends Reconfigurable, AutoCloseable {
 
-	/**
-	 * This is called when the reporter is first registered to initially register all existing metrics
-	 * @param metrics All currently existing metrics
-	 */
-	void init(List<KafkaMetric> metrics);
+    /**
+     * This is called when the reporter is first registered to initially register all existing metrics
+     * @param metrics All currently existing metrics
+     */
+    void init(List<KafkaMetric> metrics);
 
-	/**
-	 * This is called whenever a metric is updated or added
-	 * @param metric
-	 */
-	void metricChange(KafkaMetric metric);
+    /**
+     * This is called whenever a metric is updated or added
+     * @param metric The metric that has been added or changed
+     */
+    void metricChange(KafkaMetric metric);
 
-	/**
-	 * This is called whenever a metric is removed
-	 * @param metric
-	 */
-	void metricRemoval(KafkaMetric metric);
+    /**
+     * This is called whenever a metric is removed
+     * @param metric The metric that has been removed
+     */
+    void metricRemoval(KafkaMetric metric);
 
-	/**
-	 * Called when the metrics repository is closed.
-	 */
-	void close();
+    /**
+     * Called when the metrics repository is closed.
+     */
+    void close();
 
-	// default methods for backwards compatibility with reporters that only implement Configurable
-	default Set<String> reconfigurableConfigs() {
-		return Collections.emptySet();
-	}
+    // default methods for backwards compatibility with reporters that only implement Configurable
+    default Set<String> reconfigurableConfigs() {
+        return Collections.emptySet();
+    }
 
-	default void validateReconfiguration(Map<String, ?> configs) throws ConfigException {
-	}
+    default void validateReconfiguration(Map<String, ?> configs) throws ConfigException {
+    }
 
-	default void reconfigure(Map<String, ?> configs) {
-	}
+    default void reconfigure(Map<String, ?> configs) {
+    }
 
-	/**
-	 * Sets the context labels for the service or library exposing metrics. This will be called before {@link #init(List)} and may be called anytime after that.
-	 * @param metricsContext the metric context
-	 */
-	@InterfaceStability.Evolving
-	default void contextChange(MetricsContext metricsContext) {
-	}
+    /**
+     * Sets the context labels for the service or library exposing metrics. This will be called before {@link #init(List)} and may be called anytime after that.
+     *
+     * @param metricsContext the metric context
+     */
+    @InterfaceStability.Evolving
+    default void contextChange(MetricsContext metricsContext) {
+    }
 }

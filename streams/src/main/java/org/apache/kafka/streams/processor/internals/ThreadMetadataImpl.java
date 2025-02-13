@@ -47,10 +47,17 @@ public class ThreadMetadataImpl implements ThreadMetadata {
     // we keep it at the thread-level for user's convenience and possible extensions in the future
     private final String adminClientId;
 
-    public ThreadMetadataImpl(final String threadName, final String threadState, final String mainConsumerClientId, final String restoreConsumerClientId, final Set<String> producerClientIds, final String adminClientId, final Set<TaskMetadata> activeTasks, final Set<TaskMetadata> standbyTasks) {
+    public ThreadMetadataImpl(final String threadName,
+                              final String threadState,
+                              final String mainConsumerClientId,
+                              final String restoreConsumerClientId,
+                              final String producerClientIds,
+                              final String adminClientId,
+                              final Set<TaskMetadata> activeTasks,
+                              final Set<TaskMetadata> standbyTasks) {
         this.mainConsumerClientId = mainConsumerClientId;
         this.restoreConsumerClientId = restoreConsumerClientId;
-        this.producerClientIds = Collections.unmodifiableSet(producerClientIds);
+        this.producerClientIds = Collections.singleton(producerClientIds);
         this.adminClientId = adminClientId;
         this.threadName = threadName;
         this.threadState = threadState;
@@ -101,16 +108,40 @@ public class ThreadMetadataImpl implements ThreadMetadata {
             return false;
         }
         final ThreadMetadataImpl that = (ThreadMetadataImpl) o;
-        return Objects.equals(threadName, that.threadName) && Objects.equals(threadState, that.threadState) && Objects.equals(activeTasks, that.activeTasks) && Objects.equals(standbyTasks, that.standbyTasks) && mainConsumerClientId.equals(that.mainConsumerClientId) && restoreConsumerClientId.equals(that.restoreConsumerClientId) && Objects.equals(producerClientIds, that.producerClientIds) && adminClientId.equals(that.adminClientId);
+        return Objects.equals(threadName, that.threadName) &&
+               Objects.equals(threadState, that.threadState) &&
+               Objects.equals(activeTasks, that.activeTasks) &&
+               Objects.equals(standbyTasks, that.standbyTasks) &&
+               mainConsumerClientId.equals(that.mainConsumerClientId) &&
+               restoreConsumerClientId.equals(that.restoreConsumerClientId) &&
+               Objects.equals(producerClientIds, that.producerClientIds) &&
+               adminClientId.equals(that.adminClientId);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(threadName, threadState, activeTasks, standbyTasks, mainConsumerClientId, restoreConsumerClientId, producerClientIds, adminClientId);
+        return Objects.hash(
+            threadName,
+            threadState,
+            activeTasks,
+            standbyTasks,
+            mainConsumerClientId,
+            restoreConsumerClientId,
+            producerClientIds,
+            adminClientId);
     }
 
     @Override
     public String toString() {
-        return "ThreadMetadata{" + "threadName=" + threadName + ", threadState=" + threadState + ", activeTasks=" + activeTasks + ", standbyTasks=" + standbyTasks + ", consumerClientId=" + mainConsumerClientId + ", restoreConsumerClientId=" + restoreConsumerClientId + ", producerClientIds=" + producerClientIds + ", adminClientId=" + adminClientId + '}';
+        return "ThreadMetadata{" +
+                "threadName=" + threadName +
+                ", threadState=" + threadState +
+                ", activeTasks=" + activeTasks +
+                ", standbyTasks=" + standbyTasks +
+                ", consumerClientId=" + mainConsumerClientId +
+                ", restoreConsumerClientId=" + restoreConsumerClientId +
+                ", producerClientIds=" + producerClientIds +
+                ", adminClientId=" + adminClientId +
+                '}';
     }
 }

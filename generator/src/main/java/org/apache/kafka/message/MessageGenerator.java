@@ -22,16 +22,25 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
+
 import net.sourceforge.argparse4j.ArgumentParsers;
 import net.sourceforge.argparse4j.inf.ArgumentParser;
 import net.sourceforge.argparse4j.inf.Namespace;
 
 import java.io.BufferedWriter;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 import static net.sourceforge.argparse4j.impl.Arguments.store;
 
@@ -48,6 +57,10 @@ public final class MessageGenerator {
     static final String API_MESSAGE_TYPE_JAVA = "ApiMessageType.java";
 
     static final String API_SCOPE_JAVA = "ApiScope.java";
+
+    static final String COORDINATOR_RECORD_TYPE_JAVA = "CoordinatorRecordType.java";
+
+    static final String COORDINATOR_RECORD_JSON_CONVERTERS_JAVA = "CoordinatorRecordJsonConverters.java";
 
     static final String METADATA_RECORD_TYPE_JAVA = "MetadataRecordType.java";
 
@@ -71,11 +84,14 @@ public final class MessageGenerator {
 
     static final String ARRAYLIST_CLASS = "java.util.ArrayList";
 
-    static final String IMPLICIT_LINKED_HASH_COLLECTION_CLASS = "org.apache.kafka.common.utils.ImplicitLinkedHashCollection";
+    static final String IMPLICIT_LINKED_HASH_COLLECTION_CLASS =
+        "org.apache.kafka.common.utils.ImplicitLinkedHashCollection";
 
-    static final String IMPLICIT_LINKED_HASH_MULTI_COLLECTION_CLASS = "org.apache.kafka.common.utils.ImplicitLinkedHashMultiCollection";
+    static final String IMPLICIT_LINKED_HASH_MULTI_COLLECTION_CLASS =
+        "org.apache.kafka.common.utils.ImplicitLinkedHashMultiCollection";
 
-    static final String UNSUPPORTED_VERSION_EXCEPTION_CLASS = "org.apache.kafka.common.errors.UnsupportedVersionException";
+    static final String UNSUPPORTED_VERSION_EXCEPTION_CLASS =
+        "org.apache.kafka.common.errors.UnsupportedVersionException";
 
     static final String ITERATOR_CLASS = "java.util.Iterator";
 
@@ -156,7 +172,7 @@ public final class MessageGenerator {
     /**
      * The Jackson serializer we use for JSON objects.
      */
-    static final ObjectMapper JSON_SERDE;
+    public static final ObjectMapper JSON_SERDE;
 
     static {
         JSON_SERDE = new ObjectMapper();
@@ -165,11 +181,12 @@ public final class MessageGenerator {
         JSON_SERDE.configure(DeserializationFeature.FAIL_ON_TRAILING_TOKENS, true);
         JSON_SERDE.configure(JsonParser.Feature.ALLOW_COMMENTS, true);
         JSON_SERDE.setSerializationInclusion(JsonInclude.Include.NON_EMPTY);
+        JSON_SERDE.registerModule(new Jdk8Module());
     }
 
-    private static List<TypeClassGenerator> createTypeClassGenerators(String packageName, List<String> types) {
-        if (types == null)
-            return Collections.emptyList();
+    private static List<TypeClassGenerator> createTypeClassGenerators(String packageName,
+                                                                      List<String> types) {
+        if (types == null) return Collections.emptyList();
         List<TypeClassGenerator> generators = new ArrayList<>();
         for (String type : types) {
             switch (type) {
@@ -182,6 +199,12 @@ public final class MessageGenerator {
                 case "MetadataJsonConvertersGenerator":
                     generators.add(new MetadataJsonConvertersGenerator(packageName));
                     break;
+                case "CoordinatorRecordTypeGenerator":
+                    generators.add(new CoordinatorRecordTypeGenerator(packageName));
+                    break;
+                case "CoordinatorRecordJsonConvertersGenerator":
+                    generators.add(new CoordinatorRecordJsonConvertersGenerator(packageName));
+                    break;
                 default:
                     throw new RuntimeException("Unknown type class generator type '" + type + "'");
             }
@@ -189,9 +212,9 @@ public final class MessageGenerator {
         return generators;
     }
 
-    private static List<MessageClassGenerator> createMessageClassGenerators(String packageName, List<String> types) {
-        if (types == null)
-            return Collections.emptyList();
+    private static List<MessageClassGenerator> createMessageClassGenerators(String packageName,
+                                                                            List<String> types) {
+        if (types == null) return Collections.emptyList();
         List<MessageClassGenerator> generators = new ArrayList<>();
         for (String type : types) {
             switch (type) {
@@ -208,25 +231,22 @@ public final class MessageGenerator {
         return generators;
     }
 
-    public static void processDirectories(String packageName, String outputDir, String inputDir, List<String> typeClassGeneratorTypes, List<String> messageClassGeneratorTypes) throws Exception {
+    public static void processDirectories(String packageName,
+                                          String outputDir,
+                                          String inputDir,
+                                          List<String> typeClassGeneratorTypes,
+                                          List<String> messageClassGeneratorTypes) throws Exception {
         Files.createDirectories(Paths.get(outputDir));
         int numProcessed = 0;
 
         List<TypeClassGenerator> typeClassGenerators = createTypeClassGenerators(packageName, typeClassGeneratorTypes);
-        HashSet<String> outputFileNames = new HashSet<>();
+        Set<String> outputFileNames = new HashSet<>();
         try (DirectoryStream<Path> directoryStream = Files.newDirectoryStream(Paths.get(inputDir), JSON_GLOB)) {
             for (Path inputPath : directoryStream) {
                 try {
                     MessageSpec spec = JSON_SERDE.readValue(inputPath.toFile(), MessageSpec.class);
-                    List<MessageClassGenerator> generators = createMessageClassGenerators(packageName, messageClassGeneratorTypes);
-                    for (MessageClassGenerator generator : generators) {
-                        String name = generator.outputName(spec) + JAVA_SUFFIX;
-                        outputFileNames.add(name);
-                        Path outputPath = Paths.get(outputDir, name);
-                        try (BufferedWriter writer = Files.newBufferedWriter(outputPath)) {
-                            generator.generateAndWrite(spec, writer);
-                        }
-                    }
+                    outputFileNames.addAll(
+                        generateAndWriteMessageClasses(spec, packageName, outputDir, messageClassGeneratorTypes));
                     numProcessed++;
                     typeClassGenerators.forEach(generator -> generator.registerMessageType(spec));
                 } catch (Exception e) {
@@ -236,11 +256,9 @@ public final class MessageGenerator {
         }
         for (TypeClassGenerator typeClassGenerator : typeClassGenerators) {
             outputFileNames.add(typeClassGenerator.outputName());
-            Path factoryOutputPath = Paths.get(outputDir, typeClassGenerator.outputName());
-            try (BufferedWriter writer = Files.newBufferedWriter(factoryOutputPath)) {
-                typeClassGenerator.generateAndWrite(writer);
-            }
+            generateAndWriteTypeClasses(outputDir, typeClassGenerator);
         }
+
         try (DirectoryStream<Path> directoryStream = Files.newDirectoryStream(Paths.get(outputDir))) {
             for (Path outputPath : directoryStream) {
                 Path fileName = outputPath.getFileName();
@@ -254,7 +272,38 @@ public final class MessageGenerator {
         System.out.printf("MessageGenerator: processed %d Kafka message JSON files(s).%n", numProcessed);
     }
 
-    static String capitalizeFirst(String string) {
+    /**
+     * Generate and write message classes.
+     * @return output file names.
+     */
+    static Set<String> generateAndWriteMessageClasses(MessageSpec spec,
+                                                      String packageName,
+                                                      String outputDir,
+                                                      List<String> messageClassGeneratorTypes) throws Exception {
+        var outputFileNames = new HashSet<String>();
+        // Only generate `Data` classes for apis that have valid version(s)
+        if (spec.hasValidVersion()) {
+            List<MessageClassGenerator> generators = createMessageClassGenerators(packageName, messageClassGeneratorTypes);
+            for (MessageClassGenerator generator : generators) {
+                String name = generator.outputName(spec) + JAVA_SUFFIX;
+                outputFileNames.add(name);
+                Path outputPath = Paths.get(outputDir, name);
+                try (BufferedWriter writer = Files.newBufferedWriter(outputPath, StandardCharsets.UTF_8)) {
+                    generator.generateAndWrite(spec, writer);
+                }
+            }
+        }
+        return outputFileNames;
+    }
+
+    static void generateAndWriteTypeClasses(String outputDir, TypeClassGenerator typeClassGenerator) throws IOException {
+        Path factoryOutputPath = Paths.get(outputDir, typeClassGenerator.outputName());
+        try (BufferedWriter writer = Files.newBufferedWriter(factoryOutputPath, StandardCharsets.UTF_8)) {
+            typeClassGenerator.generateAndWrite(writer);
+        }
+    }
+
+    public static String capitalizeFirst(String string) {
         if (string.isEmpty()) {
             return string;
         }
@@ -300,7 +349,8 @@ public final class MessageGenerator {
         if (str.endsWith(suffix)) {
             return str.substring(0, str.length() - suffix.length());
         } else {
-            throw new RuntimeException("String " + str + " does not end with the " + "expected suffix " + suffix);
+            throw new RuntimeException("String " + str + " does not end with the " +
+                "expected suffix " + suffix);
         }
     }
 
@@ -317,13 +367,38 @@ public final class MessageGenerator {
     }
 
     public static void main(String[] args) throws Exception {
-        ArgumentParser parser = ArgumentParsers.newArgumentParser("message-generator").defaultHelp(true).description("The Kafka message generator");
-        parser.addArgument("--package", "-p").action(store()).required(true).metavar("PACKAGE").help("The java package to use in generated files.");
-        parser.addArgument("--output", "-o").action(store()).required(true).metavar("OUTPUT").help("The output directory to create.");
-        parser.addArgument("--input", "-i").action(store()).required(true).metavar("INPUT").help("The input directory to use.");
-        parser.addArgument("--typeclass-generators", "-t").nargs("+").action(store()).metavar("TYPECLASS_GENERATORS").help("The type class generators to use, if any.");
-        parser.addArgument("--message-class-generators", "-m").nargs("+").action(store()).metavar("MESSAGE_CLASS_GENERATORS").help("The message class generators to use.");
+        ArgumentParser parser = ArgumentParsers
+            .newArgumentParser("message-generator")
+            .defaultHelp(true)
+            .description("The Kafka message generator");
+        parser.addArgument("--package", "-p")
+            .action(store())
+            .required(true)
+            .metavar("PACKAGE")
+            .help("The java package to use in generated files.");
+        parser.addArgument("--output", "-o")
+            .action(store())
+            .required(true)
+            .metavar("OUTPUT")
+            .help("The output directory to create.");
+        parser.addArgument("--input", "-i")
+            .action(store())
+            .required(true)
+            .metavar("INPUT")
+            .help("The input directory to use.");
+        parser.addArgument("--typeclass-generators", "-t")
+            .nargs("+")
+            .action(store())
+            .metavar("TYPECLASS_GENERATORS")
+            .help("The type class generators to use, if any.");
+        parser.addArgument("--message-class-generators", "-m")
+            .nargs("+")
+            .action(store())
+            .metavar("MESSAGE_CLASS_GENERATORS")
+            .help("The message class generators to use.");
         Namespace res = parser.parseArgsOrFail(args);
-        processDirectories(res.getString("package"), res.getString("output"), res.getString("input"), res.getList("typeclass_generators"), res.getList("message_class_generators"));
+        processDirectories(res.getString("package"), res.getString("output"),
+            res.getString("input"), res.getList("typeclass_generators"),
+            res.getList("message_class_generators"));
     }
 }

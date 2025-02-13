@@ -28,11 +28,15 @@ import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.requests.DeleteGroupsRequest;
 import org.apache.kafka.common.requests.DeleteGroupsResponse;
 import org.apache.kafka.common.utils.LogContext;
+
 import org.junit.jupiter.api.Test;
 
-import static java.util.Collections.*;
+import static java.util.Collections.emptyList;
+import static java.util.Collections.emptySet;
+import static java.util.Collections.singleton;
+import static java.util.Collections.singletonList;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 public class DeleteConsumerGroupsHandlerTest {
 
@@ -72,40 +76,55 @@ public class DeleteConsumerGroupsHandlerTest {
     }
 
     private DeleteGroupsResponse buildResponse(Errors error) {
-        DeleteGroupsResponse response = new DeleteGroupsResponse(new DeleteGroupsResponseData().setResults(new DeletableGroupResultCollection(singletonList(new DeletableGroupResult().setErrorCode(error.code()).setGroupId(groupId1)).iterator())));
-        return response;
+        return new DeleteGroupsResponse(
+                new DeleteGroupsResponseData()
+                    .setResults(new DeletableGroupResultCollection(singletonList(
+                            new DeletableGroupResult()
+                                .setErrorCode(error.code())
+                                .setGroupId(groupId1)).iterator())));
     }
 
-    private AdminApiHandler.ApiResult<CoordinatorKey, Void> handleWithError(Errors error) {
+    private AdminApiHandler.ApiResult<CoordinatorKey, Void> handleWithError(
+        Errors error
+    ) {
         DeleteConsumerGroupsHandler handler = new DeleteConsumerGroupsHandler(logContext);
         DeleteGroupsResponse response = buildResponse(error);
         return handler.handleResponse(new Node(1, "host", 1234), singleton(CoordinatorKey.byGroupId(groupId1)), response);
     }
 
-    private void assertUnmapped(AdminApiHandler.ApiResult<CoordinatorKey, Void> result) {
+    private void assertUnmapped(
+        AdminApiHandler.ApiResult<CoordinatorKey, Void> result
+    ) {
         assertEquals(emptySet(), result.completedKeys.keySet());
         assertEquals(emptySet(), result.failedKeys.keySet());
         assertEquals(singletonList(CoordinatorKey.byGroupId(groupId1)), result.unmappedKeys);
     }
 
-    private void assertRetriable(AdminApiHandler.ApiResult<CoordinatorKey, Void> result) {
+    private void assertRetriable(
+        AdminApiHandler.ApiResult<CoordinatorKey, Void> result
+    ) {
         assertEquals(emptySet(), result.completedKeys.keySet());
         assertEquals(emptySet(), result.failedKeys.keySet());
         assertEquals(emptyList(), result.unmappedKeys);
     }
 
-    private void assertCompleted(AdminApiHandler.ApiResult<CoordinatorKey, Void> result) {
+    private void assertCompleted(
+        AdminApiHandler.ApiResult<CoordinatorKey, Void> result
+    ) {
         CoordinatorKey key = CoordinatorKey.byGroupId(groupId1);
         assertEquals(emptySet(), result.failedKeys.keySet());
         assertEquals(emptyList(), result.unmappedKeys);
         assertEquals(singleton(key), result.completedKeys.keySet());
     }
 
-    private void assertFailed(Class<? extends Throwable> expectedExceptionType, AdminApiHandler.ApiResult<CoordinatorKey, Void> result) {
+    private void assertFailed(
+        Class<? extends Throwable> expectedExceptionType,
+        AdminApiHandler.ApiResult<CoordinatorKey, Void> result
+    ) {
         CoordinatorKey key = CoordinatorKey.byGroupId(groupId1);
         assertEquals(emptySet(), result.completedKeys.keySet());
         assertEquals(emptyList(), result.unmappedKeys);
         assertEquals(singleton(key), result.failedKeys.keySet());
-        assertTrue(expectedExceptionType.isInstance(result.failedKeys.get(key)));
+        assertInstanceOf(expectedExceptionType, result.failedKeys.get(key));
     }
 }

@@ -30,7 +30,9 @@ import java.util.Objects;
 
 import static org.apache.kafka.common.config.ConfigDef.Importance.LOW;
 import static org.apache.kafka.common.config.ConfigDef.Range.atLeast;
-import static org.apache.kafka.common.config.ConfigDef.Type.*;
+import static org.apache.kafka.common.config.ConfigDef.Type.INT;
+import static org.apache.kafka.common.config.ConfigDef.Type.LONG;
+import static org.apache.kafka.common.config.ConfigDef.Type.SHORT;
 
 /**
  * This class defines the configuration of topic based {@link org.apache.kafka.server.log.remote.storage.RemoteLogMetadataManager} implementation.
@@ -47,19 +49,26 @@ public final class TopicBasedRemoteLogMetadataManagerConfig {
     public static final String REMOTE_LOG_METADATA_INITIALIZATION_RETRY_INTERVAL_MS_PROP = "remote.log.metadata.initialization.retry.interval.ms";
 
     public static final int DEFAULT_REMOTE_LOG_METADATA_TOPIC_PARTITIONS = 50;
-    public static final long DEFAULT_REMOTE_LOG_METADATA_TOPIC_RETENTION_MILLIS = -1L;
+    public static final long DEFAULT_REMOTE_LOG_METADATA_TOPIC_RETENTION_MS = -1L;
     public static final short DEFAULT_REMOTE_LOG_METADATA_TOPIC_REPLICATION_FACTOR = 3;
     public static final long DEFAULT_REMOTE_LOG_METADATA_CONSUME_WAIT_MS = 2 * 60 * 1000L;
     public static final long DEFAULT_REMOTE_LOG_METADATA_INITIALIZATION_RETRY_MAX_TIMEOUT_MS = 2 * 60 * 1000L;
-    public static final long DEFAULT_REMOTE_LOG_METADATA_INITIALIZATION_RETRY_INTERVAL_MS = 5 * 1000L;
+    public static final long DEFAULT_REMOTE_LOG_METADATA_INITIALIZATION_RETRY_INTERVAL_MS = 100L;
 
-    public static final String REMOTE_LOG_METADATA_TOPIC_REPLICATION_FACTOR_DOC = "Replication factor of remote log metadata Topic.";
-    public static final String REMOTE_LOG_METADATA_TOPIC_PARTITIONS_DOC = "The number of partitions for remote log metadata Topic.";
-    public static final String REMOTE_LOG_METADATA_TOPIC_RETENTION_MS_DOC = "Remote log metadata topic log retention in milli seconds." + "Default: -1, that means unlimited. Users can configure this value based on their use cases. " + "To avoid any data loss, this value should be more than the maximum retention period of any topic enabled with " + "tiered storage in the cluster.";
-    public static final String REMOTE_LOG_METADATA_CONSUME_WAIT_MS_DOC = "The amount of time in milli seconds to wait for the local consumer to " + "receive the published event.";
-    public static final String REMOTE_LOG_METADATA_INITIALIZATION_RETRY_INTERVAL_MS_DOC = "The retry interval in milli seconds for " + " retrying RemoteLogMetadataManager resources initialization again.";
+    public static final String REMOTE_LOG_METADATA_TOPIC_REPLICATION_FACTOR_DOC = "Replication factor of remote log metadata topic.";
+    public static final String REMOTE_LOG_METADATA_TOPIC_PARTITIONS_DOC = "The number of partitions for remote log metadata topic.";
+    public static final String REMOTE_LOG_METADATA_TOPIC_RETENTION_MS_DOC = "Retention of remote log metadata topic in milliseconds. " +
+            "Default: -1, that means unlimited. Users can configure this value based on their use cases. " +
+            "To avoid any data loss, this value should be more than the maximum retention period of any topic enabled with " +
+            "tiered storage in the cluster.";
+    public static final String REMOTE_LOG_METADATA_CONSUME_WAIT_MS_DOC = "The amount of time in milliseconds to wait for the local consumer to " +
+            "receive the published event.";
+    public static final String REMOTE_LOG_METADATA_INITIALIZATION_RETRY_INTERVAL_MS_DOC = "The retry interval in milliseconds for " +
+            "retrying RemoteLogMetadataManager resources initialization again.";
 
-    public static final String REMOTE_LOG_METADATA_INITIALIZATION_RETRY_MAX_TIMEOUT_MS_DOC = "The maximum amount of time in milli seconds " + " for retrying RemoteLogMetadataManager resources initialization. When total retry intervals reach this timeout, initialization" + " is considered as failed and broker starts shutting down.";
+    public static final String REMOTE_LOG_METADATA_INITIALIZATION_RETRY_MAX_TIMEOUT_MS_DOC = "The maximum amount of time in milliseconds " +
+            "for retrying RemoteLogMetadataManager resources initialization. When total retry intervals reach this timeout, initialization " +
+            "is considered as failed and broker starts shutting down.";
 
     public static final String REMOTE_LOG_METADATA_COMMON_CLIENT_PREFIX = "remote.log.metadata.common.client.";
     public static final String REMOTE_LOG_METADATA_PRODUCER_PREFIX = "remote.log.metadata.producer.";
@@ -70,9 +79,21 @@ public final class TopicBasedRemoteLogMetadataManagerConfig {
     private static final String REMOTE_LOG_METADATA_CLIENT_PREFIX = "__remote_log_metadata_client";
 
     private static final ConfigDef CONFIG = new ConfigDef();
-
     static {
-        CONFIG.define(REMOTE_LOG_METADATA_TOPIC_REPLICATION_FACTOR_PROP, SHORT, DEFAULT_REMOTE_LOG_METADATA_TOPIC_REPLICATION_FACTOR, atLeast(1), LOW, REMOTE_LOG_METADATA_TOPIC_REPLICATION_FACTOR_DOC).define(REMOTE_LOG_METADATA_TOPIC_PARTITIONS_PROP, INT, DEFAULT_REMOTE_LOG_METADATA_TOPIC_PARTITIONS, atLeast(1), LOW, REMOTE_LOG_METADATA_TOPIC_PARTITIONS_DOC).define(REMOTE_LOG_METADATA_TOPIC_RETENTION_MS_PROP, LONG, DEFAULT_REMOTE_LOG_METADATA_TOPIC_RETENTION_MILLIS, LOW, REMOTE_LOG_METADATA_TOPIC_RETENTION_MS_DOC).define(REMOTE_LOG_METADATA_CONSUME_WAIT_MS_PROP, LONG, DEFAULT_REMOTE_LOG_METADATA_CONSUME_WAIT_MS, atLeast(0), LOW, REMOTE_LOG_METADATA_CONSUME_WAIT_MS_DOC).define(REMOTE_LOG_METADATA_INITIALIZATION_RETRY_MAX_TIMEOUT_MS_PROP, LONG, DEFAULT_REMOTE_LOG_METADATA_INITIALIZATION_RETRY_MAX_TIMEOUT_MS, atLeast(0), LOW, REMOTE_LOG_METADATA_INITIALIZATION_RETRY_MAX_TIMEOUT_MS_DOC).define(REMOTE_LOG_METADATA_INITIALIZATION_RETRY_INTERVAL_MS_PROP, LONG, DEFAULT_REMOTE_LOG_METADATA_INITIALIZATION_RETRY_INTERVAL_MS, atLeast(0), LOW, REMOTE_LOG_METADATA_INITIALIZATION_RETRY_INTERVAL_MS_DOC);
+        CONFIG.define(REMOTE_LOG_METADATA_TOPIC_REPLICATION_FACTOR_PROP, SHORT, DEFAULT_REMOTE_LOG_METADATA_TOPIC_REPLICATION_FACTOR, atLeast(1), LOW,
+                      REMOTE_LOG_METADATA_TOPIC_REPLICATION_FACTOR_DOC)
+              .define(REMOTE_LOG_METADATA_TOPIC_PARTITIONS_PROP, INT, DEFAULT_REMOTE_LOG_METADATA_TOPIC_PARTITIONS, atLeast(1), LOW,
+                      REMOTE_LOG_METADATA_TOPIC_PARTITIONS_DOC)
+              .define(REMOTE_LOG_METADATA_TOPIC_RETENTION_MS_PROP, LONG, DEFAULT_REMOTE_LOG_METADATA_TOPIC_RETENTION_MS, LOW,
+                      REMOTE_LOG_METADATA_TOPIC_RETENTION_MS_DOC)
+              .define(REMOTE_LOG_METADATA_CONSUME_WAIT_MS_PROP, LONG, DEFAULT_REMOTE_LOG_METADATA_CONSUME_WAIT_MS, atLeast(0), LOW,
+                      REMOTE_LOG_METADATA_CONSUME_WAIT_MS_DOC)
+              .define(REMOTE_LOG_METADATA_INITIALIZATION_RETRY_MAX_TIMEOUT_MS_PROP, LONG,
+                      DEFAULT_REMOTE_LOG_METADATA_INITIALIZATION_RETRY_MAX_TIMEOUT_MS, atLeast(0), LOW,
+                      REMOTE_LOG_METADATA_INITIALIZATION_RETRY_MAX_TIMEOUT_MS_DOC)
+              .define(REMOTE_LOG_METADATA_INITIALIZATION_RETRY_INTERVAL_MS_PROP, LONG,
+                      DEFAULT_REMOTE_LOG_METADATA_INITIALIZATION_RETRY_INTERVAL_MS, atLeast(0), LOW,
+                      REMOTE_LOG_METADATA_INITIALIZATION_RETRY_INTERVAL_MS_DOC);
     }
 
     private final String clientIdPrefix;
@@ -84,19 +105,17 @@ public final class TopicBasedRemoteLogMetadataManagerConfig {
     private final long initializationRetryMaxTimeoutMs;
     private final long initializationRetryIntervalMs;
 
+    private Map<String, Object> commonProps;
     private Map<String, Object> consumerProps;
     private Map<String, Object> producerProps;
 
     public TopicBasedRemoteLogMetadataManagerConfig(Map<String, ?> props) {
         Objects.requireNonNull(props, "props can not be null");
-
         Map<String, Object> parsedConfigs = CONFIG.parse(props);
-
         logDir = (String) props.get(LOG_DIR);
         if (logDir == null || logDir.isEmpty()) {
             throw new IllegalArgumentException(LOG_DIR + " config must not be null or empty.");
         }
-
         metadataTopicPartitionsCount = (int) parsedConfigs.get(REMOTE_LOG_METADATA_TOPIC_PARTITIONS_PROP);
         metadataTopicReplicationFactor = (short) parsedConfigs.get(REMOTE_LOG_METADATA_TOPIC_REPLICATION_FACTOR_PROP);
         metadataTopicRetentionMs = (long) parsedConfigs.get(REMOTE_LOG_METADATA_TOPIC_RETENTION_MS_PROP);
@@ -106,9 +125,7 @@ public final class TopicBasedRemoteLogMetadataManagerConfig {
         consumeWaitMs = (long) parsedConfigs.get(REMOTE_LOG_METADATA_CONSUME_WAIT_MS_PROP);
         initializationRetryIntervalMs = (long) parsedConfigs.get(REMOTE_LOG_METADATA_INITIALIZATION_RETRY_INTERVAL_MS_PROP);
         initializationRetryMaxTimeoutMs = (long) parsedConfigs.get(REMOTE_LOG_METADATA_INITIALIZATION_RETRY_MAX_TIMEOUT_MS_PROP);
-
         clientIdPrefix = REMOTE_LOG_METADATA_CLIENT_PREFIX + "_" + props.get(BROKER_ID);
-
         initializeProducerConsumerProperties(props);
     }
 
@@ -116,7 +133,6 @@ public final class TopicBasedRemoteLogMetadataManagerConfig {
         Map<String, Object> commonClientConfigs = new HashMap<>();
         Map<String, Object> producerOnlyConfigs = new HashMap<>();
         Map<String, Object> consumerOnlyConfigs = new HashMap<>();
-
         for (Map.Entry<String, ?> entry : configs.entrySet()) {
             String key = entry.getKey();
             if (key.startsWith(REMOTE_LOG_METADATA_COMMON_CLIENT_PREFIX)) {
@@ -127,12 +143,11 @@ public final class TopicBasedRemoteLogMetadataManagerConfig {
                 consumerOnlyConfigs.put(key.substring(REMOTE_LOG_METADATA_CONSUMER_PREFIX.length()), entry.getValue());
             }
         }
-
-        HashMap<String, Object> allProducerConfigs = new HashMap<>(commonClientConfigs);
+        commonProps = new HashMap<>(commonClientConfigs);
+        Map<String, Object> allProducerConfigs = new HashMap<>(commonClientConfigs);
         allProducerConfigs.putAll(producerOnlyConfigs);
         producerProps = createProducerProps(allProducerConfigs);
-
-        HashMap<String, Object> allConsumerConfigs = new HashMap<>(commonClientConfigs);
+        Map<String, Object> allConsumerConfigs = new HashMap<>(commonClientConfigs);
         allConsumerConfigs.putAll(consumerOnlyConfigs);
         consumerProps = createConsumerProps(allConsumerConfigs);
     }
@@ -169,6 +184,10 @@ public final class TopicBasedRemoteLogMetadataManagerConfig {
         return logDir;
     }
 
+    public Map<String, Object> commonProperties() {
+        return commonProps;
+    }
+
     public Map<String, Object> consumerProperties() {
         return consumerProps;
     }
@@ -177,9 +196,8 @@ public final class TopicBasedRemoteLogMetadataManagerConfig {
         return producerProps;
     }
 
-    private Map<String, Object> createConsumerProps(HashMap<String, Object> allConsumerConfigs) {
+    private Map<String, Object> createConsumerProps(Map<String, Object> allConsumerConfigs) {
         Map<String, Object> props = new HashMap<>(allConsumerConfigs);
-
         props.put(CommonClientConfigs.CLIENT_ID_CONFIG, clientIdPrefix + "_consumer");
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
@@ -189,20 +207,33 @@ public final class TopicBasedRemoteLogMetadataManagerConfig {
         return props;
     }
 
-    private Map<String, Object> createProducerProps(HashMap<String, Object> allProducerConfigs) {
+    private Map<String, Object> createProducerProps(Map<String, Object> allProducerConfigs) {
         Map<String, Object> props = new HashMap<>(allProducerConfigs);
-
         props.put(ProducerConfig.CLIENT_ID_CONFIG, clientIdPrefix + "_producer");
         props.put(ProducerConfig.ACKS_CONFIG, "all");
-        props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);
+        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
-
         return Collections.unmodifiableMap(props);
     }
 
     @Override
     public String toString() {
-        return "TopicBasedRemoteLogMetadataManagerConfig{" + "clientIdPrefix='" + clientIdPrefix + '\'' + ", metadataTopicPartitionsCount=" + metadataTopicPartitionsCount + ", consumeWaitMs=" + consumeWaitMs + ", metadataTopicRetentionMs=" + metadataTopicRetentionMs + ", metadataTopicReplicationFactor=" + metadataTopicReplicationFactor + ", initializationRetryMaxTimeoutMs=" + initializationRetryMaxTimeoutMs + ", initializationRetryIntervalMs=" + initializationRetryIntervalMs + ", consumerProps=" + consumerProps + ", producerProps=" + producerProps + '}';
+        return "TopicBasedRemoteLogMetadataManagerConfig{" +
+                "clientIdPrefix='" + clientIdPrefix + '\'' +
+                ", metadataTopicPartitionsCount=" + metadataTopicPartitionsCount +
+                ", consumeWaitMs=" + consumeWaitMs +
+                ", metadataTopicRetentionMs=" + metadataTopicRetentionMs +
+                ", metadataTopicReplicationFactor=" + metadataTopicReplicationFactor +
+                ", initializationRetryMaxTimeoutMs=" + initializationRetryMaxTimeoutMs +
+                ", initializationRetryIntervalMs=" + initializationRetryIntervalMs +
+                ", commonProps=" + commonProps +
+                ", consumerProps=" + consumerProps +
+                ", producerProps=" + producerProps +
+                '}';
+    }
+
+    public static void main(String[] args) {
+        System.out.println(CONFIG.toHtml(4, config -> "remote_log_metadata_manager_" + config));
     }
 }

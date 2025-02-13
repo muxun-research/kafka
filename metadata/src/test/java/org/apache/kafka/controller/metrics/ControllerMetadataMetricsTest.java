@@ -18,8 +18,10 @@
 package org.apache.kafka.controller.metrics;
 
 import com.yammer.metrics.core.Gauge;
+import com.yammer.metrics.core.Meter;
 import com.yammer.metrics.core.MetricName;
 import com.yammer.metrics.core.MetricsRegistry;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -37,9 +39,21 @@ public class ControllerMetadataMetricsTest {
         MetricsRegistry registry = new MetricsRegistry();
         try {
             try (ControllerMetadataMetrics metrics = new ControllerMetadataMetrics(Optional.of(registry))) {
-                ControllerMetricsTestUtils.assertMetricsForTypeEqual(registry, "kafka.controller:", new HashSet<>(Arrays.asList("kafka.controller:type=KafkaController,name=ActiveBrokerCount", "kafka.controller:type=KafkaController,name=FencedBrokerCount", "kafka.controller:type=KafkaController,name=GlobalPartitionCount", "kafka.controller:type=KafkaController,name=GlobalTopicCount", "kafka.controller:type=KafkaController,name=MetadataErrorCount", "kafka.controller:type=KafkaController,name=OfflinePartitionsCount", "kafka.controller:type=KafkaController,name=PreferredReplicaImbalanceCount", "kafka.controller:type=KafkaController,name=ZkMigrationState")));
+                ControllerMetricsTestUtils.assertMetricsForTypeEqual(registry, "kafka.controller:",
+                    new HashSet<>(Arrays.asList(
+                        "kafka.controller:type=KafkaController,name=ActiveBrokerCount",
+                        "kafka.controller:type=KafkaController,name=FencedBrokerCount",
+                        "kafka.controller:type=KafkaController,name=GlobalPartitionCount",
+                        "kafka.controller:type=KafkaController,name=GlobalTopicCount",
+                        "kafka.controller:type=KafkaController,name=MetadataErrorCount",
+                        "kafka.controller:type=KafkaController,name=OfflinePartitionsCount",
+                        "kafka.controller:type=KafkaController,name=PreferredReplicaImbalanceCount",
+                        "kafka.controller:type=KafkaController,name=IgnoredStaticVoters",
+                        "kafka.controller:type=ControllerStats,name=UncleanLeaderElectionsPerSec"
+                    )));
             }
-            ControllerMetricsTestUtils.assertMetricsForTypeEqual(registry, "KafkaController", Collections.emptySet());
+            ControllerMetricsTestUtils.assertMetricsForTypeEqual(registry, "KafkaController",
+                    Collections.emptySet());
         } finally {
             registry.shutdown();
         }
@@ -49,7 +63,10 @@ public class ControllerMetadataMetricsTest {
     public void testMetadataErrorCount() {
         MetricsRegistry registry = new MetricsRegistry();
         try (ControllerMetadataMetrics metrics = new ControllerMetadataMetrics(Optional.of(registry))) {
-            @SuppressWarnings("unchecked") Gauge<Integer> metadataErrorCount = (Gauge<Integer>) registry.allMetrics().get(metricName("KafkaController", "MetadataErrorCount"));
+            @SuppressWarnings("unchecked")
+            Gauge<Integer> metadataErrorCount = (Gauge<Integer>) registry
+                    .allMetrics()
+                    .get(metricName("KafkaController", "MetadataErrorCount"));
             assertEquals(0, metadataErrorCount.value());
             metrics.incrementMetadataErrorCount();
             assertEquals(1, metadataErrorCount.value());
@@ -63,7 +80,12 @@ public class ControllerMetadataMetricsTest {
         return new MetricName("kafka.controller", type, name, null, mBeanName);
     }
 
-    private void testIntGaugeMetric(Function<ControllerMetadataMetrics, Integer> metricsGetter, Function<MetricsRegistry, Integer> registryGetter, BiConsumer<ControllerMetadataMetrics, Integer> setter, BiConsumer<ControllerMetadataMetrics, Integer> incrementer) {
+    private void testIntGaugeMetric(
+        Function<ControllerMetadataMetrics, Integer> metricsGetter,
+        Function<MetricsRegistry, Integer> registryGetter,
+        BiConsumer<ControllerMetadataMetrics, Integer> setter,
+        BiConsumer<ControllerMetadataMetrics, Integer> incrementer
+    ) {
         MetricsRegistry registry = new MetricsRegistry();
         try (ControllerMetadataMetrics metrics = new ControllerMetadataMetrics(Optional.of(registry))) {
             assertEquals(0, metricsGetter.apply(metrics));
@@ -85,36 +107,106 @@ public class ControllerMetadataMetricsTest {
     @SuppressWarnings("unchecked") // suppress warning about Gauge typecast
     @Test
     public void testFencedBrokerMetric() {
-        testIntGaugeMetric(m -> m.fencedBrokerCount(), registry -> ((Gauge<Integer>) registry.allMetrics().get(metricName("KafkaController", "FencedBrokerCount"))).value(), (m, v) -> m.setFencedBrokerCount(v), (m, v) -> m.addToFencedBrokerCount(v));
+        testIntGaugeMetric(
+            m -> m.fencedBrokerCount(),
+            registry -> ((Gauge<Integer>) registry.allMetrics().
+                    get(metricName("KafkaController", "FencedBrokerCount"))).value(),
+            (m, v) -> m.setFencedBrokerCount(v),
+            (m, v) -> m.addToFencedBrokerCount(v)
+        );
     }
 
     @SuppressWarnings("unchecked") // suppress warning about Gauge typecast
     @Test
     public void testActiveBrokerCountMetric() {
-        testIntGaugeMetric(m -> m.activeBrokerCount(), registry -> ((Gauge<Integer>) registry.allMetrics().get(metricName("KafkaController", "ActiveBrokerCount"))).value(), (m, v) -> m.setActiveBrokerCount(v), (m, v) -> m.addToActiveBrokerCount(v));
+        testIntGaugeMetric(
+            m -> m.activeBrokerCount(),
+            registry -> ((Gauge<Integer>) registry.allMetrics().
+                    get(metricName("KafkaController", "ActiveBrokerCount"))).value(),
+            (m, v) -> m.setActiveBrokerCount(v),
+            (m, v) -> m.addToActiveBrokerCount(v)
+        );
     }
 
     @SuppressWarnings("unchecked") // suppress warning about Gauge typecast
     @Test
     public void testGlobalTopicCountMetric() {
-        testIntGaugeMetric(m -> m.globalTopicCount(), registry -> ((Gauge<Integer>) registry.allMetrics().get(metricName("KafkaController", "GlobalTopicCount"))).value(), (m, v) -> m.setGlobalTopicCount(v), (m, v) -> m.addToGlobalTopicCount(v));
+        testIntGaugeMetric(
+            m -> m.globalTopicCount(),
+            registry -> ((Gauge<Integer>) registry.allMetrics().
+                    get(metricName("KafkaController", "GlobalTopicCount"))).value(),
+            (m, v) -> m.setGlobalTopicCount(v),
+            (m, v) -> m.addToGlobalTopicCount(v)
+        );
     }
 
     @SuppressWarnings("unchecked") // suppress warning about Gauge typecast
     @Test
     public void testGlobalPartitionCountMetric() {
-        testIntGaugeMetric(m -> m.globalPartitionCount(), registry -> ((Gauge<Integer>) registry.allMetrics().get(metricName("KafkaController", "GlobalPartitionCount"))).value(), (m, v) -> m.setGlobalPartitionCount(v), (m, v) -> m.addToGlobalPartitionCount(v));
+        testIntGaugeMetric(
+            m -> m.globalPartitionCount(),
+            registry -> ((Gauge<Integer>) registry.allMetrics().
+                    get(metricName("KafkaController", "GlobalPartitionCount"))).value(),
+            (m, v) -> m.setGlobalPartitionCount(v),
+            (m, v) -> m.addToGlobalPartitionCount(v)
+        );
     }
 
     @SuppressWarnings("unchecked") // suppress warning about Gauge typecast
     @Test
     public void testOfflinePartitionCountMetric() {
-        testIntGaugeMetric(m -> m.offlinePartitionCount(), registry -> ((Gauge<Integer>) registry.allMetrics().get(metricName("KafkaController", "OfflinePartitionsCount"))).value(), (m, v) -> m.setOfflinePartitionCount(v), (m, v) -> m.addToOfflinePartitionCount(v));
+        testIntGaugeMetric(
+            m -> m.offlinePartitionCount(),
+            registry -> ((Gauge<Integer>) registry.allMetrics().
+                    get(metricName("KafkaController", "OfflinePartitionsCount"))).value(),
+            (m, v) -> m.setOfflinePartitionCount(v),
+            (m, v) -> m.addToOfflinePartitionCount(v)
+        );
     }
 
     @SuppressWarnings("unchecked") // suppress warning about Gauge typecast
     @Test
     public void testPreferredReplicaImbalanceCountMetric() {
-        testIntGaugeMetric(m -> m.preferredReplicaImbalanceCount(), registry -> ((Gauge<Integer>) registry.allMetrics().get(metricName("KafkaController", "PreferredReplicaImbalanceCount"))).value(), (m, v) -> m.setPreferredReplicaImbalanceCount(v), (m, v) -> m.addToPreferredReplicaImbalanceCount(v));
+        testIntGaugeMetric(
+            m -> m.preferredReplicaImbalanceCount(),
+            registry -> ((Gauge<Integer>) registry.allMetrics().
+                    get(metricName("KafkaController", "PreferredReplicaImbalanceCount"))).value(),
+            (m, v) -> m.setPreferredReplicaImbalanceCount(v),
+            (m, v) -> m.addToPreferredReplicaImbalanceCount(v)
+        );
+    }
+
+    @SuppressWarnings("LocalVariableName")
+    @Test
+    public void testUpdateUncleanLeaderElection() {
+        MetricsRegistry registry = new MetricsRegistry();
+        try (ControllerMetadataMetrics metrics = new ControllerMetadataMetrics(Optional.of(registry))) {
+            Meter UncleanLeaderElectionsPerSec = (Meter) registry
+                    .allMetrics()
+                    .get(metricName("ControllerStats", "UncleanLeaderElectionsPerSec"));
+            assertEquals(0, UncleanLeaderElectionsPerSec.count());
+            metrics.updateUncleanLeaderElection(2);
+            assertEquals(2, UncleanLeaderElectionsPerSec.count());
+        } finally {
+            registry.shutdown();
+        }
+    }
+
+    @Test
+    public void testIgnoredStaticVoters() {
+        MetricsRegistry registry = new MetricsRegistry();
+        try (ControllerMetadataMetrics metrics = new ControllerMetadataMetrics(Optional.of(registry))) {
+            @SuppressWarnings("unchecked")
+            Gauge<Integer> ignoredStaticVoters = (Gauge<Integer>) registry
+                .allMetrics()
+                .get(metricName("KafkaController", "IgnoredStaticVoters"));
+            assertEquals(0, ignoredStaticVoters.value());
+            metrics.setIgnoredStaticVoters(true);
+            assertEquals(1, ignoredStaticVoters.value());
+            metrics.setIgnoredStaticVoters(false);
+            assertEquals(0, ignoredStaticVoters.value());
+        } finally {
+            registry.shutdown();
+        }
     }
 }

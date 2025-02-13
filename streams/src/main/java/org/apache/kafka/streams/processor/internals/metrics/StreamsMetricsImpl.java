@@ -23,12 +23,26 @@ import org.apache.kafka.common.metrics.MetricConfig;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.metrics.Sensor.RecordingLevel;
-import org.apache.kafka.common.metrics.stats.*;
+import org.apache.kafka.common.metrics.stats.Avg;
+import org.apache.kafka.common.metrics.stats.CumulativeCount;
+import org.apache.kafka.common.metrics.stats.CumulativeSum;
+import org.apache.kafka.common.metrics.stats.Max;
+import org.apache.kafka.common.metrics.stats.Min;
+import org.apache.kafka.common.metrics.stats.Rate;
+import org.apache.kafka.common.metrics.stats.Value;
+import org.apache.kafka.common.metrics.stats.WindowedCount;
+import org.apache.kafka.common.metrics.stats.WindowedSum;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.streams.StreamsMetrics;
 import org.apache.kafka.streams.state.internals.metrics.RocksDBMetricsRecordingTrigger;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -73,6 +87,7 @@ public class StreamsMetricsImpl implements StreamsMetrics {
     private final Metrics metrics;
     private final Map<Sensor, Sensor> parentSensors;
     private final String clientId;
+    private final String processId;
 
     private final Version version;
     private final Deque<MetricName> clientLevelMetrics = new LinkedList<>();
@@ -100,6 +115,7 @@ public class StreamsMetricsImpl implements StreamsMetrics {
     private static final String SENSOR_INTERNAL_LABEL = "internal";
 
     public static final String CLIENT_ID_TAG = "client-id";
+    public static final String PROCESS_ID_TAG = "process-id";
     public static final String THREAD_ID_TAG = "thread-id";
     public static final String TASK_ID_TAG = "task-id";
     public static final String PROCESSOR_NODE_ID_TAG = "processor-node-id";
@@ -135,20 +151,26 @@ public class StreamsMetricsImpl implements StreamsMetrics {
     public static final String RATIO_DESCRIPTION = "The fraction of time the thread spent on ";
     public static final String AVG_LATENCY_DESCRIPTION = "The average latency of ";
     public static final String MAX_LATENCY_DESCRIPTION = "The maximum latency of ";
+    public static final String LATENCY_DESCRIPTION_SUFFIX = " in milliseconds";
     public static final String RATE_DESCRIPTION_PREFIX = "The average number of ";
     public static final String RATE_DESCRIPTION_SUFFIX = " per second";
 
     public static final String RECORD_E2E_LATENCY = "record-e2e-latency";
-    public static final String RECORD_E2E_LATENCY_DESCRIPTION_SUFFIX = "end-to-end latency of a record, measuring by comparing the record timestamp with the " + "system time when it has been fully processed by the node";
+    public static final String RECORD_E2E_LATENCY_DESCRIPTION_SUFFIX =
+        "end-to-end latency of a record, measuring by comparing the record timestamp with the "
+            + "system time when it has been fully processed by the node";
     public static final String RECORD_E2E_LATENCY_AVG_DESCRIPTION = "The average " + RECORD_E2E_LATENCY_DESCRIPTION_SUFFIX;
     public static final String RECORD_E2E_LATENCY_MIN_DESCRIPTION = "The minimum " + RECORD_E2E_LATENCY_DESCRIPTION_SUFFIX;
     public static final String RECORD_E2E_LATENCY_MAX_DESCRIPTION = "The maximum " + RECORD_E2E_LATENCY_DESCRIPTION_SUFFIX;
 
-    public StreamsMetricsImpl(final Metrics metrics, final String clientId, final String builtInMetricsVersion, final Time time) {
+    public StreamsMetricsImpl(final Metrics metrics,
+                              final String clientId,
+                              final String processId,
+                              final Time time) {
         Objects.requireNonNull(metrics, "Metrics cannot be null");
-        Objects.requireNonNull(builtInMetricsVersion, "Built-in metrics version cannot be null");
         this.metrics = metrics;
         this.clientId = clientId;
+        this.processId = processId;
         version = Version.LATEST;
         rocksDBMetricsRecordingTrigger = new RocksDBMetricsRecordingTrigger(time);
 
@@ -167,7 +189,10 @@ public class StreamsMetricsImpl implements StreamsMetrics {
         return rocksDBMetricsRecordingTrigger;
     }
 
-    public <T> void addClientLevelImmutableMetric(final String name, final String description, final RecordingLevel recordingLevel, final T value) {
+    public <T> void addClientLevelImmutableMetric(final String name,
+                                                  final String description,
+                                                  final RecordingLevel recordingLevel,
+                                                  final T value) {
         final MetricName metricName = metrics.metricName(name, CLIENT_LEVEL_GROUP, description, clientLevelTagMap());
         final MetricConfig metricConfig = new MetricConfig().recordLevel(recordingLevel);
         synchronized (clientLevelMetrics) {
@@ -176,7 +201,10 @@ public class StreamsMetricsImpl implements StreamsMetrics {
         }
     }
 
-    public <T> void addClientLevelMutableMetric(final String name, final String description, final RecordingLevel recordingLevel, final Gauge<T> valueProvider) {
+    public <T> void addClientLevelMutableMetric(final String name,
+                                                final String description,
+                                                final RecordingLevel recordingLevel,
+                                                final Gauge<T> valueProvider) {
         final MetricName metricName = metrics.metricName(name, CLIENT_LEVEL_GROUP, description, clientLevelTagMap());
         final MetricConfig metricConfig = new MetricConfig().recordLevel(recordingLevel);
         synchronized (clientLevelMetrics) {
@@ -185,23 +213,46 @@ public class StreamsMetricsImpl implements StreamsMetrics {
         }
     }
 
-    public <T> void addThreadLevelImmutableMetric(final String name, final String description, final String threadId, final T value) {
-        final MetricName metricName = metrics.metricName(name, THREAD_LEVEL_GROUP, description, threadLevelTagMap(threadId));
+    public <T> void addThreadLevelImmutableMetric(final String name,
+        final String description,
+        final String threadId,
+        final T value) {
+        final MetricName metricName = metrics.metricName(
+            name, THREAD_LEVEL_GROUP, description, threadLevelTagMap(threadId));
         synchronized (threadLevelMetrics) {
-            threadLevelMetrics.computeIfAbsent(threadSensorPrefix(threadId), tid -> new LinkedList<>()).add(metricName);
+            threadLevelMetrics.computeIfAbsent(
+                threadSensorPrefix(threadId),
+                tid -> new LinkedList<>()
+            ).add(metricName);
             metrics.addMetric(metricName, new ImmutableMetricValue<>(value));
         }
     }
 
-    public <T> void addThreadLevelMutableMetric(final String name, final String description, final String threadId, final Gauge<T> valueProvider) {
-        final MetricName metricName = metrics.metricName(name, THREAD_LEVEL_GROUP, description, threadLevelTagMap(threadId));
+    public <T> void addThreadLevelMutableMetric(final String name,
+                                                final String description,
+                                                final String threadId,
+                                                final Gauge<T> valueProvider) {
+        addThreadLevelMutableMetric(name, description, threadId, Collections.emptyMap(), valueProvider);
+    }
+    public <T> void addThreadLevelMutableMetric(final String name,
+                                                final String description,
+                                                final String threadId,
+                                                final Map<String, String> additionalTags,
+                                                final Gauge<T> valueProvider) {
+        final MetricName metricName = metrics.metricName(
+            name, THREAD_LEVEL_GROUP, description, threadLevelTagMap(threadId, additionalTags));
         synchronized (threadLevelMetrics) {
-            threadLevelMetrics.computeIfAbsent(threadSensorPrefix(threadId), tid -> new LinkedList<>()).add(metricName);
+            threadLevelMetrics.computeIfAbsent(
+                threadSensorPrefix(threadId),
+                tid -> new LinkedList<>()
+            ).add(metricName);
             metrics.addMetric(metricName, valueProvider);
         }
     }
 
-    public final Sensor clientLevelSensor(final String sensorName, final RecordingLevel recordingLevel, final Sensor... parents) {
+    public final Sensor clientLevelSensor(final String sensorName,
+                                          final RecordingLevel recordingLevel,
+                                          final Sensor... parents) {
         synchronized (clientLevelSensors) {
             final String fullSensorName = CLIENT_LEVEL_GROUP + SENSOR_NAME_DELIMITER + sensorName;
             final Sensor sensor = metrics.getSensor(fullSensorName);
@@ -213,7 +264,10 @@ public class StreamsMetricsImpl implements StreamsMetrics {
         }
     }
 
-    public final Sensor threadLevelSensor(final String threadId, final String sensorSuffix, final RecordingLevel recordingLevel, final Sensor... parents) {
+    public final Sensor threadLevelSensor(final String threadId,
+                                          final String sensorSuffix,
+                                          final RecordingLevel recordingLevel,
+                                          final Sensor... parents) {
         final String sensorPrefix = threadSensorPrefix(threadId);
         synchronized (threadLevelSensors) {
             return getSensors(threadLevelSensors, sensorSuffix, sensorPrefix, recordingLevel, parents);
@@ -227,11 +281,16 @@ public class StreamsMetricsImpl implements StreamsMetrics {
     public Map<String, String> clientLevelTagMap() {
         final Map<String, String> tagMap = new LinkedHashMap<>();
         tagMap.put(CLIENT_ID_TAG, clientId);
+        tagMap.put(PROCESS_ID_TAG, processId);
         return tagMap;
     }
 
     public Map<String, String> threadLevelTagMap(final String threadId) {
-        final Map<String, String> tagMap = new LinkedHashMap<>();
+        return threadLevelTagMap(threadId, Collections.emptyMap());
+    }
+
+    public Map<String, String> threadLevelTagMap(final String threadId, final Map<String, String> additionalTags) {
+        final Map<String, String> tagMap = new LinkedHashMap<>(additionalTags);
         tagMap.put(THREAD_ID_TAG, threadId);
         return tagMap;
     }
@@ -277,30 +336,49 @@ public class StreamsMetricsImpl implements StreamsMetrics {
     }
 
     public Map<String, String> taskLevelTagMap(final String threadId, final String taskId) {
-        final Map<String, String> tagMap = threadLevelTagMap(threadId);
+        final Map<String, String> tagMap = new LinkedHashMap<>();
+        tagMap.put(THREAD_ID_TAG, threadId);
         tagMap.put(TASK_ID_TAG, taskId);
         return tagMap;
     }
 
-    public Map<String, String> nodeLevelTagMap(final String threadId, final String taskName, final String processorNodeName) {
-        final Map<String, String> tagMap = taskLevelTagMap(threadId, taskName);
+    public Map<String, String> nodeLevelTagMap(final String threadId,
+                                               final String taskId,
+                                               final String processorNodeName) {
+        final Map<String, String> tagMap = new LinkedHashMap<>();
+        tagMap.put(THREAD_ID_TAG, threadId);
+        tagMap.put(TASK_ID_TAG, taskId);
         tagMap.put(PROCESSOR_NODE_ID_TAG, processorNodeName);
         return tagMap;
     }
 
-    public Map<String, String> topicLevelTagMap(final String threadId, final String taskName, final String processorNodeName, final String topicName) {
-        final Map<String, String> tagMap = nodeLevelTagMap(threadId, taskName, processorNodeName);
+    public Map<String, String> topicLevelTagMap(final String threadId,
+                                                final String taskId,
+                                                final String processorNodeName,
+                                                final String topicName) {
+        final Map<String, String> tagMap = new LinkedHashMap<>();
+        tagMap.put(THREAD_ID_TAG, threadId);
+        tagMap.put(TASK_ID_TAG, taskId);
+        tagMap.put(PROCESSOR_NODE_ID_TAG, processorNodeName);
         tagMap.put(TOPIC_NAME_TAG, topicName);
         return tagMap;
     }
 
-    public Map<String, String> storeLevelTagMap(final String taskName, final String storeType, final String storeName) {
-        final Map<String, String> tagMap = taskLevelTagMap(Thread.currentThread().getName(), taskName);
+    public Map<String, String> storeLevelTagMap(final String taskId,
+                                                final String storeType,
+                                                final String storeName) {
+        final Map<String, String> tagMap = new LinkedHashMap<>();
+        tagMap.put(THREAD_ID_TAG, Thread.currentThread().getName());
+        tagMap.put(TASK_ID_TAG, taskId);
         tagMap.put(storeType + "-" + STORE_ID_TAG, storeName);
         return tagMap;
     }
 
-    public final Sensor taskLevelSensor(final String threadId, final String taskId, final String sensorSuffix, final RecordingLevel recordingLevel, final Sensor... parents) {
+    public final Sensor taskLevelSensor(final String threadId,
+                                        final String taskId,
+                                        final String sensorSuffix,
+                                        final RecordingLevel recordingLevel,
+                                        final Sensor... parents) {
         final String sensorPrefix = taskSensorPrefix(threadId, taskId);
         synchronized (taskLevelSensors) {
             return getSensors(taskLevelSensors, sensorSuffix, sensorPrefix, recordingLevel, parents);
@@ -318,17 +396,25 @@ public class StreamsMetricsImpl implements StreamsMetrics {
     }
 
     private String taskSensorPrefix(final String threadId, final String taskId) {
-        return threadSensorPrefix(threadId) + SENSOR_PREFIX_DELIMITER + SENSOR_TASK_LABEL + SENSOR_PREFIX_DELIMITER + taskId;
+        return threadSensorPrefix(threadId) + SENSOR_PREFIX_DELIMITER + SENSOR_TASK_LABEL + SENSOR_PREFIX_DELIMITER +
+            taskId;
     }
 
-    public Sensor nodeLevelSensor(final String threadId, final String taskId, final String processorNodeName, final String sensorSuffix, final Sensor.RecordingLevel recordingLevel, final Sensor... parents) {
+    public Sensor nodeLevelSensor(final String threadId,
+                                  final String taskId,
+                                  final String processorNodeName,
+                                  final String sensorSuffix,
+                                  final Sensor.RecordingLevel recordingLevel,
+                                  final Sensor... parents) {
         final String sensorPrefix = nodeSensorPrefix(threadId, taskId, processorNodeName);
         synchronized (nodeLevelSensors) {
             return getSensors(nodeLevelSensors, sensorSuffix, sensorPrefix, recordingLevel, parents);
         }
     }
 
-    public final void removeAllNodeLevelSensors(final String threadId, final String taskId, final String processorNodeName) {
+    public final void removeAllNodeLevelSensors(final String threadId,
+                                                final String taskId,
+                                                final String processorNodeName) {
         final String key = nodeSensorPrefix(threadId, taskId, processorNodeName);
         synchronized (nodeLevelSensors) {
             final Deque<String> sensors = nodeLevelSensors.remove(key);
@@ -339,17 +425,27 @@ public class StreamsMetricsImpl implements StreamsMetrics {
     }
 
     private String nodeSensorPrefix(final String threadId, final String taskId, final String processorNodeName) {
-        return taskSensorPrefix(threadId, taskId) + SENSOR_PREFIX_DELIMITER + SENSOR_NODE_LABEL + SENSOR_PREFIX_DELIMITER + processorNodeName;
+        return taskSensorPrefix(threadId, taskId)
+            + SENSOR_PREFIX_DELIMITER + SENSOR_NODE_LABEL + SENSOR_PREFIX_DELIMITER + processorNodeName;
     }
 
-    public Sensor topicLevelSensor(final String threadId, final String taskId, final String processorNodeName, final String topicName, final String sensorSuffix, final Sensor.RecordingLevel recordingLevel, final Sensor... parents) {
+    public Sensor topicLevelSensor(final String threadId,
+                                   final String taskId,
+                                   final String processorNodeName,
+                                   final String topicName,
+                                   final String sensorSuffix,
+                                   final Sensor.RecordingLevel recordingLevel,
+                                   final Sensor... parents) {
         final String sensorPrefix = topicSensorPrefix(threadId, taskId, processorNodeName, topicName);
         synchronized (topicLevelSensors) {
             return getSensors(topicLevelSensors, sensorSuffix, sensorPrefix, recordingLevel, parents);
         }
     }
 
-    public final void removeAllTopicLevelSensors(final String threadId, final String taskId, final String processorNodeName, final String topicName) {
+    public final void removeAllTopicLevelSensors(final String threadId,
+                                                 final String taskId,
+                                                 final String processorNodeName,
+                                                 final String topicName) {
         final String key = topicSensorPrefix(threadId, taskId, processorNodeName, topicName);
         synchronized (topicLevelSensors) {
             final Deque<String> sensors = topicLevelSensors.remove(key);
@@ -359,11 +455,20 @@ public class StreamsMetricsImpl implements StreamsMetrics {
         }
     }
 
-    private String topicSensorPrefix(final String threadId, final String taskId, final String processorNodeName, final String topicName) {
-        return nodeSensorPrefix(threadId, taskId, processorNodeName) + SENSOR_PREFIX_DELIMITER + SENSOR_TOPIC_LABEL + SENSOR_PREFIX_DELIMITER + topicName;
+    private String topicSensorPrefix(final String threadId,
+                                     final String taskId,
+                                     final String processorNodeName,
+                                     final String topicName) {
+        return nodeSensorPrefix(threadId, taskId, processorNodeName)
+            + SENSOR_PREFIX_DELIMITER + SENSOR_TOPIC_LABEL + SENSOR_PREFIX_DELIMITER + topicName;
     }
 
-    public Sensor cacheLevelSensor(final String threadId, final String taskName, final String storeName, final String ratioName, final Sensor.RecordingLevel recordingLevel, final Sensor... parents) {
+    public Sensor cacheLevelSensor(final String threadId,
+                                   final String taskName,
+                                   final String storeName,
+                                   final String ratioName,
+                                   final Sensor.RecordingLevel recordingLevel,
+                                   final Sensor... parents) {
         // use ratio name as sensor suffix
         final String sensorPrefix = cacheSensorPrefix(threadId, taskName, storeName);
         synchronized (cacheLevelSensors) {
@@ -371,7 +476,9 @@ public class StreamsMetricsImpl implements StreamsMetrics {
         }
     }
 
-    public Map<String, String> cacheLevelTagMap(final String threadId, final String taskId, final String storeName) {
+    public Map<String, String> cacheLevelTagMap(final String threadId,
+                                                final String taskId,
+                                                final String storeName) {
         final Map<String, String> tagMap = new LinkedHashMap<>();
         tagMap.put(THREAD_ID_TAG, threadId);
         tagMap.put(TASK_ID_TAG, taskId);
@@ -390,23 +497,39 @@ public class StreamsMetricsImpl implements StreamsMetrics {
     }
 
     private String cacheSensorPrefix(final String threadId, final String taskId, final String cacheName) {
-        return taskSensorPrefix(threadId, taskId) + SENSOR_PREFIX_DELIMITER + SENSOR_CACHE_LABEL + SENSOR_PREFIX_DELIMITER + cacheName;
+        return taskSensorPrefix(threadId, taskId)
+            + SENSOR_PREFIX_DELIMITER + SENSOR_CACHE_LABEL + SENSOR_PREFIX_DELIMITER + cacheName;
     }
 
-    public final Sensor storeLevelSensor(final String taskId, final String storeName, final String sensorSuffix, final RecordingLevel recordingLevel, final Sensor... parents) {
+    public final Sensor storeLevelSensor(final String taskId,
+                                         final String storeName,
+                                         final String sensorSuffix,
+                                         final RecordingLevel recordingLevel,
+                                         final Sensor... parents) {
         final String sensorPrefix = storeSensorPrefix(Thread.currentThread().getName(), taskId, storeName);
-        // since the keys in the map storeLevelSensors contain the name of the current thread and threads only
-        // access keys in which their name is contained, the value in the maps do not need to be thread safe
-        // and we can use a LinkedList here.
-        // TODO: In future, we could use thread local maps since each thread will exclusively access the set of keys
-        //  that contain its name. Similar is true for the other metric levels. Thread-level metrics need some
-        //  special attention, since they are created before the thread is constructed. The creation of those
-        //  metrics could be moved into the run() method of the thread.
+            // since the keys in the map storeLevelSensors contain the name of the current thread and threads only
+            // access keys in which their name is contained, the value in the maps do not need to be thread safe
+            // and we can use a LinkedList here.
+            // TODO: In future, we could use thread local maps since each thread will exclusively access the set of keys
+            //  that contain its name. Similar is true for the other metric levels. Thread-level metrics need some
+            //  special attention, since they are created before the thread is constructed. The creation of those
+            //  metrics could be moved into the run() method of the thread.
         return getSensors(storeLevelSensors, sensorSuffix, sensorPrefix, recordingLevel, parents);
     }
 
-    public <T> void addStoreLevelMutableMetric(final String taskId, final String metricsScope, final String storeName, final String name, final String description, final RecordingLevel recordingLevel, final Gauge<T> valueProvider) {
-        final MetricName metricName = metrics.metricName(name, STATE_STORE_LEVEL_GROUP, description, storeLevelTagMap(taskId, metricsScope, storeName));
+    public <T> void addStoreLevelMutableMetric(final String taskId,
+                                               final String metricsScope,
+                                               final String storeName,
+                                               final String name,
+                                               final String description,
+                                               final RecordingLevel recordingLevel,
+                                               final Gauge<T> valueProvider) {
+        final MetricName metricName = metrics.metricName(
+            name,
+            STATE_STORE_LEVEL_GROUP,
+            description,
+            storeLevelTagMap(taskId, metricsScope, storeName)
+        );
         if (metrics.metric(metricName) == null) {
             metrics.addMetricIfAbsent(metricName, new MetricConfig().recordLevel(recordingLevel), valueProvider);
             final String key = storeSensorPrefix(Thread.currentThread().getName(), taskId, storeName);
@@ -414,13 +537,16 @@ public class StreamsMetricsImpl implements StreamsMetrics {
         }
     }
 
-    public final void removeAllStoreLevelSensorsAndMetrics(final String taskId, final String storeName) {
+    public final void removeAllStoreLevelSensorsAndMetrics(final String taskId,
+                                                           final String storeName) {
         final String threadId = Thread.currentThread().getName();
         removeAllStoreLevelSensors(threadId, taskId, storeName);
         removeAllStoreLevelMetrics(threadId, taskId, storeName);
     }
 
-    private void removeAllStoreLevelSensors(final String threadId, final String taskId, final String storeName) {
+    private void removeAllStoreLevelSensors(final String threadId,
+                                            final String taskId,
+                                            final String storeName) {
         final String key = storeSensorPrefix(threadId, taskId, storeName);
         final Deque<String> sensors = storeLevelSensors.remove(key);
         while (sensors != null && !sensors.isEmpty()) {
@@ -428,7 +554,9 @@ public class StreamsMetricsImpl implements StreamsMetrics {
         }
     }
 
-    private void removeAllStoreLevelMetrics(final String threadId, final String taskId, final String storeName) {
+    private void removeAllStoreLevelMetrics(final String threadId,
+                                            final String taskId,
+                                            final String storeName) {
         final String key = storeSensorPrefix(threadId, taskId, storeName);
         final Deque<MetricName> metricNames = storeLevelMetrics.remove(key);
         while (metricNames != null && !metricNames.isEmpty()) {
@@ -436,8 +564,11 @@ public class StreamsMetricsImpl implements StreamsMetrics {
         }
     }
 
-    private String storeSensorPrefix(final String threadId, final String taskId, final String storeName) {
-        return taskSensorPrefix(threadId, taskId) + SENSOR_PREFIX_DELIMITER + SENSOR_STORE_LABEL + SENSOR_PREFIX_DELIMITER + storeName;
+    private String storeSensorPrefix(final String threadId,
+                                     final String taskId,
+                                     final String storeName) {
+        return taskSensorPrefix(threadId, taskId)
+            + SENSOR_PREFIX_DELIMITER + SENSOR_STORE_LABEL + SENSOR_PREFIX_DELIMITER + storeName;
     }
 
     @Override
@@ -455,7 +586,10 @@ public class StreamsMetricsImpl implements StreamsMetrics {
         return Collections.unmodifiableMap(this.metrics.metrics());
     }
 
-    private Map<String, String> customizedTags(final String threadId, final String scopeName, final String entityName, final String... tags) {
+    private Map<String, String> customizedTags(final String threadId,
+                                               final String scopeName,
+                                               final String entityName,
+                                               final String... tags) {
         final Map<String, String> tagMap = threadLevelTagMap(threadId);
         tagMap.put(scopeName + "-id", entityName);
         if (tags != null) {
@@ -469,102 +603,287 @@ public class StreamsMetricsImpl implements StreamsMetrics {
         return tagMap;
     }
 
-    private Sensor customInvocationRateAndCountSensor(final String threadId, final String groupName, final String entityName, final String operationName, final Map<String, String> tags, final Sensor.RecordingLevel recordingLevel) {
+    private Sensor customInvocationRateAndCountSensor(final String threadId,
+                                                      final String groupName,
+                                                      final String entityName,
+                                                      final String operationName,
+                                                      final Map<String, String> tags,
+                                                      final Sensor.RecordingLevel recordingLevel) {
         final Sensor sensor = metrics.sensor(externalChildSensorName(threadId, operationName, entityName), recordingLevel);
-        addInvocationRateAndCountToSensor(sensor, groupName, tags, operationName, RATE_DESCRIPTION_PREFIX + operationName + OPERATIONS + RATE_DESCRIPTION_SUFFIX, TOTAL_DESCRIPTION + operationName + OPERATIONS);
+        addInvocationRateAndCountToSensor(
+            sensor,
+            groupName,
+            tags,
+            operationName,
+            RATE_DESCRIPTION_PREFIX + operationName + OPERATIONS + RATE_DESCRIPTION_SUFFIX,
+            TOTAL_DESCRIPTION + operationName + OPERATIONS
+        );
         return sensor;
     }
 
     @Override
-    public Sensor addLatencyRateTotalSensor(final String scopeName, final String entityName, final String operationName, final Sensor.RecordingLevel recordingLevel, final String... tags) {
+    public Sensor addLatencyRateTotalSensor(final String scopeName,
+                                            final String entityName,
+                                            final String operationName,
+                                            final Sensor.RecordingLevel recordingLevel,
+                                            final String... tags) {
         final String threadId = Thread.currentThread().getName();
         final String group = groupNameFromScope(scopeName);
         final Map<String, String> tagMap = customizedTags(threadId, scopeName, entityName, tags);
-        final Sensor sensor = customInvocationRateAndCountSensor(threadId, group, entityName, operationName, tagMap, recordingLevel);
-        addAvgAndMaxToSensor(sensor, group, tagMap, operationName + LATENCY_SUFFIX, AVG_LATENCY_DESCRIPTION + operationName, MAX_LATENCY_DESCRIPTION + operationName);
+        final Sensor sensor =
+            customInvocationRateAndCountSensor(threadId, group, entityName, operationName, tagMap, recordingLevel);
+        addAvgAndMaxToSensor(
+            sensor,
+            group,
+            tagMap,
+            operationName + LATENCY_SUFFIX,
+            AVG_LATENCY_DESCRIPTION + operationName,
+            MAX_LATENCY_DESCRIPTION + operationName
+        );
 
         return sensor;
     }
 
     @Override
-    public Sensor addRateTotalSensor(final String scopeName, final String entityName, final String operationName, final Sensor.RecordingLevel recordingLevel, final String... tags) {
+    public Sensor addRateTotalSensor(final String scopeName,
+                                     final String entityName,
+                                     final String operationName,
+                                     final Sensor.RecordingLevel recordingLevel,
+                                     final String... tags) {
         final String threadId = Thread.currentThread().getName();
         final Map<String, String> tagMap = customizedTags(threadId, scopeName, entityName, tags);
-        return customInvocationRateAndCountSensor(threadId, groupNameFromScope(scopeName), entityName, operationName, tagMap, recordingLevel);
+        return customInvocationRateAndCountSensor(
+            threadId,
+            groupNameFromScope(scopeName),
+            entityName,
+            operationName,
+            tagMap,
+            recordingLevel
+        );
     }
 
     private String externalChildSensorName(final String threadId, final String operationName, final String entityName) {
-        return SENSOR_EXTERNAL_LABEL + SENSOR_PREFIX_DELIMITER + threadId + SENSOR_PREFIX_DELIMITER + SENSOR_ENTITY_LABEL + SENSOR_PREFIX_DELIMITER + entityName + SENSOR_NAME_DELIMITER + operationName;
+        return SENSOR_EXTERNAL_LABEL + SENSOR_PREFIX_DELIMITER + threadId
+            + SENSOR_PREFIX_DELIMITER + SENSOR_ENTITY_LABEL + SENSOR_PREFIX_DELIMITER + entityName
+            + SENSOR_NAME_DELIMITER + operationName;
     }
 
-    public static void addAvgAndMaxToSensor(final Sensor sensor, final String group, final Map<String, String> tags, final String gaugeName, final String descriptionOfAvg, final String descriptionOfMax) {
-        sensor.add(new MetricName(gaugeName + AVG_SUFFIX, group, descriptionOfAvg, tags), new Avg());
-        sensor.add(new MetricName(gaugeName + MAX_SUFFIX, group, descriptionOfMax, tags), new Max());
+    public static void addAvgAndMaxToSensor(final Sensor sensor,
+                                            final String group,
+                                            final Map<String, String> tags,
+                                            final String gaugeName,
+                                            final String descriptionOfAvg,
+                                            final String descriptionOfMax) {
+        sensor.add(
+            new MetricName(
+                gaugeName + AVG_SUFFIX,
+                group,
+                descriptionOfAvg,
+                tags),
+            new Avg()
+        );
+        sensor.add(
+            new MetricName(
+                gaugeName + MAX_SUFFIX,
+                group,
+                descriptionOfMax,
+                tags),
+            new Max()
+        );
     }
 
-    public static void addMinAndMaxToSensor(final Sensor sensor, final String group, final Map<String, String> tags, final String operation, final String descriptionOfMin, final String descriptionOfMax) {
-        sensor.add(new MetricName(operation + MIN_SUFFIX, group, descriptionOfMin, tags), new Min());
+    public static void addMinAndMaxToSensor(final Sensor sensor,
+                                            final String group,
+                                            final Map<String, String> tags,
+                                            final String operation,
+                                            final String descriptionOfMin,
+                                            final String descriptionOfMax) {
+        sensor.add(
+            new MetricName(
+                operation + MIN_SUFFIX,
+                group,
+                descriptionOfMin,
+                tags),
+            new Min()
+        );
 
-        sensor.add(new MetricName(operation + MAX_SUFFIX, group, descriptionOfMax, tags), new Max());
+        sensor.add(
+            new MetricName(
+                operation + MAX_SUFFIX,
+                group,
+                descriptionOfMax,
+                tags),
+            new Max()
+        );
     }
 
-    public static void addAvgAndMaxLatencyToSensor(final Sensor sensor, final String group, final Map<String, String> tags, final String operation) {
-        sensor.add(new MetricName(operation + "-latency-avg", group, AVG_LATENCY_DESCRIPTION + operation + " operation.", tags), new Avg());
-        sensor.add(new MetricName(operation + "-latency-max", group, MAX_LATENCY_DESCRIPTION + operation + " operation.", tags), new Max());
+    public static void addAvgAndMaxLatencyToSensor(final Sensor sensor,
+                                                   final String group,
+                                                   final Map<String, String> tags,
+                                                   final String operation) {
+        sensor.add(
+            new MetricName(
+                operation + "-latency-avg",
+                group,
+                AVG_LATENCY_DESCRIPTION + operation + " operation.",
+                tags),
+            new Avg()
+        );
+        sensor.add(
+            new MetricName(
+                operation + "-latency-max",
+                group,
+                MAX_LATENCY_DESCRIPTION + operation + " operation.",
+                tags),
+            new Max()
+        );
     }
 
-    public static void addAvgAndMinAndMaxToSensor(final Sensor sensor, final String group, final Map<String, String> tags, final String gaugeName, final String descriptionOfAvg, final String descriptionOfMin, final String descriptionOfMax) {
+    public static void addAvgAndMinAndMaxToSensor(final Sensor sensor,
+                                                  final String group,
+                                                  final Map<String, String> tags,
+                                                  final String gaugeName,
+                                                  final String descriptionOfAvg,
+                                                  final String descriptionOfMin,
+                                                  final String descriptionOfMax) {
         addAvgAndMaxToSensor(sensor, group, tags, gaugeName, descriptionOfAvg, descriptionOfMax);
-        sensor.add(new MetricName(gaugeName + MIN_SUFFIX, group, descriptionOfMin, tags), new Min());
+        sensor.add(
+            new MetricName(
+                gaugeName + MIN_SUFFIX,
+                group,
+                descriptionOfMin,
+                tags),
+            new Min()
+        );
     }
 
-    public static void addInvocationRateAndCountToSensor(final Sensor sensor, final String group, final Map<String, String> tags, final String operation, final String descriptionOfRate, final String descriptionOfCount) {
+    public static void addInvocationRateAndCountToSensor(final Sensor sensor,
+                                                         final String group,
+                                                         final Map<String, String> tags,
+                                                         final String operation,
+                                                         final String descriptionOfRate,
+                                                         final String descriptionOfCount) {
         addInvocationRateToSensor(sensor, group, tags, operation, descriptionOfRate);
-        sensor.add(new MetricName(operation + TOTAL_SUFFIX, group, descriptionOfCount, tags), new CumulativeCount());
+        sensor.add(
+            new MetricName(
+                operation + TOTAL_SUFFIX,
+                group,
+                descriptionOfCount,
+                tags
+            ),
+            new CumulativeCount()
+        );
     }
 
-    public static void addInvocationRateToSensor(final Sensor sensor, final String group, final Map<String, String> tags, final String operation, final String descriptionOfRate) {
-        sensor.add(new MetricName(operation + RATE_SUFFIX, group, descriptionOfRate, tags), new Rate(TimeUnit.SECONDS, new WindowedCount()));
+    public static void addInvocationRateToSensor(final Sensor sensor,
+                                                 final String group,
+                                                 final Map<String, String> tags,
+                                                 final String operation,
+                                                 final String descriptionOfRate) {
+        sensor.add(
+            new MetricName(
+                operation + RATE_SUFFIX,
+                group,
+                descriptionOfRate,
+                tags
+            ),
+            new Rate(TimeUnit.SECONDS, new WindowedCount())
+        );
     }
 
-    public static void addRateOfSumAndSumMetricsToSensor(final Sensor sensor, final String group, final Map<String, String> tags, final String operation, final String descriptionOfRate, final String descriptionOfTotal) {
+    public static void addRateOfSumAndSumMetricsToSensor(final Sensor sensor,
+                                                         final String group,
+                                                         final Map<String, String> tags,
+                                                         final String operation,
+                                                         final String descriptionOfRate,
+                                                         final String descriptionOfTotal) {
         addRateOfSumMetricToSensor(sensor, group, tags, operation, descriptionOfRate);
         addSumMetricToSensor(sensor, group, tags, operation, descriptionOfTotal);
     }
 
-    public static void addRateOfSumMetricToSensor(final Sensor sensor, final String group, final Map<String, String> tags, final String operation, final String description) {
-        sensor.add(new MetricName(operation + RATE_SUFFIX, group, description, tags), new Rate(TimeUnit.SECONDS, new WindowedSum()));
+    public static void addRateOfSumMetricToSensor(final Sensor sensor,
+                                                  final String group,
+                                                  final Map<String, String> tags,
+                                                  final String operation,
+                                                  final String description) {
+        sensor.add(new MetricName(operation + RATE_SUFFIX, group, description, tags),
+                   new Rate(TimeUnit.SECONDS, new WindowedSum()));
     }
 
-    public static void addSumMetricToSensor(final Sensor sensor, final String group, final Map<String, String> tags, final String operation, final String description) {
+    public static void addSumMetricToSensor(final Sensor sensor,
+                                            final String group,
+                                            final Map<String, String> tags,
+                                            final String operation,
+                                            final String description) {
         addSumMetricToSensor(sensor, group, tags, operation, true, description);
     }
 
-    public static void addSumMetricToSensor(final Sensor sensor, final String group, final Map<String, String> tags, final String operation, final boolean withSuffix, final String description) {
-        sensor.add(new MetricName(withSuffix ? operation + TOTAL_SUFFIX : operation, group, description, tags), new CumulativeSum());
+    public static void addSumMetricToSensor(final Sensor sensor,
+                                            final String group,
+                                            final Map<String, String> tags,
+                                            final String operation,
+                                            final boolean withSuffix,
+                                            final String description) {
+        sensor.add(
+            new MetricName(
+                withSuffix ? operation + TOTAL_SUFFIX : operation,
+                group,
+                description,
+                tags
+            ),
+            new CumulativeSum()
+        );
     }
 
-    public static void addValueMetricToSensor(final Sensor sensor, final String group, final Map<String, String> tags, final String name, final String description) {
+    public static void addValueMetricToSensor(final Sensor sensor,
+                                              final String group,
+                                              final Map<String, String> tags,
+                                              final String name,
+                                              final String description) {
         sensor.add(new MetricName(name, group, description, tags), new Value());
     }
 
-    public static void addAvgAndSumMetricsToSensor(final Sensor sensor, final String group, final Map<String, String> tags, final String metricNamePrefix, final String descriptionOfAvg, final String descriptionOfTotal) {
+    public static void addAvgAndSumMetricsToSensor(final Sensor sensor,
+                                                   final String group,
+                                                   final Map<String, String> tags,
+                                                   final String metricNamePrefix,
+                                                   final String descriptionOfAvg,
+                                                   final String descriptionOfTotal) {
         sensor.add(new MetricName(metricNamePrefix + AVG_SUFFIX, group, descriptionOfAvg, tags), new Avg());
-        sensor.add(new MetricName(metricNamePrefix + TOTAL_SUFFIX, group, descriptionOfTotal, tags), new CumulativeSum());
+        sensor.add(
+            new MetricName(metricNamePrefix + TOTAL_SUFFIX, group, descriptionOfTotal, tags),
+            new CumulativeSum()
+        );
     }
 
-    public static void addTotalCountAndSumMetricsToSensor(final Sensor sensor, final String group, final Map<String, String> tags, final String countMetricNamePrefix, final String sumMetricNamePrefix, final String descriptionOfCount, final String descriptionOfTotal) {
-        sensor.add(new MetricName(countMetricNamePrefix + TOTAL_SUFFIX, group, descriptionOfCount, tags), new CumulativeCount());
-        sensor.add(new MetricName(sumMetricNamePrefix + TOTAL_SUFFIX, group, descriptionOfTotal, tags), new CumulativeSum());
+    public static void addTotalCountAndSumMetricsToSensor(final Sensor sensor,
+                                                          final String group,
+                                                          final Map<String, String> tags,
+                                                          final String countMetricNamePrefix,
+                                                          final String sumMetricNamePrefix,
+                                                          final String descriptionOfCount,
+                                                          final String descriptionOfTotal) {
+        sensor.add(
+            new MetricName(countMetricNamePrefix + TOTAL_SUFFIX, group, descriptionOfCount, tags),
+            new CumulativeCount()
+        );
+        sensor.add(
+            new MetricName(sumMetricNamePrefix + TOTAL_SUFFIX, group, descriptionOfTotal, tags),
+            new CumulativeSum()
+        );
     }
 
-    public static void maybeRecordSensor(final double value, final Time time, final Sensor sensor) {
+    public static void maybeRecordSensor(final double value,
+                                         final Time time,
+                                         final Sensor sensor) {
         if (sensor.shouldRecord() && sensor.hasMetrics()) {
             sensor.record(value, time.milliseconds());
         }
     }
 
-    public static void maybeMeasureLatency(final Runnable actionToMeasure, final Time time, final Sensor sensor) {
+    public static void maybeMeasureLatency(final Runnable actionToMeasure,
+                                           final Time time,
+                                           final Sensor sensor) {
         if (sensor.shouldRecord() && sensor.hasMetrics()) {
             final long startNs = time.nanoseconds();
             try {
@@ -577,7 +896,9 @@ public class StreamsMetricsImpl implements StreamsMetrics {
         }
     }
 
-    public static <T> T maybeMeasureLatency(final Supplier<T> actionToMeasure, final Time time, final Sensor sensor) {
+    public static <T> T maybeMeasureLatency(final Supplier<T> actionToMeasure,
+                                            final Time time,
+                                            final Sensor sensor) {
         if (sensor.shouldRecord() && sensor.hasMetrics()) {
             final long startNs = time.nanoseconds();
             try {
@@ -590,7 +911,11 @@ public class StreamsMetricsImpl implements StreamsMetrics {
         }
     }
 
-    private Sensor getSensors(final Map<String, Deque<String>> sensors, final String sensorSuffix, final String sensorPrefix, final RecordingLevel recordingLevel, final Sensor... parents) {
+    private Sensor getSensors(final Map<String, Deque<String>> sensors,
+                              final String sensorSuffix,
+                              final String sensorPrefix,
+                              final RecordingLevel recordingLevel,
+                              final Sensor... parents) {
         final String fullSensorName = sensorPrefix + SENSOR_NAME_DELIMITER + sensorSuffix;
         final Sensor sensor = metrics.getSensor(fullSensorName);
         if (sensor == null) {

@@ -23,13 +23,11 @@ import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
 
 import java.nio.ByteBuffer;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.UnaryOperator;
 
-final public class FetchSnapshotResponse extends AbstractResponse {
+public final class FetchSnapshotResponse extends AbstractResponse {
     private final FetchSnapshotResponseData data;
 
     public FetchSnapshotResponse(FetchSnapshotResponseData data) {
@@ -48,7 +46,8 @@ final public class FetchSnapshotResponse extends AbstractResponse {
 
         for (FetchSnapshotResponseData.TopicSnapshot topicResponse : data.topics()) {
             for (FetchSnapshotResponseData.PartitionSnapshot partitionResponse : topicResponse.partitions()) {
-                errors.compute(Errors.forCode(partitionResponse.errorCode()), (error, count) -> count == null ? 1 : count + 1);
+                errors.compute(Errors.forCode(partitionResponse.errorCode()),
+                    (error, count) -> count == null ? 1 : count + 1);
             }
         }
 
@@ -72,6 +71,7 @@ final public class FetchSnapshotResponse extends AbstractResponse {
 
     /**
      * Creates a FetchSnapshotResponseData with a top level error.
+     *
      * @param error the top level error
      * @return the created fetch snapshot response data
      */
@@ -80,27 +80,23 @@ final public class FetchSnapshotResponse extends AbstractResponse {
     }
 
     /**
-     * Creates a FetchSnapshotResponseData with a single PartitionSnapshot for the topic partition.
-     * <p>
-     * The partition index will already by populated when calling operator.
-     * @param topicPartition the topic partition to include
-     * @param operator       unary operator responsible for populating all of the appropriate fields
-     * @return the created fetch snapshot response data
-     */
-    public static FetchSnapshotResponseData singleton(TopicPartition topicPartition, UnaryOperator<FetchSnapshotResponseData.PartitionSnapshot> operator) {
-        FetchSnapshotResponseData.PartitionSnapshot partitionSnapshot = operator.apply(new FetchSnapshotResponseData.PartitionSnapshot().setIndex(topicPartition.partition()));
-
-        return new FetchSnapshotResponseData().setTopics(Collections.singletonList(new FetchSnapshotResponseData.TopicSnapshot().setName(topicPartition.topic()).setPartitions(Collections.singletonList(partitionSnapshot))));
-    }
-
-    /**
      * Finds the PartitionSnapshot for a given topic partition.
-     * @param data           the fetch snapshot response data
+     *
+     * @param data the fetch snapshot response data
      * @param topicPartition the topic partition to find
      * @return the response partition snapshot if found, otherwise an empty Optional
      */
-    public static Optional<FetchSnapshotResponseData.PartitionSnapshot> forTopicPartition(FetchSnapshotResponseData data, TopicPartition topicPartition) {
-        return data.topics().stream().filter(topic -> topic.name().equals(topicPartition.topic())).flatMap(topic -> topic.partitions().stream()).filter(partition -> partition.index() == topicPartition.partition()).findAny();
+    public static Optional<FetchSnapshotResponseData.PartitionSnapshot> forTopicPartition(
+        FetchSnapshotResponseData data,
+        TopicPartition topicPartition
+    ) {
+        return data
+            .topics()
+            .stream()
+            .filter(topic -> topic.name().equals(topicPartition.topic()))
+            .flatMap(topic -> topic.partitions().stream())
+            .filter(partition -> partition.index() == topicPartition.partition())
+            .findAny();
     }
 
     public static FetchSnapshotResponse parse(ByteBuffer buffer, short version) {

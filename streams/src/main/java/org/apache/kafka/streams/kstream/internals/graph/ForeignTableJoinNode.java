@@ -16,20 +16,15 @@
  */
 package org.apache.kafka.streams.kstream.internals.graph;
 
-import org.apache.kafka.streams.kstream.internals.KTableValueGetterSupplier;
 import org.apache.kafka.streams.kstream.internals.foreignkeyjoin.ForeignTableJoinProcessorSupplier;
 import org.apache.kafka.streams.processor.api.ProcessorSupplier;
-import org.apache.kafka.streams.state.StoreBuilder;
 
-import java.util.Set;
+public class ForeignTableJoinNode<K, V> extends ProcessorGraphNode<K, V> implements VersionedSemanticsGraphNode {
 
-public class ForeignTableJoinNode<K, V> extends StatefulProcessorNode<K, V> implements VersionedSemanticsGraphNode {
-
-    public ForeignTableJoinNode(final ProcessorParameters<K, V, ?, ?> processorParameters, final Set<StoreBuilder<?>> preRegisteredStores, final Set<KTableValueGetterSupplier<?, ?>> valueGetterSuppliers) {
-        super(processorParameters, preRegisteredStores, valueGetterSuppliers);
+    public ForeignTableJoinNode(final ProcessorParameters<K, V, ?, ?> processorParameters) {
+        super(processorParameters.processorName(), processorParameters);
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     public void enableVersionedSemantics(final boolean useVersionedSemantics, final String parentNodeName) {
         final ProcessorSupplier<?, ?, ?, ?> processorSupplier = processorParameters().processorSupplier();
@@ -37,7 +32,8 @@ public class ForeignTableJoinNode<K, V> extends StatefulProcessorNode<K, V> impl
             throw new IllegalStateException("Unexpected processor type for foreign-key table-table join subscription processor: " + processorSupplier.getClass().getName());
         }
 
-        final ForeignTableJoinProcessorSupplier<?, ?, ?> subscriptionProcessor = (ForeignTableJoinProcessorSupplier<?, ?, ?>) processorSupplier;
+        final ForeignTableJoinProcessorSupplier<?, ?, ?> subscriptionProcessor
+            = (ForeignTableJoinProcessorSupplier<?, ?, ?>) processorSupplier;
         subscriptionProcessor.setUseVersionedSemantics(useVersionedSemantics);
     }
 }

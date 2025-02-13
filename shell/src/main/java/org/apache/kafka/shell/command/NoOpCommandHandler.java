@@ -28,7 +28,11 @@ import java.util.Optional;
  */
 public final class NoOpCommandHandler implements Commands.Handler {
     @Override
-    public void run(Optional<InteractiveShell> shell, PrintWriter writer, MetadataShellState state) {
+    public void run(
+        Optional<InteractiveShell> shell,
+        PrintWriter writer,
+        MetadataShellState state
+    ) {
     }
 
     @Override
@@ -38,8 +42,6 @@ public final class NoOpCommandHandler implements Commands.Handler {
 
     @Override
     public boolean equals(Object other) {
-        if (!(other instanceof NoOpCommandHandler))
-            return false;
-        return true;
+        return other instanceof NoOpCommandHandler;
     }
 }

@@ -23,12 +23,15 @@ import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.Optional;
 
 public abstract class GraphNode {
 
     private final Collection<GraphNode> childNodes = new LinkedHashSet<>();
     private final Collection<GraphNode> parentNodes = new LinkedHashSet<>();
+
+    private final Collection<Label> labels = new LinkedList<>();
     private final String nodeName;
     private boolean keyChangingOperation;
     private boolean valueChangingOperation;
@@ -110,7 +113,7 @@ public abstract class GraphNode {
         this.valueChangingOperation = valueChangingOperation;
     }
 
-    public void keyChangingOperation(final boolean keyChangingOperation) {
+    public void setKeyChangingOperation(final boolean keyChangingOperation) {
         this.keyChangingOperation = keyChangingOperation;
     }
 
@@ -143,6 +146,25 @@ public abstract class GraphNode {
     @Override
     public String toString() {
         final String[] parentNames = parentNodeNames();
-        return "StreamsGraphNode{" + "nodeName='" + nodeName + '\'' + ", buildPriority=" + buildPriority + ", hasWrittenToTopology=" + hasWrittenToTopology + ", keyChangingOperation=" + keyChangingOperation + ", valueChangingOperation=" + valueChangingOperation + ", mergeNode=" + mergeNode + ", parentNodes=" + Arrays.toString(parentNames) + '}';
+        return "StreamsGraphNode{" +
+               "nodeName='" + nodeName + '\'' +
+               ", buildPriority=" + buildPriority +
+               ", hasWrittenToTopology=" + hasWrittenToTopology +
+               ", keyChangingOperation=" + keyChangingOperation +
+               ", valueChangingOperation=" + valueChangingOperation +
+               ", mergeNode=" + mergeNode +
+               ", parentNodes=" + Arrays.toString(parentNames) + '}';
+    }
+
+    public void addLabel(final Label label) {
+        labels.add(label);
+    }
+
+    public Collection<Label> labels() {
+        return labels;
+    }
+
+    public enum Label {
+        NULL_KEY_RELAXED_JOIN
     }
 }

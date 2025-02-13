@@ -17,8 +17,13 @@
 package org.apache.kafka.connect.runtime.isolation;
 
 import org.apache.kafka.connect.sink.SinkConnector;
-import org.junit.Before;
-import org.junit.Test;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.net.MalformedURLException;
 import java.net.URL;
@@ -26,11 +31,13 @@ import java.util.Collections;
 import java.util.SortedSet;
 import java.util.TreeSet;
 
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)
 public class DelegatingClassLoaderTest {
 
     public PluginClassLoader parent;
@@ -52,7 +59,7 @@ public class DelegatingClassLoaderTest {
         }
     }
 
-    @Before
+    @BeforeEach
     @SuppressWarnings({"unchecked"})
     public void setUp() {
         parent = mock(PluginClassLoader.class);
@@ -61,7 +68,8 @@ public class DelegatingClassLoaderTest {
         SortedSet<PluginDesc<SinkConnector>> sinkConnectors = new TreeSet<>();
         // Lie to the DCL that this arbitrary class is a connector, since all real connector classes we have access to
         // are forced to be non-isolated by PluginUtils.shouldLoadInIsolation.
-        pluginDesc = new PluginDesc<>((Class<? extends SinkConnector>) ARBITRARY_CLASS, null, pluginLoader);
+        when(pluginLoader.location()).thenReturn("some-location");
+        pluginDesc = new PluginDesc<>((Class<? extends SinkConnector>) ARBITRARY_CLASS, null, PluginType.SINK, pluginLoader);
         assertTrue(PluginUtils.shouldLoadInIsolation(pluginDesc.className()));
         sinkConnectors.add(pluginDesc);
         scanResult = new PluginScanResult(sinkConnectors, Collections.emptySortedSet(), Collections.emptySortedSet(), Collections.emptySortedSet(), Collections.emptySortedSet(), Collections.emptySortedSet(), Collections.emptySortedSet(), Collections.emptySortedSet(), Collections.emptySortedSet());

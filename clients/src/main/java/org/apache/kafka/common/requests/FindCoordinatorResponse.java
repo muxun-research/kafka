@@ -24,7 +24,13 @@ import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 
 
 public class FindCoordinatorResponse extends AbstractResponse {
@@ -50,7 +56,13 @@ public class FindCoordinatorResponse extends AbstractResponse {
         Objects.requireNonNull(key);
         if (this.data.coordinators().isEmpty()) {
             // version <= 3
-            return Optional.of(new Coordinator().setErrorCode(data.errorCode()).setErrorMessage(data.errorMessage()).setHost(data.host()).setPort(data.port()).setNodeId(data.nodeId()).setKey(key));
+            return Optional.of(new Coordinator()
+                    .setErrorCode(data.errorCode())
+                    .setErrorMessage(data.errorMessage())
+                    .setHost(data.host())
+                    .setPort(data.port())
+                    .setNodeId(data.nodeId())
+                    .setKey(key));
         }
         // version >= 4
         return data.coordinators().stream().filter(c -> c.key().equals(key)).findFirst();
@@ -114,28 +126,60 @@ public class FindCoordinatorResponse extends AbstractResponse {
         if (!data.coordinators().isEmpty())
             return data.coordinators();
         else {
-            FindCoordinatorResponseData.Coordinator coordinator = new Coordinator().setErrorCode(data.errorCode()).setErrorMessage(data.errorMessage()).setKey(null).setNodeId(data.nodeId()).setHost(data.host()).setPort(data.port());
+            FindCoordinatorResponseData.Coordinator coordinator = new Coordinator()
+                    .setErrorCode(data.errorCode())
+                    .setErrorMessage(data.errorMessage())
+                    .setKey(null)
+                    .setNodeId(data.nodeId())
+                    .setHost(data.host())
+                    .setPort(data.port());
             return Collections.singletonList(coordinator);
         }
     }
 
     public static FindCoordinatorResponse prepareOldResponse(Errors error, Node node) {
         FindCoordinatorResponseData data = new FindCoordinatorResponseData();
-        data.setErrorCode(error.code()).setErrorMessage(error.message()).setNodeId(node.id()).setHost(node.host()).setPort(node.port());
+        data.setErrorCode(error.code())
+            .setErrorMessage(error.message())
+            .setNodeId(node.id())
+            .setHost(node.host())
+            .setPort(node.port());
         return new FindCoordinatorResponse(data);
     }
 
     public static FindCoordinatorResponse prepareResponse(Errors error, String key, Node node) {
         FindCoordinatorResponseData data = new FindCoordinatorResponseData();
-        data.setCoordinators(Collections.singletonList(new FindCoordinatorResponseData.Coordinator().setErrorCode(error.code()).setErrorMessage(error.message()).setKey(key).setHost(node.host()).setPort(node.port()).setNodeId(node.id())));
+        data.setCoordinators(Collections.singletonList(
+            prepareCoordinatorResponse(error, key, node)
+        ));
         return new FindCoordinatorResponse(data);
+    }
+
+    public static FindCoordinatorResponseData.Coordinator prepareCoordinatorResponse(
+        Errors error,
+        String key,
+        Node node
+    ) {
+        return new FindCoordinatorResponseData.Coordinator()
+            .setErrorCode(error.code())
+            .setErrorMessage(error.message())
+            .setKey(key)
+            .setHost(node.host())
+            .setPort(node.port())
+            .setNodeId(node.id());
     }
 
     public static FindCoordinatorResponse prepareErrorResponse(Errors error, List<String> keys) {
         FindCoordinatorResponseData data = new FindCoordinatorResponseData();
         List<FindCoordinatorResponseData.Coordinator> coordinators = new ArrayList<>(keys.size());
         for (String key : keys) {
-            FindCoordinatorResponseData.Coordinator coordinator = new FindCoordinatorResponseData.Coordinator().setErrorCode(error.code()).setErrorMessage(error.message()).setKey(key).setHost(Node.noNode().host()).setPort(Node.noNode().port()).setNodeId(Node.noNode().id());
+            FindCoordinatorResponseData.Coordinator coordinator = new FindCoordinatorResponseData.Coordinator()
+                .setErrorCode(error.code())
+                .setErrorMessage(error.message())
+                .setKey(key)
+                .setHost(Node.noNode().host())
+                .setPort(Node.noNode().port())
+                .setNodeId(Node.noNode().id());
             coordinators.add(coordinator);
         }
         data.setCoordinators(coordinators);

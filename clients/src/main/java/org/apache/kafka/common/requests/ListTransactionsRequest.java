@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.common.requests;
 
+import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.message.ListTransactionsRequestData;
 import org.apache.kafka.common.message.ListTransactionsResponseData;
 import org.apache.kafka.common.protocol.ApiKeys;
@@ -25,53 +26,57 @@ import org.apache.kafka.common.protocol.Errors;
 import java.nio.ByteBuffer;
 
 public class ListTransactionsRequest extends AbstractRequest {
-	public static class Builder extends AbstractRequest.Builder<ListTransactionsRequest> {
-		public final ListTransactionsRequestData data;
+    public static class Builder extends AbstractRequest.Builder<ListTransactionsRequest> {
+        public final ListTransactionsRequestData data;
 
-		public Builder(ListTransactionsRequestData data) {
-			super(ApiKeys.LIST_TRANSACTIONS);
-			this.data = data;
-		}
+        public Builder(ListTransactionsRequestData data) {
+            super(ApiKeys.LIST_TRANSACTIONS);
+            this.data = data;
+        }
 
-		@Override
-		public ListTransactionsRequest build(short version) {
-			return new ListTransactionsRequest(data, version);
-		}
+        @Override
+        public ListTransactionsRequest build(short version) {
+            if (data.durationFilter() >= 0 && version < 1) {
+                throw new UnsupportedVersionException("Duration filter can be set only when using API version 1 or higher." +
+                        " If client is connected to an older broker, do not specify duration filter or set duration filter to -1.");
+            }
+            return new ListTransactionsRequest(data, version);
+        }
 
-		@Override
-		public String toString() {
-			return data.toString();
-		}
-	}
+        @Override
+        public String toString() {
+            return data.toString();
+        }
+    }
 
-	private final ListTransactionsRequestData data;
+    private final ListTransactionsRequestData data;
 
-	private ListTransactionsRequest(ListTransactionsRequestData data, short version) {
-		super(ApiKeys.LIST_TRANSACTIONS, version);
-		this.data = data;
-	}
+    private ListTransactionsRequest(ListTransactionsRequestData data, short version) {
+        super(ApiKeys.LIST_TRANSACTIONS, version);
+        this.data = data;
+    }
 
-	public ListTransactionsRequestData data() {
-		return data;
-	}
+    public ListTransactionsRequestData data() {
+        return data;
+    }
 
-	@Override
-	public ListTransactionsResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-		Errors error = Errors.forException(e);
-		ListTransactionsResponseData response = new ListTransactionsResponseData()
-				.setErrorCode(error.code())
-				.setThrottleTimeMs(throttleTimeMs);
-		return new ListTransactionsResponse(response);
-	}
+    @Override
+    public ListTransactionsResponse getErrorResponse(int throttleTimeMs, Throwable e) {
+        Errors error = Errors.forException(e);
+        ListTransactionsResponseData response = new ListTransactionsResponseData()
+            .setErrorCode(error.code())
+            .setThrottleTimeMs(throttleTimeMs);
+        return new ListTransactionsResponse(response);
+    }
 
-	public static ListTransactionsRequest parse(ByteBuffer buffer, short version) {
-		return new ListTransactionsRequest(new ListTransactionsRequestData(
-				new ByteBufferAccessor(buffer), version), version);
-	}
+    public static ListTransactionsRequest parse(ByteBuffer buffer, short version) {
+        return new ListTransactionsRequest(new ListTransactionsRequestData(
+            new ByteBufferAccessor(buffer), version), version);
+    }
 
-	@Override
-	public String toString(boolean verbose) {
-		return data.toString();
-	}
+    @Override
+    public String toString(boolean verbose) {
+        return data.toString();
+    }
 
 }

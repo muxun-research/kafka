@@ -18,6 +18,7 @@ package org.apache.kafka.storage.internals.log;
 
 import org.apache.kafka.common.errors.InvalidOffsetException;
 import org.apache.kafka.common.record.RecordBatch;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,25 +30,26 @@ import java.nio.MappedByteBuffer;
 /**
  * An index that maps from the timestamp to the logical offsets of the messages in a segment. This index might be
  * sparse, i.e. it may not hold an entry for all the messages in the segment.
- * <p>
+ *
  * The index is stored in a file that is preallocated to hold a fixed maximum amount of 12-byte time index entries.
  * The file format is a series of time index entries. The physical format is a 8 bytes timestamp and a 4 bytes "relative"
  * offset used in the [[OffsetIndex]]. A time index entry (TIMESTAMP, OFFSET) means that the biggest timestamp seen
  * before OFFSET is TIMESTAMP. i.e. Any message whose timestamp is greater than TIMESTAMP must come after OFFSET.
- * <p>
+ *
  * All external APIs translate from relative offsets to full offsets, so users of this class do not interact with the internal
  * storage format.
- * <p>
+ *
  * The timestamps in the same time index file are guaranteed to be monotonically increasing.
- * <p>
+ *
  * The index supports timestamp lookup for a memory map of this file. The lookup is done using a binary search to find
  * the offset of the message whose indexed timestamp is closest but smaller or equals to the target timestamp.
- * <p>
+ *
  * Time index files can be opened in two ways: either as an empty, mutable index that allows appending or
  * an immutable read-only index file that has previously been populated. The makeReadOnly method will turn a mutable file into an
  * immutable one and truncate off any extra bytes. This is done when the index file is rolled over.
- * <p>
+ *
  * No attempt is made to checksum the contents of this file, in the event of a crash it is rebuilt.
+ *
  */
 public class TimeIndex extends AbstractIndex {
     private static final Logger log = LoggerFactory.getLogger(TimeIndex.class);
@@ -59,12 +61,14 @@ public class TimeIndex extends AbstractIndex {
         this(file, baseOffset, maxIndexSize, true);
     }
 
+    @SuppressWarnings("this-escape")
     public TimeIndex(File file, long baseOffset, int maxIndexSize, boolean writable) throws IOException {
         super(file, baseOffset, maxIndexSize, writable);
 
         this.lastEntry = lastEntryFromIndexFile();
 
-        log.debug("Loaded index file {} with maxEntries = {}, maxIndexSize = {}, entries = {}, lastOffset = {}, file position = {}", file.getAbsolutePath(), maxEntries(), maxIndexSize, entries(), lastEntry, mmap().position());
+        log.debug("Loaded index file {} with maxEntries = {}, maxIndexSize = {}, entries = {}, lastOffset = {}, file position = {}",
+            file.getAbsolutePath(), maxEntries(), maxIndexSize, entries(), lastEntry.offset, mmap().position());
     }
 
     @Override
@@ -73,11 +77,15 @@ public class TimeIndex extends AbstractIndex {
         long lastTimestamp = entry.timestamp;
         long lastOffset = entry.offset;
         if (entries() != 0 && lastTimestamp < timestamp(mmap(), 0))
-            throw new CorruptIndexException("Corrupt time index found, time index file (" + file().getAbsolutePath() + ") has " + "non-zero size but the last timestamp is " + lastTimestamp + " which is less than the first timestamp " + timestamp(mmap(), 0));
+            throw new CorruptIndexException("Corrupt time index found, time index file (" + file().getAbsolutePath() + ") has "
+                + "non-zero size but the last timestamp is " + lastTimestamp + " which is less than the first timestamp "
+                + timestamp(mmap(), 0));
         if (entries() != 0 && lastOffset < baseOffset())
-            throw new CorruptIndexException("Corrupt time index found, time index file (" + file().getAbsolutePath() + ") has " + "non-zero size but the last offset is " + lastOffset + " which is less than the first offset " + baseOffset());
+            throw new CorruptIndexException("Corrupt time index found, time index file (" + file().getAbsolutePath() + ") has "
+                + "non-zero size but the last offset is " + lastOffset + " which is less than the first offset " + baseOffset());
         if (length() % ENTRY_SIZE != 0)
-            throw new CorruptIndexException("Time index file " + file().getAbsolutePath() + " is corrupt, found " + length() + " bytes which is neither positive nor a multiple of " + ENTRY_SIZE);
+            throw new CorruptIndexException("Time index file " + file().getAbsolutePath() + " is corrupt, found " + length()
+                + " bytes which is neither positive nor a multiple of " + ENTRY_SIZE);
     }
 
     /**
@@ -128,7 +136,8 @@ public class TimeIndex extends AbstractIndex {
     public TimestampOffset entry(int n) {
         return maybeLock(lock, () -> {
             if (n >= entries())
-                throw new IllegalArgumentException("Attempt to fetch the " + n + "th entry from time index " + file().getAbsolutePath() + " which has size " + entries());
+                throw new IllegalArgumentException("Attempt to fetch the " + n + "th entry from time index "
+                    + file().getAbsolutePath() + " which has size " + entries());
             return parseEntry(mmap(), n);
         });
     }
@@ -137,6 +146,7 @@ public class TimeIndex extends AbstractIndex {
      * Find the time index entry whose timestamp is less than or equal to the given timestamp.
      * If the target timestamp is smaller than the least timestamp in the time index, (NoTimestamp, baseOffset) is
      * returned.
+     *
      * @param targetTimestamp The timestamp to look up.
      * @return The time index entry found.
      */
@@ -153,6 +163,7 @@ public class TimeIndex extends AbstractIndex {
 
     /**
      * Equivalent to invoking `maybeAppend(timestamp, offset, false)`.
+     *
      * @see #maybeAppend(long, long, boolean)
      */
     public void maybeAppend(long timestamp, long offset) {
@@ -163,8 +174,9 @@ public class TimeIndex extends AbstractIndex {
      * Attempt to append a time index entry to the time index.
      * The new entry is appended only if both the timestamp and offset are greater than the last appended timestamp and
      * the last appended offset.
-     * @param timestamp     The timestamp of the new time index entry
-     * @param offset        The offset of the new time index entry
+     *
+     * @param timestamp The timestamp of the new time index entry
+     * @param offset The offset of the new time index entry
      * @param skipFullCheck To skip checking whether the segment is full or not. We only skip the check when the segment
      *                      gets rolled or the segment is closed.
      */
@@ -181,9 +193,11 @@ public class TimeIndex extends AbstractIndex {
             // 1. A log segment is closed.
             // 2. LogSegment.onBecomeInactiveSegment() is called when an active log segment is rolled.
             if (entries() != 0 && offset < lastEntry.offset)
-                throw new InvalidOffsetException("Attempt to append an offset (" + offset + ") to slot " + entries() + " no larger than the last offset appended (" + lastEntry.offset + ") to " + file().getAbsolutePath());
+                throw new InvalidOffsetException("Attempt to append an offset (" + offset + ") to slot " + entries()
+                    + " no larger than the last offset appended (" + lastEntry.offset + ") to " + file().getAbsolutePath());
             if (entries() != 0 && timestamp < lastEntry.timestamp)
-                throw new IllegalStateException("Attempt to append a timestamp (" + timestamp + ") to slot " + entries() + " no larger than the last timestamp appended (" + lastEntry.timestamp + ") to " + file().getAbsolutePath());
+                throw new IllegalStateException("Attempt to append a timestamp (" + timestamp + ") to slot " + entries()
+                    + " no larger than the last timestamp appended (" + lastEntry.timestamp + ") to " + file().getAbsolutePath());
 
             // We only append to the time index when the timestamp is greater than the last inserted timestamp.
             // If all the messages are in message format v0, the timestamp will always be NoTimestamp. In that case, the time
@@ -265,7 +279,8 @@ public class TimeIndex extends AbstractIndex {
         try {
             super.truncateToEntries0(entries);
             this.lastEntry = lastEntryFromIndexFile();
-            log.debug("Truncated index {} to {} entries; position is now {} and last entry is now {}", file().getAbsolutePath(), entries, mmap().position(), lastEntry);
+            log.debug("Truncated index {} to {} entries; position is now {} and last entry is now {}",
+                file().getAbsolutePath(), entries, mmap().position(), lastEntry.offset);
         } finally {
             lock.unlock();
         }

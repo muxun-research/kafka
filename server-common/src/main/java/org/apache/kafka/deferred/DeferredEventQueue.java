@@ -18,6 +18,7 @@
 package org.apache.kafka.deferred;
 
 import org.apache.kafka.common.utils.LogContext;
+
 import org.slf4j.Logger;
 
 import java.util.*;
@@ -92,11 +93,7 @@ public class DeferredEventQueue {
                 throw new IllegalArgumentException("There is already a deferred event with " + "offset " + lastKey + ". We should not add one with an offset of " + offset + " which is lower than that.");
             }
         }
-        List<DeferredEvent> events = pending.get(offset);
-        if (events == null) {
-            events = new ArrayList<>();
-            pending.put(offset, events);
-        }
+        List<DeferredEvent> events = pending.computeIfAbsent(offset, k -> new ArrayList<>());
         events.add(event);
         if (log.isTraceEnabled()) {
             log.trace("Adding deferred event {} at offset {}", event, offset);

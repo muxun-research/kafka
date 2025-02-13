@@ -19,6 +19,7 @@ package org.apache.kafka.snapshot;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.raft.OffsetAndEpoch;
 import org.apache.kafka.test.TestUtils;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -31,7 +32,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-final public class SnapshotsTest {
+public final class SnapshotsTest {
 
     @Test
     public void testValidSnapshotFilename() {
@@ -94,7 +95,7 @@ final public class SnapshotsTest {
         OffsetAndEpoch snapshotId = new OffsetAndEpoch(TestUtils.RANDOM.nextInt(Integer.MAX_VALUE), TestUtils.RANDOM.nextInt(Integer.MAX_VALUE));
 
         Path logDirPath = TestUtils.tempDirectory().toPath();
-        try (FileRawSnapshotWriter snapshot = FileRawSnapshotWriter.create(logDirPath, snapshotId, Optional.empty())) {
+        try (FileRawSnapshotWriter snapshot = FileRawSnapshotWriter.create(logDirPath, snapshotId)) {
             snapshot.freeze();
 
             Path snapshotPath = Snapshots.snapshotPath(logDirPath, snapshotId);

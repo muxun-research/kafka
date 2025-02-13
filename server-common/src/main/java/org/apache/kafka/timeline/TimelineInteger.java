@@ -21,11 +21,11 @@ import java.util.Iterator;
 
 
 /**
- * This is a mutable integer which can be snapshotted.
- * <p>
+ * This is a mutable integer which can be snapshotted. 
+ * <br>
  * This class requires external synchronization.
  */
-public class TimelineInteger implements Revertable {
+public final class TimelineInteger implements Revertable {
     public static final int INIT = 0;
 
     static class IntegerContainer implements Delta {
@@ -60,14 +60,12 @@ public class TimelineInteger implements Revertable {
     }
 
     public int get(long epoch) {
-        if (epoch == SnapshotRegistry.LATEST_EPOCH)
-            return value;
+        if (epoch == SnapshotRegistry.LATEST_EPOCH) return value;
         Iterator<Snapshot> iterator = snapshotRegistry.iterator(epoch);
         while (iterator.hasNext()) {
             Snapshot snapshot = iterator.next();
             IntegerContainer container = snapshot.getDelta(TimelineInteger.this);
-            if (container != null)
-                return container.value();
+            if (container != null) return container.value();
         }
         return value;
     }
@@ -94,7 +92,6 @@ public class TimelineInteger implements Revertable {
         set(get() - 1);
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     public void executeRevert(long targetEpoch, Delta delta) {
         IntegerContainer container = (IntegerContainer) delta;
@@ -113,9 +110,7 @@ public class TimelineInteger implements Revertable {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof TimelineInteger))
-            return false;
-        TimelineInteger other = (TimelineInteger) o;
+        if (!(o instanceof TimelineInteger other)) return false;
         return value == other.value;
     }
 

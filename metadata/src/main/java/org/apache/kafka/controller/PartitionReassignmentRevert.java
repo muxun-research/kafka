@@ -36,7 +36,12 @@ class PartitionReassignmentRevert {
         // was adding, but keep the ones the reassignment was removing. (But see the
         // special case below.)
 
-        PartitionReassignmentReplicas ongoingReassignment = new PartitionReassignmentReplicas(Replicas.toList(registration.removingReplicas), Replicas.toList(registration.addingReplicas), Replicas.toList(registration.replicas));
+        PartitionReassignmentReplicas ongoingReassignment =
+            new PartitionReassignmentReplicas(
+                Replicas.toList(registration.removingReplicas),
+                Replicas.toList(registration.addingReplicas),
+                Replicas.toList(registration.replicas)
+            );
 
         this.replicas = ongoingReassignment.originalReplicas();
         this.isr = Replicas.toList(registration.isr);
@@ -52,7 +57,8 @@ class PartitionReassignmentRevert {
                 // This should not be reachable, since it would require a partition
                 // starting with an empty replica set prior to the reassignment we are
                 // trying to revert.
-                throw new InvalidReplicaAssignmentException("Invalid replica " + "assignment: addingReplicas contains all replicas.");
+                throw new InvalidReplicaAssignmentException("Invalid replica " +
+                    "assignment: addingReplicas contains all replicas.");
             }
             isr.add(replicas.get(0));
             this.unclean = true;
@@ -80,14 +86,17 @@ class PartitionReassignmentRevert {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof PartitionReassignmentRevert))
-            return false;
-        PartitionReassignmentRevert other = (PartitionReassignmentRevert) o;
-        return replicas.equals(other.replicas) && isr.equals(other.isr) && unclean == other.unclean;
+        if (!(o instanceof PartitionReassignmentRevert other)) return false;
+        return replicas.equals(other.replicas) &&
+            isr.equals(other.isr) &&
+            unclean == other.unclean;
     }
 
     @Override
     public String toString() {
-        return "PartitionReassignmentRevert(" + "replicas=" + replicas + ", " + "isr=" + isr + ", " + "unclean=" + unclean + ")";
+        return "PartitionReassignmentRevert(" +
+            "replicas=" + replicas + ", " +
+            "isr=" + isr + ", " +
+            "unclean=" + unclean + ")";
     }
 }

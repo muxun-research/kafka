@@ -33,7 +33,12 @@ import org.apache.kafka.common.utils.Utils;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
+import java.util.Properties;
+import java.util.Random;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
@@ -49,9 +54,9 @@ import java.util.stream.Collectors;
  * <p> e.g. [localhost:9092 test 10000 1 20] </p>
  */
 public class EndToEndLatency {
-    private final static long POLL_TIMEOUT_MS = 60000;
-    private final static short DEFAULT_REPLICATION_FACTOR = 1;
-    private final static int DEFAULT_NUM_PARTITIONS = 1;
+    private static final long POLL_TIMEOUT_MS = 60000;
+    private static final short DEFAULT_REPLICATION_FACTOR = 1;
+    private static final int DEFAULT_NUM_PARTITIONS = 1;
 
     public static void main(String... args) {
         Exit.exit(mainNoExit(args));
@@ -74,7 +79,8 @@ public class EndToEndLatency {
     // Visible for testing
     static void execute(String... args) throws Exception {
         if (args.length != 5 && args.length != 6) {
-            throw new TerseException("USAGE: java " + EndToEndLatency.class.getName() + " broker_list topic num_messages producer_acks message_size_bytes [optional] properties_file");
+            throw new TerseException("USAGE: java " + EndToEndLatency.class.getName()
+                    + " broker_list topic num_messages producer_acks message_size_bytes [optional] properties_file");
         }
 
         String brokers = args[0];
@@ -88,7 +94,8 @@ public class EndToEndLatency {
             throw new IllegalArgumentException("Latency testing requires synchronous acknowledgement. Please use 1 or all");
         }
 
-        try (KafkaConsumer<byte[], byte[]> consumer = createKafkaConsumer(propertiesFile, brokers); KafkaProducer<byte[], byte[]> producer = createKafkaProducer(propertiesFile, brokers, acks)) {
+        try (KafkaConsumer<byte[], byte[]> consumer = createKafkaConsumer(propertiesFile, brokers);
+             KafkaProducer<byte[], byte[]> producer = createKafkaProducer(propertiesFile, brokers, acks)) {
 
             if (!consumer.listTopics().containsKey(topic)) {
                 createTopic(propertiesFile, brokers, topic);
@@ -145,7 +152,11 @@ public class EndToEndLatency {
     }
 
     private static void setupConsumer(String topic, KafkaConsumer<byte[], byte[]> consumer) {
-        List<TopicPartition> topicPartitions = consumer.partitionsFor(topic).stream().map(p -> new TopicPartition(p.topic(), p.partition())).collect(Collectors.toList());
+        List<TopicPartition> topicPartitions = consumer
+                .partitionsFor(topic)
+                .stream()
+                .map(p -> new TopicPartition(p.topic(), p.partition()))
+                .collect(Collectors.toList());
         consumer.assign(topicPartitions);
         consumer.seekToEnd(topicPartitions);
         consumer.assignment().forEach(consumer::position);
@@ -167,7 +178,9 @@ public class EndToEndLatency {
     }
 
     private static void createTopic(Optional<String> propertiesFile, String brokers, String topic) throws IOException {
-        System.out.printf("Topic \"%s\" does not exist. " + "Will create topic with %d partition(s) and replication factor = %d%n", topic, DEFAULT_NUM_PARTITIONS, DEFAULT_REPLICATION_FACTOR);
+        System.out.printf("Topic \"%s\" does not exist. "
+                        + "Will create topic with %d partition(s) and replication factor = %d%n",
+                topic, DEFAULT_NUM_PARTITIONS, DEFAULT_REPLICATION_FACTOR);
 
         Properties adminProps = loadPropsWithBootstrapServers(propertiesFile, brokers);
         Admin adminClient = Admin.create(adminProps);

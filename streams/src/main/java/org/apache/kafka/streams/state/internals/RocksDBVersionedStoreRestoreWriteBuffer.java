@@ -18,16 +18,24 @@ package org.apache.kafka.streams.state.internals;
 
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
-import org.apache.kafka.streams.processor.ProcessorContext;
+import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.state.internals.RocksDBVersionedStore.RocksDBVersionedStoreClient;
 import org.apache.kafka.streams.state.internals.RocksDBVersionedStore.VersionedStoreClient;
 import org.apache.kafka.streams.state.internals.RocksDBVersionedStore.VersionedStoreSegment;
+
 import org.rocksdb.RocksDBException;
 import org.rocksdb.WriteBatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.TreeMap;
 
 /**
  * A write buffer for use in restoring a {@link RocksDBVersionedStore} from its changelog. This
@@ -82,13 +90,15 @@ public class RocksDBVersionedStoreRestoreWriteBuffer {
         // flush segments first, as this is consistent with the store always writing to
         // older segments/stores before later ones
         try (final WriteBatch segmentsBatch = new WriteBatch()) {
-            final List<WriteBufferSegmentWithDbFallback> allSegments = restoreClient.getReverseSegments(Long.MIN_VALUE);
-            if (allSegments.size() > 0) {
+            final List<WriteBufferSegmentWithDbFallback> allSegments = restoreClient.reversedSegments(Long.MIN_VALUE);
+            if (!allSegments.isEmpty()) {
                 // collect entries into write batch
                 for (final WriteBufferSegmentWithDbFallback bufferSegment : allSegments) {
                     final LogicalKeyValueSegment dbSegment = bufferSegment.dbSegment();
                     for (final Map.Entry<Bytes, byte[]> segmentEntry : bufferSegment.getAll().entrySet()) {
-                        dbSegment.addToBatch(new KeyValue<>(segmentEntry.getKey().get(), segmentEntry.getValue()), segmentsBatch);
+                        dbSegment.addToBatch(
+                            new KeyValue<>(segmentEntry.getKey().get(), segmentEntry.getValue()),
+                            segmentsBatch);
                     }
                 }
 
@@ -107,7 +117,9 @@ public class RocksDBVersionedStoreRestoreWriteBuffer {
             // collect entries into write batch
             for (final Map.Entry<Bytes, Optional<byte[]>> latestValueEntry : latestValueWriteBuffer.entrySet()) {
                 final byte[] value = latestValueEntry.getValue().orElse(null);
-                dbClient.addToLatestValueBatch(new KeyValue<>(latestValueEntry.getKey().get(), value), latestValueBatch);
+                dbClient.addToLatestValueBatch(
+                    new KeyValue<>(latestValueEntry.getKey().get(), value),
+                    latestValueBatch);
             }
 
             // write to db
@@ -174,12 +186,12 @@ public class RocksDBVersionedStoreRestoreWriteBuffer {
     private class RocksDBVersionedStoreRestoreClient implements VersionedStoreClient<WriteBufferSegmentWithDbFallback> {
 
         @Override
-        public byte[] getLatestValue(final Bytes key) {
+        public byte[] latestValue(final Bytes key) {
             final Optional<byte[]> bufferValue = latestValueWriteBuffer.get(key);
             if (bufferValue != null) {
                 return bufferValue.orElse(null);
             }
-            return dbClient.getLatestValue(key);
+            return dbClient.latestValue(key);
         }
 
         @Override
@@ -194,7 +206,7 @@ public class RocksDBVersionedStoreRestoreWriteBuffer {
         }
 
         @Override
-        public WriteBufferSegmentWithDbFallback getOrCreateSegmentIfLive(final long segmentId, final ProcessorContext context, final long streamTime) {
+        public WriteBufferSegmentWithDbFallback getOrCreateSegmentIfLive(final long segmentId, final StateStoreContext context, final long streamTime) {
             if (segmentsWriteBuffer.containsKey(segmentId)) {
                 return segmentsWriteBuffer.get(segmentId);
             }
@@ -209,12 +221,13 @@ public class RocksDBVersionedStoreRestoreWriteBuffer {
         }
 
         @Override
-        public List<WriteBufferSegmentWithDbFallback> getReverseSegments(final long timestampFrom) {
+        public List<WriteBufferSegmentWithDbFallback> reversedSegments(final long timestampFrom) {
             // head and not tail because the map is sorted in reverse order
             final long segmentFrom = segmentIdForTimestamp(timestampFrom);
-            final List<WriteBufferSegmentWithDbFallback> bufferSegments = new ArrayList<>(segmentsWriteBuffer.headMap(segmentFrom, true).values());
+            final List<WriteBufferSegmentWithDbFallback> bufferSegments =
+                new ArrayList<>(segmentsWriteBuffer.headMap(segmentFrom, true).values());
 
-            final List<LogicalKeyValueSegment> dbSegments = dbClient.getReverseSegments(timestampFrom);
+            final List<LogicalKeyValueSegment> dbSegments = dbClient.reversedSegments(timestampFrom);
 
             // merge segments from db with segments from write buffer
             final List<WriteBufferSegmentWithDbFallback> allSegments = new ArrayList<>();

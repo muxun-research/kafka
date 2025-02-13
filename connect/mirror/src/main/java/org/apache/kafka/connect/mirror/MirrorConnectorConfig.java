@@ -21,6 +21,7 @@ import org.apache.kafka.clients.admin.ForwardingAdmin;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
+import org.apache.kafka.common.metrics.JmxReporter;
 import org.apache.kafka.common.metrics.KafkaMetricsContext;
 import org.apache.kafka.common.metrics.MetricsContext;
 import org.apache.kafka.common.metrics.MetricsReporter;
@@ -37,17 +38,16 @@ import static org.apache.kafka.clients.consumer.ConsumerConfig.AUTO_OFFSET_RESET
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG;
 import static org.apache.kafka.common.config.ConfigDef.CaseInsensitiveValidString.in;
 
-/**
- * Shared config properties used by {@link MirrorSourceConnector}, {@link MirrorCheckpointConnector}, and {@link MirrorHeartbeatConnector}.
- * <p>
- * Generally, these properties are filled-in automatically by MirrorMaker based on a top-level mm2.properties file.
- * However, when running MM2 connectors as plugins on a Connect-as-a-Service cluster, these properties must be configured manually,
- * e.g. via the Connect REST API.
- * </p>
- * <p>
- * An example configuration when running on Connect (not via MirrorMaker driver):
- * </p>
- * <pre>
+/** Shared config properties used by {@link MirrorSourceConnector}, {@link MirrorCheckpointConnector}, and {@link MirrorHeartbeatConnector}.
+ *  <p>
+ *  Generally, these properties are filled-in automatically by MirrorMaker based on a top-level mm2.properties file.
+ *  However, when running MM2 connectors as plugins on a Connect-as-a-Service cluster, these properties must be configured manually,
+ *  e.g. via the Connect REST API.
+ *  </p>
+ *  <p>
+ *  An example configuration when running on Connect (not via MirrorMaker driver):
+ *  </p>
+ *  <pre>
  *      {
  *        "name": "MirrorSourceConnector",
  *        "connector.class": "org.apache.kafka.connect.mirror.MirrorSourceConnector",
@@ -83,7 +83,13 @@ public abstract class MirrorConnectorConfig extends AbstractConfig {
     private static final String REPLICATION_POLICY_CLASS_DOC = "Class which defines the remote topic naming convention.";
     public static final String REPLICATION_POLICY_SEPARATOR = MirrorClientConfig.REPLICATION_POLICY_SEPARATOR;
     private static final String REPLICATION_POLICY_SEPARATOR_DOC = "Separator used in remote topic naming convention.";
-    public static final String REPLICATION_POLICY_SEPARATOR_DEFAULT = MirrorClientConfig.REPLICATION_POLICY_SEPARATOR_DEFAULT;
+    public static final String REPLICATION_POLICY_SEPARATOR_DEFAULT =
+            MirrorClientConfig.REPLICATION_POLICY_SEPARATOR_DEFAULT;
+
+    private static final String INTERNAL_TOPIC_SEPARATOR_ENABLED =  MirrorClientConfig.INTERNAL_TOPIC_SEPARATOR_ENABLED;
+    private static final String INTERNAL_TOPIC_SEPARATOR_ENABLED_DOC = MirrorClientConfig.INTERNAL_TOPIC_SEPARATOR_ENABLED_DOC;
+    public static final Boolean INTERNAL_TOPIC_SEPARATOR_ENABLED_DEFAULT =
+        DefaultReplicationPolicy.INTERNAL_TOPIC_SEPARATOR_ENABLED_DEFAULT;
 
     public static final String ADMIN_TASK_TIMEOUT_MILLIS = "admin.timeout.ms";
     private static final String ADMIN_TASK_TIMEOUT_MILLIS_DOC = "Timeout for administrative tasks, e.g. detecting new topics.";
@@ -105,13 +111,24 @@ public abstract class MirrorConnectorConfig extends AbstractConfig {
     public static final String TOPIC_FILTER_CLASS_DOC = "TopicFilter to use. Selects topics to replicate.";
     public static final Class<?> TOPIC_FILTER_CLASS_DEFAULT = DefaultTopicFilter.class;
 
-    public static final String OFFSET_SYNCS_TOPIC_LOCATION = "offset-syncs.topic.location";
+    public static final String OFFSET_SYNCS_TOPIC_CONFIG_PREFIX = "offset-syncs.topic.";
+    public static final String OFFSET_SYNCS_TOPIC_LOCATION = OFFSET_SYNCS_TOPIC_CONFIG_PREFIX + "location";
     public static final String OFFSET_SYNCS_TOPIC_LOCATION_DEFAULT = SOURCE_CLUSTER_ALIAS_DEFAULT;
     public static final String OFFSET_SYNCS_TOPIC_LOCATION_DOC = "The location (source/target) of the offset-syncs topic.";
+
+    public static final String EMIT_OFFSET_SYNCS_ENABLED = "emit.offset-syncs" + ENABLED_SUFFIX;
+    public static final String EMIT_OFFSET_SYNCS_ENABLED_DOC = "Whether to store the new offset of the replicated records in offset-syncs topic or not. " +
+            "MirrorCheckpointConnector will not be able to sync group offsets or emit checkpoints if emit.checkpoints.enabled and/or sync.group.offsets.enabled are enabled while " +
+            EMIT_OFFSET_SYNCS_ENABLED + " is disabled.";
+    public static final boolean EMIT_OFFSET_SYNCS_ENABLED_DEFAULT = true;
+
+    public static final String OFFSET_SYNCS_CLIENT_ROLE_PREFIX = "offset-syncs-";
+
     public static final String TASK_INDEX = "task.index";
 
     private final ReplicationPolicy replicationPolicy;
 
+    @SuppressWarnings("this-escape")
     protected MirrorConnectorConfig(ConfigDef configDef, Map<String, String> props) {
         super(configDef, props, true);
         replicationPolicy = getConfiguredInstance(REPLICATION_POLICY_CLASS, ReplicationPolicy.class);
@@ -224,7 +241,9 @@ public abstract class MirrorConnectorConfig extends AbstractConfig {
     @SuppressWarnings({"unchecked", "rawtypes"})
     ForwardingAdmin forwardingAdmin(Map<String, Object> config) {
         try {
-            return Utils.newParameterizedInstance(getClass(FORWARDING_ADMIN_CLASS).getName(), (Class<Map<String, Object>>) (Class) Map.class, config);
+            return Utils.newParameterizedInstance(
+                    getClass(FORWARDING_ADMIN_CLASS).getName(), (Class<Map<String, Object>>) (Class) Map.class, config
+            );
         } catch (ClassNotFoundException e) {
             throw new KafkaException("Can't create instance of " + get(FORWARDING_ADMIN_CLASS), e);
         }
@@ -232,13 +251,79 @@ public abstract class MirrorConnectorConfig extends AbstractConfig {
 
     void addClientId(Map<String, Object> props, String role) {
         String clientId = entityLabel() + (role == null ? "" : "|" + role);
-        props.compute(CommonClientConfigs.CLIENT_ID_CONFIG, (k, userClientId) -> (userClientId == null ? "" : userClientId + "|") + clientId);
+        props.compute(CommonClientConfigs.CLIENT_ID_CONFIG,
+                (k, userClientId) -> (userClientId == null ? "" : userClientId + "|") + clientId);
     }
 
     String entityLabel() {
         return sourceClusterAlias() + "->" + targetClusterAlias() + "|" + connectorName();
     }
 
-    @SuppressWarnings("deprecation")
-    protected static final ConfigDef BASE_CONNECTOR_CONFIG_DEF = new ConfigDef(ConnectorConfig.configDef()).define(ENABLED, ConfigDef.Type.BOOLEAN, true, ConfigDef.Importance.LOW, ENABLED_DOC).define(SOURCE_CLUSTER_ALIAS, ConfigDef.Type.STRING, ConfigDef.Importance.HIGH, SOURCE_CLUSTER_ALIAS_DOC).define(TARGET_CLUSTER_ALIAS, ConfigDef.Type.STRING, TARGET_CLUSTER_ALIAS_DEFAULT, ConfigDef.Importance.HIGH, TARGET_CLUSTER_ALIAS_DOC).define(ADMIN_TASK_TIMEOUT_MILLIS, ConfigDef.Type.LONG, ADMIN_TASK_TIMEOUT_MILLIS_DEFAULT, ConfigDef.Importance.LOW, ADMIN_TASK_TIMEOUT_MILLIS_DOC).define(REPLICATION_POLICY_CLASS, ConfigDef.Type.CLASS, REPLICATION_POLICY_CLASS_DEFAULT, ConfigDef.Importance.LOW, REPLICATION_POLICY_CLASS_DOC).define(REPLICATION_POLICY_SEPARATOR, ConfigDef.Type.STRING, REPLICATION_POLICY_SEPARATOR_DEFAULT, ConfigDef.Importance.LOW, REPLICATION_POLICY_SEPARATOR_DOC).define(FORWARDING_ADMIN_CLASS, ConfigDef.Type.CLASS, FORWARDING_ADMIN_CLASS_DEFAULT, ConfigDef.Importance.LOW, FORWARDING_ADMIN_CLASS_DOC).define(CommonClientConfigs.METRIC_REPORTER_CLASSES_CONFIG, ConfigDef.Type.LIST, null, ConfigDef.Importance.LOW, CommonClientConfigs.METRIC_REPORTER_CLASSES_DOC).define(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, ConfigDef.Type.STRING, CommonClientConfigs.DEFAULT_SECURITY_PROTOCOL, in(Utils.enumOptions(SecurityProtocol.class)), ConfigDef.Importance.MEDIUM, CommonClientConfigs.SECURITY_PROTOCOL_DOC).define(CommonClientConfigs.AUTO_INCLUDE_JMX_REPORTER_CONFIG, ConfigDef.Type.BOOLEAN, true, ConfigDef.Importance.LOW, CommonClientConfigs.AUTO_INCLUDE_JMX_REPORTER_DOC).withClientSslSupport().withClientSaslSupport();
+    protected static final ConfigDef BASE_CONNECTOR_CONFIG_DEF = new ConfigDef(ConnectorConfig.configDef())
+            .define(
+                    ENABLED,
+                    ConfigDef.Type.BOOLEAN,
+                    true,
+                    ConfigDef.Importance.LOW,
+                    ENABLED_DOC)
+            .define(
+                    SOURCE_CLUSTER_ALIAS,
+                    ConfigDef.Type.STRING,
+                    ConfigDef.Importance.HIGH,
+                    SOURCE_CLUSTER_ALIAS_DOC)
+            .define(
+                    TARGET_CLUSTER_ALIAS,
+                    ConfigDef.Type.STRING,
+                    TARGET_CLUSTER_ALIAS_DEFAULT,
+                    ConfigDef.Importance.HIGH,
+                    TARGET_CLUSTER_ALIAS_DOC)
+            .define(
+                    ADMIN_TASK_TIMEOUT_MILLIS,
+                    ConfigDef.Type.LONG,
+                    ADMIN_TASK_TIMEOUT_MILLIS_DEFAULT,
+                    ConfigDef.Importance.LOW,
+                    ADMIN_TASK_TIMEOUT_MILLIS_DOC)
+            .define(
+                    REPLICATION_POLICY_CLASS,
+                    ConfigDef.Type.CLASS,
+                    REPLICATION_POLICY_CLASS_DEFAULT,
+                    ConfigDef.Importance.LOW,
+                    REPLICATION_POLICY_CLASS_DOC)
+            .define(
+                    REPLICATION_POLICY_SEPARATOR,
+                    ConfigDef.Type.STRING,
+                    REPLICATION_POLICY_SEPARATOR_DEFAULT,
+                    ConfigDef.Importance.LOW,
+                    REPLICATION_POLICY_SEPARATOR_DOC)
+            .define(
+                    INTERNAL_TOPIC_SEPARATOR_ENABLED,
+                    ConfigDef.Type.BOOLEAN,
+                    INTERNAL_TOPIC_SEPARATOR_ENABLED_DEFAULT,
+                    ConfigDef.Importance.LOW,
+                    INTERNAL_TOPIC_SEPARATOR_ENABLED_DOC)
+            .define(
+                    FORWARDING_ADMIN_CLASS,
+                    ConfigDef.Type.CLASS,
+                    FORWARDING_ADMIN_CLASS_DEFAULT,
+                    ConfigDef.Importance.LOW,
+                    FORWARDING_ADMIN_CLASS_DOC)
+            .define(
+                    CommonClientConfigs.METRIC_REPORTER_CLASSES_CONFIG,
+                    ConfigDef.Type.LIST,
+                    JmxReporter.class.getName(),
+                    ConfigDef.Importance.LOW,
+                    CommonClientConfigs.METRIC_REPORTER_CLASSES_DOC)
+            .define(
+                    CommonClientConfigs.SECURITY_PROTOCOL_CONFIG,
+                    ConfigDef.Type.STRING,
+                    CommonClientConfigs.DEFAULT_SECURITY_PROTOCOL,
+                    in(Utils.enumOptions(SecurityProtocol.class)),
+                    ConfigDef.Importance.MEDIUM,
+                    CommonClientConfigs.SECURITY_PROTOCOL_DOC)
+            .withClientSslSupport()
+            .withClientSaslSupport();
+
+    public static void main(String[] args) {
+        System.out.println(BASE_CONNECTOR_CONFIG_DEF.toHtml(4, config -> "mirror_connector_" + config));
+    }
 }

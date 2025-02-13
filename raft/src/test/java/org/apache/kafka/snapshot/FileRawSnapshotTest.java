@@ -16,11 +16,18 @@
  */
 package org.apache.kafka.snapshot;
 
-import org.apache.kafka.common.record.*;
+import org.apache.kafka.common.compress.Compression;
+import org.apache.kafka.common.record.MemoryRecords;
+import org.apache.kafka.common.record.Record;
+import org.apache.kafka.common.record.RecordBatch;
+import org.apache.kafka.common.record.SimpleRecord;
+import org.apache.kafka.common.record.UnalignedFileRecords;
+import org.apache.kafka.common.record.UnalignedMemoryRecords;
 import org.apache.kafka.common.utils.BufferSupplier.GrowableBufferSupplier;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.raft.OffsetAndEpoch;
 import org.apache.kafka.test.TestUtils;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,10 +38,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Iterator;
-import java.util.Optional;
 import java.util.stream.IntStream;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public final class FileRawSnapshotTest {
     private Path tempDir = null;
@@ -76,7 +85,7 @@ public final class FileRawSnapshotTest {
     }
 
     @Test
-    public void testWriteReadSnapshot() throws IOException {
+    public void testWriteReadSnapshot() {
         OffsetAndEpoch offsetAndEpoch = new OffsetAndEpoch(10L, 3);
         int bufferSize = 256;
         int numberOfBatches = 10;
@@ -96,7 +105,7 @@ public final class FileRawSnapshotTest {
             int countBatches = 0;
             int countRecords = 0;
 
-            Iterator<RecordBatch> batches = Utils.covariantCast(snapshot.records().batchIterator());
+            var batches = snapshot.records().batchIterator();
             while (batches.hasNext()) {
                 RecordBatch batch = batches.next();
                 countBatches += 1;
@@ -120,7 +129,7 @@ public final class FileRawSnapshotTest {
     }
 
     @Test
-    public void testPartialWriteReadSnapshot() throws IOException {
+    public void testPartialWriteReadSnapshot() {
         Path tempDir = TestUtils.tempDirectory().toPath();
         OffsetAndEpoch offsetAndEpoch = new OffsetAndEpoch(10L, 3);
 
@@ -160,7 +169,7 @@ public final class FileRawSnapshotTest {
     }
 
     @Test
-    public void testBatchWriteReadSnapshot() throws IOException {
+    public void testBatchWriteReadSnapshot() {
         OffsetAndEpoch offsetAndEpoch = new OffsetAndEpoch(10L, 3);
         int bufferSize = 256;
         int batchSize = 3;
@@ -168,7 +177,9 @@ public final class FileRawSnapshotTest {
 
         try (FileRawSnapshotWriter snapshot = createSnapshotWriter(tempDir, offsetAndEpoch)) {
             for (int i = 0; i < numberOfBatches; i++) {
-                ByteBuffer[] buffers = IntStream.range(0, batchSize).mapToObj(ignore -> ByteBuffer.wrap(randomBytes(bufferSize))).toArray(ByteBuffer[]::new);
+                ByteBuffer[] buffers = IntStream
+                    .range(0, batchSize)
+                    .mapToObj(ignore -> ByteBuffer.wrap(randomBytes(bufferSize))).toArray(ByteBuffer[]::new);
 
                 snapshot.append(buildRecords(buffers));
             }
@@ -180,7 +191,7 @@ public final class FileRawSnapshotTest {
             int countBatches = 0;
             int countRecords = 0;
 
-            Iterator<RecordBatch> batches = Utils.covariantCast(snapshot.records().batchIterator());
+            var batches = snapshot.records().batchIterator();
             while (batches.hasNext()) {
                 RecordBatch batch = batches.next();
                 countBatches += 1;
@@ -212,7 +223,9 @@ public final class FileRawSnapshotTest {
 
         try (FileRawSnapshotWriter snapshot = createSnapshotWriter(tempDir, offsetAndEpoch)) {
             for (int i = 0; i < numberOfBatches; i++) {
-                ByteBuffer[] buffers = IntStream.range(0, batchSize).mapToObj(ignore -> ByteBuffer.wrap(randomBytes(bufferSize))).toArray(ByteBuffer[]::new);
+                ByteBuffer[] buffers = IntStream
+                    .range(0, batchSize)
+                    .mapToObj(ignore -> ByteBuffer.wrap(randomBytes(bufferSize))).toArray(ByteBuffer[]::new);
 
                 UnalignedMemoryRecords records = buildRecords(buffers);
                 snapshot.append(records);
@@ -232,7 +245,7 @@ public final class FileRawSnapshotTest {
             int countBatches = 0;
             int countRecords = 0;
 
-            Iterator<RecordBatch> batches = Utils.covariantCast(snapshot.records().batchIterator());
+            var batches = snapshot.records().batchIterator();
             while (batches.hasNext()) {
                 RecordBatch batch = batches.next();
                 countBatches += 1;
@@ -329,11 +342,17 @@ public final class FileRawSnapshotTest {
     }
 
     private static UnalignedMemoryRecords buildRecords(ByteBuffer... buffers) {
-        MemoryRecords records = MemoryRecords.withRecords(CompressionType.NONE, Arrays.stream(buffers).map(SimpleRecord::new).toArray(SimpleRecord[]::new));
+        MemoryRecords records =  MemoryRecords.withRecords(
+            Compression.NONE,
+            Arrays.stream(buffers).map(SimpleRecord::new).toArray(SimpleRecord[]::new)
+        );
         return new UnalignedMemoryRecords(records.buffer());
     }
 
-    private static FileRawSnapshotWriter createSnapshotWriter(Path dir, OffsetAndEpoch snapshotId) {
-        return FileRawSnapshotWriter.create(dir, snapshotId, Optional.empty());
+    private static FileRawSnapshotWriter createSnapshotWriter(
+        Path dir,
+        OffsetAndEpoch snapshotId
+    ) {
+        return FileRawSnapshotWriter.create(dir, snapshotId);
     }
 }

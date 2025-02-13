@@ -18,18 +18,30 @@ package org.apache.kafka.common.utils;
 
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.test.TestUtils;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.stubbing.OngoingStubbing;
 
-import java.io.*;
+import java.io.Closeable;
+import java.io.DataOutputStream;
+import java.io.EOFException;
+import java.io.File;
+import java.io.IOException;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
+import java.nio.file.FileSystem;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.spi.FileSystemProvider;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
@@ -39,7 +51,19 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.temporal.ChronoField;
 import java.time.temporal.ChronoUnit;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Random;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -48,11 +72,33 @@ import java.util.stream.Stream;
 
 import static java.util.Arrays.asList;
 import static java.util.Collections.emptySet;
-import static org.apache.kafka.common.utils.Utils.*;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.apache.kafka.common.utils.Utils.diff;
+import static org.apache.kafka.common.utils.Utils.formatAddress;
+import static org.apache.kafka.common.utils.Utils.formatBytes;
+import static org.apache.kafka.common.utils.Utils.getHost;
+import static org.apache.kafka.common.utils.Utils.getPort;
+import static org.apache.kafka.common.utils.Utils.intersection;
+import static org.apache.kafka.common.utils.Utils.mkEntry;
+import static org.apache.kafka.common.utils.Utils.murmur2;
+import static org.apache.kafka.common.utils.Utils.union;
+import static org.apache.kafka.common.utils.Utils.validHostPattern;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 public class UtilsTest {
 
@@ -64,23 +110,42 @@ public class UtilsTest {
         cases.put("a-little-bit-long-string".getBytes(), -985981536);
         cases.put("a-little-bit-longer-string".getBytes(), -1486304829);
         cases.put("lkjh234lh9fiuh90y23oiuhsafujhadof229phr9h19h89h8".getBytes(), -58897971);
-        cases.put(new byte[]{'a', 'b', 'c'}, 479470107);
+        cases.put(new byte[] {'a', 'b', 'c'}, 479470107);
 
         for (Map.Entry<byte[], Integer> c : cases.entrySet()) {
             assertEquals(c.getValue().intValue(), murmur2(c.getKey()));
         }
     }
 
-    @Test
-    public void testGetHost() {
+    @ParameterizedTest
+    @CsvSource(value = {"PLAINTEXT", "SASL_PLAINTEXT", "SSL", "SASL_SSL"})
+    public void testGetHostValid(String protocol) {
+        assertEquals("mydomain.com", getHost(protocol + "://mydomain.com:8080"));
+        assertEquals("MyDomain.com", getHost(protocol + "://MyDomain.com:8080"));
+        assertEquals("My_Domain.com", getHost(protocol + "://My_Domain.com:8080"));
+        assertEquals("::1", getHost(protocol + "://[::1]:1234"));
+        assertEquals("2001:db8:85a3:8d3:1319:8a2e:370:7348", getHost(protocol + "://[2001:db8:85a3:8d3:1319:8a2e:370:7348]:5678"));
+        assertEquals("2001:DB8:85A3:8D3:1319:8A2E:370:7348", getHost(protocol + "://[2001:DB8:85A3:8D3:1319:8A2E:370:7348]:5678"));
+        assertEquals("fe80::b1da:69ca:57f7:63d8%3", getHost(protocol + "://[fe80::b1da:69ca:57f7:63d8%3]:5678"));
         assertEquals("127.0.0.1", getHost("127.0.0.1:8000"));
-        assertEquals("mydomain.com", getHost("PLAINTEXT://mydomain.com:8080"));
-        assertEquals("MyDomain.com", getHost("PLAINTEXT://MyDomain.com:8080"));
-        assertEquals("My_Domain.com", getHost("PLAINTEXT://My_Domain.com:8080"));
         assertEquals("::1", getHost("[::1]:1234"));
-        assertEquals("2001:db8:85a3:8d3:1319:8a2e:370:7348", getHost("PLAINTEXT://[2001:db8:85a3:8d3:1319:8a2e:370:7348]:5678"));
-        assertEquals("2001:DB8:85A3:8D3:1319:8A2E:370:7348", getHost("PLAINTEXT://[2001:DB8:85A3:8D3:1319:8A2E:370:7348]:5678"));
-        assertEquals("fe80::b1da:69ca:57f7:63d8%3", getHost("PLAINTEXT://[fe80::b1da:69ca:57f7:63d8%3]:5678"));
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = {"PLAINTEXT", "SASL_PLAINTEXT", "SSL", "SASL_SSL"})
+    public void testGetHostInvalid(String protocol) {
+        assertNull(getHost(protocol + "://mydo)main.com:8080"));
+        assertNull(getHost(protocol + "://mydo(main.com:8080"));
+        assertNull(getHost(protocol + "://mydo()main.com:8080"));
+        assertNull(getHost(protocol + "://mydo(main).com:8080"));
+        assertNull(getHost(protocol + "://[2001:db)8:85a3:8d3:1319:8a2e:370:7348]:5678"));
+        assertNull(getHost(protocol + "://[2001:db(8:85a3:8d3:1319:8a2e:370:7348]:5678"));
+        assertNull(getHost(protocol + "://[2001:db()8:85a3:8d3:1319:8a2e:370:7348]:5678"));
+        assertNull(getHost(protocol + "://[2001:db(8:85a3:)8d3:1319:8a2e:370:7348]:5678"));
+        assertNull(getHost("ho)st:9092"));
+        assertNull(getHost("ho(st:9092"));
+        assertNull(getHost("ho()st:9092"));
+        assertNull(getHost("ho(st):9092"));
     }
 
     @Test
@@ -95,6 +160,7 @@ public class UtilsTest {
 
     @Test
     public void testGetPort() {
+        // valid
         assertEquals(8000, getPort("127.0.0.1:8000").intValue());
         assertEquals(8080, getPort("mydomain.com:8080").intValue());
         assertEquals(8080, getPort("MyDomain.com:8080").intValue());
@@ -102,6 +168,12 @@ public class UtilsTest {
         assertEquals(5678, getPort("[2001:db8:85a3:8d3:1319:8a2e:370:7348]:5678").intValue());
         assertEquals(5678, getPort("[2001:DB8:85A3:8D3:1319:8A2E:370:7348]:5678").intValue());
         assertEquals(5678, getPort("[fe80::b1da:69ca:57f7:63d8%3]:5678").intValue());
+
+        // invalid
+        assertNull(getPort("host:-92"));
+        assertNull(getPort("host:-9-2"));
+        assertNull(getPort("host:92-"));
+        assertNull(getPort("host:9-2"));
     }
 
     @Test
@@ -121,20 +193,6 @@ public class UtilsTest {
         assertEquals("1 MB", formatBytes(1024 * 1024));
         assertEquals("1.1 MB", formatBytes((long) (1.1 * 1024 * 1024)));
         assertEquals("10 MB", formatBytes(10 * 1024 * 1024));
-    }
-
-    @Test
-    public void testJoin() {
-        assertEquals("", Utils.join(Collections.emptyList(), ","));
-        assertEquals("1", Utils.join(asList("1"), ","));
-        assertEquals("1,2,3", Utils.join(asList(1, 2, 3), ","));
-    }
-
-    @Test
-    public void testMkString() {
-        assertEquals("[]", Utils.mkString(Stream.empty(), "[", "]", ","));
-        assertEquals("(1)", Utils.mkString(Stream.of("1"), "(", ")", ","));
-        assertEquals("{1,2,3}", Utils.mkString(Stream.of(1, 2, 3), "{", "}", ","));
     }
 
     @Test
@@ -196,11 +254,11 @@ public class UtilsTest {
         assertArrayEquals(input, Utils.toArray(buffer));
         assertEquals(0, buffer.position());
 
-        assertArrayEquals(new byte[]{1, 2}, Utils.toArray(buffer, 1, 2));
+        assertArrayEquals(new byte[] {1, 2}, Utils.toArray(buffer, 1, 2));
         assertEquals(0, buffer.position());
 
         buffer.position(2);
-        assertArrayEquals(new byte[]{2, 3, 4}, Utils.toArray(buffer));
+        assertArrayEquals(new byte[] {2, 3, 4}, Utils.toArray(buffer));
         assertEquals(2, buffer.position());
     }
 
@@ -209,7 +267,7 @@ public class UtilsTest {
         byte[] input = {0, 0, 0, 2, 1, 0};
         final ByteBuffer buffer = ByteBuffer.wrap(input);
         final byte[] array = Utils.getNullableSizePrefixedArray(buffer);
-        assertArrayEquals(new byte[]{1, 0}, array);
+        assertArrayEquals(new byte[] {1, 0}, array);
         assertEquals(6, buffer.position());
         assertFalse(buffer.hasRemaining());
     }
@@ -219,7 +277,7 @@ public class UtilsTest {
         byte[] input = {0, 0, 0, 0};
         final ByteBuffer buffer = ByteBuffer.wrap(input);
         final byte[] array = Utils.getNullableSizePrefixedArray(buffer);
-        assertArrayEquals(new byte[]{}, array);
+        assertArrayEquals(new byte[] {}, array);
         assertEquals(4, buffer.position());
         assertFalse(buffer.hasRemaining());
     }
@@ -229,7 +287,7 @@ public class UtilsTest {
         byte[] input = {0, 0, 0, 2, 1, 0, 9};
         final ByteBuffer buffer = ByteBuffer.wrap(input);
         final byte[] array = Utils.getNullableSizePrefixedArray(buffer);
-        assertArrayEquals(new byte[]{1, 0}, array);
+        assertArrayEquals(new byte[] {1, 0}, array);
         assertEquals(6, buffer.position());
         assertTrue(buffer.hasRemaining());
     }
@@ -391,6 +449,65 @@ public class UtilsTest {
     }
 
     @Test
+    public void testMax() {
+        assertEquals(1, Utils.max(1));
+        assertEquals(3, Utils.max(1, 2, 3));
+        assertEquals(3, Utils.max(2, 1, 3, 3));
+        assertEquals(100, Utils.max(0, 2, 2, 100));
+        assertEquals(-1, Utils.max(-1, -2, -2, -10, -100, -1000));
+        assertEquals(0, Utils.max(-1, -2, -2, -10, -150, -1800, 0));
+    }
+
+    @Test
+    public void mkStringTest() {
+        Map<String, String> map = new LinkedHashMap<>();
+        map.put("key1", "val1");
+        map.put("key2", "val2");
+        map.put("key3", "val3");
+        String result = Utils.mkString(map, "__begin__", "__end__", "=", ",");
+        assertEquals("__begin__key1=val1,key2=val2,key3=val3__end__", result);
+
+        String result2 = Utils.mkString(Collections.emptyMap(), "__begin__", "__end__", "=", ",");
+        assertEquals("__begin____end__", result2);
+    }
+
+    @Test
+    public void parseMapTest() {
+        Map<String, String> map1 = Utils.parseMap("k1=v1,k2=v2,k3=v3", "=", ",");
+        assertEquals(3, map1.size());
+        assertEquals("v1", map1.get("k1"));
+        assertEquals("v2", map1.get("k2"));
+        assertEquals("v3", map1.get("k3"));
+
+        Map<String, String> map3 = Utils.parseMap("k4=v4,k5=v5=vv5=vvv5", "=", ",");
+        assertEquals(2, map3.size());
+        assertEquals("v4", map3.get("k4"));
+        assertEquals("v5=vv5=vvv5", map3.get("k5"));
+    }
+
+    @Test
+    public void ensureCapacityTest() {
+        ByteBuffer byteBuffer = ByteBuffer.allocate(10);
+        ByteBuffer newByteBuffer = Utils.ensureCapacity(byteBuffer, 5);
+        assertEquals(10, newByteBuffer.capacity());
+
+        ByteBuffer byteBuffer2 = ByteBuffer.allocate(10);
+        ByteBuffer newByteBuffer2 = Utils.ensureCapacity(byteBuffer2, 15);
+        assertEquals(15, newByteBuffer2.capacity());
+
+        ByteBuffer byteBuffer3 = ByteBuffer.allocate(10);
+        for (int i = 1; i <= 10; i++) {
+            byteBuffer3.put((byte) i);
+        }
+        ByteBuffer newByteBuffer3 = Utils.ensureCapacity(byteBuffer3, 15);
+        newByteBuffer3.flip();
+        assertEquals(15, newByteBuffer3.capacity());
+        assertEquals(1, newByteBuffer3.get());
+        assertEquals(2, newByteBuffer3.get());
+        assertEquals(3, newByteBuffer3.get());
+    }
+
+    @Test
     public void testCloseAll() {
         TestCloseable[] closeablesWithoutException = TestCloseable.createCloseables(false, false, false);
         try {
@@ -536,12 +653,14 @@ public class UtilsTest {
 
     /**
      * Expectation setter for multiple reads where each one reads random bytes to the buffer.
-     * @param channelMock The mocked FileChannel object
-     * @param bufferSize  The buffer size
+     *
+     * @param channelMock           The mocked FileChannel object
+     * @param bufferSize            The buffer size
      * @return Expected buffer string
-     * @throws IOException If an I/O error occurs
+     * @throws IOException          If an I/O error occurs
      */
-    private String fileChannelMockExpectReadWithRandomBytes(final FileChannel channelMock, final int bufferSize) throws IOException {
+    private String fileChannelMockExpectReadWithRandomBytes(final FileChannel channelMock,
+                                                            final int bufferSize) throws IOException {
         final int step = 20;
         final Random random = new Random();
         int remainingBytes = bufferSize;
@@ -624,9 +743,41 @@ public class UtilsTest {
         assertFalse(Files.exists(tempDir.toPath()));
     }
 
+    @SuppressWarnings("unchecked")
+    @Test
+    public void testRecursiveDeleteWithDeletedFile() throws IOException {
+        // Test recursive deletes, where the FileWalk is supplied with a deleted file path.
+        File rootDir = TestUtils.tempDirectory();
+        File subDir = TestUtils.tempDirectory(rootDir.toPath(), "a");
+
+        DirectoryStream<Path> mockDirectoryStream = (DirectoryStream<Path>) mock(DirectoryStream.class);
+        FileSystemProvider mockFileSystemProvider = mock(FileSystemProvider.class);
+        FileSystem mockFileSystem = mock(FileSystem.class);
+        Path mockRootPath = mock(Path.class);
+        BasicFileAttributes mockBasicFileAttributes = mock(BasicFileAttributes.class);
+        Iterator<Path> mockIterator = mock(Iterator.class);
+        File spyRootFile = spy(rootDir);
+
+        when(spyRootFile.toPath()).thenReturn(mockRootPath);
+        when(mockRootPath.getFileSystem()).thenReturn(mockFileSystem);
+        when(mockFileSystem.provider()).thenReturn(mockFileSystemProvider);
+        when(mockFileSystemProvider.readAttributes(any(), (Class<BasicFileAttributes>) any(), any())).thenReturn(mockBasicFileAttributes);
+        when(mockBasicFileAttributes.isDirectory()).thenReturn(true);
+        when(mockFileSystemProvider.newDirectoryStream(any(), any())).thenReturn(mockDirectoryStream);
+        when(mockDirectoryStream.iterator()).thenReturn(mockIterator);
+        // Here we pass the rootDir to the FileWalk which removes all Files recursively,
+        // and then we pass the subDir path again which is already deleted by this point.
+        when(mockIterator.next()).thenReturn(rootDir.toPath()).thenReturn(subDir.toPath());
+        when(mockIterator.hasNext()).thenReturn(true).thenReturn(true).thenReturn(false);
+
+        assertDoesNotThrow(() -> Utils.delete(spyRootFile));
+        assertFalse(Files.exists(rootDir.toPath()));
+        assertFalse(Files.exists(subDir.toPath()));
+    }
+
     @Test
     public void testConvertTo32BitField() {
-        Set<Byte> bytes = mkSet((byte) 0, (byte) 1, (byte) 5, (byte) 10, (byte) 31);
+        Set<Byte> bytes = Set.of((byte) 0, (byte) 1, (byte) 5, (byte) 10, (byte) 31);
         int bitField = Utils.to32BitField(bytes);
         assertEquals(bytes, Utils.from32BitField(bitField));
 
@@ -634,37 +785,37 @@ public class UtilsTest {
         bitField = Utils.to32BitField(bytes);
         assertEquals(bytes, Utils.from32BitField(bitField));
 
-        assertThrows(IllegalArgumentException.class, () -> Utils.to32BitField(mkSet((byte) 0, (byte) 11, (byte) 32)));
+        assertThrows(IllegalArgumentException.class, () -> Utils.to32BitField(Set.of((byte) 0, (byte) 11, (byte) 32)));
     }
 
     @Test
     public void testUnion() {
-        final Set<String> oneSet = mkSet("a", "b", "c");
-        final Set<String> anotherSet = mkSet("c", "d", "e");
+        final Set<String> oneSet = Set.of("a", "b", "c");
+        final Set<String> anotherSet = Set.of("c", "d", "e");
         final Set<String> union = union(TreeSet::new, oneSet, anotherSet);
 
-        assertEquals(mkSet("a", "b", "c", "d", "e"), union);
+        assertEquals(Set.of("a", "b", "c", "d", "e"), union);
         assertEquals(TreeSet.class, union.getClass());
     }
 
     @Test
     public void testUnionOfOne() {
-        final Set<String> oneSet = mkSet("a", "b", "c");
+        final Set<String> oneSet = Set.of("a", "b", "c");
         final Set<String> union = union(TreeSet::new, oneSet);
 
-        assertEquals(mkSet("a", "b", "c"), union);
+        assertEquals(Set.of("a", "b", "c"), union);
         assertEquals(TreeSet.class, union.getClass());
     }
 
     @Test
     public void testUnionOfMany() {
-        final Set<String> oneSet = mkSet("a", "b", "c");
-        final Set<String> twoSet = mkSet("c", "d", "e");
-        final Set<String> threeSet = mkSet("b", "c", "d");
-        final Set<String> fourSet = mkSet("x", "y", "z");
+        final Set<String> oneSet = Set.of("a", "b", "c");
+        final Set<String> twoSet = Set.of("c", "d", "e");
+        final Set<String> threeSet = Set.of("b", "c", "d");
+        final Set<String> fourSet = Set.of("x", "y", "z");
         final Set<String> union = union(TreeSet::new, oneSet, twoSet, threeSet, fourSet);
 
-        assertEquals(mkSet("a", "b", "c", "d", "e", "x", "y", "z"), union);
+        assertEquals(Set.of("a", "b", "c", "d", "e", "x", "y", "z"), union);
         assertEquals(TreeSet.class, union.getClass());
     }
 
@@ -678,40 +829,40 @@ public class UtilsTest {
 
     @Test
     public void testIntersection() {
-        final Set<String> oneSet = mkSet("a", "b", "c");
-        final Set<String> anotherSet = mkSet("c", "d", "e");
+        final Set<String> oneSet = Set.of("a", "b", "c");
+        final Set<String> anotherSet = Set.of("c", "d", "e");
         final Set<String> intersection = intersection(TreeSet::new, oneSet, anotherSet);
 
-        assertEquals(mkSet("c"), intersection);
+        assertEquals(Set.of("c"), intersection);
         assertEquals(TreeSet.class, intersection.getClass());
     }
 
     @Test
     public void testIntersectionOfOne() {
-        final Set<String> oneSet = mkSet("a", "b", "c");
+        final Set<String> oneSet = Set.of("a", "b", "c");
         final Set<String> intersection = intersection(TreeSet::new, oneSet);
 
-        assertEquals(mkSet("a", "b", "c"), intersection);
+        assertEquals(Set.of("a", "b", "c"), intersection);
         assertEquals(TreeSet.class, intersection.getClass());
     }
 
     @Test
     public void testIntersectionOfMany() {
-        final Set<String> oneSet = mkSet("a", "b", "c");
-        final Set<String> twoSet = mkSet("c", "d", "e");
-        final Set<String> threeSet = mkSet("b", "c", "d");
+        final Set<String> oneSet = Set.of("a", "b", "c");
+        final Set<String> twoSet = Set.of("c", "d", "e");
+        final Set<String> threeSet = Set.of("b", "c", "d");
         final Set<String> intersection = intersection(TreeSet::new, oneSet, twoSet, threeSet);
 
-        assertEquals(mkSet("c"), intersection);
+        assertEquals(Set.of("c"), intersection);
         assertEquals(TreeSet.class, intersection.getClass());
     }
 
     @Test
     public void testDisjointIntersectionOfMany() {
-        final Set<String> oneSet = mkSet("a", "b", "c");
-        final Set<String> twoSet = mkSet("c", "d", "e");
-        final Set<String> threeSet = mkSet("b", "c", "d");
-        final Set<String> fourSet = mkSet("x", "y", "z");
+        final Set<String> oneSet = Set.of("a", "b", "c");
+        final Set<String> twoSet = Set.of("c", "d", "e");
+        final Set<String> threeSet = Set.of("b", "c", "d");
+        final Set<String> fourSet = Set.of("x", "y", "z");
         final Set<String> intersection = intersection(TreeSet::new, oneSet, twoSet, threeSet, fourSet);
 
         assertEquals(emptySet(), intersection);
@@ -720,11 +871,11 @@ public class UtilsTest {
 
     @Test
     public void testDiff() {
-        final Set<String> oneSet = mkSet("a", "b", "c");
-        final Set<String> anotherSet = mkSet("c", "d", "e");
+        final Set<String> oneSet = Set.of("a", "b", "c");
+        final Set<String> anotherSet = Set.of("c", "d", "e");
         final Set<String> diff = diff(TreeSet::new, oneSet, anotherSet);
 
-        assertEquals(mkSet("a", "b"), diff);
+        assertEquals(Set.of("a", "b"), diff);
         assertEquals(TreeSet.class, diff.getClass());
     }
 
@@ -778,44 +929,48 @@ public class UtilsTest {
     public void shouldThrowOnInvalidDateFormatOrNullTimestamp() {
         // check some invalid formats
         // test null timestamp
-        assertTrue(assertThrows(IllegalArgumentException.class, () -> {
-            Utils.getDateTime(null);
-        }).getMessage().contains("Error parsing timestamp with null value"));
+        assertTrue(assertThrows(IllegalArgumentException.class, () ->
+            Utils.getDateTime(null)
+        ).getMessage().contains("Error parsing timestamp with null value"));
 
         // test pattern: yyyy-MM-dd'T'HH:mm:ss.X
-        checkExceptionForGetDateTimeMethod(() -> {
-            invokeGetDateTimeMethod(new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.X"));
-        });
+        checkExceptionForGetDateTimeMethod(() ->
+            invokeGetDateTimeMethod(new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.X"))
+        );
 
         // test pattern: yyyy-MM-dd HH:mm:ss
-        assertTrue(assertThrows(ParseException.class, () -> {
-            invokeGetDateTimeMethod(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss"));
-        }).getMessage().contains("It does not contain a 'T' according to ISO8601 format"));
+        assertTrue(assertThrows(ParseException.class, () ->
+            invokeGetDateTimeMethod(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss"))
+        ).getMessage().contains("It does not contain a 'T' according to ISO8601 format"));
 
         // KAFKA-10685: use DateTimeFormatter generate micro/nano second timestamp
-        final DateTimeFormatter formatter = new DateTimeFormatterBuilder().appendPattern("yyyy-MM-dd'T'HH:mm:ss").appendFraction(ChronoField.NANO_OF_SECOND, 0, 9, true).toFormatter();
+        final DateTimeFormatter formatter = new DateTimeFormatterBuilder()
+            .appendPattern("yyyy-MM-dd'T'HH:mm:ss")
+            .appendFraction(ChronoField.NANO_OF_SECOND, 0, 9, true)
+            .toFormatter();
         final LocalDateTime timestampWithNanoSeconds = LocalDateTime.of(2020, 11, 9, 12, 34, 56, 123456789);
         final LocalDateTime timestampWithMicroSeconds = timestampWithNanoSeconds.truncatedTo(ChronoUnit.MICROS);
         final LocalDateTime timestampWithSeconds = timestampWithNanoSeconds.truncatedTo(ChronoUnit.SECONDS);
 
         // test pattern: yyyy-MM-dd'T'HH:mm:ss.SSSSSSSSS
-        checkExceptionForGetDateTimeMethod(() -> {
-            Utils.getDateTime(formatter.format(timestampWithNanoSeconds));
-        });
+        checkExceptionForGetDateTimeMethod(() ->
+            Utils.getDateTime(formatter.format(timestampWithNanoSeconds))
+        );
 
         // test pattern: yyyy-MM-dd'T'HH:mm:ss.SSSSSS
-        checkExceptionForGetDateTimeMethod(() -> {
-            Utils.getDateTime(formatter.format(timestampWithMicroSeconds));
-        });
+        checkExceptionForGetDateTimeMethod(() ->
+            Utils.getDateTime(formatter.format(timestampWithMicroSeconds))
+        );
 
         // test pattern: yyyy-MM-dd'T'HH:mm:ss
-        checkExceptionForGetDateTimeMethod(() -> {
-            Utils.getDateTime(formatter.format(timestampWithSeconds));
-        });
+        checkExceptionForGetDateTimeMethod(() ->
+            Utils.getDateTime(formatter.format(timestampWithSeconds))
+        );
     }
 
     private void checkExceptionForGetDateTimeMethod(Executable executable) {
-        assertTrue(assertThrows(ParseException.class, executable).getMessage().contains("Unparseable date"));
+        assertTrue(assertThrows(ParseException.class, executable)
+            .getMessage().contains("Unparseable date"));
     }
 
     private void invokeGetDateTimeMethod(final SimpleDateFormat format) throws ParseException {
@@ -913,4 +1068,79 @@ public class UtilsTest {
         assertEquals(expected, actual);
     }
 
+    @Test
+    public void testTryAll() throws Throwable {
+        Map<String, Object> recorded = new HashMap<>();
+
+        Utils.tryAll(asList(
+            recordingCallable(recorded, "valid-0", null),
+            recordingCallable(recorded, null, new TestException("exception-1")),
+            recordingCallable(recorded, "valid-2", null),
+            recordingCallable(recorded, null, new TestException("exception-3"))
+        ));
+        Map<String, Object> expected = Utils.mkMap(
+            mkEntry("valid-0", "valid-0"),
+            mkEntry("exception-1", new TestException("exception-1")),
+            mkEntry("valid-2", "valid-2"),
+            mkEntry("exception-3", new TestException("exception-3"))
+        );
+        assertEquals(expected, recorded);
+
+        recorded.clear();
+        Utils.tryAll(asList(
+            recordingCallable(recorded, "valid-0", null),
+            recordingCallable(recorded, "valid-1", null)
+        ));
+        expected = Utils.mkMap(
+            mkEntry("valid-0", "valid-0"),
+            mkEntry("valid-1", "valid-1")
+        );
+        assertEquals(expected, recorded);
+
+        recorded.clear();
+        Utils.tryAll(asList(
+            recordingCallable(recorded, null, new TestException("exception-0")),
+            recordingCallable(recorded, null, new TestException("exception-1")))
+        );
+        expected = Utils.mkMap(
+            mkEntry("exception-0", new TestException("exception-0")),
+            mkEntry("exception-1", new TestException("exception-1"))
+        );
+        assertEquals(expected, recorded);
+    }
+
+    private Callable<Void> recordingCallable(Map<String, Object> recordingMap, String success, TestException failure) {
+        return () -> {
+            if (success == null)
+                recordingMap.put(failure.key, failure);
+            else if (failure == null)
+                recordingMap.put(success, success);
+            else
+                throw new IllegalArgumentException("Either `success` or `failure` must be null, but both are non-null.");
+
+            return null;
+        };
+    }
+
+    private static class TestException extends Exception {
+        final String key;
+        TestException(String key) {
+            this.key = key;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
+            TestException that = (TestException) o;
+            return key.equals(that.key);
+        }
+
+        @Override
+        public int hashCode() {
+            return key.hashCode();
+        }
+    }
 }

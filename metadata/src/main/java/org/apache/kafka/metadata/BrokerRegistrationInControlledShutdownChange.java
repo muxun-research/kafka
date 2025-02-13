@@ -27,13 +27,16 @@ public enum BrokerRegistrationInControlledShutdownChange {
     // Note that Optional.of(true) is not a valid state change here. The only
     // way to leave the in controlled shutdown state is by registering the
     // broker with a new incarnation id.
-    NONE(0, Optional.empty()), IN_CONTROLLED_SHUTDOWN(1, Optional.of(true));
+    NONE(0, Optional.empty()),
+    IN_CONTROLLED_SHUTDOWN(1, Optional.of(true));
 
     private final byte value;
 
     private final Optional<Boolean> asBoolean;
 
-    private final static Map<Byte, BrokerRegistrationInControlledShutdownChange> VALUE_TO_ENUM = Arrays.stream(BrokerRegistrationInControlledShutdownChange.values()).collect(Collectors.toMap(v -> Byte.valueOf(v.value()), Function.identity()));
+    private static final Map<Byte, BrokerRegistrationInControlledShutdownChange> VALUE_TO_ENUM =
+        Arrays.stream(BrokerRegistrationInControlledShutdownChange.values()).
+            collect(Collectors.toMap(v -> v.value(), Function.identity()));
 
     public static Optional<BrokerRegistrationInControlledShutdownChange> fromValue(byte value) {
         return Optional.ofNullable(VALUE_TO_ENUM.get(value));

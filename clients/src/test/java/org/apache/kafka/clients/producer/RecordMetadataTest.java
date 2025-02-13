@@ -17,6 +17,7 @@
 package org.apache.kafka.clients.producer;
 
 import org.apache.kafka.common.TopicPartition;
+
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -24,67 +25,38 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 public class RecordMetadataTest {
 
-	@Test
-	public void testConstructionWithMissingBatchIndex() {
-		TopicPartition tp = new TopicPartition("foo", 0);
-		long timestamp = 2340234L;
-		int keySize = 3;
-		int valueSize = 5;
+    @Test
+    public void testConstructionWithMissingBatchIndex() {
+        TopicPartition tp = new TopicPartition("foo", 0);
+        long timestamp = 2340234L;
+        int keySize = 3;
+        int valueSize = 5;
 
-		RecordMetadata metadata = new RecordMetadata(tp, -1L, -1, timestamp, keySize, valueSize);
-		assertEquals(tp.topic(), metadata.topic());
-		assertEquals(tp.partition(), metadata.partition());
-		assertEquals(timestamp, metadata.timestamp());
-		assertFalse(metadata.hasOffset());
+        RecordMetadata metadata = new RecordMetadata(tp, -1L, -1, timestamp, keySize, valueSize);
+        assertEquals(tp.topic(), metadata.topic());
+        assertEquals(tp.partition(), metadata.partition());
+        assertEquals(timestamp, metadata.timestamp());
+        assertFalse(metadata.hasOffset());
         assertEquals(-1L, metadata.offset());
         assertEquals(keySize, metadata.serializedKeySize());
         assertEquals(valueSize, metadata.serializedValueSize());
     }
 
-	@Test
-	public void testConstructionWithBatchIndexOffset() {
-		TopicPartition tp = new TopicPartition("foo", 0);
-		long timestamp = 2340234L;
-		int keySize = 3;
-		int valueSize = 5;
-		long baseOffset = 15L;
-		int batchIndex = 3;
+    @Test
+    public void testConstructionWithBatchIndexOffset() {
+        TopicPartition tp = new TopicPartition("foo", 0);
+        long timestamp = 2340234L;
+        int keySize = 3;
+        int valueSize = 5;
+        long baseOffset = 15L;
+        int batchIndex = 3;
 
-		RecordMetadata metadata = new RecordMetadata(tp, baseOffset, batchIndex, timestamp, keySize, valueSize);
-		assertEquals(tp.topic(), metadata.topic());
-		assertEquals(tp.partition(), metadata.partition());
-		assertEquals(timestamp, metadata.timestamp());
-		assertEquals(baseOffset + batchIndex, metadata.offset());
-		assertEquals(keySize, metadata.serializedKeySize());
+        RecordMetadata metadata = new RecordMetadata(tp, baseOffset, batchIndex, timestamp, keySize, valueSize);
+        assertEquals(tp.topic(), metadata.topic());
+        assertEquals(tp.partition(), metadata.partition());
+        assertEquals(timestamp, metadata.timestamp());
+        assertEquals(baseOffset + batchIndex, metadata.offset());
+        assertEquals(keySize, metadata.serializedKeySize());
         assertEquals(valueSize, metadata.serializedValueSize());
     }
-
-	@Test
-	@Deprecated
-	public void testConstructionWithChecksum() {
-		TopicPartition tp = new TopicPartition("foo", 0);
-		long timestamp = 2340234L;
-		long baseOffset = 15L;
-		long batchIndex = 3L;
-		int keySize = 3;
-		int valueSize = 5;
-
-		RecordMetadata metadata = new RecordMetadata(tp, baseOffset, batchIndex, timestamp, null, keySize, valueSize);
-		assertEquals(tp.topic(), metadata.topic());
-		assertEquals(tp.partition(), metadata.partition());
-		assertEquals(timestamp, metadata.timestamp());
-		assertEquals(baseOffset + batchIndex, metadata.offset());
-		assertEquals(keySize, metadata.serializedKeySize());
-		assertEquals(valueSize, metadata.serializedValueSize());
-
-		long checksum = 133424L;
-		metadata = new RecordMetadata(tp, baseOffset, batchIndex, timestamp, checksum, keySize, valueSize);
-		assertEquals(tp.topic(), metadata.topic());
-		assertEquals(tp.partition(), metadata.partition());
-		assertEquals(timestamp, metadata.timestamp());
-		assertEquals(baseOffset + batchIndex, metadata.offset());
-		assertEquals(keySize, metadata.serializedKeySize());
-		assertEquals(valueSize, metadata.serializedValueSize());
-	}
-
 }

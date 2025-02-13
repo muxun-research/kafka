@@ -23,10 +23,10 @@ import java.util.Objects;
 
 /**
  * This is a mutable reference to an immutable object. It can be snapshotted.
- * <p>
+ * <br>
  * This class requires external synchronization.
  */
-public class TimelineObject<T> implements Revertable {
+public final class TimelineObject<T> implements Revertable {
     static class ObjectContainer<T> implements Delta {
         private T value;
 
@@ -65,14 +65,12 @@ public class TimelineObject<T> implements Revertable {
     }
 
     public T get(long epoch) {
-        if (epoch == SnapshotRegistry.LATEST_EPOCH)
-            return value;
+        if (epoch == SnapshotRegistry.LATEST_EPOCH) return value;
         Iterator<Snapshot> iterator = snapshotRegistry.iterator(epoch);
         while (iterator.hasNext()) {
             Snapshot snapshot = iterator.next();
             ObjectContainer<T> container = snapshot.getDelta(TimelineObject.this);
-            if (container != null)
-                return container.value();
+            if (container != null) return container.value();
         }
         return value;
     }
@@ -111,9 +109,7 @@ public class TimelineObject<T> implements Revertable {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof TimelineObject))
-            return false;
-        TimelineObject other = (TimelineObject) o;
+        if (!(o instanceof TimelineObject other)) return false;
         return value.equals(other.value);
     }
 

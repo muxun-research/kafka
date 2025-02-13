@@ -20,6 +20,7 @@ package org.apache.kafka.image.node.printer;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.metadata.KafkaConfigSchema;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -62,6 +63,21 @@ public class MetadataNodeRedactionCriteriaTest {
     @Test
     public void testDisabledDoesNotRedactScram() {
         assertFalse(DISABLED.shouldRedactScram());
+    }
+
+    @Test
+    public void testStrictRedactsDelegationToken() {
+        assertTrue(STRICT.shouldRedactDelegationToken());
+    }
+
+    @Test
+    public void testNormalRedactsDelegationToken() {
+        assertTrue(NORMAL.shouldRedactDelegationToken());
+    }
+
+    @Test
+    public void testDisabledDoesNotRedactDelegationToken() {
+        assertFalse(DISABLED.shouldRedactDelegationToken());
     }
 
     @Test

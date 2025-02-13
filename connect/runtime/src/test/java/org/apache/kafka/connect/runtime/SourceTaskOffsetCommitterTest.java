@@ -21,24 +21,36 @@ import org.apache.kafka.common.utils.ThreadUtils;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.runtime.standalone.StandaloneConfig;
 import org.apache.kafka.connect.util.ConnectorTaskId;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
-import org.mockito.junit.MockitoJUnitRunner;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.*;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import static java.util.Collections.singletonMap;
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@RunWith(MockitoJUnitRunner.StrictStubs.class)
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)
 public class SourceTaskOffsetCommitterTest {
 
     private final ConcurrentHashMap<ConnectorTaskId, ScheduledFuture<?>> committers = new ConcurrentHashMap<>();
@@ -58,7 +70,7 @@ public class SourceTaskOffsetCommitterTest {
 
     private static final long DEFAULT_OFFSET_COMMIT_INTERVAL_MS = 1000;
 
-    @Before
+    @BeforeEach
     public void setup() {
         Map<String, String> workerProps = new HashMap<>();
         workerProps.put("key.converter", "org.apache.kafka.connect.json.JsonConverter");
@@ -75,7 +87,10 @@ public class SourceTaskOffsetCommitterTest {
     public void testSchedule() {
         ArgumentCaptor<Runnable> taskWrapper = ArgumentCaptor.forClass(Runnable.class);
 
-        when(executor.scheduleWithFixedDelay(taskWrapper.capture(), eq(DEFAULT_OFFSET_COMMIT_INTERVAL_MS), eq(DEFAULT_OFFSET_COMMIT_INTERVAL_MS), eq(TimeUnit.MILLISECONDS))).thenReturn((ScheduledFuture) commitFuture);
+        when(executor.scheduleWithFixedDelay(
+                taskWrapper.capture(), eq(DEFAULT_OFFSET_COMMIT_INTERVAL_MS),
+                eq(DEFAULT_OFFSET_COMMIT_INTERVAL_MS), eq(TimeUnit.MILLISECONDS))
+        ).thenReturn((ScheduledFuture) commitFuture);
 
         committer.schedule(taskId, task);
         assertNotNull(taskWrapper.getValue());
@@ -131,7 +146,7 @@ public class SourceTaskOffsetCommitterTest {
 
         committers.put(taskId, taskFuture);
         try (LogCaptureAppender logCaptureAppender = LogCaptureAppender.createAndRegister(SourceTaskOffsetCommitter.class)) {
-            LogCaptureAppender.setClassLoggerToTrace(SourceTaskOffsetCommitter.class);
+            logCaptureAppender.setClassLogger(SourceTaskOffsetCommitter.class, org.apache.logging.log4j.Level.TRACE);
             committer.remove(taskId);
             assertTrue(logCaptureAppender.getEvents().stream().anyMatch(e -> e.getLevel().equals("TRACE")));
         }

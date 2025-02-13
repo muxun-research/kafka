@@ -24,15 +24,18 @@ import org.apache.kafka.streams.errors.ProcessorStateException;
 import org.apache.kafka.streams.kstream.Windowed;
 import org.apache.kafka.streams.kstream.internals.Change;
 import org.apache.kafka.streams.kstream.internals.WrappingNullableUtils;
-import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.processor.TaskId;
 import org.apache.kafka.streams.processor.internals.InternalProcessorContext;
 import org.apache.kafka.streams.processor.internals.ProcessorContextUtils;
-import org.apache.kafka.streams.processor.internals.SerdeGetter;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
-import org.apache.kafka.streams.query.*;
+import org.apache.kafka.streams.query.FailureReason;
+import org.apache.kafka.streams.query.PositionBound;
+import org.apache.kafka.streams.query.Query;
+import org.apache.kafka.streams.query.QueryConfig;
+import org.apache.kafka.streams.query.QueryResult;
+import org.apache.kafka.streams.query.WindowRangeQuery;
 import org.apache.kafka.streams.query.internals.InternalQueryResultUtil;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.SessionStore;
@@ -40,14 +43,21 @@ import org.apache.kafka.streams.state.StateSerdes;
 import org.apache.kafka.streams.state.internals.StoreQueryUtils.QueryHandler;
 import org.apache.kafka.streams.state.internals.metrics.StateStoreMetrics;
 
+import java.util.Comparator;
+import java.util.Iterator;
 import java.util.Map;
+import java.util.NavigableSet;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.atomic.LongAdder;
 
 import static org.apache.kafka.common.utils.Utils.mkEntry;
 import static org.apache.kafka.common.utils.Utils.mkMap;
 import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.maybeMeasureLatency;
 
-public class MeteredSessionStore<K, V> extends WrappedStateStore<SessionStore<Bytes, byte[]>, Windowed<K>, V> implements SessionStore<K, V> {
+public class MeteredSessionStore<K, V>
+    extends WrappedStateStore<SessionStore<Bytes, byte[]>, Windowed<K>, V>
+    implements SessionStore<K, V> {
 
     private final String metricsScope;
     private final Serde<K> keySerde;
@@ -60,14 +70,28 @@ public class MeteredSessionStore<K, V> extends WrappedStateStore<SessionStore<By
     private Sensor flushSensor;
     private Sensor removeSensor;
     private Sensor e2eLatencySensor;
-    private InternalProcessorContext<?, ?> context;
+    private Sensor iteratorDurationSensor;
+    private InternalProcessorContext<?, ?> internalContext;
     private TaskId taskId;
 
+    private final LongAdder numOpenIterators = new LongAdder();
+    private final NavigableSet<MeteredIterator> openIterators = new ConcurrentSkipListSet<>(Comparator.comparingLong(MeteredIterator::startTimestamp));
+
     @SuppressWarnings("rawtypes")
-    private final Map<Class, QueryHandler> queryHandlers = mkMap(mkEntry(WindowRangeQuery.class, (query, positionBound, config, store) -> runRangeQuery(query, positionBound, config)));
+    private final Map<Class, QueryHandler> queryHandlers =
+            mkMap(
+                    mkEntry(
+                            WindowRangeQuery.class,
+                            (query, positionBound, config, store) -> runRangeQuery(query, positionBound, config)
+                    )
+            );
 
 
-    MeteredSessionStore(final SessionStore<Bytes, byte[]> inner, final String metricsScope, final Serde<K> keySerde, final Serde<V> valueSerde, final Time time) {
+    MeteredSessionStore(final SessionStore<Bytes, byte[]> inner,
+                        final String metricsScope,
+                        final Serde<K> keySerde,
+                        final Serde<V> valueSerde,
+                        final Time time) {
         super(inner);
         this.metricsScope = metricsScope;
         this.keySerde = keySerde;
@@ -75,33 +99,20 @@ public class MeteredSessionStore<K, V> extends WrappedStateStore<SessionStore<By
         this.time = time;
     }
 
-    @Deprecated
     @Override
-    public void init(final ProcessorContext context, final StateStore root) {
-        this.context = context instanceof InternalProcessorContext ? (InternalProcessorContext<?, ?>) context : null;
-        taskId = context.taskId();
-        initStoreSerde(context);
-        streamsMetrics = (StreamsMetricsImpl) context.metrics();
+    public void init(final StateStoreContext stateStoreContext,
+                     final StateStore root) {
+        internalContext = stateStoreContext instanceof InternalProcessorContext ? (InternalProcessorContext<?, ?>) stateStoreContext : null;
+        taskId = stateStoreContext.taskId();
+        initStoreSerde(stateStoreContext);
+        streamsMetrics = (StreamsMetricsImpl) stateStoreContext.metrics();
 
         registerMetrics();
-        final Sensor restoreSensor = StateStoreMetrics.restoreSensor(taskId.toString(), metricsScope, name(), streamsMetrics);
+        final Sensor restoreSensor =
+            StateStoreMetrics.restoreSensor(taskId.toString(), metricsScope, name(), streamsMetrics);
 
         // register and possibly restore the state from the logs
-        maybeMeasureLatency(() -> super.init(context, root), time, restoreSensor);
-    }
-
-    @Override
-    public void init(final StateStoreContext context, final StateStore root) {
-        this.context = context instanceof InternalProcessorContext ? (InternalProcessorContext<?, ?>) context : null;
-        taskId = context.taskId();
-        initStoreSerde(context);
-        streamsMetrics = (StreamsMetricsImpl) context.metrics();
-
-        registerMetrics();
-        final Sensor restoreSensor = StateStoreMetrics.restoreSensor(taskId.toString(), metricsScope, name(), streamsMetrics);
-
-        // register and possibly restore the state from the logs
-        maybeMeasureLatency(() -> super.init(context, root), time, restoreSensor);
+        maybeMeasureLatency(() -> super.init(stateStoreContext, root), time, restoreSensor);
     }
 
     private void registerMetrics() {
@@ -110,42 +121,60 @@ public class MeteredSessionStore<K, V> extends WrappedStateStore<SessionStore<By
         flushSensor = StateStoreMetrics.flushSensor(taskId.toString(), metricsScope, name(), streamsMetrics);
         removeSensor = StateStoreMetrics.removeSensor(taskId.toString(), metricsScope, name(), streamsMetrics);
         e2eLatencySensor = StateStoreMetrics.e2ELatencySensor(taskId.toString(), metricsScope, name(), streamsMetrics);
-    }
-
-
-    private void initStoreSerde(final ProcessorContext context) {
-        final String storeName = name();
-        final String changelogTopic = ProcessorContextUtils.changelogFor(context, storeName, Boolean.FALSE);
-        serdes = new StateSerdes<>(changelogTopic, WrappingNullableUtils.prepareKeySerde(keySerde, new SerdeGetter(context)), WrappingNullableUtils.prepareValueSerde(valueSerde, new SerdeGetter(context)));
+        iteratorDurationSensor = StateStoreMetrics.iteratorDurationSensor(taskId.toString(), metricsScope, name(), streamsMetrics);
+        StateStoreMetrics.addNumOpenIteratorsGauge(taskId.toString(), metricsScope, name(), streamsMetrics,
+                (config, now) -> numOpenIterators.sum());
+        StateStoreMetrics.addOldestOpenIteratorGauge(taskId.toString(), metricsScope, name(), streamsMetrics,
+                (config, now) -> {
+                    final Iterator<MeteredIterator> openIteratorsIterator = openIterators.iterator();
+                    return openIteratorsIterator.hasNext() ? openIteratorsIterator.next().startTimestamp() : null;
+                }
+        );
     }
 
     private void initStoreSerde(final StateStoreContext context) {
         final String storeName = name();
         final String changelogTopic = ProcessorContextUtils.changelogFor(context, storeName, Boolean.FALSE);
-        serdes = new StateSerdes<>(changelogTopic, WrappingNullableUtils.prepareKeySerde(keySerde, new SerdeGetter(context)), WrappingNullableUtils.prepareValueSerde(valueSerde, new SerdeGetter(context)));
+        serdes = StoreSerdeInitializer.prepareStoreSerde(
+            context, storeName, changelogTopic, keySerde, valueSerde, WrappingNullableUtils::prepareValueSerde);
     }
 
     @SuppressWarnings("unchecked")
     @Override
-    public boolean setFlushListener(final CacheFlushListener<Windowed<K>, V> listener, final boolean sendOldValues) {
+    public boolean setFlushListener(final CacheFlushListener<Windowed<K>, V> listener,
+                                    final boolean sendOldValues) {
         final SessionStore<Bytes, byte[]> wrapped = wrapped();
         if (wrapped instanceof CachedStateStore) {
-            return ((CachedStateStore<byte[], byte[]>) wrapped).setFlushListener(record -> listener.apply(record.withKey(SessionKeySchema.from(record.key(), serdes.keyDeserializer(), serdes.topic())).withValue(new Change<>(record.value().newValue != null ? serdes.valueFrom(record.value().newValue) : null, record.value().oldValue != null ? serdes.valueFrom(record.value().oldValue) : null, record.value().isLatest))), sendOldValues);
+            return ((CachedStateStore<byte[], byte[]>) wrapped).setFlushListener(
+                record -> listener.apply(
+                    record.withKey(SessionKeySchema.from(record.key(), serdes.keyDeserializer(), serdes.topic()))
+                        .withValue(new Change<>(
+                            record.value().newValue != null ? serdes.valueFrom(record.value().newValue) : null,
+                            record.value().oldValue != null ? serdes.valueFrom(record.value().oldValue) : null,
+                            record.value().isLatest
+                        ))
+                ),
+                sendOldValues);
         }
         return false;
     }
 
     @Override
-    public void put(final Windowed<K> sessionKey, final V aggregate) {
+    public void put(final Windowed<K> sessionKey,
+                    final V aggregate) {
         Objects.requireNonNull(sessionKey, "sessionKey can't be null");
         Objects.requireNonNull(sessionKey.key(), "sessionKey.key() can't be null");
         Objects.requireNonNull(sessionKey.window(), "sessionKey.window() can't be null");
 
         try {
-            maybeMeasureLatency(() -> {
-                final Bytes key = keyBytes(sessionKey.key());
-                wrapped().put(new Windowed<>(key, sessionKey.window()), serdes.rawValue(aggregate));
-            }, time, putSensor);
+            maybeMeasureLatency(
+                () -> {
+                    final Bytes key = keyBytes(sessionKey.key());
+                    wrapped().put(new Windowed<>(key, sessionKey.window()), serdes.rawValue(aggregate));
+                },
+                time,
+                putSensor
+            );
             maybeRecordE2ELatency();
         } catch (final ProcessorStateException e) {
             final String message = String.format(e.getMessage(), sessionKey.key(), aggregate);
@@ -160,10 +189,14 @@ public class MeteredSessionStore<K, V> extends WrappedStateStore<SessionStore<By
         Objects.requireNonNull(sessionKey.window(), "sessionKey.window() can't be null");
 
         try {
-            maybeMeasureLatency(() -> {
-                final Bytes key = keyBytes(sessionKey.key());
-                wrapped().remove(new Windowed<>(key, sessionKey.window()));
-            }, time, removeSensor);
+            maybeMeasureLatency(
+                () -> {
+                    final Bytes key = keyBytes(sessionKey.key());
+                    wrapped().remove(new Windowed<>(key, sessionKey.window()));
+                },
+                time,
+                removeSensor
+            );
         } catch (final ProcessorStateException e) {
             final String message = String.format(e.getMessage(), sessionKey.key());
             throw new ProcessorStateException(message, e);
@@ -173,69 +206,191 @@ public class MeteredSessionStore<K, V> extends WrappedStateStore<SessionStore<By
     @Override
     public V fetchSession(final K key, final long earliestSessionEndTime, final long latestSessionStartTime) {
         Objects.requireNonNull(key, "key cannot be null");
-        return maybeMeasureLatency(() -> {
-            final Bytes bytesKey = keyBytes(key);
-            final byte[] result = wrapped().fetchSession(bytesKey, earliestSessionEndTime, latestSessionStartTime);
-            if (result == null) {
-                return null;
-            }
-            return serdes.valueFrom(result);
-        }, time, fetchSensor);
+        return maybeMeasureLatency(
+            () -> {
+                final Bytes bytesKey = keyBytes(key);
+                final byte[] result = wrapped().fetchSession(
+                    bytesKey,
+                    earliestSessionEndTime,
+                    latestSessionStartTime
+                );
+                if (result == null) {
+                    return null;
+                }
+                return serdes.valueFrom(result);
+            },
+            time,
+            fetchSensor
+        );
     }
 
     @Override
     public KeyValueIterator<Windowed<K>, V> fetch(final K key) {
         Objects.requireNonNull(key, "key cannot be null");
-        return new MeteredWindowedKeyValueIterator<>(wrapped().fetch(keyBytes(key)), fetchSensor, streamsMetrics, serdes::keyFrom, serdes::valueFrom, time);
+        return new MeteredWindowedKeyValueIterator<>(
+            wrapped().fetch(keyBytes(key)),
+            fetchSensor,
+            iteratorDurationSensor,
+            streamsMetrics,
+            serdes::keyFrom,
+            serdes::valueFrom,
+            time,
+            numOpenIterators,
+            openIterators);
     }
 
     @Override
     public KeyValueIterator<Windowed<K>, V> backwardFetch(final K key) {
         Objects.requireNonNull(key, "key cannot be null");
-        return new MeteredWindowedKeyValueIterator<>(wrapped().backwardFetch(keyBytes(key)), fetchSensor, streamsMetrics, serdes::keyFrom, serdes::valueFrom, time);
+        return new MeteredWindowedKeyValueIterator<>(
+            wrapped().backwardFetch(keyBytes(key)),
+            fetchSensor,
+            iteratorDurationSensor,
+            streamsMetrics,
+            serdes::keyFrom,
+            serdes::valueFrom,
+            time,
+            numOpenIterators,
+            openIterators
+        );
     }
 
     @Override
-    public KeyValueIterator<Windowed<K>, V> fetch(final K keyFrom, final K keyTo) {
-        return new MeteredWindowedKeyValueIterator<>(wrapped().fetch(keyBytes(keyFrom), keyBytes(keyTo)), fetchSensor, streamsMetrics, serdes::keyFrom, serdes::valueFrom, time);
+    public KeyValueIterator<Windowed<K>, V> fetch(final K keyFrom,
+                                                  final K keyTo) {
+        return new MeteredWindowedKeyValueIterator<>(
+            wrapped().fetch(keyBytes(keyFrom), keyBytes(keyTo)),
+            fetchSensor,
+            iteratorDurationSensor,
+            streamsMetrics,
+            serdes::keyFrom,
+            serdes::valueFrom,
+            time,
+            numOpenIterators,
+            openIterators);
     }
 
     @Override
-    public KeyValueIterator<Windowed<K>, V> backwardFetch(final K keyFrom, final K keyTo) {
-        return new MeteredWindowedKeyValueIterator<>(wrapped().backwardFetch(keyBytes(keyFrom), keyBytes(keyTo)), fetchSensor, streamsMetrics, serdes::keyFrom, serdes::valueFrom, time);
+    public KeyValueIterator<Windowed<K>, V> backwardFetch(final K keyFrom,
+                                                          final K keyTo) {
+        return new MeteredWindowedKeyValueIterator<>(
+            wrapped().backwardFetch(keyBytes(keyFrom), keyBytes(keyTo)),
+            fetchSensor,
+            iteratorDurationSensor,
+            streamsMetrics,
+            serdes::keyFrom,
+            serdes::valueFrom,
+            time,
+            numOpenIterators,
+            openIterators
+        );
     }
 
     @Override
-    public KeyValueIterator<Windowed<K>, V> findSessions(final K key, final long earliestSessionEndTime, final long latestSessionStartTime) {
+    public KeyValueIterator<Windowed<K>, V> findSessions(final K key,
+                                                         final long earliestSessionEndTime,
+                                                         final long latestSessionStartTime) {
         Objects.requireNonNull(key, "key cannot be null");
         final Bytes bytesKey = keyBytes(key);
-        return new MeteredWindowedKeyValueIterator<>(wrapped().findSessions(bytesKey, earliestSessionEndTime, latestSessionStartTime), fetchSensor, streamsMetrics, serdes::keyFrom, serdes::valueFrom, time);
+        return new MeteredWindowedKeyValueIterator<>(
+            wrapped().findSessions(
+                bytesKey,
+                earliestSessionEndTime,
+                latestSessionStartTime),
+            fetchSensor,
+            iteratorDurationSensor,
+            streamsMetrics,
+            serdes::keyFrom,
+            serdes::valueFrom,
+            time,
+            numOpenIterators,
+            openIterators);
     }
 
     @Override
-    public KeyValueIterator<Windowed<K>, V> backwardFindSessions(final K key, final long earliestSessionEndTime, final long latestSessionStartTime) {
+    public KeyValueIterator<Windowed<K>, V> backwardFindSessions(final K key,
+                                                                 final long earliestSessionEndTime,
+                                                                 final long latestSessionStartTime) {
         Objects.requireNonNull(key, "key cannot be null");
         final Bytes bytesKey = keyBytes(key);
-        return new MeteredWindowedKeyValueIterator<>(wrapped().backwardFindSessions(bytesKey, earliestSessionEndTime, latestSessionStartTime), fetchSensor, streamsMetrics, serdes::keyFrom, serdes::valueFrom, time);
+        return new MeteredWindowedKeyValueIterator<>(
+            wrapped().backwardFindSessions(
+                bytesKey,
+                earliestSessionEndTime,
+                latestSessionStartTime
+            ),
+            fetchSensor,
+            iteratorDurationSensor,
+            streamsMetrics,
+            serdes::keyFrom,
+            serdes::valueFrom,
+            time,
+            numOpenIterators,
+            openIterators
+        );
     }
 
     @Override
-    public KeyValueIterator<Windowed<K>, V> findSessions(final K keyFrom, final K keyTo, final long earliestSessionEndTime, final long latestSessionStartTime) {
+    public KeyValueIterator<Windowed<K>, V> findSessions(final K keyFrom,
+                                                         final K keyTo,
+                                                         final long earliestSessionEndTime,
+                                                         final long latestSessionStartTime) {
         final Bytes bytesKeyFrom = keyBytes(keyFrom);
         final Bytes bytesKeyTo = keyBytes(keyTo);
-        return new MeteredWindowedKeyValueIterator<>(wrapped().findSessions(bytesKeyFrom, bytesKeyTo, earliestSessionEndTime, latestSessionStartTime), fetchSensor, streamsMetrics, serdes::keyFrom, serdes::valueFrom, time);
+        return new MeteredWindowedKeyValueIterator<>(
+            wrapped().findSessions(
+                bytesKeyFrom,
+                bytesKeyTo,
+                earliestSessionEndTime,
+                latestSessionStartTime),
+            fetchSensor,
+            iteratorDurationSensor,
+            streamsMetrics,
+            serdes::keyFrom,
+            serdes::valueFrom,
+            time,
+            numOpenIterators,
+            openIterators);
     }
 
     @Override
-    public KeyValueIterator<Windowed<K>, V> findSessions(final long earliestSessionEndTime, final long latestSessionEndTime) {
-        return new MeteredWindowedKeyValueIterator<>(wrapped().findSessions(earliestSessionEndTime, latestSessionEndTime), fetchSensor, streamsMetrics, serdes::keyFrom, serdes::valueFrom, time);
+    public KeyValueIterator<Windowed<K>, V> findSessions(final long earliestSessionEndTime,
+                                                         final long latestSessionEndTime) {
+        return new MeteredWindowedKeyValueIterator<>(
+                wrapped().findSessions(earliestSessionEndTime, latestSessionEndTime),
+                fetchSensor,
+                iteratorDurationSensor,
+                streamsMetrics,
+                serdes::keyFrom,
+                serdes::valueFrom,
+                time,
+                numOpenIterators,
+                openIterators);
     }
 
     @Override
-    public KeyValueIterator<Windowed<K>, V> backwardFindSessions(final K keyFrom, final K keyTo, final long earliestSessionEndTime, final long latestSessionStartTime) {
+    public KeyValueIterator<Windowed<K>, V> backwardFindSessions(final K keyFrom,
+                                                                 final K keyTo,
+                                                                 final long earliestSessionEndTime,
+                                                                 final long latestSessionStartTime) {
         final Bytes bytesKeyFrom = keyBytes(keyFrom);
         final Bytes bytesKeyTo = keyBytes(keyTo);
-        return new MeteredWindowedKeyValueIterator<>(wrapped().backwardFindSessions(bytesKeyFrom, bytesKeyTo, earliestSessionEndTime, latestSessionStartTime), fetchSensor, streamsMetrics, serdes::keyFrom, serdes::valueFrom, time);
+        return new MeteredWindowedKeyValueIterator<>(
+            wrapped().backwardFindSessions(
+                bytesKeyFrom,
+                bytesKeyTo,
+                earliestSessionEndTime,
+                latestSessionStartTime
+            ),
+            fetchSensor,
+            iteratorDurationSensor,
+            streamsMetrics,
+            serdes::keyFrom,
+            serdes::valueFrom,
+            time,
+            numOpenIterators,
+            openIterators
+        );
     }
 
     @Override
@@ -254,7 +409,9 @@ public class MeteredSessionStore<K, V> extends WrappedStateStore<SessionStore<By
 
     @SuppressWarnings("unchecked")
     @Override
-    public <R> QueryResult<R> query(final Query<R> query, final PositionBound positionBound, final QueryConfig config) {
+    public <R> QueryResult<R> query(final Query<R> query,
+                                    final PositionBound positionBound,
+                                    final QueryConfig config) {
         final long start = time.nanoseconds();
         final QueryResult<R> result;
 
@@ -262,27 +419,53 @@ public class MeteredSessionStore<K, V> extends WrappedStateStore<SessionStore<By
         if (handler == null) {
             result = wrapped().query(query, positionBound, config);
             if (config.isCollectExecutionInfo()) {
-                result.addExecutionInfo("Handled in " + getClass() + " in " + (time.nanoseconds() - start) + "ns");
+                result.addExecutionInfo(
+                    "Handled in " + getClass() + " in " + (time.nanoseconds() - start) + "ns");
             }
         } else {
-            result = (QueryResult<R>) handler.apply(query, positionBound, config, this);
+            result = (QueryResult<R>) handler.apply(
+                query,
+                positionBound,
+                config,
+                this
+            );
             if (config.isCollectExecutionInfo()) {
-                result.addExecutionInfo("Handled in " + getClass() + " with serdes " + serdes + " in " + (time.nanoseconds() - start) + "ns");
+                result.addExecutionInfo(
+                    "Handled in " + getClass() + " with serdes "
+                        + serdes + " in " + (time.nanoseconds() - start) + "ns");
             }
         }
         return result;
     }
 
     @SuppressWarnings("unchecked")
-    private <R> QueryResult<R> runRangeQuery(final Query<R> query, final PositionBound positionBound, final QueryConfig config) {
+    private <R> QueryResult<R> runRangeQuery(final Query<R> query,
+                                             final PositionBound positionBound,
+                                             final QueryConfig config) {
         final QueryResult<R> result;
         final WindowRangeQuery<K, V> typedQuery = (WindowRangeQuery<K, V>) query;
         if (typedQuery.getKey().isPresent()) {
-            final WindowRangeQuery<Bytes, byte[]> rawKeyQuery = WindowRangeQuery.withKey(Bytes.wrap(serdes.rawKey(typedQuery.getKey().get())));
-            final QueryResult<KeyValueIterator<Windowed<Bytes>, byte[]>> rawResult = wrapped().query(rawKeyQuery, positionBound, config);
+            final WindowRangeQuery<Bytes, byte[]> rawKeyQuery =
+                WindowRangeQuery.withKey(
+                    Bytes.wrap(serdes.rawKey(typedQuery.getKey().get()))
+                );
+            final QueryResult<KeyValueIterator<Windowed<Bytes>, byte[]>> rawResult =
+                wrapped().query(rawKeyQuery, positionBound, config);
             if (rawResult.isSuccess()) {
-                final MeteredWindowedKeyValueIterator<K, V> typedResult = new MeteredWindowedKeyValueIterator<>(rawResult.getResult(), fetchSensor, streamsMetrics, serdes::keyFrom, StoreQueryUtils.getDeserializeValue(serdes, wrapped()), time);
-                final QueryResult<MeteredWindowedKeyValueIterator<K, V>> typedQueryResult = InternalQueryResultUtil.copyAndSubstituteDeserializedResult(rawResult, typedResult);
+                final MeteredWindowedKeyValueIterator<K, V> typedResult =
+                    new MeteredWindowedKeyValueIterator<>(
+                        rawResult.getResult(),
+                        fetchSensor,
+                        iteratorDurationSensor,
+                        streamsMetrics,
+                        serdes::keyFrom,
+                        StoreQueryUtils.deserializeValue(serdes, wrapped()),
+                        time,
+                        numOpenIterators,
+                        openIterators
+                    );
+                final QueryResult<MeteredWindowedKeyValueIterator<K, V>> typedQueryResult =
+                    InternalQueryResultUtil.copyAndSubstituteDeserializedResult(rawResult, typedResult);
                 result = (QueryResult<R>) typedQueryResult;
             } else {
                 // the generic type doesn't matter, since failed queries have no result set.
@@ -290,7 +473,14 @@ public class MeteredSessionStore<K, V> extends WrappedStateStore<SessionStore<By
             }
         } else {
 
-            result = QueryResult.forFailure(FailureReason.UNKNOWN_QUERY_TYPE, "This store (" + getClass() + ") doesn't know how to" + " execute the given query (" + query + ") because" + " SessionStores only support WindowRangeQuery.withKey." + " Contact the store maintainer if you need support" + " for a new query type.");
+            result = QueryResult.forFailure(
+                FailureReason.UNKNOWN_QUERY_TYPE,
+                "This store (" + getClass() + ") doesn't know how to"
+                    + " execute the given query (" + query + ") because"
+                    + " SessionStores only support WindowRangeQuery.withKey."
+                    + " Contact the store maintainer if you need support"
+                    + " for a new query type."
+            );
         }
         return result;
     }
@@ -302,9 +492,9 @@ public class MeteredSessionStore<K, V> extends WrappedStateStore<SessionStore<By
     private void maybeRecordE2ELatency() {
         // Context is null if the provided context isn't an implementation of InternalProcessorContext.
         // In that case, we _can't_ get the current timestamp, so we don't record anything.
-        if (e2eLatencySensor.shouldRecord() && context != null) {
+        if (e2eLatencySensor.shouldRecord() && internalContext != null) {
             final long currentTime = time.milliseconds();
-            final long e2eLatency = currentTime - context.timestamp();
+            final long e2eLatency =  currentTime - internalContext.recordContext().timestamp();
             e2eLatencySensor.record(e2eLatency, currentTime);
         }
     }

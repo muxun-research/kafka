@@ -101,14 +101,14 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
     /**
      * @return the validTo timestamp of the latest record in the provided segment
      */
-    static long getNextTimestamp(final byte[] segmentValue) {
+    static long nextTimestamp(final byte[] segmentValue) {
         return ByteBuffer.wrap(segmentValue).getLong(0);
     }
 
     /**
      * @return the (validFrom) timestamp of the earliest record in the provided segment.
      */
-    static long getMinTimestamp(final byte[] segmentValue) {
+    static long minTimestamp(final byte[] segmentValue) {
         return ByteBuffer.wrap(segmentValue).getLong(TIMESTAMP_SIZE);
     }
 
@@ -125,12 +125,14 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
      * This method may also be used to create a "degenerate" segment with {@code null} value and
      * {@code validFrom} timestamp equal to {@code validTo}. (For more on degenerate segments,
      * see the main javadoc for this class.)
-     * @param value     the record value
+     *
+     * @param value the record value
      * @param validFrom the record's (validFrom) timestamp
-     * @param validTo   the record's validTo timestamp
+     * @param validTo the record's validTo timestamp
      * @return the newly created segment value
      */
-    static SegmentValue newSegmentValueWithRecord(final byte[] value, final long validFrom, final long validTo) {
+    static SegmentValue newSegmentValueWithRecord(
+        final byte[] value, final long validFrom, final long validTo) {
         return new PartiallyDeserializedSegmentValue(value, validFrom, validTo);
     }
 
@@ -141,12 +143,15 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
          * provided timestamp bound. This method requires that the provided timestamp bound exists
          * in this segment, i.e., that the provided timestamp bound is at least {@code minTimestamp}
          * and is smaller than {@code nextTimestamp}.
-         * @param timestamp    the timestamp to find
+         *
+         * @param timestamp the timestamp to find
          * @param includeValue whether the value of the found record should be returned with the result
          * @return the record that is found
          * @throws IllegalArgumentException if the provided timestamp is not contained within this segment
          */
         SegmentSearchResult find(long timestamp, boolean includeValue);
+
+        List<SegmentSearchResult> findAll(long fromTime, long toTime);
 
         /**
          * Inserts the provided record into the segment as the latest record in the segment row.
@@ -158,9 +163,10 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
          * the segment row. This truncation behavior helps reconcile inconsistencies between different
          * segments, or between a segment and the latest value store, of a
          * {@link RocksDBVersionedStore} instance.
+         *
          * @param validFrom the (validFrom) timestamp of the record to insert
-         * @param validTo   the validTo timestamp of the record to insert
-         * @param value     the value of the record to insert
+         * @param validTo the validTo timestamp of the record to insert
+         * @param value the value of the record to insert
          */
         void insertAsLatest(long validFrom, long validTo, byte[] value);
 
@@ -169,8 +175,9 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
          * It is the caller's responsibility to ensure that this action is valid, i.e.,
          * that record's (validFrom) timestamp is smaller than the current {@code minTimestamp}
          * of the segment row.
+         *
          * @param timestamp the (validFrom) timestamp of the record to insert
-         * @param value     the value of the record to insert
+         * @param value the value of the record to insert
          */
         void insertAsEarliest(long timestamp, byte[] value);
 
@@ -181,11 +188,12 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
          * <p>
          * It is the caller's responsibility to ensure that this action makes sense, i.e., that the
          * insertion index is correct for the (validFrom) timestamp of the record being inserted.
+         *
          * @param timestamp the (validFrom) timestamp of the record to insert
-         * @param value     the value of the record to insert
-         * @param index     the index that the newly inserted record should occupy
+         * @param value the value of the record to insert
+         * @param index the index that the newly inserted record should occupy
          * @throws IllegalArgumentException if the provided index is out of bounds, or if
-         *                                  {@code find()} has not been called to deserialize the relevant index.
+         *         {@code find()} has not been called to deserialize the relevant index.
          */
         void insert(long timestamp, byte[] value, int index);
 
@@ -196,9 +204,10 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
          * <p>
          * It is the caller's responsibility to ensure that this action makes sense, i.e., that the
          * updated (validFrom) timestamp does not violate timestamp order within the segment row.
+         *
          * @param timestamp the updated record (validFrom) timestamp
-         * @param value     the updated record value
-         * @param index     the index of the record to update
+         * @param value the updated record value
+         * @param index the index of the record to update
          */
         void updateRecord(long timestamp, byte[] value, int index);
 
@@ -217,7 +226,8 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
                 this(index, validFrom, validTo, null);
             }
 
-            SegmentSearchResult(final int index, final long validFrom, final long validTo, final byte[] value) {
+            SegmentSearchResult(final int index, final long validFrom, final long validTo,
+                                final byte[] value) {
                 this.index = index;
                 this.validFrom = validFrom;
                 this.validTo = validTo;
@@ -260,13 +270,16 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
 
         private PartiallyDeserializedSegmentValue(final byte[] segmentValue) {
             this.segmentValue = segmentValue;
-            this.nextTimestamp = RocksDBVersionedStoreSegmentValueFormatter.getNextTimestamp(segmentValue);
-            this.minTimestamp = RocksDBVersionedStoreSegmentValueFormatter.getMinTimestamp(segmentValue);
+            this.nextTimestamp =
+                RocksDBVersionedStoreSegmentValueFormatter.nextTimestamp(segmentValue);
+            this.minTimestamp =
+                RocksDBVersionedStoreSegmentValueFormatter.minTimestamp(segmentValue);
             this.isDegenerate = nextTimestamp == minTimestamp;
             resetDeserHelpers();
         }
 
-        private PartiallyDeserializedSegmentValue(final byte[] valueOrNull, final long validFrom, final long validTo) {
+        private PartiallyDeserializedSegmentValue(
+            final byte[] valueOrNull, final long validFrom, final long validTo) {
             initializeWithRecord(new ValueAndValueSize(valueOrNull), validFrom, validTo);
         }
 
@@ -328,6 +341,35 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
         }
 
         @Override
+        public List<SegmentSearchResult> findAll(final long fromTime, final long toTime) {
+            long currNextTimestamp = nextTimestamp;
+            final List<SegmentSearchResult> segmentSearchResults = new ArrayList<>();
+            long currTimestamp = -1L; // choose an invalid timestamp. if this is valid, this needs to be re-worked
+            int currValueSize;
+            int currIndex = 0;
+            int cumValueSize = 0;
+            while (currTimestamp != minTimestamp) {
+                final int timestampSegmentIndex = 2 * TIMESTAMP_SIZE + currIndex * (TIMESTAMP_SIZE + VALUE_SIZE);
+                currTimestamp = ByteBuffer.wrap(segmentValue).getLong(timestampSegmentIndex);
+                currValueSize = ByteBuffer.wrap(segmentValue).getInt(timestampSegmentIndex + TIMESTAMP_SIZE);
+                cumValueSize += Math.max(currValueSize, 0);
+                if (currValueSize >= 0) {
+                    final byte[] value = new byte[currValueSize];
+                    final int valueSegmentIndex = segmentValue.length - cumValueSize;
+                    System.arraycopy(segmentValue, valueSegmentIndex, value, 0, currValueSize);
+                    if (currTimestamp <= toTime && currNextTimestamp > fromTime) {
+                        segmentSearchResults.add(new SegmentSearchResult(currIndex, currTimestamp, currNextTimestamp, value));
+                    }
+                }
+
+                // prep for next iteration
+                currNextTimestamp = currTimestamp;
+                currIndex++;
+            }
+            return segmentSearchResults;
+        }
+
+        @Override
         public void insertAsLatest(final long validFrom, final long validTo, final byte[] valueOrNull) {
             final ValueAndValueSize value = new ValueAndValueSize(valueOrNull);
 
@@ -355,7 +397,9 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
                 //
                 // we have the older segment at hand, and need to truncate the partial write.
                 // do this by removing the latest entries from this segment until the overlap is resolved.
-                LOG.warn("Detected inconsistency among versioned store segments. " + "This indicates a previous failure to write to a state store. " + "Automatically recovering and continuing.");
+                LOG.warn("Detected inconsistency among versioned store segments. "
+                    + "This indicates a previous failure to write to a state store. "
+                    + "Automatically recovering and continuing.");
                 truncateRecordsToTimestamp(validFrom);
             }
 
@@ -421,7 +465,14 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
 
             // update serialization and other props
             final int segmentTimestampIndex = 2 * TIMESTAMP_SIZE + index * (TIMESTAMP_SIZE + VALUE_SIZE);
-            segmentValue = ByteBuffer.allocate(segmentValue.length + TIMESTAMP_SIZE + VALUE_SIZE + value.value().length).put(segmentValue, 0, segmentTimestampIndex).putLong(timestamp).putInt(value.valueSize()).put(segmentValue, segmentTimestampIndex, segmentValue.length - segmentTimestampIndex - prevCumValueSize).put(value.value()).put(segmentValue, segmentValue.length - prevCumValueSize, prevCumValueSize).array();
+            segmentValue = ByteBuffer.allocate(segmentValue.length + TIMESTAMP_SIZE + VALUE_SIZE + value.value().length)
+                .put(segmentValue, 0, segmentTimestampIndex)
+                .putLong(timestamp)
+                .putInt(value.valueSize())
+                .put(segmentValue, segmentTimestampIndex, segmentValue.length - segmentTimestampIndex - prevCumValueSize)
+                .put(value.value())
+                .put(segmentValue, segmentValue.length - prevCumValueSize, prevCumValueSize)
+                .array();
 
             if (needsMinTsUpdate) {
                 minTimestamp = timestamp;
@@ -446,7 +497,14 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
 
             // update serialization and other props
             final int segmentTimestampIndex = 2 * TIMESTAMP_SIZE + index * (TIMESTAMP_SIZE + VALUE_SIZE);
-            segmentValue = ByteBuffer.allocate(segmentValue.length - oldValueSize + value.value().length).put(segmentValue, 0, segmentTimestampIndex).putLong(timestamp).putInt(value.valueSize()).put(segmentValue, segmentTimestampIndex + TIMESTAMP_SIZE + VALUE_SIZE, segmentValue.length - (segmentTimestampIndex + TIMESTAMP_SIZE + VALUE_SIZE) - oldCumValueSize).put(value.value()).put(segmentValue, segmentValue.length - oldCumValueSize + oldValueSize, oldCumValueSize - oldValueSize).array();
+            segmentValue = ByteBuffer.allocate(segmentValue.length - oldValueSize + value.value().length)
+                .put(segmentValue, 0, segmentTimestampIndex)
+                .putLong(timestamp)
+                .putInt(value.valueSize())
+                .put(segmentValue, segmentTimestampIndex + TIMESTAMP_SIZE + VALUE_SIZE, segmentValue.length - (segmentTimestampIndex + TIMESTAMP_SIZE + VALUE_SIZE) - oldCumValueSize)
+                .put(value.value())
+                .put(segmentValue, segmentValue.length - oldCumValueSize + oldValueSize, oldCumValueSize - oldValueSize)
+                .array();
 
             if (needsMinTsUpdate) {
                 minTimestamp = timestamp;
@@ -462,7 +520,13 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
         private void initializeWithRecord(final ValueAndValueSize value, final long validFrom, final long validTo) {
             this.nextTimestamp = validTo;
             this.minTimestamp = validFrom;
-            this.segmentValue = ByteBuffer.allocate(TIMESTAMP_SIZE * 3 + VALUE_SIZE + value.value().length).putLong(nextTimestamp).putLong(minTimestamp).putLong(validFrom).putInt(value.valueSize()).put(value.value()).array();
+            this.segmentValue = ByteBuffer.allocate(TIMESTAMP_SIZE * 3 + VALUE_SIZE + value.value().length)
+                .putLong(nextTimestamp)
+                .putLong(minTimestamp)
+                .putLong(validFrom)
+                .putInt(value.valueSize())
+                .put(value.value())
+                .array();
             this.isDegenerate = nextTimestamp == minTimestamp;
             resetDeserHelpers();
         }
@@ -493,6 +557,7 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
          * Delete all record versions newer than (or at) the provided timestamp, and also truncate
          * any partial records which extend beyond the provided timestamp. In other words, when
          * this method returns, nextTimestamp will be equal to the truncation timestamp.
+         *
          * @param timestamp timestamp to truncate to
          */
         private void truncateRecordsToTimestamp(final long timestamp) {
@@ -503,7 +568,13 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
                 // normal, deterministic record processing post-recovery) and we log an extra warning
                 final int totalRecords = find(minTimestamp, false).index() + 1;
                 if (!((timestamp == minTimestamp) && (totalRecords == 1))) {
-                    LOG.warn("The versioned store inconsistency affects more than " + "one record version, even though under normal replay operations only one " + "record should be affected. Full records affected: {} (expected: 1). " + "New record timestamp: {} (expected: {}).", totalRecords, timestamp, unpackedReversedTimestampAndValueSizes.get(0).timestamp);
+                    LOG.warn("The versioned store inconsistency affects more than "
+                            + "one record version, even though under normal replay operations only one "
+                            + "record should be affected. Full records affected: {} (expected: 1). "
+                            + "New record timestamp: {} (expected: {}).",
+                        totalRecords,
+                        timestamp,
+                        unpackedReversedTimestampAndValueSizes.get(0).timestamp);
                 }
 
                 // delete everything in this current segment by replacing it with a degenerate segment
@@ -525,7 +596,13 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
             // unexpected (under normal, deterministic record processing post-recovery) and we log
             // an extra warning
             if (!((fullRecordsToTruncate == 1) && (searchResult.index == 0))) {
-                LOG.warn("The versioned store inconsistency affects more (or less) than " + "one record version, even though under normal replay operations only one " + "record should be affected. Full records affected: {} (expected: 1). " + "New record timestamp: {} (expected: {}).", fullRecordsToTruncate, timestamp, unpackedReversedTimestampAndValueSizes.get(0).timestamp);
+                LOG.warn("The versioned store inconsistency affects more (or less) than "
+                    + "one record version, even though under normal replay operations only one "
+                    + "record should be affected. Full records affected: {} (expected: 1). "
+                    + "New record timestamp: {} (expected: {}).",
+                    fullRecordsToTruncate,
+                    timestamp,
+                    unpackedReversedTimestampAndValueSizes.get(0).timestamp);
             }
 
             if (fullRecordsToTruncate == 0) {
@@ -538,8 +615,11 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
             final int valuesLengthToRemove = cumulativeValueSizes.get(fullRecordsToTruncate - 1);
             final int timestampAndValueSizesLengthToRemove = (TIMESTAMP_SIZE + VALUE_SIZE) * fullRecordsToTruncate;
             final int newSegmentLength = segmentValue.length - valuesLengthToRemove - timestampAndValueSizesLengthToRemove;
-            segmentValue = ByteBuffer.allocate(newSegmentLength).putLong(timestamp) // update nextTimestamp as part of truncation
-                    .putLong(minTimestamp).put(segmentValue, 2 * TIMESTAMP_SIZE + timestampAndValueSizesLengthToRemove, newSegmentLength - 2 * TIMESTAMP_SIZE).array();
+            segmentValue = ByteBuffer.allocate(newSegmentLength)
+                .putLong(timestamp) // update nextTimestamp as part of truncation
+                .putLong(minTimestamp)
+                .put(segmentValue, 2 * TIMESTAMP_SIZE + timestampAndValueSizesLengthToRemove, newSegmentLength - 2 * TIMESTAMP_SIZE)
+                .array();
             nextTimestamp = timestamp;
             resetDeserHelpers();
         }
@@ -575,7 +655,7 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
 
             /**
              * @return the value to be stored into the segment as part of the values list.
-             * This will never be null.
+             *         This will never be null.
              */
             byte[] value() {
                 return valueToStore;
@@ -583,8 +663,8 @@ final class RocksDBVersionedStoreSegmentValueFormatter {
 
             /**
              * @return the value size to be stored into the segment as part of the timestamps
-             * and value sizes list. This will be negative for tombstones, and nonnegative
-             * otherwise.
+             *         and value sizes list. This will be negative for tombstones, and nonnegative
+             *         otherwise.
              */
             int valueSize() {
                 return valueSizeToStore;

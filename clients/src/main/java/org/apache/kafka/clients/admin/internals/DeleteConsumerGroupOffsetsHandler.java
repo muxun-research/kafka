@@ -28,9 +28,15 @@ import org.apache.kafka.common.requests.FindCoordinatorRequest.CoordinatorType;
 import org.apache.kafka.common.requests.OffsetDeleteRequest;
 import org.apache.kafka.common.requests.OffsetDeleteResponse;
 import org.apache.kafka.common.utils.LogContext;
+
 import org.slf4j.Logger;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class DeleteConsumerGroupOffsetsHandler extends AdminApiHandler.Batched<CoordinatorKey, Map<TopicPartition, Errors>> {
@@ -40,7 +46,11 @@ public class DeleteConsumerGroupOffsetsHandler extends AdminApiHandler.Batched<C
     private final Logger log;
     private final AdminApiLookupStrategy<CoordinatorKey> lookupStrategy;
 
-    public DeleteConsumerGroupOffsetsHandler(String groupId, Set<TopicPartition> partitions, LogContext logContext) {
+    public DeleteConsumerGroupOffsetsHandler(
+        String groupId,
+        Set<TopicPartition> partitions,
+        LogContext logContext
+    ) {
         this.groupId = CoordinatorKey.byGroupId(groupId);
         this.partitions = partitions;
         this.log = logContext.logger(DeleteConsumerGroupOffsetsHandler.class);
@@ -57,13 +67,16 @@ public class DeleteConsumerGroupOffsetsHandler extends AdminApiHandler.Batched<C
         return lookupStrategy;
     }
 
-    public static AdminApiFuture.SimpleAdminApiFuture<CoordinatorKey, Map<TopicPartition, Errors>> newFuture(String groupId) {
+    public static AdminApiFuture.SimpleAdminApiFuture<CoordinatorKey, Map<TopicPartition, Errors>> newFuture(
+            String groupId
+    ) {
         return AdminApiFuture.forKeys(Collections.singleton(CoordinatorKey.byGroupId(groupId)));
     }
 
     private void validateKeys(Set<CoordinatorKey> groupIds) {
         if (!groupIds.equals(Collections.singleton(groupId))) {
-            throw new IllegalArgumentException("Received unexpected group ids " + groupIds + " (expected only " + Collections.singleton(groupId) + ")");
+            throw new IllegalArgumentException("Received unexpected group ids " + groupIds +
+                " (expected only " + Collections.singleton(groupId) + ")");
         }
     }
 
@@ -72,13 +85,28 @@ public class DeleteConsumerGroupOffsetsHandler extends AdminApiHandler.Batched<C
         validateKeys(groupIds);
 
         final OffsetDeleteRequestTopicCollection topics = new OffsetDeleteRequestTopicCollection();
-        partitions.stream().collect(Collectors.groupingBy(TopicPartition::topic)).forEach((topic, topicPartitions) -> topics.add(new OffsetDeleteRequestTopic().setName(topic).setPartitions(topicPartitions.stream().map(tp -> new OffsetDeleteRequestPartition().setPartitionIndex(tp.partition())).collect(Collectors.toList()))));
+        partitions.stream().collect(Collectors.groupingBy(TopicPartition::topic)).forEach((topic, topicPartitions) -> topics.add(
+            new OffsetDeleteRequestTopic()
+            .setName(topic)
+            .setPartitions(topicPartitions.stream()
+                .map(tp -> new OffsetDeleteRequestPartition().setPartitionIndex(tp.partition()))
+                .collect(Collectors.toList())
+            )
+        ));
 
-        return new OffsetDeleteRequest.Builder(new OffsetDeleteRequestData().setGroupId(groupId.idValue).setTopics(topics));
+        return new OffsetDeleteRequest.Builder(
+            new OffsetDeleteRequestData()
+                .setGroupId(groupId.idValue)
+                .setTopics(topics)
+        );
     }
 
     @Override
-    public ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> handleResponse(Node coordinator, Set<CoordinatorKey> groupIds, AbstractResponse abstractResponse) {
+    public ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> handleResponse(
+        Node coordinator,
+        Set<CoordinatorKey> groupIds,
+        AbstractResponse abstractResponse
+    ) {
         validateKeys(groupIds);
 
         final OffsetDeleteResponse response = (OffsetDeleteResponse) abstractResponse;
@@ -93,13 +121,25 @@ public class DeleteConsumerGroupOffsetsHandler extends AdminApiHandler.Batched<C
             return new ApiResult<>(Collections.emptyMap(), failed, new ArrayList<>(groupsToUnmap));
         } else {
             final Map<TopicPartition, Errors> partitionResults = new HashMap<>();
-            response.data().topics().forEach(topic -> topic.partitions().forEach(partition -> partitionResults.put(new TopicPartition(topic.name(), partition.partitionIndex()), Errors.forCode(partition.errorCode()))));
+            response.data().topics().forEach(topic ->
+                topic.partitions().forEach(partition ->
+                    partitionResults.put(
+                        new TopicPartition(topic.name(), partition.partitionIndex()),
+                        Errors.forCode(partition.errorCode())
+                    )
+                )
+            );
 
             return ApiResult.completed(groupId, partitionResults);
         }
     }
 
-    private void handleGroupError(CoordinatorKey groupId, Errors error, Map<CoordinatorKey, Throwable> failed, Set<CoordinatorKey> groupsToUnmap) {
+    private void handleGroupError(
+        CoordinatorKey groupId,
+        Errors error,
+        Map<CoordinatorKey, Throwable> failed,
+        Set<CoordinatorKey> groupsToUnmap
+    ) {
         switch (error) {
             case GROUP_AUTHORIZATION_FAILED:
             case GROUP_ID_NOT_FOUND:
@@ -111,14 +151,16 @@ public class DeleteConsumerGroupOffsetsHandler extends AdminApiHandler.Batched<C
 
             case COORDINATOR_LOAD_IN_PROGRESS:
                 // If the coordinator is in the middle of loading, then we just need to retry
-                log.debug("`OffsetDelete` request for group id {} failed because the coordinator" + " is still in the process of loading state. Will retry.", groupId.idValue);
+                log.debug("`OffsetDelete` request for group id {} failed because the coordinator" +
+                    " is still in the process of loading state. Will retry.", groupId.idValue);
                 break;
 
             case COORDINATOR_NOT_AVAILABLE:
             case NOT_COORDINATOR:
                 // If the coordinator is unavailable or there was a coordinator change, then we unmap
                 // the key so that we retry the `FindCoordinator` request
-                log.debug("`OffsetDelete` request for group id {} returned error {}. " + "Will attempt to find the coordinator again and retry.", groupId.idValue, error);
+                log.debug("`OffsetDelete` request for group id {} returned error {}. " +
+                    "Will attempt to find the coordinator again and retry.", groupId.idValue, error);
                 groupsToUnmap.add(groupId);
                 break;
 

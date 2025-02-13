@@ -22,6 +22,7 @@ import org.apache.kafka.common.config.SecurityConfig;
 import org.apache.kafka.common.resource.ResourceType;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
 import org.apache.kafka.common.security.auth.SecurityProviderCreator;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,7 +55,7 @@ public class SecurityUtils {
             NAME_TO_OPERATIONS.put(operationName.toUpperCase(Locale.ROOT), operation);
         }
         for (AclPermissionType permissionType : AclPermissionType.values()) {
-            String permissionName = toPascalCase(permissionType.name());
+            String permissionName  = toPascalCase(permissionType.name());
             NAME_TO_PERMISSION_TYPES.put(permissionName, permissionType);
             NAME_TO_PERMISSION_TYPES.put(permissionName.toUpperCase(Locale.ROOT), permissionType);
         }
@@ -76,18 +77,20 @@ public class SecurityUtils {
 
     public static void addConfiguredSecurityProviders(Map<String, ?> configs) {
         String securityProviderClassesStr = (String) configs.get(SecurityConfig.SECURITY_PROVIDERS_CONFIG);
-        if (securityProviderClassesStr == null || securityProviderClassesStr.equals("")) {
+        if (securityProviderClassesStr == null || securityProviderClassesStr.isEmpty()) {
             return;
         }
         try {
             String[] securityProviderClasses = securityProviderClassesStr.replaceAll("\\s+", "").split(",");
             for (int index = 0; index < securityProviderClasses.length; index++) {
-                SecurityProviderCreator securityProviderCreator = (SecurityProviderCreator) Class.forName(securityProviderClasses[index]).getConstructor().newInstance();
+                SecurityProviderCreator securityProviderCreator =
+                    (SecurityProviderCreator) Class.forName(securityProviderClasses[index]).getConstructor().newInstance();
                 securityProviderCreator.configure(configs);
                 Security.insertProviderAt(securityProviderCreator.getProvider(), index + 1);
             }
         } catch (ClassCastException e) {
-            LOGGER.error("Creators provided through " + SecurityConfig.SECURITY_PROVIDERS_CONFIG + " are expected to be sub-classes of SecurityProviderCreator");
+            LOGGER.error("Creators provided through " + SecurityConfig.SECURITY_PROVIDERS_CONFIG +
+                    " are expected to be sub-classes of SecurityProviderCreator");
         } catch (ClassNotFoundException cnfe) {
             LOGGER.error("Unrecognized security provider creator class", cnfe);
         } catch (ReflectiveOperationException e) {
@@ -145,21 +148,26 @@ public class SecurityUtils {
         return builder.toString();
     }
 
-    public static void authorizeByResourceTypeCheckArgs(AclOperation op, ResourceType type) {
+    public static void authorizeByResourceTypeCheckArgs(AclOperation op,
+                                                        ResourceType type) {
         if (type == ResourceType.ANY) {
-            throw new IllegalArgumentException("Must specify a non-filter resource type for authorizeByResourceType");
+            throw new IllegalArgumentException(
+                "Must specify a non-filter resource type for authorizeByResourceType");
         }
 
         if (type == ResourceType.UNKNOWN) {
-            throw new IllegalArgumentException("Unknown resource type");
+            throw new IllegalArgumentException(
+                "Unknown resource type");
         }
 
         if (op == AclOperation.ANY) {
-            throw new IllegalArgumentException("Must specify a non-filter operation type for authorizeByResourceType");
+            throw new IllegalArgumentException(
+                "Must specify a non-filter operation type for authorizeByResourceType");
         }
 
         if (op == AclOperation.UNKNOWN) {
-            throw new IllegalArgumentException("Unknown operation type");
+            throw new IllegalArgumentException(
+                "Unknown operation type");
         }
     }
 }

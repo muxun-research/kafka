@@ -20,10 +20,18 @@ package org.apache.kafka.shell.glob;
 import org.apache.kafka.image.node.MetadataNode;
 import org.apache.kafka.shell.glob.GlobVisitor.MetadataNodeInfo;
 import org.apache.kafka.shell.state.MetadataShellState;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
@@ -31,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @Timeout(value = 5, unit = MINUTES)
 public class GlobVisitorTest {
-    static private final MetadataShellState DATA;
+    private static final MetadataShellState DATA;
 
     static class TestNode implements MetadataNode {
         private final String name;
@@ -73,16 +81,31 @@ public class GlobVisitorTest {
 
     static {
         DATA = new MetadataShellState();
-        DATA.setRoot(new TestNode("", new TestNode("alpha", new TestNode("beta", new TestNode("gamma")), new TestNode("theta")), new TestNode("foo", new TestNode("a"), new TestNode("beta")), new TestNode("zeta", new TestNode("c", false)), new TestNode("zzz")));
+        DATA.setRoot(new TestNode("",
+            new TestNode("alpha",
+                new TestNode("beta",
+                    new TestNode("gamma")
+                ),
+                new TestNode("theta")
+            ),
+            new TestNode("foo",
+                new TestNode("a"),
+                new TestNode("beta")
+            ),
+            new TestNode("zeta",
+                new TestNode("c", false)
+            ),
+            new TestNode("zzz")
+        ));
         DATA.setWorkingDirectory("foo");
     }
 
     static class InfoConsumer implements Consumer<Optional<MetadataNodeInfo>> {
-        private Optional<List<MetadataNodeInfo>> infos = null;
+        private Optional<List<MetadataNodeInfo>> infos = Optional.empty();
 
         @Override
         public void accept(Optional<MetadataNodeInfo> info) {
-            if (infos == null) {
+            if (infos.isEmpty()) {
                 if (info.isPresent()) {
                     infos = Optional.of(new ArrayList<>());
                     infos.get().add(info.get());
@@ -104,7 +127,11 @@ public class GlobVisitorTest {
         InfoConsumer consumer = new InfoConsumer();
         GlobVisitor visitor = new GlobVisitor("*", consumer);
         visitor.accept(DATA);
-        assertEquals(Optional.of(Arrays.asList(new MetadataNodeInfo(new String[]{"foo", "a"}, DATA.root().child("foo").child("a")), new MetadataNodeInfo(new String[]{"foo", "beta"}, DATA.root().child("foo").child("beta")))), consumer.infos);
+        assertEquals(Optional.of(Arrays.asList(
+            new MetadataNodeInfo(new String[] {"foo", "a"},
+                DATA.root().child("foo").child("a")),
+            new MetadataNodeInfo(new String[] {"foo", "beta"},
+                DATA.root().child("foo").child("beta")))), consumer.infos);
     }
 
     @Test
@@ -112,7 +139,8 @@ public class GlobVisitorTest {
         InfoConsumer consumer = new InfoConsumer();
         GlobVisitor visitor = new GlobVisitor("..", consumer);
         visitor.accept(DATA);
-        assertEquals(Optional.of(Arrays.asList(new MetadataNodeInfo(new String[0], DATA.root()))), consumer.infos);
+        assertEquals(Optional.of(Collections.singletonList(
+            new MetadataNodeInfo(new String[0], DATA.root()))), consumer.infos);
     }
 
     @Test
@@ -120,7 +148,8 @@ public class GlobVisitorTest {
         InfoConsumer consumer = new InfoConsumer();
         GlobVisitor visitor = new GlobVisitor("../..", consumer);
         visitor.accept(DATA);
-        assertEquals(Optional.of(Arrays.asList(new MetadataNodeInfo(new String[0], DATA.root()))), consumer.infos);
+        assertEquals(Optional.of(Collections.singletonList(
+            new MetadataNodeInfo(new String[0], DATA.root()))), consumer.infos);
     }
 
     @Test
@@ -128,7 +157,11 @@ public class GlobVisitorTest {
         InfoConsumer consumer = new InfoConsumer();
         GlobVisitor visitor = new GlobVisitor("../z*", consumer);
         visitor.accept(DATA);
-        assertEquals(Optional.of(Arrays.asList(new MetadataNodeInfo(new String[]{"zeta"}, DATA.root().child("zeta")), new MetadataNodeInfo(new String[]{"zzz"}, DATA.root().child("zzz")))), consumer.infos);
+        assertEquals(Optional.of(Arrays.asList(
+            new MetadataNodeInfo(new String[] {"zeta"},
+                DATA.root().child("zeta")),
+            new MetadataNodeInfo(new String[] {"zzz"},
+                DATA.root().child("zzz")))), consumer.infos);
     }
 
     @Test
@@ -136,7 +169,13 @@ public class GlobVisitorTest {
         InfoConsumer consumer = new InfoConsumer();
         GlobVisitor visitor = new GlobVisitor("../*/{beta,theta}", consumer);
         visitor.accept(DATA);
-        assertEquals(Optional.of(Arrays.asList(new MetadataNodeInfo(new String[]{"alpha", "beta"}, DATA.root().child("alpha").child("beta")), new MetadataNodeInfo(new String[]{"alpha", "theta"}, DATA.root().child("alpha").child("theta")), new MetadataNodeInfo(new String[]{"foo", "beta"}, DATA.root().child("foo").child("beta")))), consumer.infos);
+        assertEquals(Optional.of(Arrays.asList(
+            new MetadataNodeInfo(new String[] {"alpha", "beta"},
+                DATA.root().child("alpha").child("beta")),
+            new MetadataNodeInfo(new String[] {"alpha", "theta"},
+                DATA.root().child("alpha").child("theta")),
+            new MetadataNodeInfo(new String[] {"foo", "beta"},
+                DATA.root().child("foo").child("beta")))), consumer.infos);
     }
 
     @Test
@@ -152,6 +191,8 @@ public class GlobVisitorTest {
         InfoConsumer consumer = new InfoConsumer();
         GlobVisitor visitor = new GlobVisitor("/a?pha", consumer);
         visitor.accept(DATA);
-        assertEquals(Optional.of(Arrays.asList(new MetadataNodeInfo(new String[]{"alpha"}, DATA.root().child("alpha")))), consumer.infos);
+        assertEquals(Optional.of(Collections.singletonList(
+            new MetadataNodeInfo(new String[]{"alpha"},
+                DATA.root().child("alpha")))), consumer.infos);
     }
 }

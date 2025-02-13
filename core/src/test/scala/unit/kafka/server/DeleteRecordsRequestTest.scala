@@ -17,7 +17,6 @@
 
 package kafka.server
 
-import kafka.utils.TestInfoUtils
 import org.apache.kafka.clients.producer.{ProducerRecord, RecordMetadata}
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.protocol.Errors
@@ -34,8 +33,8 @@ class DeleteRecordsRequestTest extends BaseRequestTest {
   private val TIMEOUT_MS = 1000
   private val MESSAGES_PRODUCED_PER_PARTITION = 10
 
-  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
-  @ValueSource(strings = Array("zk", "kraft"))
+  @ParameterizedTest
+  @ValueSource(strings = Array("kraft"))
   def testDeleteRecordsHappyCase(quorum: String): Unit = {
     val (topicPartition: TopicPartition, leaderId: Int) = createTopicAndSendRecords
 
@@ -59,8 +58,8 @@ class DeleteRecordsRequestTest extends BaseRequestTest {
     validateLogStartOffsetForTopic(topicPartition, offsetToDelete)
   }
 
-  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
-  @ValueSource(strings = Array("zk", "kraft"))
+  @ParameterizedTest
+  @ValueSource(strings = Array("kraft"))
   def testErrorWhenDeletingRecordsWithInvalidOffset(quorum: String): Unit = {
     val (topicPartition: TopicPartition, leaderId: Int) = createTopicAndSendRecords
 
@@ -84,8 +83,8 @@ class DeleteRecordsRequestTest extends BaseRequestTest {
     validateLogStartOffsetForTopic(topicPartition, 0)
   }
 
-  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
-  @ValueSource(strings = Array("zk", "kraft"))
+  @ParameterizedTest
+  @ValueSource(strings = Array("kraft"))
   def testErrorWhenDeletingRecordsWithInvalidTopic(quorum: String): Unit = {
     val invalidTopicPartition = new TopicPartition("invalid-topic", 0)
     // Create the DeleteRecord request requesting deletion of offset which is not present

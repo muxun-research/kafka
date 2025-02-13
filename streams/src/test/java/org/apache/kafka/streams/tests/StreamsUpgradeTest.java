@@ -16,7 +16,11 @@
  */
 package org.apache.kafka.streams.tests;
 
-import org.apache.kafka.clients.consumer.*;
+import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
+import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
@@ -41,6 +45,7 @@ import org.apache.kafka.streams.processor.internals.assignment.AssignmentInfo;
 import org.apache.kafka.streams.processor.internals.assignment.AssignorConfiguration;
 import org.apache.kafka.streams.processor.internals.assignment.LegacySubscriptionInfoSerde;
 import org.apache.kafka.streams.processor.internals.assignment.SubscriptionInfo;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,7 +55,14 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -87,15 +99,19 @@ public class StreamsUpgradeTest {
 
     public static KafkaStreams buildStreams(final Properties streamsProperties) {
         final StreamsBuilder builder = new StreamsBuilder();
-        final KTable<String, Integer> dataTable = builder.table("data", Consumed.with(stringSerde, intSerde));
+        final KTable<String, Integer> dataTable = builder.table(
+            "data", Consumed.with(stringSerde, intSerde));
         final KStream<String, Integer> dataStream = dataTable.toStream();
         dataStream.process(SmokeTestUtil.printProcessorSupplier("data"));
         dataStream.to("echo");
 
-        final boolean runFkJoin = Boolean.parseBoolean(streamsProperties.getProperty("test.run_fk_join", "false"));
+        final boolean runFkJoin = Boolean.parseBoolean(streamsProperties.getProperty(
+            "test.run_fk_join",
+            "false"));
         if (runFkJoin) {
             try {
-                final KTable<Integer, String> fkTable = builder.table("fk", Consumed.with(intSerde, stringSerde));
+                final KTable<Integer, String> fkTable = builder.table(
+                    "fk", Consumed.with(intSerde, stringSerde));
                 buildFKTable(dataStream, fkTable);
             } catch (final Exception e) {
                 System.err.println("Caught " + e.getMessage());
@@ -119,8 +135,11 @@ public class StreamsUpgradeTest {
         return new KafkaStreams(builder.build(), config, kafkaClientSupplier);
     }
 
-    private static void buildFKTable(final KStream<String, Integer> primaryTable, final KTable<Integer, String> otherTable) {
-        final KStream<String, String> kStream = primaryTable.toTable().join(otherTable, v -> v, (k0, v0) -> v0).toStream();
+    private static void buildFKTable(final KStream<String, Integer> primaryTable,
+                                     final KTable<Integer, String> otherTable) {
+        final KStream<String, String> kStream = primaryTable.toTable()
+            .join(otherTable, v -> v, (k0, v0) -> v0)
+            .toStream();
         kStream.process(SmokeTestUtil.printProcessorSupplier("fk"));
         kStream.to("fk-result", Produced.with(stringSerde, stringSerde));
     }
@@ -135,7 +154,7 @@ public class StreamsUpgradeTest {
 
     public static class FutureStreamsPartitionAssignor extends StreamsPartitionAssignor {
         private static final Map<String, String> CLIENT_TAGS = mkMap(mkEntry("t1", "v1"), mkEntry("t2", "v2"));
-        private final Logger log = LoggerFactory.getLogger(FutureStreamsPartitionAssignor.class);
+        private static final Logger log = LoggerFactory.getLogger(FutureStreamsPartitionAssignor.class);
 
         private AtomicInteger usedSubscriptionMetadataVersionPeek;
         private AtomicLong nextScheduledRebalanceMs;
@@ -170,14 +189,30 @@ public class StreamsUpgradeTest {
             byte uniqueField = 0;
             if (usedSubscriptionMetadataVersion <= LATEST_SUPPORTED_VERSION) {
                 uniqueField++;
-                return new SubscriptionInfo(usedSubscriptionMetadataVersion, LATEST_SUPPORTED_VERSION + 1, taskManager.processId(), userEndPoint(), taskManager.getTaskOffsetSums(), uniqueField, 0, CLIENT_TAGS).encode();
+                return new SubscriptionInfo(
+                    usedSubscriptionMetadataVersion,
+                    LATEST_SUPPORTED_VERSION + 1,
+                    taskManager.processId(),
+                    userEndPoint(),
+                    taskManager.taskOffsetSums(),
+                    uniqueField,
+                    0,
+                    CLIENT_TAGS
+                ).encode();
             } else {
-                return new FutureSubscriptionInfo(usedSubscriptionMetadataVersion, taskManager.processId(), SubscriptionInfo.getActiveTasksFromTaskOffsetSumMap(taskManager.getTaskOffsetSums()), SubscriptionInfo.getStandbyTasksFromTaskOffsetSumMap(taskManager.getTaskOffsetSums()), userEndPoint()).encode();
+                return new FutureSubscriptionInfo(
+                    usedSubscriptionMetadataVersion,
+                    taskManager.processId().id(),
+                    SubscriptionInfo.getActiveTasksFromTaskOffsetSumMap(taskManager.taskOffsetSums()),
+                    SubscriptionInfo.getStandbyTasksFromTaskOffsetSumMap(taskManager.taskOffsetSums()),
+                    userEndPoint())
+                    .encode();
             }
         }
 
         @Override
-        public void onAssignment(final ConsumerPartitionAssignor.Assignment assignment, final ConsumerGroupMetadata metadata) {
+        public void onAssignment(final ConsumerPartitionAssignor.Assignment assignment,
+                                 final ConsumerGroupMetadata metadata) {
             try {
                 super.onAssignment(assignment, metadata);
                 usedSubscriptionMetadataVersionPeek.set(usedSubscriptionMetadataVersion);
@@ -197,10 +232,12 @@ public class StreamsUpgradeTest {
             }
 
             if (usedVersion > LATEST_SUPPORTED_VERSION + 1) {
-                throw new IllegalStateException("Unknown metadata version: " + usedVersion + "; latest supported version: " + LATEST_SUPPORTED_VERSION + 1);
+                throw new IllegalStateException("Unknown metadata version: " + usedVersion
+                                                    + "; latest supported version: " + LATEST_SUPPORTED_VERSION + 1);
             }
 
-            final AssignmentInfo info = AssignmentInfo.decode(assignment.userData().putInt(0, LATEST_SUPPORTED_VERSION));
+            final AssignmentInfo info = AssignmentInfo.decode(
+                assignment.userData().putInt(0, LATEST_SUPPORTED_VERSION));
 
             if (maybeUpdateSubscriptionVersion(usedVersion, info.commonlySupportedVersion())) {
                 log.info("Requested to schedule immediate rebalance due to version probing.");
@@ -246,9 +283,26 @@ public class StreamsUpgradeTest {
                 for (final Map.Entry<String, Subscription> entry : subscriptions.entrySet()) {
                     final Subscription subscription = entry.getValue();
 
-                    final SubscriptionInfo info = SubscriptionInfo.decode(subscription.userData().putInt(0, LATEST_SUPPORTED_VERSION).putInt(4, LATEST_SUPPORTED_VERSION));
+                    final SubscriptionInfo info = SubscriptionInfo.decode(subscription.userData()
+                        .putInt(0, LATEST_SUPPORTED_VERSION)
+                        .putInt(4, LATEST_SUPPORTED_VERSION));
 
-                    downgradedSubscriptions.put(entry.getKey(), new Subscription(subscription.topics(), new SubscriptionInfo(LATEST_SUPPORTED_VERSION, LATEST_SUPPORTED_VERSION, info.processId(), info.userEndPoint(), taskManager().getTaskOffsetSums(), (byte) 0, 0, CLIENT_TAGS).encode(), subscription.ownedPartitions()));
+                    downgradedSubscriptions.put(
+                        entry.getKey(),
+                        new Subscription(
+                            subscription.topics(),
+                            new SubscriptionInfo(
+                                LATEST_SUPPORTED_VERSION,
+                                LATEST_SUPPORTED_VERSION,
+                                info.processId(),
+                                info.userEndPoint(),
+                                taskManager().taskOffsetSums(),
+                                (byte) 0,
+                                0,
+                                CLIENT_TAGS
+                            ).encode(),
+                            subscription.ownedPartitions()
+                        ));
                 }
                 assignment = super.assign(metadata, new GroupSubscription(downgradedSubscriptions)).groupAssignment();
                 bumpUsedVersion = true;
@@ -258,7 +312,15 @@ public class StreamsUpgradeTest {
             final Map<String, Assignment> newAssignment = new HashMap<>();
             for (final Map.Entry<String, Assignment> entry : assignment.entrySet()) {
                 final Assignment singleAssignment = entry.getValue();
-                newAssignment.put(entry.getKey(), new Assignment(singleAssignment.partitions(), new FutureAssignmentInfo(bumpUsedVersion, bumpSupportedVersion, singleAssignment.userData()).encode()));
+                newAssignment.put(
+                    entry.getKey(),
+                    new Assignment(
+                        singleAssignment.partitions(),
+                        new FutureAssignmentInfo(
+                            bumpUsedVersion,
+                            bumpSupportedVersion,
+                            singleAssignment.userData())
+                            .encode()));
             }
 
             return new GroupAssignment(newAssignment);
@@ -273,7 +335,11 @@ public class StreamsUpgradeTest {
         private final String userEndPoint;
 
         // for testing only; don't apply version checks
-        FutureSubscriptionInfo(final int version, final UUID processId, final Set<TaskId> activeTasks, final Set<TaskId> standbyTasks, final String userEndPoint) {
+        FutureSubscriptionInfo(final int version,
+                               final UUID processId,
+                               final Set<TaskId> activeTasks,
+                               final Set<TaskId> standbyTasks,
+                               final String userEndPoint) {
             this.version = version;
             this.processId = processId;
             this.activeTasks = activeTasks;
@@ -287,14 +353,15 @@ public class StreamsUpgradeTest {
         private ByteBuffer encode() {
             final byte[] endPointBytes = LegacySubscriptionInfoSerde.prepareUserEndPoint(userEndPoint);
 
-            final ByteBuffer buf = ByteBuffer.allocate(4 + // used version
-                    4 + // latest supported version version
-                    16 + // client ID
-                    4 + activeTasks.size() * 8 +   // length + active tasks
-                    4 + standbyTasks.size() * 8 +  // length + standby tasks
-                    4 + endPointBytes.length +      // length + endpoint
-                    4 + //uniqueField
-                    4 //assignment error code
+            final ByteBuffer buf = ByteBuffer.allocate(
+                4 + // used version
+                4 + // latest supported version version
+                16 + // client ID
+                4 + activeTasks.size() * 8 +   // length + active tasks
+                4 + standbyTasks.size() * 8 +  // length + standby tasks
+                4 + endPointBytes.length +      // length + endpoint
+                4 + //uniqueField
+                4 //assignment error code
             );
 
             buf.putInt(version); // used version

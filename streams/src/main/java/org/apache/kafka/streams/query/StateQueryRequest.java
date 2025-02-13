@@ -18,8 +18,6 @@ package org.apache.kafka.streams.query;
 
 import org.apache.kafka.common.annotation.InterfaceStability.Evolving;
 
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 
@@ -27,6 +25,7 @@ import java.util.Set;
  * The request object for Interactive Queries. This is an immutable builder class for passing all
  * required and optional arguments for querying a state store in Kafka Streams.
  * <p>
+ *
  * @param <R> The type of the query result.
  */
 @Evolving
@@ -39,7 +38,13 @@ public class StateQueryRequest<R> {
     private final boolean executionInfoEnabled;
     private final boolean requireActive;
 
-    private StateQueryRequest(final String storeName, final PositionBound position, final Optional<Set<Integer>> partitions, final Query<R> query, final boolean executionInfoEnabled, final boolean requireActive) {
+    private StateQueryRequest(
+        final String storeName,
+        final PositionBound position,
+        final Optional<Set<Integer>> partitions,
+        final Query<R> query,
+        final boolean executionInfoEnabled,
+        final boolean requireActive) {
 
         this.storeName = storeName;
         this.position = position;
@@ -60,7 +65,14 @@ public class StateQueryRequest<R> {
      * Bounds the position of the state store against its input topics.
      */
     public StateQueryRequest<R> withPositionBound(final PositionBound positionBound) {
-        return new StateQueryRequest<>(storeName, positionBound, partitions, query, executionInfoEnabled, requireActive);
+        return new StateQueryRequest<>(
+            storeName,
+            positionBound,
+            partitions,
+            query,
+            executionInfoEnabled,
+            requireActive
+        );
     }
 
 
@@ -68,7 +80,14 @@ public class StateQueryRequest<R> {
      * Specifies that the query will run against all locally available partitions.
      */
     public StateQueryRequest<R> withAllPartitions() {
-        return new StateQueryRequest<>(storeName, position, Optional.empty(), query, executionInfoEnabled, requireActive);
+        return new StateQueryRequest<>(
+            storeName,
+            position,
+            Optional.empty(),
+            query,
+            executionInfoEnabled,
+            requireActive
+        );
     }
 
     /**
@@ -78,7 +97,14 @@ public class StateQueryRequest<R> {
      * {@link FailureReason#DOES_NOT_EXIST} for those partitions.
      */
     public StateQueryRequest<R> withPartitions(final Set<Integer> partitions) {
-        return new StateQueryRequest<>(storeName, position, Optional.of(Collections.unmodifiableSet(new HashSet<>(partitions))), query, executionInfoEnabled, requireActive);
+        return new StateQueryRequest<>(
+            storeName,
+            position,
+            Optional.of(Set.copyOf(partitions)),
+            query,
+            executionInfoEnabled,
+            requireActive
+        );
     }
 
     /**
@@ -86,7 +112,14 @@ public class StateQueryRequest<R> {
      * was executed.
      */
     public StateQueryRequest<R> enableExecutionInfo() {
-        return new StateQueryRequest<>(storeName, position, partitions, query, true, requireActive);
+        return new StateQueryRequest<>(
+            storeName,
+            position,
+            partitions,
+            query,
+            true,
+            requireActive
+        );
     }
 
     /**
@@ -95,7 +128,14 @@ public class StateQueryRequest<R> {
      * {@link FailureReason#NOT_ACTIVE}.
      */
     public StateQueryRequest<R> requireActive() {
-        return new StateQueryRequest<>(storeName, position, partitions, query, executionInfoEnabled, true);
+        return new StateQueryRequest<>(
+            storeName,
+            position,
+            partitions,
+            query,
+            executionInfoEnabled,
+            true
+        );
     }
 
     /**
@@ -124,16 +164,18 @@ public class StateQueryRequest<R> {
      * Whether this request should fetch from all locally available partitions.
      */
     public boolean isAllPartitions() {
-        return !partitions.isPresent();
+        return partitions.isEmpty();
     }
 
     /**
      * If the request is for specific partitions, return the set of partitions to query.
+     *
      * @throws IllegalStateException if this is a request for all partitions
      */
     public Set<Integer> getPartitions() {
-        if (!partitions.isPresent()) {
-            throw new IllegalStateException("Cannot list partitions of an 'all partitions' request");
+        if (partitions.isEmpty()) {
+            throw new IllegalStateException(
+                "Cannot list partitions of an 'all partitions' request");
         } else {
             return partitions.get();
         }
@@ -168,12 +210,13 @@ public class StateQueryRequest<R> {
          * Specifies the query to run on the specified store.
          */
         public <R> StateQueryRequest<R> withQuery(final Query<R> query) {
-            return new StateQueryRequest<>(name, // name is already specified
-                    PositionBound.unbounded(), // default: unbounded
-                    Optional.empty(), // default: all partitions
-                    query, // the query is specified
-                    false, // default: no execution info
-                    false // default: don't require active
+            return new StateQueryRequest<>(
+                name, // name is already specified
+                PositionBound.unbounded(), // default: unbounded
+                Optional.empty(), // default: all partitions
+                query, // the query is specified
+                false, // default: no execution info
+                false // default: don't require active
             );
         }
     }

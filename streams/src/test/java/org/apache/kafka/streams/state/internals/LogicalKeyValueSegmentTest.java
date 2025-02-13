@@ -16,28 +16,35 @@
  */
 package org.apache.kafka.streams.state.internals;
 
-import org.apache.kafka.common.serialization.*;
+import org.apache.kafka.common.serialization.Deserializer;
+import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.common.serialization.Serializer;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.errors.InvalidStateStoreException;
-import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.internals.metrics.RocksDBMetricsRecorder;
 import org.apache.kafka.test.InternalMockProcessorContext;
 import org.apache.kafka.test.StreamsTestUtils;
 import org.apache.kafka.test.TestUtils;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class LogicalKeyValueSegmentTest {
 
@@ -54,10 +61,15 @@ public class LogicalKeyValueSegmentTest {
     private LogicalKeyValueSegment segment2;
     private LogicalKeyValueSegment negativeIdSegment;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         physicalStore = new RocksDBStore(STORE_NAME, DB_FILE_DIR, new RocksDBMetricsRecorder(METRICS_SCOPE, STORE_NAME), false);
-        physicalStore.init((StateStoreContext) new InternalMockProcessorContext<>(TestUtils.tempDirectory(), Serdes.String(), Serdes.String(), new StreamsConfig(StreamsTestUtils.getStreamsConfig())), physicalStore);
+        physicalStore.init(new InternalMockProcessorContext<>(
+            TestUtils.tempDirectory(),
+            Serdes.String(),
+            Serdes.String(),
+            new StreamsConfig(StreamsTestUtils.getStreamsConfig())
+        ), physicalStore);
 
         segment0 = new LogicalKeyValueSegment(0, "segment-0", physicalStore);
         segment1 = new LogicalKeyValueSegment(1, "segment-1", physicalStore);
@@ -67,7 +79,7 @@ public class LogicalKeyValueSegmentTest {
         negativeIdSegment = new LogicalKeyValueSegment(-1, "reserved-segment", physicalStore);
     }
 
-    @After
+    @AfterEach
     public void tearDown() {
         segment0.close();
         segment1.close();
@@ -111,16 +123,28 @@ public class LogicalKeyValueSegmentTest {
     @Test
     public void shouldPutAll() {
         final List<KeyValue<Bytes, byte[]>> segment0Records = new ArrayList<>();
-        segment0Records.add(new KeyValue<>(new Bytes(serializeBytes("shared")), serializeBytes("v1")));
-        segment0Records.add(new KeyValue<>(new Bytes(serializeBytes("segment0_only")), serializeBytes("foo")));
+        segment0Records.add(new KeyValue<>(
+            new Bytes(serializeBytes("shared")),
+            serializeBytes("v1")));
+        segment0Records.add(new KeyValue<>(
+            new Bytes(serializeBytes("segment0_only")),
+            serializeBytes("foo")));
 
         final List<KeyValue<Bytes, byte[]>> segment1Records = new ArrayList<>();
-        segment1Records.add(new KeyValue<>(new Bytes(serializeBytes("shared")), serializeBytes("v2")));
-        segment1Records.add(new KeyValue<>(new Bytes(serializeBytes("segment1_only")), serializeBytes("bar")));
+        segment1Records.add(new KeyValue<>(
+            new Bytes(serializeBytes("shared")),
+            serializeBytes("v2")));
+        segment1Records.add(new KeyValue<>(
+            new Bytes(serializeBytes("segment1_only")),
+            serializeBytes("bar")));
 
         final List<KeyValue<Bytes, byte[]>> negativeSegmentRecords = new ArrayList<>();
-        negativeSegmentRecords.add(new KeyValue<>(new Bytes(serializeBytes("shared")), serializeBytes("v3")));
-        negativeSegmentRecords.add(new KeyValue<>(new Bytes(serializeBytes("negative_segment_only")), serializeBytes("baz")));
+        negativeSegmentRecords.add(new KeyValue<>(
+            new Bytes(serializeBytes("shared")),
+            serializeBytes("v3")));
+        negativeSegmentRecords.add(new KeyValue<>(
+            new Bytes(serializeBytes("negative_segment_only")),
+            serializeBytes("baz")));
 
         segment0.putAll(segment0Records);
         segment1.putAll(segment1Records);

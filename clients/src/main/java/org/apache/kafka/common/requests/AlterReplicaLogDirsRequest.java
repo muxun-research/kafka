@@ -33,61 +33,61 @@ import java.util.stream.Collectors;
 
 public class AlterReplicaLogDirsRequest extends AbstractRequest {
 
-	private final AlterReplicaLogDirsRequestData data;
+    private final AlterReplicaLogDirsRequestData data;
 
     public static class Builder extends AbstractRequest.Builder<AlterReplicaLogDirsRequest> {
-		private final AlterReplicaLogDirsRequestData data;
+        private final AlterReplicaLogDirsRequestData data;
 
-		public Builder(AlterReplicaLogDirsRequestData data) {
-			super(ApiKeys.ALTER_REPLICA_LOG_DIRS);
-			this.data = data;
-		}
+        public Builder(AlterReplicaLogDirsRequestData data) {
+            super(ApiKeys.ALTER_REPLICA_LOG_DIRS);
+            this.data = data;
+        }
 
         @Override
         public AlterReplicaLogDirsRequest build(short version) {
-			return new AlterReplicaLogDirsRequest(data, version);
+            return new AlterReplicaLogDirsRequest(data, version);
         }
 
         @Override
         public String toString() {
-			return data.toString();
+            return data.toString();
         }
     }
 
-	public AlterReplicaLogDirsRequest(AlterReplicaLogDirsRequestData data, short version) {
-		super(ApiKeys.ALTER_REPLICA_LOG_DIRS, version);
-		this.data = data;
-	}
+    public AlterReplicaLogDirsRequest(AlterReplicaLogDirsRequestData data, short version) {
+        super(ApiKeys.ALTER_REPLICA_LOG_DIRS, version);
+        this.data = data;
+    }
 
-	@Override
-	public AlterReplicaLogDirsRequestData data() {
-		return data;
-	}
+    @Override
+    public AlterReplicaLogDirsRequestData data() {
+        return data;
+    }
 
-	public AlterReplicaLogDirsResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-		AlterReplicaLogDirsResponseData data = new AlterReplicaLogDirsResponseData();
-		data.setResults(this.data.dirs().stream().flatMap(alterDir ->
-				alterDir.topics().stream().map(topic ->
-						new AlterReplicaLogDirTopicResult()
-								.setTopicName(topic.name())
-								.setPartitions(topic.partitions().stream().map(partitionId ->
-										new AlterReplicaLogDirsResponseData.AlterReplicaLogDirPartitionResult()
-												.setErrorCode(Errors.forException(e).code())
-												.setPartitionIndex(partitionId)).collect(Collectors.toList())))).collect(Collectors.toList()));
-		return new AlterReplicaLogDirsResponse(data.setThrottleTimeMs(throttleTimeMs));
-	}
+    public AlterReplicaLogDirsResponse getErrorResponse(int throttleTimeMs, Throwable e) {
+        AlterReplicaLogDirsResponseData data = new AlterReplicaLogDirsResponseData();
+        data.setResults(this.data.dirs().stream().flatMap(alterDir ->
+            alterDir.topics().stream().map(topic ->
+                new AlterReplicaLogDirTopicResult()
+                    .setTopicName(topic.name())
+                    .setPartitions(topic.partitions().stream().map(partitionId ->
+                        new AlterReplicaLogDirsResponseData.AlterReplicaLogDirPartitionResult()
+                            .setErrorCode(Errors.forException(e).code())
+                            .setPartitionIndex(partitionId)).collect(Collectors.toList())))).collect(Collectors.toList()));
+        return new AlterReplicaLogDirsResponse(data.setThrottleTimeMs(throttleTimeMs));
+    }
 
-	public Map<TopicPartition, String> partitionDirs() {
-		Map<TopicPartition, String> result = new HashMap<>();
-		data.dirs().forEach(alterDir ->
-				alterDir.topics().forEach(topic ->
-						topic.partitions().forEach(partition ->
-								result.put(new TopicPartition(topic.name(), partition.intValue()), alterDir.path())))
-		);
-		return result;
-	}
+    public Map<TopicPartition, String> partitionDirs() {
+        Map<TopicPartition, String> result = new HashMap<>();
+        data.dirs().forEach(alterDir ->
+            alterDir.topics().forEach(topic ->
+                topic.partitions().forEach(partition ->
+                    result.put(new TopicPartition(topic.name(), partition), alterDir.path())))
+        );
+        return result;
+    }
 
     public static AlterReplicaLogDirsRequest parse(ByteBuffer buffer, short version) {
-		return new AlterReplicaLogDirsRequest(new AlterReplicaLogDirsRequestData(new ByteBufferAccessor(buffer), version), version);
+        return new AlterReplicaLogDirsRequest(new AlterReplicaLogDirsRequestData(new ByteBufferAccessor(buffer), version), version);
     }
 }

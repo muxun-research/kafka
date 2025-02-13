@@ -16,11 +16,10 @@
 {
   "apiKey": 8,
   "type": "request",
-  "listeners": [
-    "zkBroker",
-    "broker"
-  ],
+  "listeners": ["broker"],
   "name": "OffsetCommitRequest",
+  // Versions 0-1 were removed in Apache Kafka 4.0, Version 2 is the new baseline.
+  //
   // Version 1 adds timestamp and group membership information, as well as the commit timestamp.
   //
   // Version 2 adds retention time.  It removes the commit timestamp added in version 1.
@@ -34,39 +33,21 @@
   // version 7 adds a new field called groupInstanceId to indicate member identity across restarts.
   //
   // Version 8 is the first flexible version.
-  "validVersions": "0-8",
+  //
+  // Version 9 is the first version that can be used with the new consumer group protocol (KIP-848). The
+  // request is the same as version 8.
+  "validVersions": "2-9",
   "flexibleVersions": "8+",
   "fields": [
-    {
-      "name": "GroupId",
-      "type": "string",
-      "versions": "0+",
-      "entityType": "groupId",
-      "about": "The unique group identifier."
-    },
-    {
-      "name": "GenerationId",
-      "type": "int32",
-      "versions": "1+",
-      "default": "-1",
-      "ignorable": true,
-      "about": "The generation of the group."
-    },
-    {
-      "name": "MemberId",
-      "type": "string",
-      "versions": "1+",
-      "ignorable": true,
-      "about": "The member ID assigned by the group coordinator."
-    },
-    {
-      "name": "GroupInstanceId",
-      "type": "string",
-      "versions": "7+",
-      "nullableVersions": "7+",
-      "default": "null",
-      "about": "The unique identifier of the consumer instance provided by end user."
-    },
+    { "name": "GroupId", "type": "string", "versions": "0+", "entityType": "groupId",
+      "about": "The unique group identifier." },
+    { "name": "GenerationIdOrMemberEpoch", "type": "int32", "versions": "1+", "default": "-1", "ignorable": true,
+      "about": "The generation of the group if using the classic group protocol or the member epoch if using the consumer protocol." },
+    { "name": "MemberId", "type": "string", "versions": "1+", "ignorable": true,
+      "about": "The member ID assigned by the group coordinator." },
+    { "name": "GroupInstanceId", "type": "string", "versions": "7+",
+      "nullableVersions": "7+", "default": "null",
+      "about": "The unique identifier of the consumer instance provided by end user." },
     { "name": "RetentionTimeMs", "type": "int64", "versions": "2-4", "default": "-1", "ignorable": true,
       "about": "The time period in ms to retain the offset." },
     { "name": "Topics", "type": "[]OffsetCommitRequestTopic", "versions": "0+",
@@ -81,9 +62,6 @@
           "about": "The message offset to be committed." },
         { "name": "CommittedLeaderEpoch", "type": "int32", "versions": "6+", "default": "-1", "ignorable": true,
           "about": "The leader epoch of this partition." },
-        // CommitTimestamp has been removed from v2 and later.
-        { "name": "CommitTimestamp", "type": "int64", "versions": "1", "default": "-1",
-          "about": "The timestamp of the commit." },
         { "name": "CommittedMetadata", "type": "string", "versions": "0+", "nullableVersions": "0+",
           "about": "Any associated metadata the client wants to keep." }
       ]}

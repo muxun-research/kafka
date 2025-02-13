@@ -28,6 +28,11 @@ public interface MetadataNodeRedactionCriteria {
     boolean shouldRedactScram();
 
     /**
+     * Returns true if DelegationToken data should be redacted.
+     */
+    boolean shouldRedactDelegationToken();
+
+    /**
      * Returns true if a configuration should be redacted.
      * @param type The configuration type.
      * @param key  The configuration key.
@@ -40,6 +45,11 @@ public interface MetadataNodeRedactionCriteria {
 
         @Override
         public boolean shouldRedactScram() {
+            return true;
+        }
+
+        @Override
+        public boolean shouldRedactDelegationToken() {
             return true;
         }
 
@@ -62,6 +72,11 @@ public interface MetadataNodeRedactionCriteria {
         }
 
         @Override
+        public boolean shouldRedactDelegationToken() {
+            return true;
+        }
+
+        @Override
         public boolean shouldRedactConfig(ConfigResource.Type type, String key) {
             return configSchema.isSensitive(type, key);
         }
@@ -72,6 +87,11 @@ public interface MetadataNodeRedactionCriteria {
 
         @Override
         public boolean shouldRedactScram() {
+            return false;
+        }
+
+        @Override
+        public boolean shouldRedactDelegationToken() {
             return false;
         }
 

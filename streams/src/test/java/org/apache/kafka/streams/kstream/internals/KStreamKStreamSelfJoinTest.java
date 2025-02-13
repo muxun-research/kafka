@@ -23,7 +23,14 @@ import org.apache.kafka.streams.kstream.*;
 import org.apache.kafka.test.MockApiProcessor;
 import org.apache.kafka.test.MockApiProcessorSupplier;
 import org.apache.kafka.test.StreamsTestUtils;
-import org.junit.Test;
+
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Properties;
+
+import static java.time.Duration.ofMillis;
+import static java.time.Duration.ofSeconds;
 
 import java.util.List;
 import java.util.Properties;

@@ -31,55 +31,38 @@ public final class RecordMetadata {
     public static final int UNKNOWN_PARTITION = -1;
 
     private final long offset;
-	// The timestamp of the message.
-	// If LogAppendTime is used for the topic, the timestamp will be the timestamp returned by the broker.
-	// If CreateTime is used for the topic, the timestamp is the timestamp in the corresponding ProducerRecord if the
-	// user provided one. Otherwise, it will be the producer local time when the producer record was handed to the
-	// producer.
-	private final long timestamp;
-	private final int serializedKeySize;
-	private final int serializedValueSize;
-	private final TopicPartition topicPartition;
+    // The timestamp of the message.
+    // If LogAppendTime is used for the topic, the timestamp will be the timestamp returned by the broker.
+    // If CreateTime is used for the topic, the timestamp is the timestamp in the corresponding ProducerRecord if the
+    // user provided one. Otherwise, it will be the producer local time when the producer record was handed to the
+    // producer.
+    private final long timestamp;
+    private final int serializedKeySize;
+    private final int serializedValueSize;
+    private final TopicPartition topicPartition;
 
-	/**
-	 * Creates a new instance with the provided parameters.
-	 */
-	public RecordMetadata(TopicPartition topicPartition, long baseOffset, int batchIndex, long timestamp,
-						  int serializedKeySize, int serializedValueSize) {
-		// ignore the batchIndex if the base offset is -1, since this indicates the offset is unknown
-		this.offset = baseOffset == -1 ? baseOffset : baseOffset + batchIndex;
-		this.timestamp = timestamp;
-		this.serializedKeySize = serializedKeySize;
-		this.serializedValueSize = serializedValueSize;
-		this.topicPartition = topicPartition;
-	}
+    /**
+     * Creates a new instance with the provided parameters.
+     */
+    public RecordMetadata(TopicPartition topicPartition, long baseOffset, int batchIndex, long timestamp,
+                          int serializedKeySize, int serializedValueSize) {
+        // ignore the batchIndex if the base offset is -1, since this indicates the offset is unknown
+        this.offset = baseOffset == -1 ? baseOffset : baseOffset + batchIndex;
+        this.timestamp = timestamp;
+        this.serializedKeySize = serializedKeySize;
+        this.serializedValueSize = serializedValueSize;
+        this.topicPartition = topicPartition;
+    }
 
-	/**
-	 * Creates a new instance with the provided parameters.
-	 * @deprecated use constructor without `checksum` parameter. This constructor will be removed in
-	 * Apache Kafka 4.0 (deprecated since 3.0).
-	 */
-	@Deprecated
-	public RecordMetadata(TopicPartition topicPartition, long baseOffset, long batchIndex, long timestamp,
-						  Long checksum, int serializedKeySize, int serializedValueSize) {
-		this(topicPartition, baseOffset, batchIndexToInt(batchIndex), timestamp, serializedKeySize, serializedValueSize);
-	}
+    /**
+     * Indicates whether the record metadata includes the offset.
+     * @return true if the offset is included in the metadata, false otherwise.
+     */
+    public boolean hasOffset() {
+        return this.offset != ProduceResponse.INVALID_OFFSET;
+    }
 
-	private static int batchIndexToInt(long batchIndex) {
-		if (batchIndex > Integer.MAX_VALUE)
-			throw new IllegalArgumentException("batchIndex is larger than Integer.MAX_VALUE: " + batchIndex);
-		return (int) batchIndex;
-	}
-
-	/**
-	 * Indicates whether the record metadata includes the offset.
-	 * @return true if the offset is included in the metadata, false otherwise.
-	 */
-	public boolean hasOffset() {
-		return this.offset != ProduceResponse.INVALID_OFFSET;
-	}
-
-	/**
+    /**
      * The offset of the record in the topic/partition.
      * @return the offset of the record, or -1 if {{@link #hasOffset()}} returns false.
      */

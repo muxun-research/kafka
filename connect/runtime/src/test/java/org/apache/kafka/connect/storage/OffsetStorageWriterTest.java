@@ -17,23 +17,40 @@
 package org.apache.kafka.connect.storage;
 
 import org.apache.kafka.connect.util.Callback;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)
 public class OffsetStorageWriterTest {
     private static final String NAMESPACE = "namespace";
     // Connect format - any types should be accepted here
@@ -53,20 +70,21 @@ public class OffsetStorageWriterTest {
 
     private ExecutorService service;
 
-    @Before
+    @BeforeEach
     public void setup() {
         writer = new OffsetStorageWriter(store, NAMESPACE, keyConverter, valueConverter);
         service = Executors.newFixedThreadPool(1);
     }
 
-    @After
+    @AfterEach
     public void teardown() {
         service.shutdownNow();
     }
 
     @Test
     public void testWriteFlush() throws Exception {
-        @SuppressWarnings("unchecked") Callback<Void> callback = mock(Callback.class);
+        @SuppressWarnings("unchecked")
+        Callback<Void> callback = mock(Callback.class);
         expectStore(OFFSET_KEY, OFFSET_KEY_SERIALIZED, OFFSET_VALUE, OFFSET_VALUE_SERIALIZED, false, null);
 
         writer.offset(OFFSET_KEY, OFFSET_VALUE);
@@ -79,7 +97,8 @@ public class OffsetStorageWriterTest {
     // It should be possible to set offset values to null
     @Test
     public void testWriteNullValueFlush() throws Exception {
-        @SuppressWarnings("unchecked") Callback<Void> callback = mock(Callback.class);
+        @SuppressWarnings("unchecked")
+        Callback<Void> callback = mock(Callback.class);
         expectStore(OFFSET_KEY, OFFSET_KEY_SERIALIZED, null, null, false, null);
 
         writer.offset(OFFSET_KEY, null);
@@ -93,7 +112,8 @@ public class OffsetStorageWriterTest {
     // info about the namespace (connector)
     @Test
     public void testWriteNullKeyFlush() throws Exception {
-        @SuppressWarnings("unchecked") Callback<Void> callback = mock(Callback.class);
+        @SuppressWarnings("unchecked")
+        Callback<Void> callback = mock(Callback.class);
         expectStore(null, null, OFFSET_VALUE, OFFSET_VALUE_SERIALIZED, false, null);
 
         writer.offset(null, OFFSET_VALUE);
@@ -118,7 +138,8 @@ public class OffsetStorageWriterTest {
         // When a flush fails, we shouldn't just lose the offsets. Instead, they should be restored
         // such that a subsequent flush will write them.
 
-        @SuppressWarnings("unchecked") final Callback<Void> callback = mock(Callback.class);
+        @SuppressWarnings("unchecked")
+        final Callback<Void> callback = mock(Callback.class);
         // First time the write fails
         expectStore(OFFSET_KEY, OFFSET_KEY_SERIALIZED, OFFSET_VALUE, OFFSET_VALUE_SERIALIZED, true, null);
         writer.offset(OFFSET_KEY, OFFSET_VALUE);
@@ -138,7 +159,8 @@ public class OffsetStorageWriterTest {
 
     @Test
     public void testAlreadyFlushing() throws InterruptedException, TimeoutException {
-        @SuppressWarnings("unchecked") final Callback<Void> callback = mock(Callback.class);
+        @SuppressWarnings("unchecked")
+        final Callback<Void> callback = mock(Callback.class);
         // Trigger the send, but don't invoke the callback so we'll still be mid-flush
         CountDownLatch allowStoreCompleteCountdown = new CountDownLatch(1);
         expectStore(OFFSET_KEY, OFFSET_KEY_SERIALIZED, OFFSET_VALUE, OFFSET_VALUE_SERIALIZED, false, allowStoreCompleteCountdown);
@@ -161,7 +183,8 @@ public class OffsetStorageWriterTest {
 
     @Test
     public void testCancelAfterAwaitFlush() throws Exception {
-        @SuppressWarnings("unchecked") Callback<Void> callback = mock(Callback.class);
+        @SuppressWarnings("unchecked")
+        Callback<Void> callback = mock(Callback.class);
         CountDownLatch allowStoreCompleteCountdown = new CountDownLatch(1);
         // In this test, the write should be cancelled so the callback will not be invoked and is not
         // passed to the expectStore call
@@ -189,13 +212,18 @@ public class OffsetStorageWriterTest {
      *                          ensure tests complete.
      */
     @SuppressWarnings("unchecked")
-    private void expectStore(Map<String, Object> key, byte[] keySerialized, Map<String, Object> value, byte[] valueSerialized, final boolean fail, final CountDownLatch waitForCompletion) {
+    private void expectStore(Map<String, Object> key, byte[] keySerialized,
+                             Map<String, Object> value, byte[] valueSerialized,
+                             final boolean fail,
+                             final CountDownLatch waitForCompletion) {
         List<Object> keyWrapped = Arrays.asList(NAMESPACE, key);
         when(keyConverter.fromConnectData(NAMESPACE, null, keyWrapped)).thenReturn(keySerialized);
         when(valueConverter.fromConnectData(NAMESPACE, null, value)).thenReturn(valueSerialized);
 
         final ArgumentCaptor<Callback<Void>> storeCallback = ArgumentCaptor.forClass(Callback.class);
-        final Map<ByteBuffer, ByteBuffer> offsetsSerialized = Collections.singletonMap(keySerialized == null ? null : ByteBuffer.wrap(keySerialized), valueSerialized == null ? null : ByteBuffer.wrap(valueSerialized));
+        final Map<ByteBuffer, ByteBuffer> offsetsSerialized = Collections.singletonMap(
+                keySerialized == null ? null : ByteBuffer.wrap(keySerialized),
+                valueSerialized == null ? null : ByteBuffer.wrap(valueSerialized));
         when(store.set(eq(offsetsSerialized), storeCallback.capture())).thenAnswer(invocation -> {
             final Callback<Void> cb = invocation.getArgument(1);
             return service.submit(() -> {

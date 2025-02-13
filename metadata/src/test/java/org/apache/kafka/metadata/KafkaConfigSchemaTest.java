@@ -22,6 +22,7 @@ import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.requests.DescribeConfigsResponse;
 import org.apache.kafka.server.config.ConfigSynonym;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -34,7 +35,10 @@ import static java.util.Collections.emptyList;
 import static org.apache.kafka.common.config.ConfigResource.Type.BROKER;
 import static org.apache.kafka.common.config.ConfigResource.Type.TOPIC;
 import static org.apache.kafka.server.config.ConfigSynonym.HOURS_TO_MILLISECONDS;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 
 @Timeout(value = 40)
@@ -42,8 +46,17 @@ public class KafkaConfigSchemaTest {
     public static final Map<ConfigResource.Type, ConfigDef> CONFIGS = new HashMap<>();
 
     static {
-        CONFIGS.put(BROKER, new ConfigDef().define("foo.bar", ConfigDef.Type.LIST, "1", ConfigDef.Importance.HIGH, "foo bar doc").define("baz", ConfigDef.Type.STRING, ConfigDef.Importance.HIGH, "baz doc").define("quux", ConfigDef.Type.INT, ConfigDef.Importance.HIGH, "quux doc").define("quuux", ConfigDef.Type.PASSWORD, ConfigDef.Importance.HIGH, "quuux doc").define("quuux2", ConfigDef.Type.PASSWORD, ConfigDef.Importance.HIGH, "quuux2 doc"));
-        CONFIGS.put(TOPIC, new ConfigDef().define("abc", ConfigDef.Type.LIST, ConfigDef.Importance.HIGH, "abc doc").define("def", ConfigDef.Type.LONG, ConfigDef.Importance.HIGH, "def doc").define("ghi", ConfigDef.Type.BOOLEAN, true, ConfigDef.Importance.HIGH, "ghi doc").define("xyz", ConfigDef.Type.PASSWORD, "thedefault", ConfigDef.Importance.HIGH, "xyz doc"));
+        CONFIGS.put(BROKER, new ConfigDef().
+            define("foo.bar", ConfigDef.Type.LIST, "1", ConfigDef.Importance.HIGH, "foo bar doc").
+            define("baz", ConfigDef.Type.STRING, ConfigDef.Importance.HIGH, "baz doc").
+            define("quux", ConfigDef.Type.INT, ConfigDef.Importance.HIGH, "quux doc").
+            define("quuux", ConfigDef.Type.PASSWORD, ConfigDef.Importance.HIGH, "quuux doc").
+            define("quuux2", ConfigDef.Type.PASSWORD, ConfigDef.Importance.HIGH, "quuux2 doc"));
+        CONFIGS.put(TOPIC, new ConfigDef().
+            define("abc", ConfigDef.Type.LIST, ConfigDef.Importance.HIGH, "abc doc").
+            define("def", ConfigDef.Type.LONG, ConfigDef.Importance.HIGH, "def doc").
+            define("ghi", ConfigDef.Type.BOOLEAN, true, ConfigDef.Importance.HIGH, "ghi doc").
+            define("xyz", ConfigDef.Type.PASSWORD, "thedefault", ConfigDef.Importance.HIGH, "xyz doc"));
     }
 
     public static final Map<String, List<ConfigSynonym>> SYNONYMS = new HashMap<>();
@@ -76,15 +89,26 @@ public class KafkaConfigSchemaTest {
 
     @Test
     public void testTranslateConfigSources() {
-        testTranslateConfigSource(ConfigEntry.ConfigSource.DYNAMIC_TOPIC_CONFIG, DescribeConfigsResponse.ConfigSource.TOPIC_CONFIG);
-        testTranslateConfigSource(ConfigEntry.ConfigSource.DYNAMIC_BROKER_LOGGER_CONFIG, DescribeConfigsResponse.ConfigSource.DYNAMIC_BROKER_LOGGER_CONFIG);
-        testTranslateConfigSource(ConfigEntry.ConfigSource.DYNAMIC_BROKER_CONFIG, DescribeConfigsResponse.ConfigSource.DYNAMIC_BROKER_CONFIG);
-        testTranslateConfigSource(ConfigEntry.ConfigSource.DYNAMIC_DEFAULT_BROKER_CONFIG, DescribeConfigsResponse.ConfigSource.DYNAMIC_DEFAULT_BROKER_CONFIG);
-        testTranslateConfigSource(ConfigEntry.ConfigSource.STATIC_BROKER_CONFIG, DescribeConfigsResponse.ConfigSource.STATIC_BROKER_CONFIG);
-        testTranslateConfigSource(ConfigEntry.ConfigSource.DEFAULT_CONFIG, DescribeConfigsResponse.ConfigSource.DEFAULT_CONFIG);
+        testTranslateConfigSource(ConfigEntry.ConfigSource.DYNAMIC_TOPIC_CONFIG,
+            DescribeConfigsResponse.ConfigSource.TOPIC_CONFIG);
+        testTranslateConfigSource(ConfigEntry.ConfigSource.DYNAMIC_BROKER_LOGGER_CONFIG,
+            DescribeConfigsResponse.ConfigSource.DYNAMIC_BROKER_LOGGER_CONFIG);
+        testTranslateConfigSource(ConfigEntry.ConfigSource.DYNAMIC_BROKER_CONFIG,
+            DescribeConfigsResponse.ConfigSource.DYNAMIC_BROKER_CONFIG);
+        testTranslateConfigSource(ConfigEntry.ConfigSource.DYNAMIC_DEFAULT_BROKER_CONFIG,
+            DescribeConfigsResponse.ConfigSource.DYNAMIC_DEFAULT_BROKER_CONFIG);
+        testTranslateConfigSource(ConfigEntry.ConfigSource.STATIC_BROKER_CONFIG,
+            DescribeConfigsResponse.ConfigSource.STATIC_BROKER_CONFIG);
+        testTranslateConfigSource(ConfigEntry.ConfigSource.DYNAMIC_CLIENT_METRICS_CONFIG,
+            DescribeConfigsResponse.ConfigSource.CLIENT_METRICS_CONFIG);
+        testTranslateConfigSource(ConfigEntry.ConfigSource.DYNAMIC_GROUP_CONFIG,
+            DescribeConfigsResponse.ConfigSource.GROUP_CONFIG);
+        testTranslateConfigSource(ConfigEntry.ConfigSource.DEFAULT_CONFIG,
+            DescribeConfigsResponse.ConfigSource.DEFAULT_CONFIG);
     }
 
-    private static void testTranslateConfigSource(ConfigEntry.ConfigSource a, DescribeConfigsResponse.ConfigSource b) {
+    private static void testTranslateConfigSource(ConfigEntry.ConfigSource a,
+                                                  DescribeConfigsResponse.ConfigSource b) {
         assertEquals(b, KafkaConfigSchema.translateConfigSource(a));
     }
 
@@ -128,10 +152,21 @@ public class KafkaConfigSchemaTest {
         Map<String, String> dynamicTopicConfigs = new HashMap<>();
         dynamicTopicConfigs.put("ghi", "true");
         Map<String, ConfigEntry> expected = new HashMap<>();
-        expected.put("abc", new ConfigEntry("abc", "the,dynamic,cluster,config,value", ConfigEntry.ConfigSource.DYNAMIC_DEFAULT_BROKER_CONFIG, false, false, emptyList(), ConfigEntry.ConfigType.LIST, "abc doc"));
-        expected.put("def", new ConfigEntry("def", "2840400000", ConfigEntry.ConfigSource.DYNAMIC_BROKER_CONFIG, false, false, emptyList(), ConfigEntry.ConfigType.LONG, "def doc"));
-        expected.put("ghi", new ConfigEntry("ghi", "true", ConfigEntry.ConfigSource.DYNAMIC_TOPIC_CONFIG, false, false, emptyList(), ConfigEntry.ConfigType.BOOLEAN, "ghi doc"));
-        expected.put("xyz", new ConfigEntry("xyz", "thedefault", ConfigEntry.ConfigSource.DEFAULT_CONFIG, true, false, emptyList(), ConfigEntry.ConfigType.PASSWORD, "xyz doc"));
-        assertEquals(expected, SCHEMA.resolveEffectiveTopicConfigs(staticNodeConfig, dynamicClusterConfigs, dynamicNodeConfigs, dynamicTopicConfigs));
+        expected.put("abc", new ConfigEntry("abc", "the,dynamic,cluster,config,value",
+            ConfigEntry.ConfigSource.DYNAMIC_DEFAULT_BROKER_CONFIG, false, false, emptyList(),
+                ConfigEntry.ConfigType.LIST, "abc doc"));
+        expected.put("def", new ConfigEntry("def", "2840400000",
+            ConfigEntry.ConfigSource.DYNAMIC_BROKER_CONFIG, false, false, emptyList(),
+            ConfigEntry.ConfigType.LONG, "def doc"));
+        expected.put("ghi", new ConfigEntry("ghi", "true",
+            ConfigEntry.ConfigSource.DYNAMIC_TOPIC_CONFIG, false, false, emptyList(),
+            ConfigEntry.ConfigType.BOOLEAN, "ghi doc"));
+        expected.put("xyz", new ConfigEntry("xyz", "thedefault",
+            ConfigEntry.ConfigSource.DEFAULT_CONFIG, true, false, emptyList(),
+            ConfigEntry.ConfigType.PASSWORD, "xyz doc"));
+        assertEquals(expected, SCHEMA.resolveEffectiveTopicConfigs(staticNodeConfig,
+            dynamicClusterConfigs,
+            dynamicNodeConfigs,
+            dynamicTopicConfigs));
     }
 }

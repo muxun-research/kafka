@@ -17,20 +17,27 @@
 
 package org.apache.kafka.connect.mirror.clients.admin;
 
-import org.apache.kafka.clients.admin.*;
+import org.apache.kafka.clients.admin.CreateAclsOptions;
+import org.apache.kafka.clients.admin.CreateAclsResult;
+import org.apache.kafka.clients.admin.CreatePartitionsOptions;
+import org.apache.kafka.clients.admin.CreatePartitionsResult;
+import org.apache.kafka.clients.admin.CreateTopicsOptions;
+import org.apache.kafka.clients.admin.CreateTopicsResult;
+import org.apache.kafka.clients.admin.ForwardingAdmin;
+import org.apache.kafka.clients.admin.NewPartitions;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.acl.AclBinding;
-import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.errors.TopicExistsException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Collection;
 import java.util.Map;
 
-/**
- * Customised ForwardingAdmin for testing only.
+/** Customised ForwardingAdmin for testing only.
  * The class create/alter topics, partitions and ACLs in Kafka then store metadata in {@link FakeLocalMetadataStore}.
- */
+ * */
 
 public class FakeForwardingAdminWithLocalMetadata extends ForwardingAdmin {
     private static final Logger log = LoggerFactory.getLogger(FakeForwardingAdminWithLocalMetadata.class);
@@ -67,23 +74,6 @@ public class FakeForwardingAdminWithLocalMetadata extends ForwardingAdmin {
         }));
         return createPartitionsResult;
     }
-
-    @Deprecated
-    @Override
-    public AlterConfigsResult alterConfigs(Map<ConfigResource, Config> configs, AlterConfigsOptions options) {
-        AlterConfigsResult alterConfigsResult = super.alterConfigs(configs, options);
-        configs.forEach((configResource, newConfigs) -> alterConfigsResult.values().get(configResource).whenComplete((ignored, error) -> {
-            if (error == null) {
-                if (configResource.type() == ConfigResource.Type.TOPIC) {
-                    FakeLocalMetadataStore.updateTopicConfig(configResource.name(), newConfigs);
-                }
-            } else {
-                log.error("Unable to intercept admin client operation", error);
-            }
-        }));
-        return alterConfigsResult;
-    }
-
 
     @Override
     public CreateAclsResult createAcls(Collection<AclBinding> acls, CreateAclsOptions options) {

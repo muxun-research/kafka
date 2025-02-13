@@ -19,10 +19,10 @@ package org.apache.kafka.streams.state.internals.metrics;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.utils.MockTime;
-import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.processor.TaskId;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
 import org.apache.kafka.streams.state.internals.metrics.RocksDBMetrics.RocksDBMetricContext;
+
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,24 +33,39 @@ import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
-import org.rocksdb.*;
+import org.rocksdb.Cache;
+import org.rocksdb.HistogramData;
+import org.rocksdb.HistogramType;
+import org.rocksdb.RocksDB;
+import org.rocksdb.Statistics;
+import org.rocksdb.StatsLevel;
+import org.rocksdb.TickerType;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertThrows;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isA;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.STRICT_STUBS)
 public class RocksDBMetricsRecorderTest {
-    private final static String METRICS_SCOPE = "metrics-scope";
-    private final static TaskId TASK_ID1 = new TaskId(0, 0);
-    private final static TaskId TASK_ID2 = new TaskId(0, 1);
-    private final static String STORE_NAME = "store-name";
-    private final static String SEGMENT_STORE_NAME_1 = "segment-store-name-1";
-    private final static String SEGMENT_STORE_NAME_2 = "segment-store-name-2";
-    private final static String SEGMENT_STORE_NAME_3 = "segment-store-name-3";
+    private static final String METRICS_SCOPE = "metrics-scope";
+    private static final TaskId TASK_ID1 = new TaskId(0, 0);
+    private static final TaskId TASK_ID2 = new TaskId(0, 1);
+    private static final String STORE_NAME = "store-name";
+    private static final String SEGMENT_STORE_NAME_1 = "segment-store-name-1";
+    private static final String SEGMENT_STORE_NAME_2 = "segment-store-name-2";
+    private static final String SEGMENT_STORE_NAME_3 = "segment-store-name-3";
 
     private final RocksDB dbToAdd1 = mock(RocksDB.class);
     private final RocksDB dbToAdd2 = mock(RocksDB.class);
@@ -152,12 +167,37 @@ public class RocksDBMetricsRecorderTest {
 
     @Test
     public void shouldThrowIfMetricRecorderIsReInitialisedWithDifferentTask() {
-        assertThrows(IllegalStateException.class, () -> recorder.init(streamsMetrics, TASK_ID2));
+        assertThrows(
+            IllegalStateException.class,
+            () -> recorder.init(streamsMetrics, TASK_ID2)
+        );
+    }
+
+    @Test
+    public void shouldThrowIfMetricRecorderIsInitialisedWithNullMetrics() {
+        assertThrows(
+            NullPointerException.class,
+            () -> recorder.init(null, TASK_ID1)
+        );
+    }
+
+    @Test
+    public void shouldThrowIfMetricRecorderIsInitialisedWithNullTaskId() {
+        assertThrows(
+            NullPointerException.class,
+            () -> recorder.init(streamsMetrics, null)
+        );
     }
 
     @Test
     public void shouldThrowIfMetricRecorderIsReInitialisedWithDifferentStreamsMetrics() {
-        assertThrows(IllegalStateException.class, () -> recorder.init(new StreamsMetricsImpl(new Metrics(), "test-client", StreamsConfig.METRICS_LATEST, new MockTime()), TASK_ID1));
+        assertThrows(
+            IllegalStateException.class,
+            () -> recorder.init(
+                new StreamsMetricsImpl(new Metrics(), "test-client", "processId", new MockTime()),
+                TASK_ID1
+            )
+        );
     }
 
     @Test
@@ -176,40 +216,84 @@ public class RocksDBMetricsRecorderTest {
     public void shouldThrowIfValueProvidersForASegmentHasBeenAlreadyAdded() {
         recorder.addValueProviders(SEGMENT_STORE_NAME_1, dbToAdd1, cacheToAdd1, statisticsToAdd1);
 
-        final Throwable exception = assertThrows(IllegalStateException.class, () -> recorder.addValueProviders(SEGMENT_STORE_NAME_1, dbToAdd1, cacheToAdd1, statisticsToAdd2));
-        assertThat(exception.getMessage(), is("Value providers for store " + SEGMENT_STORE_NAME_1 + " of task " + TASK_ID1 + " has been already added. This is a bug in Kafka Streams. " + "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues"));
+        final Throwable exception = assertThrows(
+            IllegalStateException.class,
+            () -> recorder.addValueProviders(SEGMENT_STORE_NAME_1, dbToAdd1, cacheToAdd1, statisticsToAdd2)
+        );
+        assertThat(
+            exception.getMessage(),
+            is("Value providers for store " + SEGMENT_STORE_NAME_1 + " of task " + TASK_ID1 +
+                " has been already added. This is a bug in Kafka Streams. " +
+                "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues")
+        );
     }
 
     @Test
     public void shouldThrowIfStatisticsToAddIsNotNullButExistingStatisticsAreNull() {
         recorder.addValueProviders(SEGMENT_STORE_NAME_1, dbToAdd1, cacheToAdd1, null);
 
-        final Throwable exception = assertThrows(IllegalStateException.class, () -> recorder.addValueProviders(SEGMENT_STORE_NAME_2, dbToAdd2, cacheToAdd2, statisticsToAdd2));
-        assertThat(exception.getMessage(), is("Statistics for segment " + SEGMENT_STORE_NAME_2 + " of task " + TASK_ID1 + " is not null although the statistics of another segment in this metrics recorder is null. " + "This is a bug in Kafka Streams. " + "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues"));
+        final Throwable exception = assertThrows(
+            IllegalStateException.class,
+            () -> recorder.addValueProviders(SEGMENT_STORE_NAME_2, dbToAdd2, cacheToAdd2, statisticsToAdd2)
+        );
+        assertThat(
+            exception.getMessage(),
+            is("Statistics for segment " + SEGMENT_STORE_NAME_2 + " of task " + TASK_ID1 +
+                " is not null although the statistics of another segment in this metrics recorder is null. " +
+                "This is a bug in Kafka Streams. " +
+                "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues")
+        );
     }
 
     @Test
     public void shouldThrowIfStatisticsToAddIsNullButExistingStatisticsAreNotNull() {
         recorder.addValueProviders(SEGMENT_STORE_NAME_1, dbToAdd1, cacheToAdd1, statisticsToAdd1);
 
-        final Throwable exception = assertThrows(IllegalStateException.class, () -> recorder.addValueProviders(SEGMENT_STORE_NAME_2, dbToAdd2, cacheToAdd2, null));
-        assertThat(exception.getMessage(), is("Statistics for segment " + SEGMENT_STORE_NAME_2 + " of task " + TASK_ID1 + " is null although the statistics of another segment in this metrics recorder is not null. " + "This is a bug in Kafka Streams. " + "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues"));
+        final Throwable exception = assertThrows(
+            IllegalStateException.class,
+            () -> recorder.addValueProviders(SEGMENT_STORE_NAME_2, dbToAdd2, cacheToAdd2, null)
+        );
+        assertThat(
+            exception.getMessage(),
+            is("Statistics for segment " + SEGMENT_STORE_NAME_2 + " of task " + TASK_ID1 +
+                " is null although the statistics of another segment in this metrics recorder is not null. " +
+                "This is a bug in Kafka Streams. " +
+                "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues")
+        );
     }
 
     @Test
     public void shouldThrowIfCacheToAddIsNullButExistingCacheIsNotNull() {
         recorder.addValueProviders(SEGMENT_STORE_NAME_1, dbToAdd1, null, statisticsToAdd1);
 
-        final Throwable exception = assertThrows(IllegalStateException.class, () -> recorder.addValueProviders(SEGMENT_STORE_NAME_2, dbToAdd2, cacheToAdd1, statisticsToAdd1));
-        assertThat(exception.getMessage(), is("Cache for segment " + SEGMENT_STORE_NAME_2 + " of task " + TASK_ID1 + " is not null although the cache of another segment in this metrics recorder is null. " + "This is a bug in Kafka Streams. " + "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues"));
+        final Throwable exception = assertThrows(
+            IllegalStateException.class,
+            () -> recorder.addValueProviders(SEGMENT_STORE_NAME_2, dbToAdd2, cacheToAdd1, statisticsToAdd1)
+        );
+        assertThat(
+            exception.getMessage(),
+            is("Cache for segment " + SEGMENT_STORE_NAME_2 + " of task " + TASK_ID1 +
+                " is not null although the cache of another segment in this metrics recorder is null. " +
+                "This is a bug in Kafka Streams. " +
+                "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues")
+        );
     }
 
     @Test
     public void shouldThrowIfCacheToAddIsNotNullButExistingCacheIsNull() {
         recorder.addValueProviders(SEGMENT_STORE_NAME_1, dbToAdd1, cacheToAdd1, statisticsToAdd1);
 
-        final Throwable exception = assertThrows(IllegalStateException.class, () -> recorder.addValueProviders(SEGMENT_STORE_NAME_2, dbToAdd2, null, statisticsToAdd2));
-        assertThat(exception.getMessage(), is("Cache for segment " + SEGMENT_STORE_NAME_2 + " of task " + TASK_ID1 + " is null although the cache of another segment in this metrics recorder is not null. " + "This is a bug in Kafka Streams. " + "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues"));
+        final Throwable exception = assertThrows(
+            IllegalStateException.class,
+            () -> recorder.addValueProviders(SEGMENT_STORE_NAME_2, dbToAdd2, null, statisticsToAdd2)
+        );
+        assertThat(
+            exception.getMessage(),
+            is("Cache for segment " + SEGMENT_STORE_NAME_2 + " of task " + TASK_ID1 +
+                " is null although the cache of another segment in this metrics recorder is not null. " +
+                "This is a bug in Kafka Streams. " +
+                "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues")
+        );
     }
 
     @Test
@@ -217,8 +301,16 @@ public class RocksDBMetricsRecorderTest {
         recorder.addValueProviders(SEGMENT_STORE_NAME_1, dbToAdd1, cacheToAdd1, statisticsToAdd1);
         recorder.addValueProviders(SEGMENT_STORE_NAME_2, dbToAdd2, cacheToAdd1, statisticsToAdd2);
 
-        final Throwable exception = assertThrows(IllegalStateException.class, () -> recorder.addValueProviders(SEGMENT_STORE_NAME_3, dbToAdd3, cacheToAdd2, statisticsToAdd3));
-        assertThat(exception.getMessage(), is("Caches for store " + STORE_NAME + " of task " + TASK_ID1 + " are either not all distinct or do not all refer to the same cache. This is a bug in Kafka Streams. " + "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues"));
+        final Throwable exception = assertThrows(
+            IllegalStateException.class,
+            () -> recorder.addValueProviders(SEGMENT_STORE_NAME_3, dbToAdd3, cacheToAdd2, statisticsToAdd3)
+        );
+        assertThat(
+            exception.getMessage(),
+            is("Caches for store " + STORE_NAME + " of task " + TASK_ID1 +
+                " are either not all distinct or do not all refer to the same cache. This is a bug in Kafka Streams. " +
+                "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues")
+        );
     }
 
     @Test
@@ -226,16 +318,32 @@ public class RocksDBMetricsRecorderTest {
         recorder.addValueProviders(SEGMENT_STORE_NAME_1, dbToAdd1, cacheToAdd1, statisticsToAdd1);
         recorder.addValueProviders(SEGMENT_STORE_NAME_2, dbToAdd2, cacheToAdd2, statisticsToAdd2);
 
-        final Throwable exception = assertThrows(IllegalStateException.class, () -> recorder.addValueProviders(SEGMENT_STORE_NAME_3, dbToAdd3, cacheToAdd1, statisticsToAdd3));
-        assertThat(exception.getMessage(), is("Caches for store " + STORE_NAME + " of task " + TASK_ID1 + " are either not all distinct or do not all refer to the same cache. This is a bug in Kafka Streams. " + "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues"));
+        final Throwable exception = assertThrows(
+            IllegalStateException.class,
+            () -> recorder.addValueProviders(SEGMENT_STORE_NAME_3, dbToAdd3, cacheToAdd1, statisticsToAdd3)
+        );
+        assertThat(
+            exception.getMessage(),
+            is("Caches for store " + STORE_NAME + " of task " + TASK_ID1 +
+                " are either not all distinct or do not all refer to the same cache. This is a bug in Kafka Streams. " +
+                "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues")
+        );
     }
 
     @Test
     public void shouldThrowIfDbToAddWasAlreadyAddedForOtherSegment() {
         recorder.addValueProviders(SEGMENT_STORE_NAME_1, dbToAdd1, cacheToAdd1, statisticsToAdd1);
 
-        final Throwable exception = assertThrows(IllegalStateException.class, () -> recorder.addValueProviders(SEGMENT_STORE_NAME_2, dbToAdd1, cacheToAdd2, statisticsToAdd2));
-        assertThat(exception.getMessage(), is("DB instance for store " + SEGMENT_STORE_NAME_2 + " of task " + TASK_ID1 + " was already added for another segment as a value provider. This is a bug in Kafka Streams. " + "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues"));
+        final Throwable exception = assertThrows(
+            IllegalStateException.class,
+            () -> recorder.addValueProviders(SEGMENT_STORE_NAME_2, dbToAdd1, cacheToAdd2, statisticsToAdd2)
+        );
+        assertThat(
+            exception.getMessage(),
+            is("DB instance for store " + SEGMENT_STORE_NAME_2 + " of task " + TASK_ID1 +
+                " was already added for another segment as a value provider. This is a bug in Kafka Streams. " +
+                "Please open a bug report under https://issues.apache.org/jira/projects/KAFKA/issues")
+        );
     }
 
     @Test
@@ -289,7 +397,10 @@ public class RocksDBMetricsRecorderTest {
     public void shouldThrowIfValueProvidersToRemoveNotFound() {
         recorder.addValueProviders(SEGMENT_STORE_NAME_1, dbToAdd1, cacheToAdd1, statisticsToAdd1);
 
-        assertThrows(IllegalStateException.class, () -> recorder.removeValueProviders(SEGMENT_STORE_NAME_2));
+        assertThrows(
+            IllegalStateException.class,
+            () -> recorder.removeValueProviders(SEGMENT_STORE_NAME_2)
+        );
     }
 
     @Test
@@ -363,10 +474,8 @@ public class RocksDBMetricsRecorderTest {
         final double expectedCompactionTimeMaxSensor = 24.0;
 
         when(statisticsToAdd1.getAndResetTickerCount(TickerType.NO_FILE_OPENS)).thenReturn(5L);
-        when(statisticsToAdd1.getAndResetTickerCount(TickerType.NO_FILE_CLOSES)).thenReturn(3L);
         when(statisticsToAdd2.getAndResetTickerCount(TickerType.NO_FILE_OPENS)).thenReturn(7L);
-        when(statisticsToAdd2.getAndResetTickerCount(TickerType.NO_FILE_CLOSES)).thenReturn(4L);
-        final double expectedNumberOfOpenFilesSensor = (5 + 7) - (3 + 4);
+        final double expectedNumberOfOpenFilesSensor = -1;
 
         when(statisticsToAdd1.getAndResetTickerCount(TickerType.NO_FILE_ERRORS)).thenReturn(34L);
         when(statisticsToAdd2.getAndResetTickerCount(TickerType.NO_FILE_ERRORS)).thenReturn(11L);
@@ -374,8 +483,8 @@ public class RocksDBMetricsRecorderTest {
 
         recorder.record(now);
 
-        verify(statisticsToAdd1, times(17)).getAndResetTickerCount(isA(TickerType.class));
-        verify(statisticsToAdd2, times(17)).getAndResetTickerCount(isA(TickerType.class));
+        verify(statisticsToAdd1, times(15)).getAndResetTickerCount(isA(TickerType.class));
+        verify(statisticsToAdd2, times(15)).getAndResetTickerCount(isA(TickerType.class));
         verify(statisticsToAdd1, times(2)).getHistogramData(isA(HistogramType.class));
         verify(statisticsToAdd2, times(2)).getHistogramData(isA(HistogramType.class));
         verify(bytesWrittenToDatabaseSensor).record(expectedBytesWrittenToDatabaseSensor, now);
@@ -404,7 +513,26 @@ public class RocksDBMetricsRecorderTest {
 
         recorder.record(0L);
 
-        verifyNoInteractions(bytesWrittenToDatabaseSensor, bytesReadFromDatabaseSensor, memtableBytesFlushedSensor, memtableHitRatioSensor, memtableAvgFlushTimeSensor, memtableMinFlushTimeSensor, memtableMaxFlushTimeSensor, writeStallDurationSensor, blockCacheDataHitRatioSensor, blockCacheIndexHitRatioSensor, blockCacheFilterHitRatioSensor, bytesWrittenDuringCompactionSensor, bytesReadDuringCompactionSensor, compactionTimeAvgSensor, compactionTimeMinSensor, compactionTimeMaxSensor, numberOfOpenFilesSensor, numberOfFileErrorsSensor);
+        verifyNoInteractions(
+            bytesWrittenToDatabaseSensor,
+            bytesReadFromDatabaseSensor,
+            memtableBytesFlushedSensor,
+            memtableHitRatioSensor,
+            memtableAvgFlushTimeSensor,
+            memtableMinFlushTimeSensor,
+            memtableMaxFlushTimeSensor,
+            writeStallDurationSensor,
+            blockCacheDataHitRatioSensor,
+            blockCacheIndexHitRatioSensor,
+            blockCacheFilterHitRatioSensor,
+            bytesWrittenDuringCompactionSensor,
+            bytesReadDuringCompactionSensor,
+            compactionTimeAvgSensor,
+            compactionTimeMinSensor,
+            compactionTimeMaxSensor,
+            numberOfOpenFilesSensor,
+            numberOfFileErrorsSensor
+        );
     }
 
     @Test
@@ -436,23 +564,41 @@ public class RocksDBMetricsRecorderTest {
 
     private void setUpMetricsMock() {
         dbMetrics = mockStatic(RocksDBMetrics.class);
-        dbMetrics.when(() -> RocksDBMetrics.bytesWrittenToDatabaseSensor(streamsMetrics, metricsContext)).thenReturn(bytesWrittenToDatabaseSensor);
-        dbMetrics.when(() -> RocksDBMetrics.bytesReadFromDatabaseSensor(streamsMetrics, metricsContext)).thenReturn(bytesReadFromDatabaseSensor);
-        dbMetrics.when(() -> RocksDBMetrics.memtableBytesFlushedSensor(streamsMetrics, metricsContext)).thenReturn(memtableBytesFlushedSensor);
-        dbMetrics.when(() -> RocksDBMetrics.memtableHitRatioSensor(streamsMetrics, metricsContext)).thenReturn(memtableHitRatioSensor);
-        dbMetrics.when(() -> RocksDBMetrics.memtableAvgFlushTimeSensor(streamsMetrics, metricsContext)).thenReturn(memtableAvgFlushTimeSensor);
-        dbMetrics.when(() -> RocksDBMetrics.memtableMinFlushTimeSensor(streamsMetrics, metricsContext)).thenReturn(memtableMinFlushTimeSensor);
-        dbMetrics.when(() -> RocksDBMetrics.memtableMaxFlushTimeSensor(streamsMetrics, metricsContext)).thenReturn(memtableMaxFlushTimeSensor);
-        dbMetrics.when(() -> RocksDBMetrics.writeStallDurationSensor(streamsMetrics, metricsContext)).thenReturn(writeStallDurationSensor);
-        dbMetrics.when(() -> RocksDBMetrics.blockCacheDataHitRatioSensor(streamsMetrics, metricsContext)).thenReturn(blockCacheDataHitRatioSensor);
-        dbMetrics.when(() -> RocksDBMetrics.blockCacheIndexHitRatioSensor(streamsMetrics, metricsContext)).thenReturn(blockCacheIndexHitRatioSensor);
-        dbMetrics.when(() -> RocksDBMetrics.blockCacheFilterHitRatioSensor(streamsMetrics, metricsContext)).thenReturn(blockCacheFilterHitRatioSensor);
-        dbMetrics.when(() -> RocksDBMetrics.bytesWrittenDuringCompactionSensor(streamsMetrics, metricsContext)).thenReturn(bytesWrittenDuringCompactionSensor);
-        dbMetrics.when(() -> RocksDBMetrics.bytesReadDuringCompactionSensor(streamsMetrics, metricsContext)).thenReturn(bytesReadDuringCompactionSensor);
-        dbMetrics.when(() -> RocksDBMetrics.compactionTimeAvgSensor(streamsMetrics, metricsContext)).thenReturn(compactionTimeAvgSensor);
-        dbMetrics.when(() -> RocksDBMetrics.compactionTimeMinSensor(streamsMetrics, metricsContext)).thenReturn(compactionTimeMinSensor);
-        dbMetrics.when(() -> RocksDBMetrics.compactionTimeMaxSensor(streamsMetrics, metricsContext)).thenReturn(compactionTimeMaxSensor);
-        dbMetrics.when(() -> RocksDBMetrics.numberOfOpenFilesSensor(streamsMetrics, metricsContext)).thenReturn(numberOfOpenFilesSensor);
-        dbMetrics.when(() -> RocksDBMetrics.numberOfFileErrorsSensor(streamsMetrics, metricsContext)).thenReturn(numberOfFileErrorsSensor);
+        dbMetrics.when(() -> RocksDBMetrics.bytesWrittenToDatabaseSensor(streamsMetrics, metricsContext))
+            .thenReturn(bytesWrittenToDatabaseSensor);
+        dbMetrics.when(() -> RocksDBMetrics.bytesReadFromDatabaseSensor(streamsMetrics, metricsContext))
+            .thenReturn(bytesReadFromDatabaseSensor);
+        dbMetrics.when(() -> RocksDBMetrics.memtableBytesFlushedSensor(streamsMetrics, metricsContext))
+            .thenReturn(memtableBytesFlushedSensor);
+        dbMetrics.when(() -> RocksDBMetrics.memtableHitRatioSensor(streamsMetrics, metricsContext))
+            .thenReturn(memtableHitRatioSensor);
+        dbMetrics.when(() -> RocksDBMetrics.memtableAvgFlushTimeSensor(streamsMetrics, metricsContext))
+            .thenReturn(memtableAvgFlushTimeSensor);
+        dbMetrics.when(() -> RocksDBMetrics.memtableMinFlushTimeSensor(streamsMetrics, metricsContext))
+            .thenReturn(memtableMinFlushTimeSensor);
+        dbMetrics.when(() -> RocksDBMetrics.memtableMaxFlushTimeSensor(streamsMetrics, metricsContext))
+            .thenReturn(memtableMaxFlushTimeSensor);
+        dbMetrics.when(() -> RocksDBMetrics.writeStallDurationSensor(streamsMetrics, metricsContext))
+            .thenReturn(writeStallDurationSensor);
+        dbMetrics.when(() -> RocksDBMetrics.blockCacheDataHitRatioSensor(streamsMetrics, metricsContext))
+            .thenReturn(blockCacheDataHitRatioSensor);
+        dbMetrics.when(() -> RocksDBMetrics.blockCacheIndexHitRatioSensor(streamsMetrics, metricsContext))
+            .thenReturn(blockCacheIndexHitRatioSensor);
+        dbMetrics.when(() -> RocksDBMetrics.blockCacheFilterHitRatioSensor(streamsMetrics, metricsContext))
+            .thenReturn(blockCacheFilterHitRatioSensor);
+        dbMetrics.when(() -> RocksDBMetrics.bytesWrittenDuringCompactionSensor(streamsMetrics, metricsContext))
+            .thenReturn(bytesWrittenDuringCompactionSensor);
+        dbMetrics.when(() -> RocksDBMetrics.bytesReadDuringCompactionSensor(streamsMetrics, metricsContext))
+            .thenReturn(bytesReadDuringCompactionSensor);
+        dbMetrics.when(() -> RocksDBMetrics.compactionTimeAvgSensor(streamsMetrics, metricsContext))
+            .thenReturn(compactionTimeAvgSensor);
+        dbMetrics.when(() -> RocksDBMetrics.compactionTimeMinSensor(streamsMetrics, metricsContext))
+            .thenReturn(compactionTimeMinSensor);
+        dbMetrics.when(() -> RocksDBMetrics.compactionTimeMaxSensor(streamsMetrics, metricsContext))
+            .thenReturn(compactionTimeMaxSensor);
+        dbMetrics.when(() -> RocksDBMetrics.numberOfOpenFilesSensor(streamsMetrics, metricsContext))
+            .thenReturn(numberOfOpenFilesSensor);
+        dbMetrics.when(() -> RocksDBMetrics.numberOfFileErrorsSensor(streamsMetrics, metricsContext))
+            .thenReturn(numberOfFileErrorsSensor);
     }
 }

@@ -16,15 +16,23 @@
  */
 package org.apache.kafka.streams.processor.internals;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.errors.ProcessorStateException;
 import org.apache.kafka.streams.errors.StreamsException;
+import org.apache.kafka.streams.errors.TaskCorruptedException;
+import org.apache.kafka.streams.internals.StreamsConfigUtils;
 import org.apache.kafka.streams.processor.TaskId;
+import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
+import org.apache.kafka.streams.state.internals.ThreadCache;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,8 +47,20 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -52,7 +72,7 @@ import static org.apache.kafka.streams.processor.internals.StateManagerUtil.pars
  * stored. Handles creation/locking/unlocking/cleaning of the Task Directories. This class is not
  * thread-safe.
  */
-public class StateDirectory {
+public class StateDirectory implements AutoCloseable {
 
     private static final Pattern TASK_DIR_PATH_NAME = Pattern.compile("\\d+_\\d+");
     private static final Pattern NAMED_TOPOLOGY_DIR_PATH_NAME = Pattern.compile("__.+__"); // named topology dirs follow '__Topology-Name__'
@@ -86,19 +106,24 @@ public class StateDirectory {
     private final boolean hasPersistentStores;
     private final boolean hasNamedTopologies;
 
-    private final HashMap<TaskId, Thread> lockedTasksToOwner = new HashMap<>();
+    private final ConcurrentMap<TaskId, Thread> lockedTasksToOwner = new ConcurrentHashMap<>();
 
     private FileChannel stateDirLockChannel;
     private FileLock stateDirLock;
 
+    private final StreamsConfig config;
+    private final ConcurrentMap<TaskId, Task> tasksForLocalState = new ConcurrentHashMap<>();
+
     /**
      * Ensures that the state base directory as well as the application's sub-directory are created.
+     *
      * @param config              streams application configuration to read the root state directory path
      * @param time                system timer used to execute periodic cleanup procedure
      * @param hasPersistentStores only when the application's topology does have stores persisted on local file
      *                            system, we would go ahead and auto-create the corresponding application / task / store
      *                            directories whenever necessary; otherwise no directories would be created.
      * @param hasNamedTopologies  whether this application is composed of independent named topologies
+     *
      * @throws ProcessorStateException if the base state directory or application state directory does not exist
      *                                 and could not be created when hasPersistentStores is enabled.
      */
@@ -107,22 +132,28 @@ public class StateDirectory {
         this.hasPersistentStores = hasPersistentStores;
         this.hasNamedTopologies = hasNamedTopologies;
         this.appId = config.getString(StreamsConfig.APPLICATION_ID_CONFIG);
+        this.config = config;
         final String stateDirName = config.getString(StreamsConfig.STATE_DIR_CONFIG);
         final File baseDir = new File(stateDirName);
         stateDir = new File(baseDir, appId);
 
         if (this.hasPersistentStores) {
             if (!baseDir.exists() && !baseDir.mkdirs()) {
-                throw new ProcessorStateException(String.format("base state directory [%s] doesn't exist and couldn't be created", stateDirName));
+                throw new ProcessorStateException(
+                    String.format("base state directory [%s] doesn't exist and couldn't be created", stateDirName));
             }
             if (!stateDir.exists() && !stateDir.mkdir()) {
-                throw new ProcessorStateException(String.format("state directory [%s] doesn't exist and couldn't be created", stateDir.getPath()));
+                throw new ProcessorStateException(
+                    String.format("state directory [%s] doesn't exist and couldn't be created", stateDir.getPath()));
             } else if (stateDir.exists() && !stateDir.isDirectory()) {
-                throw new ProcessorStateException(String.format("state directory [%s] can't be created as there is an existing file with the same name", stateDir.getPath()));
+                throw new ProcessorStateException(
+                    String.format("state directory [%s] can't be created as there is an existing file with the same name", stateDir.getPath()));
             }
 
             if (stateDirName.startsWith(System.getProperty("java.io.tmpdir"))) {
-                log.warn("Using an OS temp directory in the state.dir property can cause failures with writing" + " the checkpoint file due to the fact that this directory can be cleared by the OS." + " Resolved state.dir: [" + stateDirName + "]");
+                log.warn("Using an OS temp directory in the state.dir property can cause failures with writing" +
+                    " the checkpoint file due to the fact that this directory can be cleared by the OS." +
+                    " Resolved state.dir: [" + stateDirName + "]");
 
             }
             // change the dir permission to "rwxr-x---" to avoid world readable
@@ -160,19 +191,127 @@ public class StateDirectory {
             stateDirLock = tryLock(stateDirLockChannel);
         } catch (final IOException e) {
             log.error("Unable to lock the state directory due to unexpected exception", e);
-            throw new ProcessorStateException(String.format("Failed to lock the state directory [%s] during startup", stateDir.getAbsolutePath()), e);
+            throw new ProcessorStateException(String.format("Failed to lock the state directory [%s] during startup",
+                stateDir.getAbsolutePath()), e);
         }
         return stateDirLock != null;
     }
 
+    public void initializeStartupTasks(final TopologyMetadata topologyMetadata,
+                                       final StreamsMetricsImpl streamsMetrics,
+                                       final LogContext logContext) {
+        final List<TaskDirectory> nonEmptyTaskDirectories = listNonEmptyTaskDirectories();
+        if (hasPersistentStores && !nonEmptyTaskDirectories.isEmpty()) {
+            final ThreadCache dummyCache = new ThreadCache(logContext, 0, streamsMetrics);
+            final boolean eosEnabled = StreamsConfigUtils.eosEnabled(config);
+            final boolean stateUpdaterEnabled = StreamsConfig.InternalConfig.stateUpdaterEnabled(config.originals());
+
+            // discover all non-empty task directories in StateDirectory
+            for (final TaskDirectory taskDirectory : nonEmptyTaskDirectories) {
+                final String dirName = taskDirectory.file().getName();
+                final TaskId id = parseTaskDirectoryName(dirName, taskDirectory.namedTopology());
+                final ProcessorTopology subTopology = topologyMetadata.buildSubtopology(id);
+
+                // we still check if the task's sub-topology is stateful, even though we know its directory contains state,
+                // because it's possible that the topology has changed since that data was written, and is now stateless
+                // this therefore prevents us from creating unnecessary Tasks just because of some left-over state
+                if (subTopology.hasStateWithChangelogs()) {
+                    final Set<TopicPartition> inputPartitions = topologyMetadata.nodeToSourceTopics(id).values().stream()
+                            .flatMap(Collection::stream)
+                            .map(t -> new TopicPartition(t, id.partition()))
+                            .collect(Collectors.toSet());
+                    final ProcessorStateManager stateManager = ProcessorStateManager.createStartupTaskStateManager(
+                        id,
+                        eosEnabled,
+                        logContext,
+                        this,
+                        subTopology.storeToChangelogTopic(),
+                        inputPartitions,
+                        stateUpdaterEnabled
+                    );
+
+                    final InternalProcessorContext<Object, Object> context = new ProcessorContextImpl(
+                        id,
+                        config,
+                        stateManager,
+                        streamsMetrics,
+                        dummyCache
+                    );
+
+                    final Task task = new StandbyTask(
+                        id,
+                        inputPartitions,
+                        subTopology,
+                        topologyMetadata.taskConfig(id),
+                        streamsMetrics,
+                        stateManager,
+                        this,
+                        dummyCache,
+                        context
+                    );
+
+                    try {
+                        task.initializeIfNeeded();
+
+                        tasksForLocalState.put(id, task);
+                    } catch (final TaskCorruptedException e) {
+                        // Task is corrupt - wipe it out (under EOS) and don't initialize a Standby for it
+                        task.suspend();
+                        task.closeDirty();
+                    }
+                }
+            }
+        }
+    }
+
+    public boolean hasStartupTasks() {
+        return !tasksForLocalState.isEmpty();
+    }
+
+    public Task removeStartupTask(final TaskId taskId) {
+        final Task task = tasksForLocalState.remove(taskId);
+        if (task != null) {
+            lockedTasksToOwner.replace(taskId, Thread.currentThread());
+        }
+        return task;
+    }
+
+    public void closeStartupTasks() {
+        closeStartupTasks(t -> true);
+    }
+
+    private void closeStartupTasks(final Predicate<Task> predicate) {
+        if (!tasksForLocalState.isEmpty()) {
+            // "drain" Tasks first to ensure that we don't try to close Tasks that another thread is attempting to close
+            final Set<Task> drainedTasks = new HashSet<>(tasksForLocalState.size());
+            for (final Map.Entry<TaskId, Task> entry : tasksForLocalState.entrySet()) {
+                if (predicate.test(entry.getValue()) && removeStartupTask(entry.getKey()) != null) {
+                    // only add to our list of drained Tasks if we exclusively "claimed" a Task from tasksForLocalState
+                    // to ensure we don't accidentally try to drain the same Task multiple times from concurrent threads
+                    drainedTasks.add(entry.getValue());
+                }
+            }
+
+            // now that we have exclusive ownership of the drained tasks, close them
+            for (final Task task : drainedTasks) {
+                task.suspend();
+                task.closeClean();
+            }
+        }
+    }
+
     public UUID initializeProcessId() {
         if (!hasPersistentStores) {
-            return UUID.randomUUID();
+            final UUID processId = UUID.randomUUID();
+            log.info("Created new process id: {}", processId);
+            return processId;
         }
 
         if (!lockStateDirectory()) {
             log.error("Unable to obtain lock as state directory is already locked by another process");
-            throw new StreamsException(String.format("Unable to initialize state, this can happen if multiple instances of " + "Kafka Streams are running in the same state directory " + "(current state directory is [%s]", stateDir.getAbsolutePath()));
+            throw new StreamsException(String.format("Unable to initialize state, this can happen if multiple instances of " +
+                                           "Kafka Streams are running in the same state directory " +
+                                           "(current state directory is [%s]", stateDir.getAbsolutePath()));
         }
 
         final File processFile = new File(stateDir, PROCESS_FILE_NAME);
@@ -218,14 +357,18 @@ public class StateDirectory {
                     // one blocks on `synchronized` while the other creates the directory,
                     // and the blocking one fails when trying to create it after it's unblocked
                     if (!taskParentDir.exists() && !taskParentDir.mkdir()) {
-                        throw new ProcessorStateException(String.format("Parent [%s] of task directory [%s] doesn't exist and couldn't be created", taskParentDir.getPath(), taskDir.getPath()));
+                        throw new ProcessorStateException(
+                            String.format("Parent [%s] of task directory [%s] doesn't exist and couldn't be created",
+                                taskParentDir.getPath(), taskDir.getPath()));
                     }
                     if (!taskDir.exists() && !taskDir.mkdir()) {
-                        throw new ProcessorStateException(String.format("task directory [%s] doesn't exist and couldn't be created", taskDir.getPath()));
+                        throw new ProcessorStateException(
+                            String.format("task directory [%s] doesn't exist and couldn't be created", taskDir.getPath()));
                     }
                 }
             } else if (!taskDir.isDirectory()) {
-                throw new ProcessorStateException(String.format("state directory [%s] can't be created as there is an existing file with the same name", taskDir.getPath()));
+                throw new ProcessorStateException(
+                    String.format("state directory [%s] can't be created as there is an existing file with the same name", taskDir.getPath()));
             }
         }
         return taskDir;
@@ -264,7 +407,8 @@ public class StateDirectory {
     }
 
     private boolean taskDirIsEmpty(final File taskDir) {
-        final File[] storeDirs = taskDir.listFiles(pathname -> !pathname.getName().equals(CHECKPOINT_FILE_NAME));
+        final File[] storeDirs = taskDir.listFiles(pathname ->
+                !pathname.getName().equals(CHECKPOINT_FILE_NAME));
 
         boolean taskDirEmpty = true;
 
@@ -298,9 +442,11 @@ public class StateDirectory {
         final File dir = new File(stateDir, "global");
         if (hasPersistentStores) {
             if (!dir.exists() && !dir.mkdir()) {
-                throw new ProcessorStateException(String.format("global state directory [%s] doesn't exist and couldn't be created", dir.getPath()));
+                throw new ProcessorStateException(
+                    String.format("global state directory [%s] doesn't exist and couldn't be created", dir.getPath()));
             } else if (dir.exists() && !dir.isDirectory()) {
-                throw new ProcessorStateException(String.format("global state directory [%s] can't be created as there is an existing file with the same name", dir.getPath()));
+                throw new ProcessorStateException(
+                    String.format("global state directory [%s] can't be created as there is an existing file with the same name", dir.getPath()));
             }
         }
         return dir;
@@ -335,8 +481,6 @@ public class StateDirectory {
             throw new IllegalStateException("The state directory has been deleted");
         } else {
             lockedTasksToOwner.put(taskId, Thread.currentThread());
-            // make sure the task directory actually exists, and create it if not
-            getOrCreateDirectoryForTask(taskId);
             return true;
         }
     }
@@ -352,8 +496,17 @@ public class StateDirectory {
         }
     }
 
+    /**
+     * Expose for tests.
+     */
+    Thread lockOwner(final TaskId taskId) {
+        return lockedTasksToOwner.get(taskId);
+    }
+
+    @Override
     public void close() {
         if (hasPersistentStores) {
+            closeStartupTasks();
             try {
                 stateDirLock.release();
                 stateDirLockChannel.close();
@@ -384,16 +537,27 @@ public class StateDirectory {
                 Utils.delete(globalStateDir().getAbsoluteFile());
             }
         } catch (final IOException exception) {
-            log.error(String.format("%s Failed to delete global state directory of %s due to an unexpected exception", logPrefix(), appId), exception);
+            log.error(
+                String.format("%s Failed to delete global state directory of %s due to an unexpected exception",
+                    logPrefix(), appId),
+                exception
+            );
             throw new StreamsException(exception);
         }
 
         try {
             if (hasPersistentStores && stateDir.exists() && !stateDir.delete()) {
-                log.warn(String.format("%s Failed to delete state store directory of %s for it is not empty", logPrefix(), stateDir.getAbsolutePath()));
+                log.warn(
+                    String.format("%s Failed to delete state store directory of %s for it is not empty",
+                        logPrefix(), stateDir.getAbsolutePath())
+                );
             }
         } catch (final SecurityException exception) {
-            log.error(String.format("%s Failed to delete state store directory of %s due to an unexpected exception", logPrefix(), stateDir.getAbsolutePath()), exception);
+            log.error(
+                String.format("%s Failed to delete state store directory of %s due to an unexpected exception",
+                    logPrefix(), stateDir.getAbsolutePath()),
+                exception
+            );
             throw new StreamsException(exception);
         }
     }
@@ -423,12 +587,17 @@ public class StateDirectory {
                         final long now = time.milliseconds();
                         final long lastModifiedMs = taskDir.file().lastModified();
                         if (now - cleanupDelayMs > lastModifiedMs) {
-                            log.info("{} Deleting obsolete state directory {} for task {} as {}ms has elapsed (cleanup delay is {}ms).", logPrefix(), dirName, id, now - lastModifiedMs, cleanupDelayMs);
+                            log.info("{} Deleting obsolete state directory {} for task {} as {}ms has elapsed (cleanup delay is {}ms).",
+                                logPrefix(), dirName, id, now - lastModifiedMs, cleanupDelayMs);
                             Utils.delete(taskDir.file());
                         }
                     }
                 } catch (final IOException exception) {
-                    log.warn(String.format("%s Swallowed the following exception during deletion of obsolete state directory %s for task %s:", logPrefix(), dirName, id), exception);
+                    log.warn(
+                        String.format("%s Swallowed the following exception during deletion of obsolete state directory %s for task %s:",
+                            logPrefix(), dirName, id),
+                        exception
+                    );
                 } finally {
                     unlock(id);
                 }
@@ -441,7 +610,7 @@ public class StateDirectory {
     /**
      * Cleans up any leftover named topology directories that are empty, if any exist
      * @param logExceptionAsWarn if true, an exception will be logged as a warning
-     *                           if false, an exception will be logged as error
+     *                       if false, an exception will be logged as error
      * @return the first IOException to be encountered
      */
     private IOException maybeCleanEmptyNamedTopologyDirs(final boolean logExceptionAsWarn) {
@@ -450,18 +619,29 @@ public class StateDirectory {
         }
 
         final AtomicReference<IOException> firstException = new AtomicReference<>(null);
-        final File[] namedTopologyDirs = stateDir.listFiles(pathname -> pathname.isDirectory() && NAMED_TOPOLOGY_DIR_PATH_NAME.matcher(pathname.getName()).matches());
+        final File[] namedTopologyDirs = stateDir.listFiles(pathname ->
+                pathname.isDirectory() && NAMED_TOPOLOGY_DIR_PATH_NAME.matcher(pathname.getName()).matches()
+        );
         if (namedTopologyDirs != null) {
             for (final File namedTopologyDir : namedTopologyDirs) {
+                closeStartupTasks(task -> task.id().topologyName().equals(parseNamedTopologyFromDirectory(namedTopologyDir.getName())));
                 final File[] contents = namedTopologyDir.listFiles();
                 if (contents != null && contents.length == 0) {
                     try {
                         Utils.delete(namedTopologyDir);
                     } catch (final IOException exception) {
                         if (logExceptionAsWarn) {
-                            log.warn(String.format("%sSwallowed the following exception during deletion of named topology directory %s", logPrefix(), namedTopologyDir.getName()), exception);
+                            log.warn(
+                                String.format("%sSwallowed the following exception during deletion of named topology directory %s",
+                                    logPrefix(), namedTopologyDir.getName()),
+                                exception
+                            );
                         } else {
-                            log.error(String.format("%s Failed to delete named topology directory %s with exception:", logPrefix(), namedTopologyDir.getName()), exception);
+                            log.error(
+                                String.format("%s Failed to delete named topology directory %s with exception:",
+                                    logPrefix(), namedTopologyDir.getName()),
+                                exception
+                            );
                         }
                         firstException.compareAndSet(null, exception);
                     }
@@ -473,6 +653,7 @@ public class StateDirectory {
 
     /**
      * Clears out any local state found for the given NamedTopology after it was removed
+     *
      * @throws StreamsException if cleanup failed
      */
     public void clearLocalStateForNamedTopology(final String topologyName) {
@@ -481,30 +662,39 @@ public class StateDirectory {
             log.debug("Tried to clear out the local state for NamedTopology {} but none was found", topologyName);
         }
         try {
+            closeStartupTasks(task -> task.id().topologyName().equals(topologyName));
             Utils.delete(namedTopologyDir);
         } catch (final IOException e) {
             log.error("Hit an unexpected error while clearing local state for topology " + topologyName, e);
-            throw new StreamsException("Unable to delete state for the named topology " + topologyName, e, new TaskId(-1, -1, topologyName)); // use dummy taskid to report source topology for this error
+            throw new StreamsException("Unable to delete state for the named topology " + topologyName,
+                                       e, new TaskId(-1, -1, topologyName)); // use dummy taskid to report source topology for this error
         }
     }
 
     private void cleanStateAndTaskDirectoriesCalledByUser() throws Exception {
         if (!lockedTasksToOwner.isEmpty()) {
-            log.warn("Found some still-locked task directories when user requested to cleaning up the state, " + "since Streams is not running any more these will be ignored to complete the cleanup");
+            log.warn("Found some still-locked task directories when user requested to cleaning up the state, "
+                + "since Streams is not running any more these will be ignored to complete the cleanup");
         }
         final AtomicReference<Exception> firstException = new AtomicReference<>();
         for (final TaskDirectory taskDir : listAllTaskDirectories()) {
             final String dirName = taskDir.file().getName();
             final TaskId id = parseTaskDirectoryName(dirName, taskDir.namedTopology());
             try {
-                log.info("{} Deleting task directory {} for {} as user calling cleanup.", logPrefix(), dirName, id);
+                log.info("{} Deleting task directory {} for {} as user calling cleanup.",
+                    logPrefix(), dirName, id);
 
                 if (lockedTasksToOwner.containsKey(id)) {
-                    log.warn("{} Task {} in state directory {} was still locked by {}", logPrefix(), dirName, id, lockedTasksToOwner.get(id));
+                    log.warn("{} Task {} in state directory {} was still locked by {}",
+                        logPrefix(), dirName, id, lockedTasksToOwner.get(id));
                 }
                 Utils.delete(taskDir.file());
             } catch (final IOException exception) {
-                log.error(String.format("%s Failed to delete task directory %s for %s with exception:", logPrefix(), dirName, id), exception);
+                log.error(
+                    String.format("%s Failed to delete task directory %s for %s with exception:",
+                        logPrefix(), dirName, id),
+                    exception
+                );
                 firstException.compareAndSet(null, exception);
             }
         }
@@ -547,13 +737,16 @@ public class StateDirectory {
                     final String namedTopology = parseNamedTopologyFromDirectory(namedTopologyDir.getName());
                     final File[] taskDirs = namedTopologyDir.listFiles(filter);
                     if (taskDirs != null) {
-                        taskDirectories.addAll(Arrays.stream(taskDirs).map(f -> new TaskDirectory(f, namedTopology)).collect(Collectors.toList()));
+                        taskDirectories.addAll(Arrays.stream(taskDirs)
+                            .map(f -> new TaskDirectory(f, namedTopology)).collect(Collectors.toList()));
                     }
                 }
             } else {
-                final File[] taskDirs = stateDir.listFiles(filter);
+                final File[] taskDirs =
+                    stateDir.listFiles(filter);
                 if (taskDirs != null) {
-                    taskDirectories.addAll(Arrays.stream(taskDirs).map(f -> new TaskDirectory(f, null)).collect(Collectors.toList()));
+                    taskDirectories.addAll(Arrays.stream(taskDirs)
+                                               .map(f -> new TaskDirectory(f, null)).collect(Collectors.toList()));
                 }
             }
         }
@@ -562,7 +755,7 @@ public class StateDirectory {
     }
 
     private List<File> listNamedTopologyDirs() {
-        final File[] namedTopologyDirectories = stateDir.listFiles(f -> f.getName().startsWith("__") && f.getName().endsWith("__"));
+        final File[] namedTopologyDirectories = stateDir.listFiles(f -> f.getName().startsWith("__") &&  f.getName().endsWith("__"));
         return namedTopologyDirectories != null ? Arrays.asList(namedTopologyDirectories) : Collections.emptyList();
     }
 
@@ -604,7 +797,8 @@ public class StateDirectory {
                 return false;
             }
             final TaskDirectory that = (TaskDirectory) o;
-            return file.equals(that.file) && Objects.equals(namedTopology, that.namedTopology);
+            return file.equals(that.file) &&
+                Objects.equals(namedTopology, that.namedTopology);
         }
 
         @Override
@@ -612,5 +806,4 @@ public class StateDirectory {
             return Objects.hash(file, namedTopology);
         }
     }
-
 }

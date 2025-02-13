@@ -27,6 +27,7 @@ import java.util.Objects;
  * Represents a memory record set which is not necessarily offset-aligned
  */
 public class UnalignedMemoryRecords implements UnalignedRecords {
+    private static final UnalignedMemoryRecords EMPTY = new UnalignedMemoryRecords(ByteBuffer.allocate(0));
 
     private final ByteBuffer buffer;
 
@@ -50,4 +51,7 @@ public class UnalignedMemoryRecords implements UnalignedRecords {
         return Utils.tryWriteTo(channel, position, length, buffer);
     }
 
+    public static UnalignedMemoryRecords empty() {
+        return EMPTY;
+    }
 }

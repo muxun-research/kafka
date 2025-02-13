@@ -23,14 +23,28 @@ import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.connect.runtime.TargetState;
 import org.apache.kafka.connect.runtime.distributed.WorkerCoordinator.ConnectorsAndTasks;
+import org.apache.kafka.connect.storage.AppliedConnectorConfig;
 import org.apache.kafka.connect.storage.ClusterConfigState;
 import org.apache.kafka.connect.util.ConnectUtils;
 import org.apache.kafka.connect.util.ConnectorTaskId;
-import org.junit.Before;
-import org.junit.Test;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -38,10 +52,17 @@ import java.util.stream.IntStream;
 import static org.apache.kafka.connect.runtime.distributed.IncrementalCooperativeAssignor.ClusterAssignment;
 import static org.apache.kafka.connect.runtime.distributed.WorkerCoordinator.WorkerLoad;
 import static org.apache.kafka.connect.util.ConnectUtils.transformValues;
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.notNull;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)
 public class IncrementalCooperativeAssignorTest {
 
     // Offset isn't used in most tests but is required for creating a config snapshot object,
@@ -56,7 +77,7 @@ public class IncrementalCooperativeAssignorTest {
     private ClusterAssignment returnedAssignments;
     private Map<String, ConnectorsAndTasks> memberAssignments;
 
-    @Before
+    @BeforeEach
     public void setup() {
         generationId = 1000;
         time = Time.SYSTEM;
@@ -111,7 +132,7 @@ public class IncrementalCooperativeAssignorTest {
     }
 
     @Test
-    public void testAssignmentsWhenWorkersJoinAfterRevocations() {
+    public void testAssignmentsWhenWorkersJoinAfterRevocations()  {
         // Customize assignor for this test case
         time = new MockTime();
         initAssignor();
@@ -180,7 +201,7 @@ public class IncrementalCooperativeAssignorTest {
     }
 
     @Test
-    public void testImmediateRevocationsWhenMaxDelayIs0() {
+    public void testImmediateRevocationsWhenMaxDelayIs0()  {
         // Customize assignor for this test case
         rebalanceDelay = 0;
         time = new MockTime();
@@ -643,7 +664,7 @@ public class IncrementalCooperativeAssignorTest {
                 .collect(Collectors.toList());
         expectedAssignment.get(0).connectors().addAll(Arrays.asList("connector6", "connector9"));
         expectedAssignment.get(1).connectors().addAll(Arrays.asList("connector7", "connector10"));
-        expectedAssignment.get(2).connectors().addAll(Arrays.asList("connector8"));
+        expectedAssignment.get(2).connectors().add("connector8");
 
         List<String> newConnectors = newConnectors(6, 11);
         assignor.assignConnectors(existingAssignment, newConnectors);
@@ -663,11 +684,11 @@ public class IncrementalCooperativeAssignorTest {
 
         expectedAssignment.get(0).connectors().addAll(Arrays.asList("connector6", "connector9"));
         expectedAssignment.get(1).connectors().addAll(Arrays.asList("connector7", "connector10"));
-        expectedAssignment.get(2).connectors().addAll(Arrays.asList("connector8"));
+        expectedAssignment.get(2).connectors().add("connector8");
 
         expectedAssignment.get(0).tasks().addAll(Arrays.asList(new ConnectorTaskId("task", 6), new ConnectorTaskId("task", 9)));
         expectedAssignment.get(1).tasks().addAll(Arrays.asList(new ConnectorTaskId("task", 7), new ConnectorTaskId("task", 10)));
-        expectedAssignment.get(2).tasks().addAll(Arrays.asList(new ConnectorTaskId("task", 8)));
+        expectedAssignment.get(2).tasks().add(new ConnectorTaskId("task", 8));
 
         List<String> newConnectors = newConnectors(6, 11);
         assignor.assignConnectors(existingAssignment, newConnectors);
@@ -709,9 +730,13 @@ public class IncrementalCooperativeAssignorTest {
         configuredAssignment.put("worker2", workerLoad("worker2", 4, 2, 8, 4));
 
         // No lost assignments
-        assignor.handleLostAssignments(new ConnectorsAndTasks.Builder().build(), new ConnectorsAndTasks.Builder(), new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(new ConnectorsAndTasks.Builder().build(),
+                new ConnectorsAndTasks.Builder(),
+                new ArrayList<>(configuredAssignment.values()));
 
-        assertEquals("Wrong set of workers for reassignments", Collections.emptySet(), assignor.candidateWorkersForReassignment);
+        assertEquals(Collections.emptySet(),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(0, assignor.scheduledRebalance);
         assertEquals(0, assignor.delay);
 
@@ -719,12 +744,16 @@ public class IncrementalCooperativeAssignorTest {
 
         String flakyWorker = "worker1";
         WorkerLoad lostLoad = configuredAssignment.remove(flakyWorker);
-        ConnectorsAndTasks lostAssignments = new ConnectorsAndTasks.Builder().with(lostLoad.connectors(), lostLoad.tasks()).build();
+        ConnectorsAndTasks lostAssignments = new ConnectorsAndTasks.Builder()
+                .with(lostLoad.connectors(), lostLoad.tasks()).build();
 
         // Lost assignments detected - No candidate worker has appeared yet (worker with no assignments)
-        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(), new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(),
+                new ArrayList<>(configuredAssignment.values()));
 
-        assertEquals("Wrong set of workers for reassignments", Collections.emptySet(), assignor.candidateWorkersForReassignment);
+        assertEquals(Collections.emptySet(),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(time.milliseconds() + rebalanceDelay, assignor.scheduledRebalance);
         assertEquals(rebalanceDelay, assignor.delay);
 
@@ -734,9 +763,12 @@ public class IncrementalCooperativeAssignorTest {
 
         // A new worker (probably returning worker) has joined
         configuredAssignment.put(flakyWorker, new WorkerLoad.Builder(flakyWorker).build());
-        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(), new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(),
+                new ArrayList<>(configuredAssignment.values()));
 
-        assertEquals("Wrong set of workers for reassignments", Collections.singleton(flakyWorker), assignor.candidateWorkersForReassignment);
+        assertEquals(Collections.singleton(flakyWorker),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(time.milliseconds() + rebalanceDelay, assignor.scheduledRebalance);
         assertEquals(rebalanceDelay, assignor.delay);
 
@@ -744,11 +776,20 @@ public class IncrementalCooperativeAssignorTest {
         time.sleep(rebalanceDelay);
 
         // The new worker has still no assignments
-        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(), new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(),
+                new ArrayList<>(configuredAssignment.values()));
 
-        assertTrue("Wrong assignment of lost connectors", configuredAssignment.getOrDefault(flakyWorker, new WorkerLoad.Builder(flakyWorker).build()).connectors().containsAll(lostAssignments.connectors()));
-        assertTrue("Wrong assignment of lost tasks", configuredAssignment.getOrDefault(flakyWorker, new WorkerLoad.Builder(flakyWorker).build()).tasks().containsAll(lostAssignments.tasks()));
-        assertEquals("Wrong set of workers for reassignments", Collections.emptySet(), assignor.candidateWorkersForReassignment);
+        assertTrue(configuredAssignment.getOrDefault(flakyWorker, new WorkerLoad.Builder(flakyWorker).build())
+                                .connectors()
+                                .containsAll(lostAssignments.connectors()),
+            "Wrong assignment of lost connectors");
+        assertTrue(configuredAssignment.getOrDefault(flakyWorker, new WorkerLoad.Builder(flakyWorker).build())
+                                .tasks()
+                                .containsAll(lostAssignments.tasks()),
+            "Wrong assignment of lost tasks");
+        assertEquals(Collections.emptySet(),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(0, assignor.scheduledRebalance);
         assertEquals(0, assignor.delay);
     }
@@ -769,9 +810,13 @@ public class IncrementalCooperativeAssignorTest {
         configuredAssignment.put("worker2", workerLoad("worker2", 4, 2, 8, 4));
 
         // No lost assignments
-        assignor.handleLostAssignments(new ConnectorsAndTasks.Builder().build(), new ConnectorsAndTasks.Builder(), new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(new ConnectorsAndTasks.Builder().build(),
+                new ConnectorsAndTasks.Builder(),
+                new ArrayList<>(configuredAssignment.values()));
 
-        assertEquals("Wrong set of workers for reassignments", Collections.emptySet(), assignor.candidateWorkersForReassignment);
+        assertEquals(Collections.emptySet(),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(0, assignor.scheduledRebalance);
         assertEquals(0, assignor.delay);
 
@@ -779,12 +824,16 @@ public class IncrementalCooperativeAssignorTest {
 
         String removedWorker = "worker1";
         WorkerLoad lostLoad = configuredAssignment.remove(removedWorker);
-        ConnectorsAndTasks lostAssignments = new ConnectorsAndTasks.Builder().with(lostLoad.connectors(), lostLoad.tasks()).build();
+        ConnectorsAndTasks lostAssignments = new ConnectorsAndTasks.Builder()
+                .with(lostLoad.connectors(), lostLoad.tasks()).build();
 
         // Lost assignments detected - No candidate worker has appeared yet (worker with no assignments)
-        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(), new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(),
+                new ArrayList<>(configuredAssignment.values()));
 
-        assertEquals("Wrong set of workers for reassignments", Collections.emptySet(), assignor.candidateWorkersForReassignment);
+        assertEquals(Collections.emptySet(),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(time.milliseconds() + rebalanceDelay, assignor.scheduledRebalance);
         assertEquals(rebalanceDelay, assignor.delay);
 
@@ -793,20 +842,28 @@ public class IncrementalCooperativeAssignorTest {
         rebalanceDelay /= 2;
 
         // No new worker has joined
-        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(), new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(),
+                new ArrayList<>(configuredAssignment.values()));
 
-        assertEquals("Wrong set of workers for reassignments", Collections.emptySet(), assignor.candidateWorkersForReassignment);
+        assertEquals(Collections.emptySet(),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(time.milliseconds() + rebalanceDelay, assignor.scheduledRebalance);
         assertEquals(rebalanceDelay, assignor.delay);
 
         time.sleep(rebalanceDelay);
 
         ConnectorsAndTasks.Builder lostAssignmentsToReassign = new ConnectorsAndTasks.Builder();
-        assignor.handleLostAssignments(lostAssignments, lostAssignmentsToReassign, new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(lostAssignments, lostAssignmentsToReassign,
+                new ArrayList<>(configuredAssignment.values()));
 
-        assertTrue("Wrong assignment of lost connectors", lostAssignmentsToReassign.build().connectors().containsAll(lostAssignments.connectors()));
-        assertTrue("Wrong assignment of lost tasks", lostAssignmentsToReassign.build().tasks().containsAll(lostAssignments.tasks()));
-        assertEquals("Wrong set of workers for reassignments", Collections.emptySet(), assignor.candidateWorkersForReassignment);
+        assertTrue(lostAssignmentsToReassign.build().connectors().containsAll(lostAssignments.connectors()),
+            "Wrong assignment of lost connectors");
+        assertTrue(lostAssignmentsToReassign.build().tasks().containsAll(lostAssignments.tasks()),
+            "Wrong assignment of lost tasks");
+        assertEquals(Collections.emptySet(),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(0, assignor.scheduledRebalance);
         assertEquals(0, assignor.delay);
     }
@@ -827,9 +884,13 @@ public class IncrementalCooperativeAssignorTest {
         configuredAssignment.put("worker2", workerLoad("worker2", 4, 2, 8, 4));
 
         // No lost assignments
-        assignor.handleLostAssignments(new ConnectorsAndTasks.Builder().build(), new ConnectorsAndTasks.Builder(), new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(new ConnectorsAndTasks.Builder().build(),
+                new ConnectorsAndTasks.Builder(),
+                new ArrayList<>(configuredAssignment.values()));
 
-        assertEquals("Wrong set of workers for reassignments", Collections.emptySet(), assignor.candidateWorkersForReassignment);
+        assertEquals(Collections.emptySet(),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(0, assignor.scheduledRebalance);
         assertEquals(0, assignor.delay);
 
@@ -837,15 +898,19 @@ public class IncrementalCooperativeAssignorTest {
 
         String flakyWorker = "worker1";
         WorkerLoad lostLoad = configuredAssignment.remove(flakyWorker);
-        ConnectorsAndTasks lostAssignments = new ConnectorsAndTasks.Builder().with(lostLoad.connectors(), lostLoad.tasks()).build();
+        ConnectorsAndTasks lostAssignments = new ConnectorsAndTasks.Builder()
+                .with(lostLoad.connectors(), lostLoad.tasks()).build();
 
         String newWorker = "worker3";
         configuredAssignment.put(newWorker, new WorkerLoad.Builder(newWorker).build());
 
         // Lost assignments detected - A new worker also has joined that is not the returning worker
-        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(), new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(),
+                new ArrayList<>(configuredAssignment.values()));
 
-        assertEquals("Wrong set of workers for reassignments", Collections.singleton(newWorker), assignor.candidateWorkersForReassignment);
+        assertEquals(Collections.singleton(newWorker),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(time.milliseconds() + rebalanceDelay, assignor.scheduledRebalance);
         assertEquals(rebalanceDelay, assignor.delay);
 
@@ -855,11 +920,13 @@ public class IncrementalCooperativeAssignorTest {
 
         // Now two new workers have joined
         configuredAssignment.put(flakyWorker, new WorkerLoad.Builder(flakyWorker).build());
-        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(), new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(),
+                new ArrayList<>(configuredAssignment.values()));
 
-        Set<String> expectedWorkers = new HashSet<>();
-        expectedWorkers.addAll(Arrays.asList(newWorker, flakyWorker));
-        assertEquals("Wrong set of workers for reassignments", expectedWorkers, assignor.candidateWorkersForReassignment);
+        Set<String> expectedWorkers = new HashSet<>(Arrays.asList(newWorker, flakyWorker));
+        assertEquals(expectedWorkers,
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(time.milliseconds() + rebalanceDelay, assignor.scheduledRebalance);
         assertEquals(rebalanceDelay, assignor.delay);
 
@@ -871,18 +938,27 @@ public class IncrementalCooperativeAssignorTest {
         configuredAssignment.put(newWorker, workerLoad(newWorker, 8, 2, 12, 4));
         // we don't reflect these new assignments in memberConfigs currently because they are not
         // used in handleLostAssignments method
-        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(), new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(),
+                new ArrayList<>(configuredAssignment.values()));
 
         // both the newWorkers would need to be considered for re assignment of connectors and tasks
         List<String> listOfConnectorsInLast2Workers = new ArrayList<>();
-        listOfConnectorsInLast2Workers.addAll(configuredAssignment.getOrDefault(newWorker, new WorkerLoad.Builder(flakyWorker).build()).connectors());
-        listOfConnectorsInLast2Workers.addAll(configuredAssignment.getOrDefault(flakyWorker, new WorkerLoad.Builder(flakyWorker).build()).connectors());
+        listOfConnectorsInLast2Workers.addAll(configuredAssignment.getOrDefault(newWorker, new WorkerLoad.Builder(flakyWorker).build())
+            .connectors());
+        listOfConnectorsInLast2Workers.addAll(configuredAssignment.getOrDefault(flakyWorker, new WorkerLoad.Builder(flakyWorker).build())
+            .connectors());
         List<ConnectorTaskId> listOfTasksInLast2Workers = new ArrayList<>();
-        listOfTasksInLast2Workers.addAll(configuredAssignment.getOrDefault(newWorker, new WorkerLoad.Builder(flakyWorker).build()).tasks());
-        listOfTasksInLast2Workers.addAll(configuredAssignment.getOrDefault(flakyWorker, new WorkerLoad.Builder(flakyWorker).build()).tasks());
-        assertTrue("Wrong assignment of lost connectors", listOfConnectorsInLast2Workers.containsAll(lostAssignments.connectors()));
-        assertTrue("Wrong assignment of lost tasks", listOfTasksInLast2Workers.containsAll(lostAssignments.tasks()));
-        assertEquals("Wrong set of workers for reassignments", Collections.emptySet(), assignor.candidateWorkersForReassignment);
+        listOfTasksInLast2Workers.addAll(configuredAssignment.getOrDefault(newWorker, new WorkerLoad.Builder(flakyWorker).build())
+            .tasks());
+        listOfTasksInLast2Workers.addAll(configuredAssignment.getOrDefault(flakyWorker, new WorkerLoad.Builder(flakyWorker).build())
+            .tasks());
+        assertTrue(listOfConnectorsInLast2Workers.containsAll(lostAssignments.connectors()),
+            "Wrong assignment of lost connectors");
+        assertTrue(listOfTasksInLast2Workers.containsAll(lostAssignments.tasks()),
+            "Wrong assignment of lost tasks");
+        assertEquals(Collections.emptySet(),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(0, assignor.scheduledRebalance);
         assertEquals(0, assignor.delay);
     }
@@ -903,9 +979,13 @@ public class IncrementalCooperativeAssignorTest {
         configuredAssignment.put("worker2", workerLoad("worker2", 4, 2, 8, 4));
 
         // No lost assignments
-        assignor.handleLostAssignments(new ConnectorsAndTasks.Builder().build(), new ConnectorsAndTasks.Builder(), new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(new ConnectorsAndTasks.Builder().build(),
+                new ConnectorsAndTasks.Builder(),
+                new ArrayList<>(configuredAssignment.values()));
 
-        assertEquals("Wrong set of workers for reassignments", Collections.emptySet(), assignor.candidateWorkersForReassignment);
+        assertEquals(Collections.emptySet(),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(0, assignor.scheduledRebalance);
         assertEquals(0, assignor.delay);
 
@@ -913,12 +993,16 @@ public class IncrementalCooperativeAssignorTest {
 
         String veryFlakyWorker = "worker1";
         WorkerLoad lostLoad = configuredAssignment.remove(veryFlakyWorker);
-        ConnectorsAndTasks lostAssignments = new ConnectorsAndTasks.Builder().with(lostLoad.connectors(), lostLoad.tasks()).build();
+        ConnectorsAndTasks lostAssignments = new ConnectorsAndTasks.Builder()
+                .with(lostLoad.connectors(), lostLoad.tasks()).build();
 
         // Lost assignments detected - No candidate worker has appeared yet (worker with no assignments)
-        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(), new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(),
+                new ArrayList<>(configuredAssignment.values()));
 
-        assertEquals("Wrong set of workers for reassignments", Collections.emptySet(), assignor.candidateWorkersForReassignment);
+        assertEquals(Collections.emptySet(),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(time.milliseconds() + rebalanceDelay, assignor.scheduledRebalance);
         assertEquals(rebalanceDelay, assignor.delay);
 
@@ -928,9 +1012,12 @@ public class IncrementalCooperativeAssignorTest {
 
         // A new worker (probably returning worker) has joined
         configuredAssignment.put(veryFlakyWorker, new WorkerLoad.Builder(veryFlakyWorker).build());
-        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(), new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(lostAssignments, new ConnectorsAndTasks.Builder(),
+                new ArrayList<>(configuredAssignment.values()));
 
-        assertEquals("Wrong set of workers for reassignments", Collections.singleton(veryFlakyWorker), assignor.candidateWorkersForReassignment);
+        assertEquals(Collections.singleton(veryFlakyWorker),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(time.milliseconds() + rebalanceDelay, assignor.scheduledRebalance);
         assertEquals(rebalanceDelay, assignor.delay);
 
@@ -940,13 +1027,95 @@ public class IncrementalCooperativeAssignorTest {
         // The returning worker leaves permanently after joining briefly during the delay
         configuredAssignment.remove(veryFlakyWorker);
         ConnectorsAndTasks.Builder lostAssignmentsToReassign = new ConnectorsAndTasks.Builder();
-        assignor.handleLostAssignments(lostAssignments, lostAssignmentsToReassign, new ArrayList<>(configuredAssignment.values()));
+        assignor.handleLostAssignments(lostAssignments, lostAssignmentsToReassign,
+                new ArrayList<>(configuredAssignment.values()));
 
-        assertTrue("Wrong assignment of lost connectors", lostAssignmentsToReassign.build().connectors().containsAll(lostAssignments.connectors()));
-        assertTrue("Wrong assignment of lost tasks", lostAssignmentsToReassign.build().tasks().containsAll(lostAssignments.tasks()));
-        assertEquals("Wrong set of workers for reassignments", Collections.emptySet(), assignor.candidateWorkersForReassignment);
+        assertTrue(lostAssignmentsToReassign.build().connectors().containsAll(lostAssignments.connectors()),
+            "Wrong assignment of lost connectors");
+        assertTrue(lostAssignmentsToReassign.build().tasks().containsAll(lostAssignments.tasks()),
+            "Wrong assignment of lost tasks");
+        assertEquals(Collections.emptySet(),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
         assertEquals(0, assignor.scheduledRebalance);
         assertEquals(0, assignor.delay);
+    }
+
+    @Test
+    public void testLostAssignmentHandlingWhenScheduledDelayIsDisabled() {
+        // Customize assignor for this test case
+        rebalanceDelay = 0;
+        time = new MockTime();
+        initAssignor();
+
+        assertTrue(assignor.candidateWorkersForReassignment.isEmpty());
+        assertEquals(0, assignor.scheduledRebalance);
+        assertEquals(0, assignor.delay);
+
+        Map<String, WorkerLoad> configuredAssignment = new HashMap<>();
+        configuredAssignment.put("worker0", workerLoad("worker0", 0, 2, 0, 4));
+        configuredAssignment.put("worker1", workerLoad("worker1", 2, 2, 4, 4));
+        configuredAssignment.put("worker2", workerLoad("worker2", 4, 2, 8, 4));
+
+        // No lost assignments
+        assignor.handleLostAssignments(new ConnectorsAndTasks.Builder().build(),
+                new ConnectorsAndTasks.Builder(),
+                new ArrayList<>(configuredAssignment.values()));
+
+        assertEquals(Collections.emptySet(),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
+        assertEquals(0, assignor.scheduledRebalance);
+        assertEquals(0, assignor.delay);
+
+        assignor.previousMembers = new HashSet<>(configuredAssignment.keySet());
+
+        String veryFlakyWorker = "worker1";
+        WorkerLoad lostLoad = configuredAssignment.remove(veryFlakyWorker);
+        ConnectorsAndTasks lostAssignments = new ConnectorsAndTasks.Builder()
+                .with(lostLoad.connectors(), lostLoad.tasks()).build();
+
+        // Lost assignments detected - Immediately reassigned
+        ConnectorsAndTasks.Builder lostAssignmentsToReassign = new ConnectorsAndTasks.Builder();
+        assignor.handleLostAssignments(lostAssignments, lostAssignmentsToReassign,
+                new ArrayList<>(configuredAssignment.values()));
+
+        assertEquals(Collections.emptySet(),
+            assignor.candidateWorkersForReassignment,
+            "Wrong set of workers for reassignments");
+        assertEquals(0, assignor.scheduledRebalance);
+        assertEquals(0, assignor.delay);
+        assertEquals(lostAssignments.connectors(),
+            lostAssignmentsToReassign.build().connectors(), "Wrong assignment of lost connectors");
+        assertEquals(lostAssignments.tasks(),
+            lostAssignmentsToReassign.build().tasks(), "Wrong assignment of lost tasks");
+    }
+
+    @Test
+    public void testScheduledDelayIsDisabled() {
+        // Customize assignor for this test case
+        rebalanceDelay = 0;
+        time = new MockTime();
+        initAssignor();
+
+        // First assignment with 2 workers and 2 connectors configured but not yet assigned
+        addNewEmptyWorkers("worker2");
+        performStandardRebalance();
+        assertDelay(0);
+        assertWorkers("worker1", "worker2");
+        assertConnectorAllocations(1, 1);
+        assertTaskAllocations(4, 4);
+        assertBalancedAndCompleteAllocation();
+
+        // Second assignment with only one worker remaining in the group. The worker that left the
+        // group was a follower. Re-assignments take place immediately
+        removeWorkers("worker2");
+        performStandardRebalance();
+        assertDelay(rebalanceDelay);
+        assertWorkers("worker1");
+        assertConnectorAllocations(2);
+        assertTaskAllocations(8);
+        assertBalancedAndCompleteAllocation();
     }
 
     @Test
@@ -1030,7 +1199,13 @@ public class IncrementalCooperativeAssignorTest {
         workerStates.put(leader, new ExtendedWorkerState("followMe:618", CONFIG_OFFSET, ExtendedAssignment.empty()));
         WorkerCoordinator coordinator = mock(WorkerCoordinator.class);
         when(coordinator.configSnapshot()).thenReturn(configState());
-        assignor.performTaskAssignment(leader, CONFIG_OFFSET, workerStates, coordinator, IncrementalCooperativeConnectProtocol.CONNECT_PROTOCOL_V2);
+        assignor.performTaskAssignment(
+                leader,
+                CONFIG_OFFSET,
+                workerStates,
+                coordinator,
+                IncrementalCooperativeConnectProtocol.CONNECT_PROTOCOL_V2
+        );
         verify(coordinator).leaderState(notNull());
     }
 
@@ -1040,16 +1215,38 @@ public class IncrementalCooperativeAssignorTest {
         connectors.clear();
         String leader = "followMe";
         List<JoinGroupResponseData.JoinGroupResponseMember> memberMetadata = new ArrayList<>();
-        ExtendedAssignment leaderAssignment = new ExtendedAssignment(IncrementalCooperativeConnectProtocol.CONNECT_PROTOCOL_V1, ConnectProtocol.Assignment.NO_ERROR, leader, "followMe:618", CONFIG_OFFSET, Collections.emptySet(), Collections.emptySet(), Collections.emptySet(), Collections.emptySet(), 0);
+        ExtendedAssignment leaderAssignment = new ExtendedAssignment(
+                IncrementalCooperativeConnectProtocol.CONNECT_PROTOCOL_V1,
+                ConnectProtocol.Assignment.NO_ERROR,
+                leader,
+                "followMe:618",
+                CONFIG_OFFSET,
+                Collections.emptySet(),
+                Collections.emptySet(),
+                Collections.emptySet(),
+                Collections.emptySet(),
+                0
+        );
         ExtendedWorkerState leaderState = new ExtendedWorkerState("followMe:618", CONFIG_OFFSET, leaderAssignment);
-        JoinGroupResponseData.JoinGroupResponseMember leaderMetadata = new JoinGroupResponseData.JoinGroupResponseMember().setMemberId(leader).setMetadata(IncrementalCooperativeConnectProtocol.serializeMetadata(leaderState, false).array());
+        JoinGroupResponseData.JoinGroupResponseMember leaderMetadata = new JoinGroupResponseData.JoinGroupResponseMember()
+                .setMemberId(leader)
+                .setMetadata(IncrementalCooperativeConnectProtocol.serializeMetadata(leaderState, false).array());
         memberMetadata.add(leaderMetadata);
         WorkerCoordinator coordinator = mock(WorkerCoordinator.class);
         when(coordinator.configSnapshot()).thenReturn(configState());
-        Map<String, ByteBuffer> serializedAssignments = assignor.performAssignment(leader, ConnectProtocolCompatibility.COMPATIBLE.protocol(), memberMetadata, coordinator);
+        Map<String, ByteBuffer> serializedAssignments = assignor.performAssignment(
+                leader,
+                ConnectProtocolCompatibility.COMPATIBLE.protocol(),
+                memberMetadata,
+                coordinator
+        );
         serializedAssignments.forEach((worker, serializedAssignment) -> {
             ExtendedAssignment assignment = IncrementalCooperativeConnectProtocol.deserializeAssignment(serializedAssignment);
-            assertEquals("Incorrect protocol version in assignment for worker " + worker, IncrementalCooperativeConnectProtocol.CONNECT_PROTOCOL_V1, assignment.version());
+            assertEquals(
+                    IncrementalCooperativeConnectProtocol.CONNECT_PROTOCOL_V1,
+                    assignment.version(),
+                    "Incorrect protocol version in assignment for worker " + worker
+            );
         });
     }
 
@@ -1059,16 +1256,38 @@ public class IncrementalCooperativeAssignorTest {
         connectors.clear();
         String leader = "followMe";
         List<JoinGroupResponseData.JoinGroupResponseMember> memberMetadata = new ArrayList<>();
-        ExtendedAssignment leaderAssignment = new ExtendedAssignment(IncrementalCooperativeConnectProtocol.CONNECT_PROTOCOL_V2, ConnectProtocol.Assignment.NO_ERROR, leader, "followMe:618", CONFIG_OFFSET, Collections.emptySet(), Collections.emptySet(), Collections.emptySet(), Collections.emptySet(), 0);
+        ExtendedAssignment leaderAssignment = new ExtendedAssignment(
+                IncrementalCooperativeConnectProtocol.CONNECT_PROTOCOL_V2,
+                ConnectProtocol.Assignment.NO_ERROR,
+                leader,
+                "followMe:618",
+                CONFIG_OFFSET,
+                Collections.emptySet(),
+                Collections.emptySet(),
+                Collections.emptySet(),
+                Collections.emptySet(),
+                0
+        );
         ExtendedWorkerState leaderState = new ExtendedWorkerState("followMe:618", CONFIG_OFFSET, leaderAssignment);
-        JoinGroupResponseData.JoinGroupResponseMember leaderMetadata = new JoinGroupResponseData.JoinGroupResponseMember().setMemberId(leader).setMetadata(IncrementalCooperativeConnectProtocol.serializeMetadata(leaderState, true).array());
+        JoinGroupResponseData.JoinGroupResponseMember leaderMetadata = new JoinGroupResponseData.JoinGroupResponseMember()
+                .setMemberId(leader)
+                .setMetadata(IncrementalCooperativeConnectProtocol.serializeMetadata(leaderState, true).array());
         memberMetadata.add(leaderMetadata);
         WorkerCoordinator coordinator = mock(WorkerCoordinator.class);
         when(coordinator.configSnapshot()).thenReturn(configState());
-        Map<String, ByteBuffer> serializedAssignments = assignor.performAssignment(leader, ConnectProtocolCompatibility.SESSIONED.protocol(), memberMetadata, coordinator);
+        Map<String, ByteBuffer> serializedAssignments = assignor.performAssignment(
+                leader,
+                ConnectProtocolCompatibility.SESSIONED.protocol(),
+                memberMetadata,
+                coordinator
+        );
         serializedAssignments.forEach((worker, serializedAssignment) -> {
             ExtendedAssignment assignment = IncrementalCooperativeConnectProtocol.deserializeAssignment(serializedAssignment);
-            assertEquals("Incorrect protocol version in assignment for worker " + worker, IncrementalCooperativeConnectProtocol.CONNECT_PROTOCOL_V2, assignment.version());
+            assertEquals(
+                    IncrementalCooperativeConnectProtocol.CONNECT_PROTOCOL_V2,
+                    assignment.version(),
+                    "Incorrect protocol version in assignment for worker " + worker
+            );
         });
     }
 
@@ -1088,7 +1307,11 @@ public class IncrementalCooperativeAssignorTest {
         generationId++;
         int lastCompletedGenerationId = generationMismatch ? generationId - 2 : generationId - 1;
         try {
-            Map<String, ConnectorsAndTasks> memberAssignmentsCopy = memberAssignments.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> new ConnectorsAndTasks.Builder().with(e.getValue().connectors(), e.getValue().tasks()).build()));
+            Map<String, ConnectorsAndTasks> memberAssignmentsCopy = memberAssignments.entrySet().stream()
+                    .collect(Collectors.toMap(
+                            Map.Entry::getKey,
+                            e -> new ConnectorsAndTasks.Builder().with(e.getValue().connectors(), e.getValue().tasks()).build()
+                    ));
             returnedAssignments = assignor.performTaskAssignment(configState(), lastCompletedGenerationId, generationId, memberAssignmentsCopy);
         } catch (RuntimeException e) {
             if (assignmentFailure) {
@@ -1111,12 +1334,18 @@ public class IncrementalCooperativeAssignorTest {
 
     private void addNewWorker(String worker, List<String> connectors, List<ConnectorTaskId> tasks) {
         ConnectorsAndTasks assignment = new ConnectorsAndTasks.Builder().with(connectors, tasks).build();
-        assertNull("Worker " + worker + " already exists", memberAssignments.put(worker, assignment));
+        assertNull(
+                memberAssignments.put(worker, assignment),
+                "Worker " + worker + " already exists"
+        );
     }
 
     private void removeWorkers(String... workers) {
         for (String worker : workers) {
-            assertNotNull("Worker " + worker + " does not exist", memberAssignments.remove(worker));
+            assertNotNull(
+                    memberAssignments.remove(worker),
+                    "Worker " + worker + " does not exist"
+            );
         }
     }
 
@@ -1124,12 +1353,17 @@ public class IncrementalCooperativeAssignorTest {
         return new WorkerLoad.Builder(worker).build();
     }
 
-    private static WorkerLoad workerLoad(String worker, int connectorStart, int connectorNum, int taskStart, int taskNum) {
-        return new WorkerLoad.Builder(worker).with(newConnectors(connectorStart, connectorStart + connectorNum), newTasks(taskStart, taskStart + taskNum)).build();
+    private static WorkerLoad workerLoad(String worker, int connectorStart, int connectorNum,
+                                  int taskStart, int taskNum) {
+        return new WorkerLoad.Builder(worker).with(
+                newConnectors(connectorStart, connectorStart + connectorNum),
+                newTasks(taskStart, taskStart + taskNum)).build();
     }
 
     private static List<String> newConnectors(int start, int end) {
-        return IntStream.range(start, end).mapToObj(i -> "connector" + i).collect(Collectors.toList());
+        return IntStream.range(start, end)
+                .mapToObj(i -> "connector" + i)
+                .collect(Collectors.toList());
     }
 
     private static List<ConnectorTaskId> newTasks(int start, int end) {
@@ -1137,23 +1371,52 @@ public class IncrementalCooperativeAssignorTest {
     }
 
     private static List<ConnectorTaskId> newTasks(String connectorName, int start, int end) {
-        return IntStream.range(start, end).mapToObj(i -> new ConnectorTaskId(connectorName, i)).collect(Collectors.toList());
+        return IntStream.range(start, end)
+                .mapToObj(i -> new ConnectorTaskId(connectorName, i))
+                .collect(Collectors.toList());
     }
 
     private void addNewConnector(String connector, int taskCount) {
-        assertNull("Connector " + connector + " already exists", connectors.put(connector, taskCount));
+        assertNull(
+                connectors.put(connector, taskCount),
+                "Connector " + connector + " already exists"
+        );
     }
 
     private void removeConnector(String connector) {
-        assertNotNull("Connector " + connector + " does not exist", connectors.remove(connector));
+        assertNotNull(
+                connectors.remove(connector),
+                "Connector " + connector + " does not exist"
+        );
     }
 
     private ClusterConfigState configState() {
         Map<String, Integer> taskCounts = new HashMap<>(connectors);
         Map<String, Map<String, String>> connectorConfigs = transformValues(taskCounts, c -> Collections.emptyMap());
         Map<String, TargetState> targetStates = transformValues(taskCounts, c -> TargetState.STARTED);
-        Map<ConnectorTaskId, Map<String, String>> taskConfigs = taskCounts.entrySet().stream().flatMap(e -> IntStream.range(0, e.getValue()).mapToObj(i -> new ConnectorTaskId(e.getKey(), i))).collect(Collectors.toMap(Function.identity(), connectorTaskId -> Collections.emptyMap()));
-        return new ClusterConfigState(CONFIG_OFFSET, null, taskCounts, connectorConfigs, targetStates, taskConfigs, Collections.emptyMap(), Collections.emptyMap(), Collections.emptySet(), Collections.emptySet());
+        Map<ConnectorTaskId, Map<String, String>> taskConfigs = taskCounts.entrySet().stream()
+                .flatMap(e -> IntStream.range(0, e.getValue()).mapToObj(i -> new ConnectorTaskId(e.getKey(), i)))
+                .collect(Collectors.toMap(
+                        Function.identity(),
+                        connectorTaskId -> Collections.emptyMap()
+                ));
+        Map<String, AppliedConnectorConfig> appliedConnectorConfigs = connectorConfigs.entrySet().stream()
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        e -> new AppliedConnectorConfig(e.getValue())
+                ));
+        return new ClusterConfigState(
+                CONFIG_OFFSET,
+                null,
+                taskCounts,
+                connectorConfigs,
+                targetStates,
+                taskConfigs,
+                Collections.emptyMap(),
+                Collections.emptyMap(),
+                appliedConnectorConfigs,
+                Collections.emptySet(),
+                Collections.emptySet());
     }
 
     private void applyAssignments() {
@@ -1165,20 +1428,34 @@ public class IncrementalCooperativeAssignorTest {
             workerAssignment.tasks().removeAll(returnedAssignments.newlyRevokedTasks(worker));
             workerAssignment.tasks().addAll(returnedAssignments.newlyAssignedTasks(worker));
 
-            assertEquals("Complete connector assignment for worker " + worker + " does not match expectations " + "based on prior assignment and new revocations and assignments", new HashSet<>(workerAssignment.connectors()), new HashSet<>(returnedAssignments.allAssignedConnectors().get(worker)));
-            assertEquals("Complete task assignment for worker " + worker + " does not match expectations " + "based on prior assignment and new revocations and assignments", new HashSet<>(workerAssignment.tasks()), new HashSet<>(returnedAssignments.allAssignedTasks().get(worker)));
+            assertEquals(new HashSet<>(workerAssignment.connectors()),
+                new HashSet<>(returnedAssignments.allAssignedConnectors().get(worker)),
+                "Complete connector assignment for worker " + worker + " does not match expectations " +
+                    "based on prior assignment and new revocations and assignments");
+            assertEquals(new HashSet<>(workerAssignment.tasks()),
+                new HashSet<>(returnedAssignments.allAssignedTasks().get(worker)),
+                "Complete task assignment for worker " + worker + " does not match expectations " +
+                    "based on prior assignment and new revocations and assignments");
         });
     }
 
     private void assertEmptyAssignment() {
-        assertEquals("No connectors should have been newly assigned during this round", Collections.emptyList(), ConnectUtils.combineCollections(returnedAssignments.newlyAssignedConnectors().values()));
-        assertEquals("No tasks should have been newly assigned during this round", Collections.emptyList(), ConnectUtils.combineCollections(returnedAssignments.newlyAssignedTasks().values()));
-        assertEquals("No connectors should have been revoked during this round", Collections.emptyList(), ConnectUtils.combineCollections(returnedAssignments.newlyRevokedConnectors().values()));
-        assertEquals("No tasks should have been revoked during this round", Collections.emptyList(), ConnectUtils.combineCollections(returnedAssignments.newlyRevokedTasks().values()));
+        assertEquals(Collections.emptyList(),
+            ConnectUtils.combineCollections(returnedAssignments.newlyAssignedConnectors().values()),
+            "No connectors should have been newly assigned during this round");
+        assertEquals(Collections.emptyList(),
+            ConnectUtils.combineCollections(returnedAssignments.newlyAssignedTasks().values()),
+            "No tasks should have been newly assigned during this round");
+        assertEquals(Collections.emptyList(),
+            ConnectUtils.combineCollections(returnedAssignments.newlyRevokedConnectors().values()),
+            "No connectors should have been revoked during this round");
+        assertEquals(Collections.emptyList(),
+            ConnectUtils.combineCollections(returnedAssignments.newlyRevokedTasks().values()),
+            "No tasks should have been revoked during this round");
     }
 
     private void assertWorkers(String... workers) {
-        assertEquals("Wrong set of workers", new HashSet<>(Arrays.asList(workers)), returnedAssignments.allWorkers());
+        assertEquals(new HashSet<>(Arrays.asList(workers)), returnedAssignments.allWorkers(), "Wrong set of workers");
     }
 
     /**
@@ -1202,22 +1479,47 @@ public class IncrementalCooperativeAssignorTest {
     }
 
     private void assertAllocations(String allocated, Function<ConnectorsAndTasks, ? extends Collection<?>> allocation, int... rawExpectedAllocations) {
-        List<Integer> expectedAllocations = IntStream.of(rawExpectedAllocations).boxed().sorted().collect(Collectors.toList());
+        List<Integer> expectedAllocations = IntStream.of(rawExpectedAllocations)
+                .boxed()
+                .sorted()
+                .collect(Collectors.toList());
         List<Integer> actualAllocations = allocations(allocation);
-        assertEquals("Allocation of assigned " + allocated + " across cluster does not match expected counts", expectedAllocations, actualAllocations);
+        assertEquals(expectedAllocations,
+            actualAllocations,
+            "Allocation of assigned " + allocated + " across cluster does not match expected counts");
     }
 
     private List<Integer> allocations(Function<ConnectorsAndTasks, ? extends Collection<?>> allocation) {
-        return memberAssignments.values().stream().map(allocation).map(Collection::size).sorted().collect(Collectors.toList());
+        return memberAssignments.values().stream()
+                .map(allocation)
+                .map(Collection::size)
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     private void assertNoRevocations() {
-        returnedAssignments.newlyRevokedConnectors().forEach((worker, revocations) -> assertEquals("Expected no revocations to take place during this round, but connector revocations were issued for worker " + worker, Collections.emptySet(), new HashSet<>(revocations)));
-        returnedAssignments.newlyRevokedTasks().forEach((worker, revocations) -> assertEquals("Expected no revocations to take place during this round, but task revocations were issued for worker " + worker, Collections.emptySet(), new HashSet<>(revocations)));
+        returnedAssignments.newlyRevokedConnectors().forEach((worker, revocations) ->
+                assertEquals(
+                    Collections.emptySet(),
+                    new HashSet<>(revocations),
+                    "Expected no revocations to take place during this round, but connector revocations were issued for worker " + worker
+                                )
+        );
+        returnedAssignments.newlyRevokedTasks().forEach((worker, revocations) ->
+                assertEquals(
+                    Collections.emptySet(),
+                    new HashSet<>(revocations),
+                    "Expected no revocations to take place during this round, but task revocations were issued for worker " + worker
+                                )
+        );
     }
 
     private void assertDelay(int expectedDelay) {
-        assertEquals("Wrong rebalance delay", expectedDelay, assignor.delay);
+        assertEquals(
+                expectedDelay,
+                assignor.delay,
+                "Wrong rebalance delay"
+        );
     }
 
     /**
@@ -1230,13 +1532,23 @@ public class IncrementalCooperativeAssignorTest {
         List<ConnectorTaskId> existingTasks = ConnectUtils.combineCollections(memberAssignments.values(), ConnectorsAndTasks::tasks);
         List<ConnectorTaskId> newTasks = ConnectUtils.combineCollections(returnedAssignments.newlyAssignedTasks().values());
 
-        assertNoDuplicates(newConnectors, "Connectors should be unique in assignments but duplicates were found; the set of newly-assigned connectors is " + newConnectors);
-        assertNoDuplicates(newTasks, "Tasks should be unique in assignments but duplicates were found; the set of newly-assigned tasks is " + newTasks);
+        assertNoDuplicates(
+                newConnectors,
+                "Connectors should be unique in assignments but duplicates were found; the set of newly-assigned connectors is " + newConnectors
+        );
+        assertNoDuplicates(
+                newTasks,
+                "Tasks should be unique in assignments but duplicates were found; the set of newly-assigned tasks is " + newTasks
+        );
 
         existingConnectors.retainAll(newConnectors);
-        assertEquals("Found connectors in new assignment that already exist in current assignment", Collections.emptyList(), existingConnectors);
+        assertEquals(Collections.emptyList(),
+            existingConnectors,
+            "Found connectors in new assignment that already exist in current assignment");
         existingTasks.retainAll(newTasks);
-        assertEquals("Found tasks in new assignment that already exist in current assignment", Collections.emptyList(), existingConnectors);
+        assertEquals(Collections.emptyList(),
+            existingConnectors,
+            "Found tasks in new assignment that already exist in current assignment");
     }
 
     private void assertBalancedAndCompleteAllocation() {
@@ -1254,24 +1566,34 @@ public class IncrementalCooperativeAssignorTest {
         int minTasks = taskCounts.get(0);
         int maxTasks = taskCounts.get(taskCounts.size() - 1);
 
-        assertTrue("Assignments are imbalanced. The spread of connectors across each worker is: " + connectorCounts, maxConnectors - minConnectors <= 1);
-        assertTrue("Assignments are imbalanced. The spread of tasks across each worker is: " + taskCounts, maxTasks - minTasks <= 1);
+        assertTrue(maxConnectors - minConnectors <= 1,
+            "Assignments are imbalanced. The spread of connectors across each worker is: " + connectorCounts);
+        assertTrue(maxTasks - minTasks <= 1,
+            "Assignments are imbalanced. The spread of tasks across each worker is: " + taskCounts);
     }
 
     private void assertCompleteAllocation() {
         List<String> allAssignedConnectors = ConnectUtils.combineCollections(memberAssignments.values(), ConnectorsAndTasks::connectors);
-        assertEquals("The set of connectors assigned across the cluster does not match the set of connectors in the config topic", connectors.keySet(), new HashSet<>(allAssignedConnectors));
+        assertEquals(connectors.keySet(),
+            new HashSet<>(allAssignedConnectors),
+            "The set of connectors assigned across the cluster does not match the set of connectors in the config topic");
 
-        Map<String, List<ConnectorTaskId>> allAssignedTasks = ConnectUtils.combineCollections(memberAssignments.values(), ConnectorsAndTasks::tasks).stream().collect(Collectors.groupingBy(ConnectorTaskId::connector, Collectors.toList()));
+        Map<String, List<ConnectorTaskId>> allAssignedTasks = ConnectUtils.combineCollections(memberAssignments.values(), ConnectorsAndTasks::tasks)
+                .stream()
+                .collect(Collectors.groupingBy(ConnectorTaskId::connector, Collectors.toList()));
 
         connectors.forEach((connector, taskCount) -> {
-            Set<ConnectorTaskId> expectedTasks = IntStream.range(0, taskCount).mapToObj(i -> new ConnectorTaskId(connector, i)).collect(Collectors.toSet());
-            assertEquals("The set of tasks assigned across the cluster for connector " + connector + " does not match the set of tasks in the config topic", expectedTasks, new HashSet<>(allAssignedTasks.get(connector)));
+            Set<ConnectorTaskId> expectedTasks = IntStream.range(0, taskCount)
+                    .mapToObj(i -> new ConnectorTaskId(connector, i))
+                    .collect(Collectors.toSet());
+            assertEquals(expectedTasks,
+                new HashSet<>(allAssignedTasks.get(connector)),
+                "The set of tasks assigned across the cluster for connector " + connector + " does not match the set of tasks in the config topic");
         });
     }
 
     private static <T> void assertNoDuplicates(List<T> collection, String assertionMessage) {
-        assertEquals(assertionMessage, new HashSet<>(collection).size(), collection.size());
+        assertEquals(new HashSet<>(collection).size(), collection.size(), assertionMessage);
     }
 
 }

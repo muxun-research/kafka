@@ -28,10 +28,15 @@ import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.record.RecordBatch;
-import org.apache.kafka.common.utils.Utils;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class FetchRequest extends AbstractRequest {
@@ -46,8 +51,6 @@ public class FetchRequest extends AbstractRequest {
     public static final int FUTURE_LOCAL_REPLICA_ID = -3;
 
     private final FetchRequestData data;
-    private volatile LinkedHashMap<TopicIdPartition, PartitionData> fetchData = null;
-    private volatile List<TopicIdPartition> toForget = null;
 
     // This is an immutable read-only structures derived from FetchRequestData
     private final FetchMetadata metadata;
@@ -60,11 +63,24 @@ public class FetchRequest extends AbstractRequest {
         public final Optional<Integer> currentLeaderEpoch;
         public final Optional<Integer> lastFetchedEpoch;
 
-        public PartitionData(Uuid topicId, long fetchOffset, long logStartOffset, int maxBytes, Optional<Integer> currentLeaderEpoch) {
+        public PartitionData(
+            Uuid topicId,
+            long fetchOffset,
+            long logStartOffset,
+            int maxBytes,
+            Optional<Integer> currentLeaderEpoch
+        ) {
             this(topicId, fetchOffset, logStartOffset, maxBytes, currentLeaderEpoch, Optional.empty());
         }
 
-        public PartitionData(Uuid topicId, long fetchOffset, long logStartOffset, int maxBytes, Optional<Integer> currentLeaderEpoch, Optional<Integer> lastFetchedEpoch) {
+        public PartitionData(
+            Uuid topicId,
+            long fetchOffset,
+            long logStartOffset,
+            int maxBytes,
+            Optional<Integer> currentLeaderEpoch,
+            Optional<Integer> lastFetchedEpoch
+        ) {
             this.topicId = topicId;
             this.fetchOffset = fetchOffset;
             this.logStartOffset = logStartOffset;
@@ -75,12 +91,15 @@ public class FetchRequest extends AbstractRequest {
 
         @Override
         public boolean equals(Object o) {
-            if (this == o)
-                return true;
-            if (o == null || getClass() != o.getClass())
-                return false;
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
             PartitionData that = (PartitionData) o;
-            return Objects.equals(topicId, that.topicId) && fetchOffset == that.fetchOffset && logStartOffset == that.logStartOffset && maxBytes == that.maxBytes && Objects.equals(currentLeaderEpoch, that.currentLeaderEpoch) && Objects.equals(lastFetchedEpoch, that.lastFetchedEpoch);
+            return Objects.equals(topicId, that.topicId) &&
+                fetchOffset == that.fetchOffset &&
+                logStartOffset == that.logStartOffset &&
+                maxBytes == that.maxBytes &&
+                Objects.equals(currentLeaderEpoch, that.currentLeaderEpoch) &&
+                Objects.equals(lastFetchedEpoch, that.lastFetchedEpoch);
         }
 
         @Override
@@ -90,7 +109,14 @@ public class FetchRequest extends AbstractRequest {
 
         @Override
         public String toString() {
-            return "PartitionData(" + "topicId=" + topicId + ", fetchOffset=" + fetchOffset + ", logStartOffset=" + logStartOffset + ", maxBytes=" + maxBytes + ", currentLeaderEpoch=" + currentLeaderEpoch + ", lastFetchedEpoch=" + lastFetchedEpoch + ')';
+            return "PartitionData(" +
+                "topicId=" + topicId +
+                ", fetchOffset=" + fetchOffset +
+                ", logStartOffset=" + logStartOffset +
+                ", maxBytes=" + maxBytes +
+                ", currentLeaderEpoch=" + currentLeaderEpoch +
+                ", lastFetchedEpoch=" + lastFetchedEpoch +
+                ')';
         }
     }
 
@@ -139,14 +165,17 @@ public class FetchRequest extends AbstractRequest {
         private String rackId = "";
 
         public static Builder forConsumer(short maxVersion, int maxWait, int minBytes, Map<TopicPartition, PartitionData> fetchData) {
-            return new Builder(ApiKeys.FETCH.oldestVersion(), maxVersion, CONSUMER_REPLICA_ID, -1, maxWait, minBytes, fetchData);
+            return new Builder(ApiKeys.FETCH.oldestVersion(), maxVersion,
+                CONSUMER_REPLICA_ID,  -1, maxWait, minBytes, fetchData);
         }
 
-        public static Builder forReplica(short allowedVersion, int replicaId, long replicaEpoch, int maxWait, int minBytes, Map<TopicPartition, PartitionData> fetchData) {
+        public static Builder forReplica(short allowedVersion, int replicaId, long replicaEpoch, int maxWait, int minBytes,
+                                         Map<TopicPartition, PartitionData> fetchData) {
             return new Builder(allowedVersion, allowedVersion, replicaId, replicaEpoch, maxWait, minBytes, fetchData);
         }
 
-        public Builder(short minVersion, short maxVersion, int replicaId, long replicaEpoch, int maxWait, int minBytes, Map<TopicPartition, PartitionData> fetchData) {
+        public Builder(short minVersion, short maxVersion, int replicaId, long replicaEpoch, int maxWait, int minBytes,
+                       Map<TopicPartition, PartitionData> fetchData) {
             super(ApiKeys.FETCH, minVersion, maxVersion);
             this.replicaId = replicaId;
             this.replicaEpoch = replicaEpoch;
@@ -206,7 +235,9 @@ public class FetchRequest extends AbstractRequest {
             toForget.forEach(topicIdPartition -> {
                 FetchRequestData.ForgottenTopic forgottenTopic = forgottenTopicMap.get(topicIdPartition.topic());
                 if (forgottenTopic == null) {
-                    forgottenTopic = new ForgottenTopic().setTopic(topicIdPartition.topic()).setTopicId(topicIdPartition.topicId());
+                    forgottenTopic = new ForgottenTopic()
+                            .setTopic(topicIdPartition.topic())
+                            .setTopicId(topicIdPartition.topicId());
                     forgottenTopicMap.put(topicIdPartition.topic(), forgottenTopic);
                 }
                 forgottenTopic.partitions().add(topicIdPartition.partition());
@@ -228,7 +259,9 @@ public class FetchRequest extends AbstractRequest {
             if (version < 15) {
                 fetchRequestData.setReplicaId(replicaId);
             } else {
-                fetchRequestData.setReplicaState(new ReplicaState().setReplicaId(replicaId).setReplicaEpoch(replicaEpoch));
+                fetchRequestData.setReplicaState(new ReplicaState()
+                    .setReplicaId(replicaId)
+                    .setReplicaEpoch(replicaEpoch));
             }
 
             Map<String, FetchRequestData.ForgottenTopic> forgottenTopicMap = new LinkedHashMap<>();
@@ -252,11 +285,20 @@ public class FetchRequest extends AbstractRequest {
                 PartitionData partitionData = entry.getValue();
 
                 if (fetchTopic == null || !topicPartition.topic().equals(fetchTopic.topic())) {
-                    fetchTopic = new FetchRequestData.FetchTopic().setTopic(topicPartition.topic()).setTopicId(partitionData.topicId).setPartitions(new ArrayList<>());
+                    fetchTopic = new FetchRequestData.FetchTopic()
+                       .setTopic(topicPartition.topic())
+                       .setTopicId(partitionData.topicId)
+                       .setPartitions(new ArrayList<>());
                     fetchRequestData.topics().add(fetchTopic);
                 }
 
-                FetchRequestData.FetchPartition fetchPartition = new FetchRequestData.FetchPartition().setPartition(topicPartition.partition()).setCurrentLeaderEpoch(partitionData.currentLeaderEpoch.orElse(RecordBatch.NO_PARTITION_LEADER_EPOCH)).setLastFetchedEpoch(partitionData.lastFetchedEpoch.orElse(RecordBatch.NO_PARTITION_LEADER_EPOCH)).setFetchOffset(partitionData.fetchOffset).setLogStartOffset(partitionData.logStartOffset).setPartitionMaxBytes(partitionData.maxBytes);
+                FetchRequestData.FetchPartition fetchPartition = new FetchRequestData.FetchPartition()
+                    .setPartition(topicPartition.partition())
+                    .setCurrentLeaderEpoch(partitionData.currentLeaderEpoch.orElse(RecordBatch.NO_PARTITION_LEADER_EPOCH))
+                    .setLastFetchedEpoch(partitionData.lastFetchedEpoch.orElse(RecordBatch.NO_PARTITION_LEADER_EPOCH))
+                    .setFetchOffset(partitionData.fetchOffset)
+                    .setLogStartOffset(partitionData.logStartOffset)
+                    .setPartitionMaxBytes(partitionData.maxBytes);
 
                 fetchTopic.partitions().add(fetchPartition);
             }
@@ -272,9 +314,18 @@ public class FetchRequest extends AbstractRequest {
 
         @Override
         public String toString() {
-            StringBuilder bld = new StringBuilder();
-            bld.append("(type=FetchRequest").append(", replicaId=").append(replicaId).append(", maxWait=").append(maxWait).append(", minBytes=").append(minBytes).append(", maxBytes=").append(maxBytes).append(", fetchData=").append(toFetch).append(", isolationLevel=").append(isolationLevel).append(", removed=").append(Utils.join(removed, ", ")).append(", replaced=").append(Utils.join(replaced, ", ")).append(", metadata=").append(metadata).append(", rackId=").append(rackId).append(")");
-            return bld.toString();
+            return "(type=FetchRequest" +
+                    ", replicaId=" + replicaId +
+                    ", maxWait=" + maxWait +
+                    ", minBytes=" + minBytes +
+                    ", maxBytes=" + maxBytes +
+                    ", fetchData=" + toFetch +
+                    ", isolationLevel=" + isolationLevel +
+                    ", removed=" + removed.stream().map(TopicIdPartition::toString).collect(Collectors.joining(", ")) +
+                    ", replaced=" + replaced.stream().map(TopicIdPartition::toString).collect(Collectors.joining(", ")) +
+                    ", metadata=" + metadata +
+                    ", rackId=" + rackId +
+                    ")";
         }
     }
 
@@ -302,11 +353,19 @@ public class FetchRequest extends AbstractRequest {
         // For version 13+, we know the client can handle a top level error code, so we don't need to send back partitions too.
         if (version() < 13) {
             data.topics().forEach(topic -> {
-                List<FetchResponseData.PartitionData> partitionResponses = topic.partitions().stream().map(partition -> FetchResponse.partitionResponse(partition.partition(), error)).collect(Collectors.toList());
-                topicResponseList.add(new FetchResponseData.FetchableTopicResponse().setTopic(topic.topic()).setTopicId(topic.topicId()).setPartitions(partitionResponses));
+                List<FetchResponseData.PartitionData> partitionResponses = topic.partitions().stream().map(partition ->
+                        FetchResponse.partitionResponse(partition.partition(), error)).collect(Collectors.toList());
+                topicResponseList.add(new FetchResponseData.FetchableTopicResponse()
+                        .setTopic(topic.topic())
+                        .setTopicId(topic.topicId())
+                        .setPartitions(partitionResponses));
             });
         }
-        return new FetchResponse(new FetchResponseData().setThrottleTimeMs(throttleTimeMs).setErrorCode(error.code()).setSessionId(data.sessionId()).setResponses(topicResponseList));
+        return new FetchResponse(new FetchResponseData()
+                .setThrottleTimeMs(throttleTimeMs)
+                .setErrorCode(error.code())
+                .setSessionId(data.sessionId())
+                .setResponses(topicResponseList));
     }
 
     public int replicaId() {
@@ -335,54 +394,46 @@ public class FetchRequest extends AbstractRequest {
     // For versions < 13, builds the partitionData map using only the FetchRequestData.
     // For versions 13+, builds the partitionData map using both the FetchRequestData and a mapping of topic IDs to names.
     public Map<TopicIdPartition, PartitionData> fetchData(Map<Uuid, String> topicNames) {
-        if (fetchData == null) {
-            synchronized (this) {
-                if (fetchData == null) {
-                    // Assigning the lazy-initialized `fetchData` in the last step
-                    // to avoid other threads accessing a half-initialized object.
-                    final LinkedHashMap<TopicIdPartition, PartitionData> fetchDataTmp = new LinkedHashMap<>();
-                    final short version = version();
-                    data.topics().forEach(fetchTopic -> {
-                        String name;
-                        if (version < 13) {
-                            name = fetchTopic.topic(); // can't be null
-                        } else {
-                            name = topicNames.get(fetchTopic.topicId());
-                        }
-                        fetchTopic.partitions().forEach(fetchPartition ->
-                                // Topic name may be null here if the topic name was unable to be resolved using the topicNames map.
-                                fetchDataTmp.put(new TopicIdPartition(fetchTopic.topicId(), new TopicPartition(name, fetchPartition.partition())), new PartitionData(fetchTopic.topicId(), fetchPartition.fetchOffset(), fetchPartition.logStartOffset(), fetchPartition.partitionMaxBytes(), optionalEpoch(fetchPartition.currentLeaderEpoch()), optionalEpoch(fetchPartition.lastFetchedEpoch()))));
-                    });
-                    fetchData = fetchDataTmp;
-                }
+        final LinkedHashMap<TopicIdPartition, PartitionData> fetchData = new LinkedHashMap<>();
+        final short version = version();
+        data.topics().forEach(fetchTopic -> {
+            String name;
+            if (version < 13) {
+                name = fetchTopic.topic(); // can't be null
+            } else {
+                name = topicNames.get(fetchTopic.topicId());
             }
-        }
+            fetchTopic.partitions().forEach(fetchPartition ->
+                // Topic name may be null here if the topic name was unable to be resolved using the topicNames map.
+                fetchData.put(new TopicIdPartition(fetchTopic.topicId(), new TopicPartition(name, fetchPartition.partition())),
+                    new PartitionData(
+                        fetchTopic.topicId(),
+                        fetchPartition.fetchOffset(),
+                        fetchPartition.logStartOffset(),
+                        fetchPartition.partitionMaxBytes(),
+                        optionalEpoch(fetchPartition.currentLeaderEpoch()),
+                        optionalEpoch(fetchPartition.lastFetchedEpoch())
+                    )
+                )
+            );
+        });
         return fetchData;
     }
 
     // For versions < 13, builds the forgotten topics list using only the FetchRequestData.
     // For versions 13+, builds the forgotten topics list using both the FetchRequestData and a mapping of topic IDs to names.
     public List<TopicIdPartition> forgottenTopics(Map<Uuid, String> topicNames) {
-        if (toForget == null) {
-            synchronized (this) {
-                if (toForget == null) {
-                    // Assigning the lazy-initialized `toForget` in the last step
-                    // to avoid other threads accessing a half-initialized object.
-                    final List<TopicIdPartition> toForgetTmp = new ArrayList<>();
-                    data.forgottenTopicsData().forEach(forgottenTopic -> {
-                        String name;
-                        if (version() < 13) {
-                            name = forgottenTopic.topic(); // can't be null
-                        } else {
-                            name = topicNames.get(forgottenTopic.topicId());
-                        }
-                        // Topic name may be null here if the topic name was unable to be resolved using the topicNames map.
-                        forgottenTopic.partitions().forEach(partitionId -> toForgetTmp.add(new TopicIdPartition(forgottenTopic.topicId(), new TopicPartition(name, partitionId))));
-                    });
-                    toForget = toForgetTmp;
-                }
+        final List<TopicIdPartition> toForget = new ArrayList<>();
+        data.forgottenTopicsData().forEach(forgottenTopic -> {
+            String name;
+            if (version() < 13) {
+                name = forgottenTopic.topic(); // can't be null
+            } else {
+                name = topicNames.get(forgottenTopic.topicId());
             }
-        }
+            // Topic name may be null here if the topic name was unable to be resolved using the topicNames map.
+            forgottenTopic.partitions().forEach(partitionId -> toForget.add(new TopicIdPartition(forgottenTopic.topicId(), new TopicPartition(name, partitionId))));
+        });
         return toForget;
     }
 
@@ -417,12 +468,9 @@ public class FetchRequest extends AbstractRequest {
 
     public static String describeReplicaId(int replicaId) {
         switch (replicaId) {
-            case ORDINARY_CONSUMER_ID:
-                return "consumer";
-            case DEBUGGING_CONSUMER_ID:
-                return "debug consumer";
-            case FUTURE_LOCAL_REPLICA_ID:
-                return "future local replica";
+            case ORDINARY_CONSUMER_ID: return "consumer";
+            case DEBUGGING_CONSUMER_ID: return "debug consumer";
+            case FUTURE_LOCAL_REPLICA_ID: return "future local replica";
             default: {
                 if (isValidBrokerId(replicaId))
                     return "replica [" + replicaId + "]";

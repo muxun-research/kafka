@@ -29,18 +29,13 @@ import java.util.concurrent.ExecutionException;
 
 /**
  * The result of the {@link KafkaAdminClient#describeTopics(Collection)} call.
- * <p>
+ *
  * The API of this class is evolving, see {@link Admin} for details.
  */
 @InterfaceStability.Evolving
 public class DescribeTopicsResult {
     private final Map<Uuid, KafkaFuture<TopicDescription>> topicIdFutures;
     private final Map<String, KafkaFuture<TopicDescription>> nameFutures;
-
-    @Deprecated
-    protected DescribeTopicsResult(Map<String, KafkaFuture<TopicDescription>> futures) {
-        this(null, futures);
-    }
 
     // VisibleForTesting
     protected DescribeTopicsResult(Map<Uuid, KafkaFuture<TopicDescription>> topicIdFutures, Map<String, KafkaFuture<TopicDescription>> nameFutures) {
@@ -62,8 +57,9 @@ public class DescribeTopicsResult {
 
     /**
      * Use when {@link Admin#describeTopics(TopicCollection, DescribeTopicsOptions)} used a TopicIdCollection
+     *
      * @return a map from topic IDs to futures which can be used to check the status of
-     * individual topics if the request used topic IDs, otherwise return null.
+     *         individual topics if the request used topic IDs, otherwise return null.
      */
     public Map<Uuid, KafkaFuture<TopicDescription>> topicIdValues() {
         return topicIdFutures;
@@ -71,40 +67,19 @@ public class DescribeTopicsResult {
 
     /**
      * Use when {@link Admin#describeTopics(TopicCollection, DescribeTopicsOptions)} used a TopicNameCollection
+     *
      * @return a map from topic names to futures which can be used to check the status of
-     * individual topics if the request used topic names, otherwise return null.
+     *         individual topics if the request used topic names, otherwise return null.
      */
     public Map<String, KafkaFuture<TopicDescription>> topicNameValues() {
         return nameFutures;
     }
 
     /**
-     * @return a map from topic names to futures which can be used to check the status of
-     * individual topics if the request used topic names, otherwise return null.
-     * @deprecated Since 3.1.0 use {@link #topicNameValues} instead
-     */
-    @Deprecated
-    public Map<String, KafkaFuture<TopicDescription>> values() {
-        return nameFutures;
-    }
-
-    /**
      * @return A future map from topic names to descriptions which can be used to check
-     * the status of individual description if the describe topic request used
-     * topic names, otherwise return null, this request succeeds only if all the
-     * topic descriptions succeed
-     * @deprecated Since 3.1.0 use {@link #allTopicNames()} instead
-     */
-    @Deprecated
-    public KafkaFuture<Map<String, TopicDescription>> all() {
-        return all(nameFutures);
-    }
-
-    /**
-     * @return A future map from topic names to descriptions which can be used to check
-     * the status of individual description if the describe topic request used
-     * topic names, otherwise return null, this request succeeds only if all the
-     * topic descriptions succeed
+     *         the status of individual description if the describe topic request used
+     *         topic names, otherwise return null, this request succeeds only if all the
+     *         topic descriptions succeed
      */
     public KafkaFuture<Map<String, TopicDescription>> allTopicNames() {
         return all(nameFutures);
@@ -112,9 +87,9 @@ public class DescribeTopicsResult {
 
     /**
      * @return A future map from topic ids to descriptions which can be used to check the
-     * status of individual description if the describe topic request used topic
-     * ids, otherwise return null, this request succeeds only if all the topic
-     * descriptions succeed
+     *         status of individual description if the describe topic request used topic
+     *         ids, otherwise return null, this request succeeds only if all the topic
+     *         descriptions succeed
      */
     public KafkaFuture<Map<Uuid, TopicDescription>> allTopicIds() {
         return all(topicIdFutures);
@@ -124,19 +99,21 @@ public class DescribeTopicsResult {
      * Return a future which succeeds only if all the topic descriptions succeed.
      */
     private static <T> KafkaFuture<Map<T, TopicDescription>> all(Map<T, KafkaFuture<TopicDescription>> futures) {
+        if (futures == null) return null;
         KafkaFuture<Void> future = KafkaFuture.allOf(futures.values().toArray(new KafkaFuture[0]));
-        return future.thenApply(v -> {
-            Map<T, TopicDescription> descriptions = new HashMap<>(futures.size());
-            for (Map.Entry<T, KafkaFuture<TopicDescription>> entry : futures.entrySet()) {
-                try {
-                    descriptions.put(entry.getKey(), entry.getValue().get());
-                } catch (InterruptedException | ExecutionException e) {
-                    // This should be unreachable, because allOf ensured that all the futures
-                    // completed successfully.
-                    throw new RuntimeException(e);
+        return future.
+            thenApply(v -> {
+                Map<T, TopicDescription> descriptions = new HashMap<>(futures.size());
+                for (Map.Entry<T, KafkaFuture<TopicDescription>> entry : futures.entrySet()) {
+                    try {
+                        descriptions.put(entry.getKey(), entry.getValue().get());
+                    } catch (InterruptedException | ExecutionException e) {
+                        // This should be unreachable, because allOf ensured that all the futures
+                        // completed successfully.
+                        throw new RuntimeException(e);
+                    }
                 }
-            }
-            return descriptions;
-        });
+                return descriptions;
+            });
     }
 }

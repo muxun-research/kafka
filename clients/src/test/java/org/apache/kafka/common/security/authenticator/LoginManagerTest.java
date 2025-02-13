@@ -20,23 +20,38 @@ import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.config.types.Password;
 import org.apache.kafka.common.network.ListenerName;
 import org.apache.kafka.common.security.JaasContext;
+import org.apache.kafka.common.security.auth.AuthenticateCallbackHandler;
+import org.apache.kafka.common.security.auth.Login;
 import org.apache.kafka.common.security.plain.PlainLoginModule;
+import org.apache.kafka.common.utils.Utils;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import javax.security.auth.login.LoginException;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
 
 public class LoginManagerTest {
 
     private Password dynamicPlainContext;
     private Password dynamicDigestContext;
 
-	@BeforeEach
+    @BeforeEach
     public void setUp() {
         dynamicPlainContext = new Password(PlainLoginModule.class.getName() +
                 " required user=\"plainuser\" password=\"plain-secret\";");
@@ -46,7 +61,7 @@ public class LoginManagerTest {
                 Collections.singletonList("SCRAM-SHA-256"));
     }
 
-	@AfterEach
+    @AfterEach
     public void tearDown() {
         LoginManager.closeAll();
     }
@@ -98,8 +113,10 @@ public class LoginManagerTest {
 
         assertSame(dynamicPlainLogin, LoginManager.acquireLoginManager(plainJaasContext, "PLAIN",
                 DefaultLogin.class, configs));
-        assertSame(dynamicDigestLogin, LoginManager.acquireLoginManager(digestJaasContext, "DIGEST-MD5", DefaultLogin.class, configs));
-        assertSame(staticScramLogin, LoginManager.acquireLoginManager(scramJaasContext, "SCRAM-SHA-256", DefaultLogin.class, configs));
+        assertSame(dynamicDigestLogin, LoginManager.acquireLoginManager(digestJaasContext, "DIGEST-MD5",
+                DefaultLogin.class, configs));
+        assertSame(staticScramLogin, LoginManager.acquireLoginManager(scramJaasContext, "SCRAM-SHA-256",
+                DefaultLogin.class, configs));
 
         verifyLoginManagerRelease(dynamicPlainLogin, 2, plainJaasContext, configs);
         verifyLoginManagerRelease(dynamicDigestLogin, 2, digestJaasContext, configs);
@@ -148,12 +165,40 @@ public class LoginManagerTest {
         verifyLoginManagerRelease(staticLogin2, 2, staticContext, configs2);
     }
 
-    private void verifyLoginManagerRelease(LoginManager loginManager, int acquireCount, JaasContext jaasContext, Map<String, ?> configs) throws Exception {
+    @Test
+    public void testShouldReThrowExceptionOnErrorLoginAttempt() throws Exception {
+        Map<String, Object> config = new HashMap<>();
+        config.put(SaslConfigs.SASL_JAAS_CONFIG, dynamicPlainContext);
+        config.put(SaslConfigs.SASL_LOGIN_CLASS, Login.class);
+        config.put(SaslConfigs.SASL_LOGIN_CALLBACK_HANDLER_CLASS, AuthenticateCallbackHandler.class);
+        JaasContext dynamicContext = JaasContext.loadClientContext(config);
+
+        Login mockLogin = mock(Login.class);
+        AuthenticateCallbackHandler mockHandler = mock(AuthenticateCallbackHandler.class);
+
+        doThrow(new LoginException("Expecting LoginException")).when(mockLogin).login();
+
+        try (MockedStatic<Utils> mockedUtils = mockStatic(Utils.class, Mockito.CALLS_REAL_METHODS)) {
+            mockedUtils.when(() -> Utils.newInstance(Login.class)).thenReturn(mockLogin);
+            mockedUtils.when(() -> Utils.newInstance(AuthenticateCallbackHandler.class)).thenReturn(mockHandler);
+
+            assertThrows(LoginException.class, () ->
+                    LoginManager.acquireLoginManager(dynamicContext, "PLAIN", DefaultLogin.class, config)
+            );
+
+            verify(mockLogin).close();
+            verify(mockHandler).close();
+        }
+    }
+
+    private void verifyLoginManagerRelease(LoginManager loginManager, int acquireCount, JaasContext jaasContext,
+                                           Map<String, ?> configs) throws Exception {
 
         // Release all except one reference and verify that the loginManager is still cached
         for (int i = 0; i < acquireCount - 1; i++)
             loginManager.release();
-        assertSame(loginManager, LoginManager.acquireLoginManager(jaasContext, "PLAIN", DefaultLogin.class, configs));
+        assertSame(loginManager, LoginManager.acquireLoginManager(jaasContext, "PLAIN",
+                DefaultLogin.class, configs));
 
         // Release all references and verify that new LoginManager is created on next acquire
         for (int i = 0; i < 2; i++) // release all references

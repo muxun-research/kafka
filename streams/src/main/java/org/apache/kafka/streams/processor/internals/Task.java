@@ -155,9 +155,23 @@ public interface Task {
      */
     void prepareRecycle();
 
+    /**
+     * Resumes polling in the main consumer for all partitions for which
+     * the corresponding record queues have capacity (again).
+     */
+    void resumePollingForPartitionsWithAvailableSpace();
+
+    /**
+     * Fetches up-to-date lag information from the consumer.
+     */
+    void updateLags();
+
     // runtime methods (using in RUNNING state)
 
     void addRecords(TopicPartition partition, Iterable<ConsumerRecord<byte[], byte[]>> records);
+
+    default void updateNextOffsets(final TopicPartition partition, final OffsetAndMetadata offsetAndMetadata) {
+    }
 
     default boolean process(final long wallClockTime) {
         return false;
@@ -227,7 +241,7 @@ public interface Task {
 
     // IQ related methods
 
-    StateStore getStore(final String name);
+    StateStore store(final String name);
 
     /**
      * @return the offsets of all the changelog partitions associated with this task,

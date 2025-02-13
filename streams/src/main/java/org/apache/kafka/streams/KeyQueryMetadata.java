@@ -30,101 +30,74 @@ import java.util.Set;
  * NOTE: This is a point in time view. It may change as rebalances happen.
  */
 public class KeyQueryMetadata {
-	/**
-	 * Sentinel to indicate that the KeyQueryMetadata is currently unavailable. This can occur during rebalance
-	 * operations.
-	 */
-	public static final KeyQueryMetadata NOT_AVAILABLE =
-			new KeyQueryMetadata(HostInfo.unavailable(), Collections.emptySet(), -1);
+    /**
+     * Sentinel to indicate that the KeyQueryMetadata is currently unavailable. This can occur during rebalance
+     * operations.
+     */
+    public static final KeyQueryMetadata NOT_AVAILABLE =
+        new KeyQueryMetadata(HostInfo.unavailable(), Collections.emptySet(), -1);
 
-	private final HostInfo activeHost;
+    private final HostInfo activeHost;
 
-	private final Set<HostInfo> standbyHosts;
+    private final Set<HostInfo> standbyHosts;
 
-	private final int partition;
+    private final int partition;
 
-	public KeyQueryMetadata(final HostInfo activeHost, final Set<HostInfo> standbyHosts, final int partition) {
-		this.activeHost = activeHost;
-		this.standbyHosts = standbyHosts;
-		this.partition = partition;
-	}
+    public KeyQueryMetadata(final HostInfo activeHost, final Set<HostInfo> standbyHosts, final int partition) {
+        this.activeHost = activeHost;
+        this.standbyHosts = standbyHosts;
+        this.partition = partition;
+    }
 
-	/**
-	 * Get the active Kafka Streams instance for given key.
-	 * @return active instance's {@link HostInfo}
-	 * @deprecated Use {@link #activeHost()} instead.
-	 */
-	@Deprecated
-	public HostInfo getActiveHost() {
-		return activeHost;
-	}
+    /**
+     * Get the active Kafka Streams instance for given key.
+     *
+     * @return active instance's {@link HostInfo}
+     */
+    public HostInfo activeHost() {
+        return activeHost;
+    }
 
-	/**
-	 * Get the Kafka Streams instances that host the key as standbys.
-	 * @return set of standby {@link HostInfo} or a empty set, if no standbys are configured
-	 * @deprecated Use {@link #standbyHosts()} instead.
-	 */
-	@Deprecated
-	public Set<HostInfo> getStandbyHosts() {
-		return standbyHosts;
-	}
+    /**
+     * Get the Kafka Streams instances that host the key as standbys.
+     *
+     * @return set of standby {@link HostInfo} or an empty set, if no standbys are configured
+     */
+    public Set<HostInfo> standbyHosts() {
+        return standbyHosts;
+    }
 
-	/**
-	 * Get the store partition corresponding to the key.
-	 * @return store partition number
-	 * @deprecated Use {@link #partition()} instead.
-	 */
-	@Deprecated
-	public int getPartition() {
-		return partition;
-	}
+    /**
+     * Get the store partition corresponding to the key.
+     *
+     * @return store partition number
+     */
+    public int partition() {
+        return partition;
+    }
 
-	/**
-	 * Get the active Kafka Streams instance for given key.
-	 * @return active instance's {@link HostInfo}
-	 */
-	public HostInfo activeHost() {
-		return activeHost;
-	}
+    @Override
+    public boolean equals(final Object obj) {
+        if (!(obj instanceof KeyQueryMetadata)) {
+            return false;
+        }
+        final KeyQueryMetadata keyQueryMetadata = (KeyQueryMetadata) obj;
+        return Objects.equals(keyQueryMetadata.activeHost, activeHost)
+            && Objects.equals(keyQueryMetadata.standbyHosts, standbyHosts)
+            && Objects.equals(keyQueryMetadata.partition, partition);
+    }
 
-	/**
-	 * Get the Kafka Streams instances that host the key as standbys.
-	 * @return set of standby {@link HostInfo} or a empty set, if no standbys are configured
-	 */
-	public Set<HostInfo> standbyHosts() {
-		return standbyHosts;
-	}
+    @Override
+    public String toString() {
+        return "KeyQueryMetadata {" +
+                "activeHost=" + activeHost +
+                ", standbyHosts=" + standbyHosts +
+                ", partition=" + partition +
+                '}';
+    }
 
-	/**
-	 * Get the store partition corresponding to the key.
-	 * @return store partition number
-	 */
-	public int partition() {
-		return partition;
-	}
-
-	@Override
-	public boolean equals(final Object obj) {
-		if (!(obj instanceof KeyQueryMetadata)) {
-			return false;
-		}
-		final KeyQueryMetadata keyQueryMetadata = (KeyQueryMetadata) obj;
-		return Objects.equals(keyQueryMetadata.activeHost, activeHost)
-				&& Objects.equals(keyQueryMetadata.standbyHosts, standbyHosts)
-				&& Objects.equals(keyQueryMetadata.partition, partition);
-	}
-
-	@Override
-	public String toString() {
-		return "KeyQueryMetadata {" +
-				"activeHost=" + activeHost +
-				", standbyHosts=" + standbyHosts +
-				", partition=" + partition +
-				'}';
-	}
-
-	@Override
-	public int hashCode() {
-		return Objects.hash(activeHost, standbyHosts, partition);
-	}
+    @Override
+    public int hashCode() {
+        return Objects.hash(activeHost, standbyHosts, partition);
+    }
 }

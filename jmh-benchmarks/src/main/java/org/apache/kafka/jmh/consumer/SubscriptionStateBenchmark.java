@@ -18,11 +18,12 @@
 package org.apache.kafka.jmh.consumer;
 
 import org.apache.kafka.clients.Metadata;
-import org.apache.kafka.clients.consumer.OffsetResetStrategy;
+import org.apache.kafka.clients.consumer.internals.AutoOffsetResetStrategy;
 import org.apache.kafka.clients.consumer.internals.SubscriptionState;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.utils.LogContext;
+
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -49,47 +50,47 @@ import java.util.stream.IntStream;
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 public class SubscriptionStateBenchmark {
-	@Param({"5000"})
-	int topicCount;
+    @Param({"5000"})
+    int topicCount;
 
-	@Param({"50"})
-	int partitionCount;
+    @Param({"50"})
+    int partitionCount;
 
-	SubscriptionState subscriptionState;
+    SubscriptionState subscriptionState;
 
-	@Setup(Level.Trial)
-	public void setup() {
-		Set<TopicPartition> assignment = new HashSet<>(topicCount * partitionCount);
-		IntStream.range(0, topicCount).forEach(topicId ->
-				IntStream.range(0, partitionCount).forEach(partitionId ->
-						assignment.add(new TopicPartition(String.format("topic-%04d", topicId), partitionId))
-				)
-		);
-		subscriptionState = new SubscriptionState(new LogContext(), OffsetResetStrategy.EARLIEST);
-		subscriptionState.assignFromUser(assignment);
-		SubscriptionState.FetchPosition position = new SubscriptionState.FetchPosition(
-				0L,
-				Optional.of(0),
-				new Metadata.LeaderAndEpoch(Optional.of(new Node(0, "host", 9092)), Optional.of(10))
-		);
-		assignment.forEach(topicPartition -> {
-			subscriptionState.seekUnvalidated(topicPartition, position);
-			subscriptionState.completeValidation(topicPartition);
-		});
-	}
+    @Setup(Level.Trial)
+    public void setup() {
+        Set<TopicPartition> assignment = new HashSet<>(topicCount * partitionCount);
+        IntStream.range(0, topicCount).forEach(topicId ->
+            IntStream.range(0, partitionCount).forEach(partitionId ->
+                assignment.add(new TopicPartition(String.format("topic-%04d", topicId), partitionId))
+            )
+        );
+        subscriptionState = new SubscriptionState(new LogContext(), AutoOffsetResetStrategy.EARLIEST);
+        subscriptionState.assignFromUser(assignment);
+        SubscriptionState.FetchPosition position = new SubscriptionState.FetchPosition(
+            0L,
+            Optional.of(0),
+            new Metadata.LeaderAndEpoch(Optional.of(new Node(0, "host", 9092)), Optional.of(10))
+        );
+        assignment.forEach(topicPartition -> {
+            subscriptionState.seekUnvalidated(topicPartition, position);
+            subscriptionState.completeValidation(topicPartition);
+        });
+    }
 
-	@Benchmark
-	public boolean testHasAllFetchPositions() {
-		return subscriptionState.hasAllFetchPositions();
-	}
+    @Benchmark
+    public boolean testHasAllFetchPositions() {
+        return subscriptionState.hasAllFetchPositions();
+    }
 
-	@Benchmark
-	public int testFetchablePartitions() {
-		return subscriptionState.fetchablePartitions(tp -> true).size();
-	}
+    @Benchmark
+    public int testFetchablePartitions() {
+        return subscriptionState.fetchablePartitions(tp -> true).size();
+    }
 
-	@Benchmark
-	public int testPartitionsNeedingValidation() {
-		return subscriptionState.partitionsNeedingValidation(0L).size();
-	}
+    @Benchmark
+    public int testPartitionsNeedingValidation() {
+        return subscriptionState.partitionsNeedingValidation(0L).size();
+    }
 }

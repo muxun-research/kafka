@@ -16,12 +16,14 @@
  */
 package kafka.cluster
 
-import kafka.log.UnifiedLog
+import kafka.server.metadata.KRaftMetadataCache
 import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.common.errors.NotLeaderOrFollowerException
 import org.apache.kafka.server.util.MockTime
-import org.apache.kafka.storage.internals.log.LogOffsetMetadata
-import org.junit.jupiter.api.Assertions.{assertEquals, assertFalse, assertTrue}
+import org.apache.kafka.storage.internals.log.{LogOffsetMetadata, UnifiedLog}
+import org.junit.jupiter.api.Assertions.{assertEquals, assertFalse, assertThrows, assertTrue}
 import org.junit.jupiter.api.{BeforeEach, Test}
+import org.mockito.Mockito.{mock, when}
 
 object ReplicaTest {
   val BrokerId: Int = 0
@@ -38,7 +40,9 @@ class ReplicaTest {
 
   @BeforeEach
   def setup(): Unit = {
-    replica = new Replica(BrokerId, Partition)
+    val metadataCache = mock(classOf[KRaftMetadataCache])
+    when(metadataCache.getAliveBrokerEpoch(BrokerId)).thenReturn(Option(1L))
+    replica = new Replica(BrokerId, Partition, metadataCache)
   }
 
   private def assertReplicaState(
@@ -86,7 +90,7 @@ class ReplicaTest {
                                 leaderEndOffset: Long
                               ): Long = {
     val currentTimeMs = time.milliseconds()
-    replica.updateFetchState(
+    replica.updateFetchStateOrThrow(
       followerFetchOffsetMetadata = new LogOffsetMetadata(followerFetchOffset),
       followerStartOffset = followerStartOffset,
       followerFetchTimeMs = currentTimeMs,
@@ -124,8 +128,8 @@ class ReplicaTest {
   @Test
   def testInitialState(): Unit = {
     assertReplicaState(
-      logStartOffset = UnifiedLog.UnknownOffset,
-      logEndOffset = UnifiedLog.UnknownOffset,
+      logStartOffset = UnifiedLog.UNKNOWN_OFFSET,
+      logEndOffset = UnifiedLog.UNKNOWN_OFFSET,
       lastCaughtUpTimeMs = 0L,
       lastFetchLeaderLogEndOffset = 0L,
       lastFetchTimeMs = 0L,
@@ -239,10 +243,10 @@ class ReplicaTest {
     )
 
     assertReplicaState(
-      logStartOffset = UnifiedLog.UnknownOffset,
-      logEndOffset = UnifiedLog.UnknownOffset,
+      logStartOffset = UnifiedLog.UNKNOWN_OFFSET,
+      logEndOffset = UnifiedLog.UNKNOWN_OFFSET,
       lastCaughtUpTimeMs = resetTimeMs1,
-      lastFetchLeaderLogEndOffset = UnifiedLog.UnknownOffset,
+      lastFetchLeaderLogEndOffset = UnifiedLog.UNKNOWN_OFFSET,
       lastFetchTimeMs = 0L,
       brokerEpoch = Option.empty
     )
@@ -263,10 +267,10 @@ class ReplicaTest {
     )
 
     assertReplicaState(
-      logStartOffset = UnifiedLog.UnknownOffset,
-      logEndOffset = UnifiedLog.UnknownOffset,
+      logStartOffset = UnifiedLog.UNKNOWN_OFFSET,
+      logEndOffset = UnifiedLog.UNKNOWN_OFFSET,
       lastCaughtUpTimeMs = 0L,
-      lastFetchLeaderLogEndOffset = UnifiedLog.UnknownOffset,
+      lastFetchLeaderLogEndOffset = UnifiedLog.UNKNOWN_OFFSET,
       lastFetchTimeMs = 0L,
       brokerEpoch = Option.empty
     )
@@ -312,5 +316,34 @@ class ReplicaTest {
     time.sleep(ReplicaLagTimeMaxMs + 1)
 
     assertFalse(isCaughtUp(leaderEndOffset = 16L))
+  }
+
+  @Test
+  def testFenceStaleUpdates(): Unit = {
+    val metadataCache = mock(classOf[KRaftMetadataCache])
+    when(metadataCache.getAliveBrokerEpoch(BrokerId)).thenReturn(Option(2L))
+
+    val replica = new Replica(BrokerId, Partition, metadataCache)
+    replica.updateFetchStateOrThrow(
+      followerFetchOffsetMetadata = new LogOffsetMetadata(5L),
+      followerStartOffset = 1L,
+      followerFetchTimeMs = 1,
+      leaderEndOffset = 10L,
+      brokerEpoch = 2L
+    )
+    assertThrows(classOf[NotLeaderOrFollowerException], () => replica.updateFetchStateOrThrow(
+      followerFetchOffsetMetadata = new LogOffsetMetadata(5L),
+      followerStartOffset = 2L,
+      followerFetchTimeMs = 3,
+      leaderEndOffset = 10L,
+      brokerEpoch = 1L
+    ))
+    replica.updateFetchStateOrThrow(
+      followerFetchOffsetMetadata = new LogOffsetMetadata(5L),
+      followerStartOffset = 2L,
+      followerFetchTimeMs = 4,
+      leaderEndOffset = 10L,
+      brokerEpoch = -1L
+    )
   }
 }

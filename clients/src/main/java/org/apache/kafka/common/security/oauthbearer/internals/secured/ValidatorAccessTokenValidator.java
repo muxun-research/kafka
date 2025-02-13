@@ -18,6 +18,7 @@
 package org.apache.kafka.common.security.oauthbearer.internals.secured;
 
 import org.apache.kafka.common.security.oauthbearer.OAuthBearerToken;
+
 import org.jose4j.jwt.JwtClaims;
 import org.jose4j.jwt.MalformedClaimException;
 import org.jose4j.jwt.NumericDate;
@@ -41,7 +42,7 @@ import static org.jose4j.jwa.AlgorithmConstraints.DISALLOW_NONE;
  * by the broker to perform more extensive validation of the JWT access token that is received
  * from the client, but ultimately from posting the client credentials to the OAuth/OIDC provider's
  * token endpoint.
- * <p>
+ *
  * The validation steps performed (primary by the jose4j library) are:
  *
  * <ol>
@@ -74,6 +75,7 @@ public class ValidatorAccessTokenValidator implements AccessTokenValidator {
     /**
      * Creates a new ValidatorAccessTokenValidator that will be used by the broker for more
      * thorough validation of the JWT.
+     *
      * @param clockSkew               The optional value (in seconds) to allow for differences
      *                                between the time of the OAuth/OIDC identity provider and
      *                                the broker. If <code>null</code> is provided, the broker
@@ -104,12 +106,18 @@ public class ValidatorAccessTokenValidator implements AccessTokenValidator {
      * @param scopeClaimName          Name of the scope claim to use; must be non-<code>null</code>
      * @param subClaimName            Name of the subject claim to use; must be
      *                                non-<code>null</code>
+     *
      * @see JwtConsumerBuilder
      * @see JwtConsumer
      * @see VerificationKeyResolver
      */
 
-    public ValidatorAccessTokenValidator(Integer clockSkew, Set<String> expectedAudiences, String expectedIssuer, VerificationKeyResolver verificationKeyResolver, String scopeClaimName, String subClaimName) {
+    public ValidatorAccessTokenValidator(Integer clockSkew,
+        Set<String> expectedAudiences,
+        String expectedIssuer,
+        VerificationKeyResolver verificationKeyResolver,
+        String scopeClaimName,
+        String subClaimName) {
         final JwtConsumerBuilder jwtConsumerBuilder = new JwtConsumerBuilder();
 
         if (clockSkew != null)
@@ -121,7 +129,12 @@ public class ValidatorAccessTokenValidator implements AccessTokenValidator {
         if (expectedIssuer != null)
             jwtConsumerBuilder.setExpectedIssuer(expectedIssuer);
 
-        this.jwtConsumer = jwtConsumerBuilder.setJwsAlgorithmConstraints(DISALLOW_NONE).setRequireExpirationTime().setRequireIssuedAt().setVerificationKeyResolver(verificationKeyResolver).build();
+        this.jwtConsumer = jwtConsumerBuilder
+            .setJwsAlgorithmConstraints(DISALLOW_NONE)
+            .setRequireExpirationTime()
+            .setRequireIssuedAt()
+            .setVerificationKeyResolver(verificationKeyResolver)
+            .build();
         this.scopeClaimName = scopeClaimName;
         this.subClaimName = subClaimName;
     }
@@ -129,6 +142,7 @@ public class ValidatorAccessTokenValidator implements AccessTokenValidator {
     /**
      * Accepts an OAuth JWT access token in base-64 encoded format, validates, and returns an
      * OAuthBearerToken.
+     *
      * @param accessToken Non-<code>null</code> JWT access token
      * @return {@link OAuthBearerToken}
      * @throws ValidateException Thrown on errors performing validation of given token
@@ -163,13 +177,17 @@ public class ValidatorAccessTokenValidator implements AccessTokenValidator {
         NumericDate issuedAtRaw = getClaim(claims::getIssuedAt, ReservedClaimNames.ISSUED_AT);
 
         Set<String> scopes = ClaimValidationUtils.validateScopes(scopeClaimName, scopeRawCollection);
-        long expiration = ClaimValidationUtils.validateExpiration(ReservedClaimNames.EXPIRATION_TIME, expirationRaw != null ? expirationRaw.getValueInMillis() : null);
+        long expiration = ClaimValidationUtils.validateExpiration(ReservedClaimNames.EXPIRATION_TIME,
+            expirationRaw != null ? expirationRaw.getValueInMillis() : null);
         String sub = ClaimValidationUtils.validateSubject(subClaimName, subRaw);
-        Long issuedAt = ClaimValidationUtils.validateIssuedAt(ReservedClaimNames.ISSUED_AT, issuedAtRaw != null ? issuedAtRaw.getValueInMillis() : null);
+        Long issuedAt = ClaimValidationUtils.validateIssuedAt(ReservedClaimNames.ISSUED_AT,
+            issuedAtRaw != null ? issuedAtRaw.getValueInMillis() : null);
 
-        OAuthBearerToken token = new BasicOAuthBearerToken(accessToken, scopes, expiration, sub, issuedAt);
-
-        return token;
+        return new BasicOAuthBearerToken(accessToken,
+            scopes,
+            expiration,
+            sub,
+            issuedAt);
     }
 
     private <T> T getClaim(ClaimSupplier<T> supplier, String claimName) throws ValidateException {

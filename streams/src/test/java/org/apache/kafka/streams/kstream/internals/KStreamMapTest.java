@@ -19,13 +19,18 @@ package org.apache.kafka.streams.kstream.internals;
 import org.apache.kafka.common.serialization.IntegerSerializer;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.apache.kafka.streams.*;
+import org.apache.kafka.streams.KeyValue;
+import org.apache.kafka.streams.KeyValueTimestamp;
+import org.apache.kafka.streams.StreamsBuilder;
+import org.apache.kafka.streams.TestInputTopic;
+import org.apache.kafka.streams.TopologyTestDriver;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.processor.api.Record;
 import org.apache.kafka.test.MockApiProcessorSupplier;
 import org.apache.kafka.test.StreamsTestUtils;
-import org.junit.Test;
+
+import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -33,8 +38,8 @@ import java.util.Properties;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.core.Is.is;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class KStreamMapTest {
     private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.Integer(), Serdes.String());
@@ -51,13 +56,16 @@ public class KStreamMapTest {
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
             for (final int expectedKey : expectedKeys) {
-				final TestInputTopic<Integer, String> inputTopic =
-						driver.createInputTopic(topicName, new IntegerSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
-				inputTopic.pipeInput(expectedKey, "V" + expectedKey, 10L - expectedKey);
-			}
+                final TestInputTopic<Integer, String> inputTopic =
+                        driver.createInputTopic(topicName, new IntegerSerializer(), new StringSerializer(), Instant.ofEpochMilli(0L), Duration.ZERO);
+                inputTopic.pipeInput(expectedKey, "V" + expectedKey, 10L - expectedKey);
+            }
         }
 
-        final KeyValueTimestamp[] expected = new KeyValueTimestamp[]{new KeyValueTimestamp<>("V0", 0, 10), new KeyValueTimestamp<>("V1", 1, 9), new KeyValueTimestamp<>("V2", 2, 8), new KeyValueTimestamp<>("V3", 3, 7)};
+        final KeyValueTimestamp[] expected = new KeyValueTimestamp[] {new KeyValueTimestamp<>("V0", 0, 10),
+            new KeyValueTimestamp<>("V1", 1, 9),
+            new KeyValueTimestamp<>("V2", 2, 8),
+            new KeyValueTimestamp<>("V3", 3, 7)};
         assertEquals(4, supplier.theCapturedProcessor().processed().size());
         for (int i = 0; i < expected.length; i++) {
             assertEquals(expected[i], supplier.theCapturedProcessor().processed().get(i));
@@ -67,12 +75,16 @@ public class KStreamMapTest {
     @Test
     public void testKeyValueMapperResultNotNull() {
         final KStreamMap<String, Integer, String, Integer> supplier = new KStreamMap<>((key, value) -> null);
-        final Throwable throwable = assertThrows(NullPointerException.class, () -> supplier.get().process(new Record<>("K", 0, 0L)));
+        final Throwable throwable = assertThrows(NullPointerException.class,
+                () -> supplier.get().process(new Record<>("K", 0, 0L)));
         assertThat(throwable.getMessage(), is("The provided KeyValueMapper returned null which is not allowed."));
     }
 
     @Test
     public void testTypeVariance() {
-        new StreamsBuilder().<Integer, String>stream("numbers").map((key, value) -> KeyValue.pair(key, key + ":" + value)).to("strings");
+        new StreamsBuilder()
+            .<Integer, String>stream("numbers")
+            .map((key, value) -> KeyValue.pair(key, key + ":" + value))
+            .to("strings");
     }
 }

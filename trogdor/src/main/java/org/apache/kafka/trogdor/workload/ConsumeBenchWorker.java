@@ -17,9 +17,6 @@
 
 package org.apache.kafka.trogdor.workload;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -36,12 +33,29 @@ import org.apache.kafka.trogdor.common.Platform;
 import org.apache.kafka.trogdor.common.WorkerUtils;
 import org.apache.kafka.trogdor.task.TaskWorker;
 import org.apache.kafka.trogdor.task.WorkerStatusTracker;
+
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Properties;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
@@ -61,21 +75,22 @@ public class ConsumeBenchWorker implements TaskWorker {
     private Future<?> statusUpdaterFuture;
     private KafkaFutureImpl<String> doneFuture;
     private ThreadSafeConsumer consumer;
-
     public ConsumeBenchWorker(String id, ConsumeBenchSpec spec) {
         this.id = id;
         this.spec = spec;
     }
 
     @Override
-    public void start(Platform platform, WorkerStatusTracker status, KafkaFutureImpl<String> doneFuture) throws Exception {
+    public void start(Platform platform, WorkerStatusTracker status,
+                      KafkaFutureImpl<String> doneFuture) throws Exception {
         if (!running.compareAndSet(false, true)) {
             throw new IllegalStateException("ConsumeBenchWorker is already running.");
         }
         log.info("{}: Activating ConsumeBenchWorker with {}", id, spec);
         this.statusUpdater = new StatusUpdater();
-        this.executor = Executors.newScheduledThreadPool(spec.threadsPerWorker() + 2, // 1 thread for all the ConsumeStatusUpdater and 1 for the StatusUpdater
-                ThreadUtils.createThreadFactory("ConsumeBenchWorkerThread%d", false));
+        this.executor = Executors.newScheduledThreadPool(
+            spec.threadsPerWorker() + 2, // 1 thread for all the ConsumeStatusUpdater and 1 for the StatusUpdater
+            ThreadUtils.createThreadFactory("ConsumeBenchWorkerThread%d", false));
         this.statusUpdaterFuture = executor.scheduleAtFixedRate(this.statusUpdater, 1, 1, TimeUnit.MINUTES);
         this.workerStatus = status;
         this.doneFuture = doneFuture;
@@ -104,18 +119,20 @@ public class ConsumeBenchWorker implements TaskWorker {
             boolean toUseGroupPartitionAssignment = partitionsByTopic.values().stream().allMatch(List::isEmpty);
 
             if (!toUseGroupPartitionAssignment && !toUseRandomConsumeGroup() && consumerCount > 1)
-                throw new ConfigException("You may not specify an explicit partition assignment when using multiple consumers in the same group." + "Please leave the consumer group unset, specify topics instead of partitions or use a single consumer.");
+                throw new ConfigException("You may not specify an explicit partition assignment when using multiple consumers in the same group."
+                    + "Please leave the consumer group unset, specify topics instead of partitions or use a single consumer.");
 
             consumer = consumer(consumerGroup, clientId(0));
             if (toUseGroupPartitionAssignment) {
                 Set<String> topics = partitionsByTopic.keySet();
-                tasks.add(new ConsumeMessages(consumer, spec.recordProcessor(), topics));
+                tasks.add(new ConsumeMessages(consumer,  spec.recordProcessor(), topics));
 
                 for (int i = 0; i < consumerCount - 1; i++) {
                     tasks.add(new ConsumeMessages(consumer(consumerGroup(), clientId(i + 1)), spec.recordProcessor(), topics));
                 }
             } else {
-                List<TopicPartition> partitions = populatePartitionsByTopic(consumer.consumer(), partitionsByTopic).values().stream().flatMap(List::stream).collect(Collectors.toList());
+                List<TopicPartition> partitions = populatePartitionsByTopic(consumer.consumer(), partitionsByTopic)
+                    .values().stream().flatMap(List::stream).collect(Collectors.toList());
                 tasks.add(new ConsumeMessages(consumer, spec.recordProcessor(), partitions));
 
                 for (int i = 0; i < consumerCount - 1; i++) {
@@ -146,21 +163,26 @@ public class ConsumeBenchWorker implements TaskWorker {
         }
 
         private String consumerGroup() {
-            return toUseRandomConsumeGroup() ? "consume-bench-" + UUID.randomUUID() : spec.consumerGroup();
+            return toUseRandomConsumeGroup()
+                ? "consume-bench-" + UUID.randomUUID()
+                : spec.consumerGroup();
         }
 
         private boolean toUseRandomConsumeGroup() {
             return spec.consumerGroup().isEmpty();
         }
 
-        private Map<String, List<TopicPartition>> populatePartitionsByTopic(KafkaConsumer<byte[], byte[]> consumer, Map<String, List<TopicPartition>> materializedTopics) {
+        private Map<String, List<TopicPartition>> populatePartitionsByTopic(KafkaConsumer<byte[], byte[]> consumer,
+                                                                         Map<String, List<TopicPartition>> materializedTopics) {
             // fetch partitions for topics who do not have any listed
             for (Map.Entry<String, List<TopicPartition>> entry : materializedTopics.entrySet()) {
                 String topicName = entry.getKey();
                 List<TopicPartition> partitions = entry.getValue();
 
                 if (partitions.isEmpty()) {
-                    List<TopicPartition> fetchedPartitions = consumer.partitionsFor(topicName).stream().map(partitionInfo -> new TopicPartition(partitionInfo.topic(), partitionInfo.partition())).collect(Collectors.toList());
+                    List<TopicPartition> fetchedPartitions = consumer.partitionsFor(topicName).stream()
+                        .map(partitionInfo -> new TopicPartition(partitionInfo.topic(), partitionInfo.partition()))
+                        .collect(Collectors.toList());
                     partitions.addAll(fetchedPartitions);
                 }
 
@@ -180,11 +202,13 @@ public class ConsumeBenchWorker implements TaskWorker {
         private final ThreadSafeConsumer consumer;
         private final Optional<RecordProcessor> recordProcessor;
 
-        private ConsumeMessages(ThreadSafeConsumer consumer, Optional<RecordProcessor> recordProcessor) {
+        private ConsumeMessages(ThreadSafeConsumer consumer,
+                                Optional<RecordProcessor> recordProcessor) {
             this.latencyHistogram = new Histogram(10000);
             this.messageSizeHistogram = new Histogram(2 * 1024 * 1024);
             this.clientId = consumer.clientId();
-            this.statusUpdaterFuture = executor.scheduleAtFixedRate(new ConsumeStatusUpdater(latencyHistogram, messageSizeHistogram, consumer, recordProcessor), 1, 1, TimeUnit.MINUTES);
+            this.statusUpdaterFuture = executor.scheduleAtFixedRate(
+                new ConsumeStatusUpdater(latencyHistogram, messageSizeHistogram, consumer, recordProcessor), 1, 1, TimeUnit.MINUTES);
             int perPeriod;
             if (spec.targetMessagesPerSec() <= 0)
                 perPeriod = Integer.MAX_VALUE;
@@ -196,13 +220,16 @@ public class ConsumeBenchWorker implements TaskWorker {
             this.recordProcessor = recordProcessor;
         }
 
-        ConsumeMessages(ThreadSafeConsumer consumer, Optional<RecordProcessor> recordProcessor, Set<String> topics) {
+        ConsumeMessages(ThreadSafeConsumer consumer,
+                        Optional<RecordProcessor> recordProcessor,
+                        Set<String> topics) {
             this(consumer, recordProcessor);
             log.info("Will consume from topics {} via dynamic group assignment.", topics);
             this.consumer.subscribe(topics);
         }
-
-        ConsumeMessages(ThreadSafeConsumer consumer, Optional<RecordProcessor> recordProcessor, List<TopicPartition> partitions) {
+        ConsumeMessages(ThreadSafeConsumer consumer,
+                        Optional<RecordProcessor> recordProcessor,
+                        List<TopicPartition> partitions) {
             this(consumer, recordProcessor);
             log.info("Will consume from topic partitions {} via manual assignment.", partitions);
             this.consumer.assign(partitions);
@@ -250,9 +277,11 @@ public class ConsumeBenchWorker implements TaskWorker {
                 WorkerUtils.abort(log, "ConsumeRecords", e, doneFuture);
             } finally {
                 statusUpdaterFuture.cancel(false);
-                StatusData statusData = new ConsumeStatusUpdater(latencyHistogram, messageSizeHistogram, consumer, spec.recordProcessor()).update();
+                StatusData statusData =
+                    new ConsumeStatusUpdater(latencyHistogram, messageSizeHistogram, consumer, spec.recordProcessor()).update();
                 long curTimeMs = Time.SYSTEM.milliseconds();
-                log.info("{} Consumed total number of messages={}, bytes={} in {} ms.  status: {}", clientId, messagesConsumed, bytesConsumed, curTimeMs - startTimeMs, statusData);
+                log.info("{} Consumed total number of messages={}, bytes={} in {} ms.  status: {}",
+                         clientId, messagesConsumed, bytesConsumed, curTimeMs - startTimeMs, statusData);
             }
             consumer.close();
             return null;
@@ -316,7 +345,10 @@ public class ConsumeBenchWorker implements TaskWorker {
         private final ThreadSafeConsumer consumer;
         private final Optional<RecordProcessor> recordProcessor;
 
-        ConsumeStatusUpdater(Histogram latencyHistogram, Histogram messageSizeHistogram, ThreadSafeConsumer consumer, Optional<RecordProcessor> recordProcessor) {
+        ConsumeStatusUpdater(Histogram latencyHistogram,
+                             Histogram messageSizeHistogram,
+                             ThreadSafeConsumer consumer,
+                             Optional<RecordProcessor> recordProcessor) {
             this.latencyHistogram = latencyHistogram;
             this.messageSizeHistogram = messageSizeHistogram;
             this.consumer = consumer;
@@ -342,7 +374,16 @@ public class ConsumeBenchWorker implements TaskWorker {
                 recordProcessorStatus = Optional.of(recordProcessor.get().processorStatus());
             }
 
-            StatusData statusData = new StatusData(consumer.assignedPartitions(), latSummary.numSamples(), (long) (msgSummary.numSamples() * msgSummary.average()), (long) msgSummary.average(), latSummary.average(), latSummary.percentiles().get(0).value(), latSummary.percentiles().get(1).value(), latSummary.percentiles().get(2).value(), recordProcessorStatus);
+            StatusData statusData = new StatusData(
+                consumer.assignedPartitions(),
+                latSummary.numSamples(),
+                (long) (msgSummary.numSamples() * msgSummary.average()),
+                (long) msgSummary.average(),
+                latSummary.average(),
+                latSummary.percentiles().get(0).value(),
+                latSummary.percentiles().get(1).value(),
+                latSummary.percentiles().get(2).value(),
+                recordProcessorStatus);
             statusUpdater.updateConsumeStatus(consumer.clientId(), statusData);
             log.info("Status={}", JsonUtil.toJsonString(statusData));
             return statusData;
@@ -364,10 +405,17 @@ public class ConsumeBenchWorker implements TaskWorker {
          * The percentiles to use when calculating the histogram data.
          * These should match up with the p50LatencyMs, p95LatencyMs, etc. fields.
          */
-        final static float[] PERCENTILES = {0.5f, 0.95f, 0.99f};
-
+        static final float[] PERCENTILES = {0.5f, 0.95f, 0.99f};
         @JsonCreator
-        StatusData(@JsonProperty("assignedPartitions") List<String> assignedPartitions, @JsonProperty("totalMessagesReceived") long totalMessagesReceived, @JsonProperty("totalBytesReceived") long totalBytesReceived, @JsonProperty("averageMessageSizeBytes") long averageMessageSizeBytes, @JsonProperty("averageLatencyMs") float averageLatencyMs, @JsonProperty("p50LatencyMs") int p50latencyMs, @JsonProperty("p95LatencyMs") int p95latencyMs, @JsonProperty("p99LatencyMs") int p99latencyMs, @JsonProperty("recordProcessorStatus") Optional<JsonNode> recordProcessorStatus) {
+        StatusData(@JsonProperty("assignedPartitions") List<String> assignedPartitions,
+                   @JsonProperty("totalMessagesReceived") long totalMessagesReceived,
+                   @JsonProperty("totalBytesReceived") long totalBytesReceived,
+                   @JsonProperty("averageMessageSizeBytes") long averageMessageSizeBytes,
+                   @JsonProperty("averageLatencyMs") float averageLatencyMs,
+                   @JsonProperty("p50LatencyMs") int p50latencyMs,
+                   @JsonProperty("p95LatencyMs") int p95latencyMs,
+                   @JsonProperty("p99LatencyMs") int p99latencyMs,
+                   @JsonProperty("recordProcessorStatus") Optional<JsonNode> recordProcessorStatus) {
             this.assignedPartitions = assignedPartitions;
             this.totalMessagesReceived = totalMessagesReceived;
             this.totalBytesReceived = totalBytesReceived;
@@ -501,7 +549,8 @@ public class ConsumeBenchWorker implements TaskWorker {
         List<String> assignedPartitions() {
             this.consumerLock.lock();
             try {
-                return consumer.assignment().stream().map(TopicPartition::toString).collect(Collectors.toList());
+                return consumer.assignment().stream()
+                    .map(TopicPartition::toString).collect(Collectors.toList());
             } finally {
                 this.consumerLock.unlock();
             }

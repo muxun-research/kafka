@@ -23,38 +23,44 @@ import java.util.Optional;
  * Metadata for specific local log offset
  */
 public class LogOffsetMetadata {
+    private final long offset;
+    private final Optional<OffsetMetadata> metadata;
 
-	public final long offset;
-	public final Optional<OffsetMetadata> metadata;
+    public LogOffsetMetadata(long offset) {
+        this(offset, Optional.empty());
+    }
 
-	public LogOffsetMetadata(long offset) {
-		this(offset, Optional.empty());
-	}
+    public LogOffsetMetadata(long offset, Optional<OffsetMetadata> metadata) {
+        this.offset = offset;
+        this.metadata = metadata;
+    }
 
-	public LogOffsetMetadata(long offset, Optional<OffsetMetadata> metadata) {
-		this.offset = offset;
-		this.metadata = metadata;
-	}
+    public long offset() {
+        return offset;
+    }
 
-	@Override
-	public String toString() {
-		return "LogOffsetMetadata(offset=" + offset +
-				", metadata=" + metadata + ")";
-	}
+    public Optional<OffsetMetadata> metadata() {
+        return metadata;
+    }
 
-	@Override
-	public boolean equals(Object obj) {
-		if (obj instanceof LogOffsetMetadata) {
-			LogOffsetMetadata other = (LogOffsetMetadata) obj;
-			return this.offset == other.offset &&
-					this.metadata.equals(other.metadata);
-		} else {
-			return false;
-		}
-	}
+    @Override
+    public String toString() {
+        return "LogOffsetMetadata(offset=" + offset +
+                ", metadata=" + metadata + ")";
+    }
 
-	@Override
-	public int hashCode() {
-		return Objects.hash(offset, metadata);
-	}
+    @Override
+    public boolean equals(Object obj) {
+        if (obj instanceof LogOffsetMetadata other) {
+            return this.offset == other.offset &&
+                   this.metadata.equals(other.metadata);
+        } else {
+            return false;
+        }
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(offset, metadata);
+    }
 }

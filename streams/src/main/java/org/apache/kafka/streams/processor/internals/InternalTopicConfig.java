@@ -29,80 +29,79 @@ import java.util.Optional;
  * the internal topics we create for change-logs and repartitioning etc.
  */
 public abstract class InternalTopicConfig {
-	final String name;
-	final Map<String, String> topicConfigs;
-	final boolean enforceNumberOfPartitions;
+    final String name;
+    final Map<String, String> topicConfigs;
+    final boolean enforceNumberOfPartitions;
 
-	private Optional<Integer> numberOfPartitions = Optional.empty();
+    private Optional<Integer> numberOfPartitions = Optional.empty();
 
-	static final Map<String, String> INTERNAL_TOPIC_DEFAULT_OVERRIDES = new HashMap<>();
+    static final Map<String, String> INTERNAL_TOPIC_DEFAULT_OVERRIDES = new HashMap<>();
+    static {
+        INTERNAL_TOPIC_DEFAULT_OVERRIDES.put(TopicConfig.MESSAGE_TIMESTAMP_TYPE_CONFIG, "CreateTime");
+    }
 
-	static {
-		INTERNAL_TOPIC_DEFAULT_OVERRIDES.put(TopicConfig.MESSAGE_TIMESTAMP_TYPE_CONFIG, "CreateTime");
-	}
+    InternalTopicConfig(final String name, final Map<String, String> topicConfigs) {
+        this.name = Objects.requireNonNull(name, "name can't be null");
+        Topic.validate(name);
+        this.topicConfigs = Objects.requireNonNull(topicConfigs, "topicConfigs can't be null");
+        this.enforceNumberOfPartitions = false;
+    }
 
-	InternalTopicConfig(final String name, final Map<String, String> topicConfigs) {
-		this.name = Objects.requireNonNull(name, "name can't be null");
-		Topic.validate(name);
-		this.topicConfigs = Objects.requireNonNull(topicConfigs, "topicConfigs can't be null");
-		this.enforceNumberOfPartitions = false;
-	}
+    InternalTopicConfig(final String name,
+                        final Map<String, String> topicConfigs,
+                        final int numberOfPartitions,
+                        final boolean enforceNumberOfPartitions) {
+        this.name = Objects.requireNonNull(name, "name can't be null");
+        Topic.validate(name);
+        validateNumberOfPartitions(numberOfPartitions);
+        this.topicConfigs = Objects.requireNonNull(topicConfigs, "topicConfigs can't be null");
+        this.numberOfPartitions = Optional.of(numberOfPartitions);
+        this.enforceNumberOfPartitions = enforceNumberOfPartitions;
+    }
 
-	InternalTopicConfig(final String name,
-						final Map<String, String> topicConfigs,
-						final int numberOfPartitions,
-						final boolean enforceNumberOfPartitions) {
-		this.name = Objects.requireNonNull(name, "name can't be null");
-		Topic.validate(name);
-		validateNumberOfPartitions(numberOfPartitions);
-		this.topicConfigs = Objects.requireNonNull(topicConfigs, "topicConfigs can't be null");
-		this.numberOfPartitions = Optional.of(numberOfPartitions);
-		this.enforceNumberOfPartitions = enforceNumberOfPartitions;
-	}
+    /**
+     * Get the configured properties for this topic. If retentionMs is set then
+     * we add additionalRetentionMs to work out the desired retention when cleanup.policy=compact,delete
+     *
+     * @param additionalRetentionMs - added to retention to allow for clock drift etc
+     * @return Properties to be used when creating the topic
+     */
+    public abstract Map<String, String> properties(final Map<String, String> defaultProperties, final long additionalRetentionMs);
 
-	/**
-	 * Get the configured properties for this topic. If retentionMs is set then
-	 * we add additionalRetentionMs to work out the desired retention when cleanup.policy=compact,delete
-	 * @param additionalRetentionMs - added to retention to allow for clock drift etc
-	 * @return Properties to be used when creating the topic
-	 */
-	public abstract Map<String, String> getProperties(final Map<String, String> defaultProperties, final long additionalRetentionMs);
+    public boolean hasEnforcedNumberOfPartitions() {
+        return enforceNumberOfPartitions;
+    }
 
-	public boolean hasEnforcedNumberOfPartitions() {
-		return enforceNumberOfPartitions;
-	}
+    public String name() {
+        return name;
+    }
 
-	public String name() {
-		return name;
-	}
+    public Optional<Integer> numberOfPartitions() {
+        return numberOfPartitions;
+    }
 
-	public Optional<Integer> numberOfPartitions() {
-		return numberOfPartitions;
-	}
+    public void setNumberOfPartitions(final int numberOfPartitions) {
+        if (hasEnforcedNumberOfPartitions()) {
+            throw new UnsupportedOperationException("number of partitions are enforced on topic " + name() + " and can't be altered.");
+        }
 
-	public void setNumberOfPartitions(final int numberOfPartitions) {
-		if (hasEnforcedNumberOfPartitions()) {
-			throw new UnsupportedOperationException("number of partitions are enforced on topic " +
-					"" + name() + " and can't be altered.");
-		}
+        validateNumberOfPartitions(numberOfPartitions);
 
-		validateNumberOfPartitions(numberOfPartitions);
+        this.numberOfPartitions = Optional.of(numberOfPartitions);
+    }
 
-		this.numberOfPartitions = Optional.of(numberOfPartitions);
-	}
+    private static void validateNumberOfPartitions(final int numberOfPartitions) {
+        if (numberOfPartitions < 1) {
+            throw new IllegalArgumentException("Number of partitions must be at least 1.");
+        }
+    }
 
-	private static void validateNumberOfPartitions(final int numberOfPartitions) {
-		if (numberOfPartitions < 1) {
-			throw new IllegalArgumentException("Number of partitions must be at least 1.");
-		}
-	}
-
-	@Override
-	public String toString() {
-		return "InternalTopicConfig(" +
-				"name=" + name +
-				", topicConfigs=" + topicConfigs +
-				", enforceNumberOfPartitions=" + enforceNumberOfPartitions +
-				")";
+    @Override
+    public String toString() {
+        return "InternalTopicConfig(" +
+                "name=" + name +
+                ", topicConfigs=" + topicConfigs +
+                ", enforceNumberOfPartitions=" + enforceNumberOfPartitions +
+                ")";
     }
 }

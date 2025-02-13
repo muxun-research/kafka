@@ -17,32 +17,39 @@
 package org.apache.kafka.clients;
 
 import org.apache.kafka.common.errors.UnsupportedVersionException;
+import org.apache.kafka.common.feature.SupportedVersionRange;
 import org.apache.kafka.common.message.ApiMessageType;
+import org.apache.kafka.common.message.ApiVersionsResponseData;
 import org.apache.kafka.common.message.ApiVersionsResponseData.ApiVersion;
 import org.apache.kafka.common.message.ApiVersionsResponseData.ApiVersionCollection;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.requests.ApiVersionsResponse;
 import org.apache.kafka.test.TestUtils;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class NodeApiVersionsTest {
 
     @Test
     public void testUnsupportedVersionsToString() {
-        NodeApiVersions versions = new NodeApiVersions(new ApiVersionCollection(), Collections.emptyList(), false);
+        NodeApiVersions versions = new NodeApiVersions(new ApiVersionCollection(), Collections.emptyList());
         StringBuilder bld = new StringBuilder();
         String prefix = "(";
-        for (ApiKeys apiKey : ApiKeys.zkBrokerApis()) {
-            bld.append(prefix).append(apiKey.name).append("(").append(apiKey.id).append("): UNSUPPORTED");
+        for (ApiKeys apiKey : ApiKeys.clientApis()) {
+            bld.append(prefix).append(apiKey.name).
+                    append("(").append(apiKey.id).append("): UNSUPPORTED");
             prefix = ", ";
         }
         bld.append(")");
@@ -60,17 +67,21 @@ public class NodeApiVersionsTest {
         List<ApiVersion> versionList = new ArrayList<>();
         for (ApiKeys apiKey : ApiKeys.values()) {
             if (apiKey == ApiKeys.DELETE_TOPICS) {
-                versionList.add(new ApiVersion().setApiKey(apiKey.id).setMinVersion((short) 10000).setMaxVersion((short) 10001));
-            } else
-                versionList.add(ApiVersionsResponse.toApiVersion(apiKey));
+                versionList.add(new ApiVersion()
+                        .setApiKey(apiKey.id)
+                        .setMinVersion((short) 10000)
+                        .setMaxVersion((short) 10001));
+            } else versionList.add(ApiVersionsResponse.toApiVersion(apiKey));
         }
-        NodeApiVersions versions = new NodeApiVersions(versionList, Collections.emptyList(), false);
+        NodeApiVersions versions = new NodeApiVersions(versionList, Collections.emptyList());
         StringBuilder bld = new StringBuilder();
         String prefix = "(";
         for (ApiKeys apiKey : ApiKeys.values()) {
             bld.append(prefix);
             if (apiKey == ApiKeys.DELETE_TOPICS) {
                 bld.append("DeleteTopics(20): 10000 to 10001 [unusable: node too new]");
+            } else if (!apiKey.hasValidVersion()) {
+                bld.append(apiKey.name + "(" + apiKey.id + "): 0 to -1 [unusable: node too new]");
             } else {
                 bld.append(apiKey.name).append("(").
                         append(apiKey.id).append("): ");
@@ -93,40 +104,44 @@ public class NodeApiVersionsTest {
 
     @Test
     public void testLatestUsableVersion() {
-        NodeApiVersions apiVersions = NodeApiVersions.create(ApiKeys.PRODUCE.id, (short) 1, (short) 3);
-        assertEquals(3, apiVersions.latestUsableVersion(ApiKeys.PRODUCE));
-        assertEquals(1, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 0, (short) 1));
-        assertEquals(1, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 1, (short) 1));
-        assertEquals(2, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 1, (short) 2));
-        assertEquals(3, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 1, (short) 3));
-        assertEquals(2, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 2, (short) 2));
-        assertEquals(3, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 2, (short) 3));
-        assertEquals(3, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 3, (short) 3));
-        assertEquals(3, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 3, (short) 4));
+        NodeApiVersions apiVersions = NodeApiVersions.create(ApiKeys.PRODUCE.id, (short) 8, (short) 10);
+        assertEquals(10, apiVersions.latestUsableVersion(ApiKeys.PRODUCE));
+        assertEquals(8, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 7, (short) 8));
+        assertEquals(8, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 8, (short) 8));
+        assertEquals(9, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 8, (short) 9));
+        assertEquals(10, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 8, (short) 10));
+        assertEquals(9, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 9, (short) 9));
+        assertEquals(10, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 9, (short) 10));
+        assertEquals(10, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 10, (short) 10));
+        assertEquals(10, apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 10, (short) 11));
     }
 
     @Test
     public void testLatestUsableVersionOutOfRangeLow() {
         NodeApiVersions apiVersions = NodeApiVersions.create(ApiKeys.PRODUCE.id, (short) 1, (short) 2);
-        assertThrows(UnsupportedVersionException.class, () -> apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 3, (short) 4));
+        assertThrows(UnsupportedVersionException.class,
+            () -> apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 3, (short) 4));
     }
 
     @Test
     public void testLatestUsableVersionOutOfRangeHigh() {
         NodeApiVersions apiVersions = NodeApiVersions.create(ApiKeys.PRODUCE.id, (short) 2, (short) 3);
-        assertThrows(UnsupportedVersionException.class, () -> apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 0, (short) 1));
+        assertThrows(UnsupportedVersionException.class,
+            () -> apiVersions.latestUsableVersion(ApiKeys.PRODUCE, (short) 0, (short) 1));
     }
 
     @Test
     public void testUsableVersionCalculationNoKnownVersions() {
-        NodeApiVersions versions = new NodeApiVersions(new ApiVersionCollection(), Collections.emptyList(), false);
-        assertThrows(UnsupportedVersionException.class, () -> versions.latestUsableVersion(ApiKeys.FETCH));
+        NodeApiVersions versions = new NodeApiVersions(new ApiVersionCollection(), Collections.emptyList());
+        assertThrows(UnsupportedVersionException.class,
+            () -> versions.latestUsableVersion(ApiKeys.FETCH));
     }
 
     @Test
     public void testLatestUsableVersionOutOfRange() {
         NodeApiVersions apiVersions = NodeApiVersions.create(ApiKeys.PRODUCE.id, (short) 300, (short) 300);
-        assertThrows(UnsupportedVersionException.class, () -> apiVersions.latestUsableVersion(ApiKeys.PRODUCE));
+        assertThrows(UnsupportedVersionException.class,
+            () -> apiVersions.latestUsableVersion(ApiKeys.PRODUCE));
     }
 
     @ParameterizedTest
@@ -135,9 +150,12 @@ public class NodeApiVersionsTest {
         ApiVersionsResponse defaultResponse = TestUtils.defaultApiVersionsResponse(scope);
         List<ApiVersion> versionList = new LinkedList<>(defaultResponse.data().apiKeys());
         // Add an API key that we don't know about.
-        versionList.add(new ApiVersion().setApiKey((short) 100).setMinVersion((short) 0).setMaxVersion((short) 1));
-        NodeApiVersions versions = new NodeApiVersions(versionList, Collections.emptyList(), false);
-        for (ApiKeys apiKey : ApiKeys.apisForListener(scope)) {
+        versionList.add(new ApiVersion()
+                .setApiKey((short) 100)
+                .setMinVersion((short) 0)
+                .setMaxVersion((short) 1));
+        NodeApiVersions versions = new NodeApiVersions(versionList, Collections.emptyList());
+        for (ApiKeys apiKey: ApiKeys.apisForListener(scope)) {
             assertEquals(apiKey.latestVersion(), versions.latestUsableVersion(apiKey));
         }
     }
@@ -146,7 +164,7 @@ public class NodeApiVersionsTest {
     @EnumSource(ApiMessageType.ListenerType.class)
     public void testConstructionFromApiVersionsResponse(ApiMessageType.ListenerType scope) {
         ApiVersionsResponse apiVersionsResponse = TestUtils.defaultApiVersionsResponse(scope);
-        NodeApiVersions versions = new NodeApiVersions(apiVersionsResponse.data().apiKeys(), Collections.emptyList(), false);
+        NodeApiVersions versions = new NodeApiVersions(apiVersionsResponse.data().apiKeys(), Collections.emptyList());
 
         for (ApiVersion apiVersionKey : apiVersionsResponse.data().apiKeys()) {
             ApiVersion apiVersion = versions.apiVersion(ApiKeys.forId(apiVersionKey.apiKey()));
@@ -154,5 +172,25 @@ public class NodeApiVersionsTest {
             assertEquals(apiVersionKey.minVersion(), apiVersion.minVersion());
             assertEquals(apiVersionKey.maxVersion(), apiVersion.maxVersion());
         }
+    }
+
+    @Test
+    public void testFeatures() {
+        NodeApiVersions versions = new NodeApiVersions(
+            Collections.emptyList(),
+            Arrays.asList(new ApiVersionsResponseData.SupportedFeatureKey()
+                .setName("transaction.version")
+                .setMaxVersion((short) 2)
+                .setMinVersion((short) 0)),
+            Arrays.asList(new ApiVersionsResponseData.FinalizedFeatureKey()
+                .setName("transaction.version")
+                .setMaxVersionLevel((short) 2)
+                .setMinVersionLevel((short) 2)),
+            0);
+        SupportedVersionRange supportedVersionRange = versions.supportedFeatures().get("transaction.version");
+        assertEquals(0, supportedVersionRange.min());
+        assertEquals(2, supportedVersionRange.max());
+        assertEquals((short) 2, versions.finalizedFeatures().get("transaction.version"));
+        assertEquals(0L, versions.finalizedFeaturesEpoch());
     }
 }

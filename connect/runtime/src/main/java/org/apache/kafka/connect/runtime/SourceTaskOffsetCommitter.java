@@ -21,10 +21,18 @@ import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceTask;
 import org.apache.kafka.connect.util.ConnectorTaskId;
 import org.apache.kafka.connect.util.LoggingContext;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.concurrent.*;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * <p>
@@ -55,24 +63,24 @@ class SourceTaskOffsetCommitter {
     }
 
     public SourceTaskOffsetCommitter(WorkerConfig config) {
-		this(config, Executors.newSingleThreadScheduledExecutor(ThreadUtils.createThreadFactory(
-				SourceTaskOffsetCommitter.class.getSimpleName() + "-%d", false)),
-				new ConcurrentHashMap<>());
-	}
+        this(config, Executors.newSingleThreadScheduledExecutor(ThreadUtils.createThreadFactory(
+                SourceTaskOffsetCommitter.class.getSimpleName() + "-%d", false)),
+                new ConcurrentHashMap<>());
+    }
 
     public void close(long timeoutMs) {
         ThreadUtils.shutdownExecutorServiceQuietly(commitExecutorService, timeoutMs, TimeUnit.MILLISECONDS);
     }
 
     public void schedule(final ConnectorTaskId id, final WorkerSourceTask workerTask) {
-		long commitIntervalMs = config.getLong(WorkerConfig.OFFSET_COMMIT_INTERVAL_MS_CONFIG);
-		ScheduledFuture<?> commitFuture = commitExecutorService.scheduleWithFixedDelay(() -> {
-			try (LoggingContext loggingContext = LoggingContext.forOffsets(id)) {
-				commit(workerTask);
-			}
-		}, commitIntervalMs, commitIntervalMs, TimeUnit.MILLISECONDS);
-		committers.put(id, commitFuture);
-	}
+        long commitIntervalMs = config.getLong(WorkerConfig.OFFSET_COMMIT_INTERVAL_MS_CONFIG);
+        ScheduledFuture<?> commitFuture = commitExecutorService.scheduleWithFixedDelay(() -> {
+            try (LoggingContext loggingContext = LoggingContext.forOffsets(id)) {
+                commit(workerTask);
+            }
+        }, commitIntervalMs, commitIntervalMs, TimeUnit.MILLISECONDS);
+        committers.put(id, commitFuture);
+    }
 
     public void remove(ConnectorTaskId id) {
         final ScheduledFuture<?> task = committers.remove(id);

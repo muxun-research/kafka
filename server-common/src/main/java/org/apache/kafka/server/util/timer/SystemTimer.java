@@ -17,6 +17,7 @@
 package org.apache.kafka.server.util.timer;
 
 import org.apache.kafka.common.utils.KafkaThread;
+import org.apache.kafka.common.utils.ThreadUtils;
 import org.apache.kafka.common.utils.Time;
 
 import java.util.concurrent.DelayQueue;
@@ -27,6 +28,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class SystemTimer implements Timer {
+    public static final String SYSTEM_TIMER_THREAD_PREFIX = "executor-";
+
     // timeout timer
     private final ExecutorService taskExecutor;
     private final DelayQueue<TimerTaskList> delayQueue;
@@ -42,11 +45,23 @@ public class SystemTimer implements Timer {
         this(executorName, 1, 20, Time.SYSTEM.hiResClockMs());
     }
 
-    public SystemTimer(String executorName, long tickMs, int wheelSize, long startMs) {
-        this.taskExecutor = Executors.newFixedThreadPool(1, runnable -> KafkaThread.nonDaemon("executor-" + executorName, runnable));
+    public SystemTimer(
+        String executorName,
+        long tickMs,
+        int wheelSize,
+        long startMs
+    ) {
+        this.taskExecutor = Executors.newFixedThreadPool(1,
+            runnable -> KafkaThread.nonDaemon(SYSTEM_TIMER_THREAD_PREFIX + executorName, runnable));
         this.delayQueue = new DelayQueue<>();
         this.taskCounter = new AtomicInteger(0);
-        this.timingWheel = new TimingWheel(tickMs, wheelSize, startMs, taskCounter, delayQueue);
+        this.timingWheel = new TimingWheel(
+            tickMs,
+            wheelSize,
+            startMs,
+            taskCounter,
+            delayQueue
+        );
     }
 
     public void add(TimerTask timerTask) {
@@ -96,6 +111,11 @@ public class SystemTimer implements Timer {
 
     @Override
     public void close() {
-        taskExecutor.shutdown();
+        ThreadUtils.shutdownExecutorServiceQuietly(taskExecutor, 5, TimeUnit.SECONDS);
+    }
+
+    // visible for testing
+    boolean isTerminated() {
+        return taskExecutor.isTerminated();
     }
 }

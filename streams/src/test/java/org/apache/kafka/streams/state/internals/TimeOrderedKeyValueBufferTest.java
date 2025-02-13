@@ -29,7 +29,6 @@ import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.internals.Change;
-import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.processor.TaskId;
 import org.apache.kafka.streams.processor.api.Record;
 import org.apache.kafka.streams.processor.internals.ProcessorRecordContext;
@@ -39,16 +38,22 @@ import org.apache.kafka.streams.state.internals.TimeOrderedKeyValueBuffer.Evicti
 import org.apache.kafka.test.MockInternalProcessorContext;
 import org.apache.kafka.test.MockRecordCollector;
 import org.apache.kafka.test.TestUtils;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Optional;
+import java.util.Properties;
+import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Arrays.asList;
@@ -56,14 +61,13 @@ import static java.util.Collections.singletonList;
 import static org.apache.kafka.streams.state.internals.InMemoryTimeOrderedKeyValueChangeBuffer.CHANGELOG_HEADERS;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.fail;
 
-@RunWith(Parameterized.class)
 public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<String, String, Change<String>>> {
 
     private static final String APP_ID = "test-app";
-    private final Function<String, B> bufferSupplier;
-    private final String testName;
+    private Function<String, B> bufferSupplier;
+    private String testName;
 
     public static final class NullRejectingStringSerializer extends StringSerializer {
         @Override
@@ -76,31 +80,36 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
     }
 
     // As we add more buffer implementations/configurations, we can add them here
-    @Parameterized.Parameters(name = "{index}: test={0}")
-    public static Collection<Object[]> parameters() {
-        return singletonList(new Object[]{"in-memory buffer", (Function<String, InMemoryTimeOrderedKeyValueChangeBuffer<String, String, Change<String>>>) name -> new InMemoryTimeOrderedKeyValueChangeBuffer.Builder<>(name, Serdes.String(), Serdes.serdeFrom(new NullRejectingStringSerializer(), new StringDeserializer())).build()});
+    public static Stream<Arguments> parameters() {
+        return Stream.of(
+                Arguments.of("in-memory buffer",
+                (Function<String, InMemoryTimeOrderedKeyValueChangeBuffer<String, String, Change<String>>>) name ->
+                    new InMemoryTimeOrderedKeyValueChangeBuffer
+                        .Builder<>(name, Serdes.String(), Serdes.serdeFrom(new NullRejectingStringSerializer(), new StringDeserializer()))
+                        .build())
+        );
     }
 
-    public TimeOrderedKeyValueBufferTest(final String testName, final Function<String, B> bufferSupplier) {
+    private void setup(final String testName, final Function<String, B> bufferSupplier) {
         this.testName = testName + "_" + new Random().nextInt(Integer.MAX_VALUE);
         this.bufferSupplier = bufferSupplier;
     }
 
-    private static MockInternalProcessorContext makeContext() {
+    private static MockInternalProcessorContext<?, ?> makeContext() {
         final Properties properties = new Properties();
         properties.setProperty(StreamsConfig.APPLICATION_ID_CONFIG, APP_ID);
         properties.setProperty(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "");
 
         final TaskId taskId = new TaskId(0, 0);
 
-        final MockInternalProcessorContext context = new MockInternalProcessorContext(properties, taskId, TestUtils.tempDirectory());
+        final MockInternalProcessorContext<?, ?> context = new MockInternalProcessorContext<>(properties, taskId, TestUtils.tempDirectory());
         context.setRecordCollector(new MockRecordCollector());
 
         return context;
     }
 
 
-    private static void cleanup(final MockInternalProcessorContext context, final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer) {
+    private static void cleanup(final MockInternalProcessorContext<?, ?> context, final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer) {
         try {
             buffer.close();
             Utils.delete(context.stateDir());
@@ -109,28 +118,34 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
         }
     }
 
-    @Test
-    public void shouldInit() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldInit(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
         cleanup(context, buffer);
     }
 
-    @Test
-    public void shouldAcceptData() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldAcceptData(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
         putRecord(buffer, context, 0L, 0L, "asdf", "2p93nf");
         cleanup(context, buffer);
     }
 
-    @Test
-    public void shouldRejectNullValues() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldRejectNullValues(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
         try {
             buffer.put(0, new Record<>("asdf", null, 0L), getContext(0));
             fail("expected an exception");
@@ -140,39 +155,46 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
         cleanup(context, buffer);
     }
 
-    @Test
-    public void shouldRemoveData() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldRemoveData(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
         putRecord(buffer, context, 0L, 0L, "asdf", "qwer");
         assertThat(buffer.numRecords(), is(1));
-        buffer.evictWhile(() -> true, kv -> {
-        });
+        buffer.evictWhile(() -> true, kv -> { });
         assertThat(buffer.numRecords(), is(0));
         cleanup(context, buffer);
     }
 
-    @Test
-    public void shouldRespectEvictionPredicate() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldRespectEvictionPredicate(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
         putRecord(buffer, context, 0L, 0L, "asdf", "eyt");
         putRecord(buffer, context, 1L, 0L, "zxcv", "rtg");
         assertThat(buffer.numRecords(), is(2));
         final List<Eviction<String, Change<String>>> evicted = new LinkedList<>();
         buffer.evictWhile(() -> buffer.numRecords() > 1, evicted::add);
         assertThat(buffer.numRecords(), is(1));
-        assertThat(evicted, is(singletonList(new Eviction<>("asdf", new Change<>("eyt", null), getContext(0L)))));
+        assertThat(evicted, is(singletonList(
+            new Eviction<>("asdf", new Change<>("eyt", null), getContext(0L))
+        )));
         cleanup(context, buffer);
     }
 
-    @Test
-    public void shouldTrackCount() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldTrackCount(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
         putRecord(buffer, context, 0L, 0L, "asdf", "oin");
         assertThat(buffer.numRecords(), is(1));
         putRecord(buffer, context, 1L, 0L, "asdf", "wekjn");
@@ -182,11 +204,13 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
         cleanup(context, buffer);
     }
 
-    @Test
-    public void shouldTrackSize() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldTrackSize(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
         putRecord(buffer, context, 0L, 0L, "asdf", "23roni");
         assertThat(buffer.bufferSize(), is(43L));
         putRecord(buffer, context, 1L, 0L, "asdf", "3l");
@@ -196,11 +220,13 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
         cleanup(context, buffer);
     }
 
-    @Test
-    public void shouldTrackMinTimestamp() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldTrackMinTimestamp(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
         putRecord(buffer, context, 1L, 0L, "asdf", "2093j");
         assertThat(buffer.minTimestamp(), is(1L));
         putRecord(buffer, context, 0L, 0L, "zxcv", "3gon4i");
@@ -208,11 +234,13 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
         cleanup(context, buffer);
     }
 
-    @Test
-    public void shouldEvictOldestAndUpdateSizeAndCountAndMinTimestamp() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldEvictOldestAndUpdateSizeAndCountAndMinTimestamp(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
 
         putRecord(buffer, context, 1L, 0L, "zxcv", "o23i4");
         assertThat(buffer.numRecords(), is(1));
@@ -254,20 +282,24 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
         cleanup(context, buffer);
     }
 
-    @Test
-    public void shouldReturnUndefinedOnPriorValueForNotBufferedKey() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldReturnUndefinedOnPriorValueForNotBufferedKey(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
 
         assertThat(buffer.priorValueForBuffered("ASDF"), is(Maybe.undefined()));
     }
 
-    @Test
-    public void shouldReturnPriorValueForBufferedKey() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldReturnPriorValueForBufferedKey(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
 
         final ProcessorRecordContext recordContext = getContext(0L);
         context.setRecordContext(recordContext);
@@ -277,18 +309,19 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
         assertThat(buffer.priorValueForBuffered("B"), is(Maybe.defined(null)));
     }
 
-    @Test
-    public void shouldFlush() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldFlush(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
         putRecord(buffer, context, 2L, 0L, "asdf", "2093j");
         putRecord(buffer, context, 1L, 1L, "zxcv", "3gon4i");
         putRecord(buffer, context, 0L, 2L, "deleteme", "deadbeef");
 
         // replace "deleteme" with a tombstone
-        buffer.evictWhile(() -> buffer.minTimestamp() < 1, kv -> {
-        });
+        buffer.evictWhile(() -> buffer.minTimestamp() < 1, kv -> { });
 
         // flush everything to the changelog
         buffer.flush();
@@ -313,7 +346,12 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
                         niceValue = new KeyValue<>(timestamp, contextualRecord);
                     }
 
-                    return new ProducerRecord<>(pr.topic(), pr.partition(), pr.timestamp(), pr.key().toString(), niceValue, pr.headers());
+                    return new ProducerRecord<>(pr.topic(),
+                                                pr.partition(),
+                                                pr.timestamp(),
+                                                pr.key().toString(),
+                                                niceValue,
+                                                pr.headers());
                 })
                 .collect(Collectors.toList());
 
@@ -329,21 +367,31 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
                                  0,
                                  null,
                                  "zxcv",
-                                 new KeyValue<>(1L, getBufferValue("3gon4i", 1)), CHANGELOG_HEADERS
+                                 new KeyValue<>(1L, getBufferValue("3gon4i", 1)),
+                                 CHANGELOG_HEADERS
             ),
             new ProducerRecord<>(APP_ID + "-" + testName + "-changelog",
-                                 0, null, "asdf", new KeyValue<>(2L, getBufferValue("2093j", 0)), CHANGELOG_HEADERS))));
+                                 0,
+                                 null,
+                                 "asdf",
+                                 new KeyValue<>(2L, getBufferValue("2093j", 0)),
+                                 CHANGELOG_HEADERS
+            )
+        )));
 
         cleanup(context, buffer);
     }
 
-    @Test
-    public void shouldRestoreOldUnversionedFormat() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldRestoreOldUnversionedFormat(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
 
-        final RecordBatchingStateRestoreCallback stateRestoreCallback = (RecordBatchingStateRestoreCallback) context.stateRestoreCallback(testName);
+        final RecordBatchingStateRestoreCallback stateRestoreCallback =
+            (RecordBatchingStateRestoreCallback) context.stateRestoreCallback(testName);
 
         context.setRecordContext(new ProcessorRecordContext(0, 0, 0, "", new RecordHeaders()));
 
@@ -355,13 +403,69 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
         final String zxcvBinaryValue1 = "00000000000000010000000870726576696F757300000005656F34696D";
         final String zxcvBinaryValue2 = "000000000000000100000005656F34696D000000046E657874";
 
-        stateRestoreCallback.restoreBatch(asList(new ConsumerRecord<>("changelog-topic", 0, 0, 0, TimestampType.CREATE_TIME, -1, -1, "todelete".getBytes(UTF_8), hexStringToByteArray(toDeleteBinaryValue), new RecordHeaders(), Optional.empty()), new ConsumerRecord<>("changelog-topic", 0, 1, 1, TimestampType.CREATE_TIME, -1, -1, "asdf".getBytes(UTF_8), hexStringToByteArray(asdfBinaryValue), new RecordHeaders(), Optional.empty()), new ConsumerRecord<>("changelog-topic", 0, 2, 2, TimestampType.CREATE_TIME, -1, -1, "zxcv".getBytes(UTF_8), hexStringToByteArray(zxcvBinaryValue1), new RecordHeaders(), Optional.empty()), new ConsumerRecord<>("changelog-topic", 0, 3, 3, TimestampType.CREATE_TIME, -1, -1, "zxcv".getBytes(UTF_8), hexStringToByteArray(zxcvBinaryValue2), new RecordHeaders(), Optional.empty())));
+        stateRestoreCallback.restoreBatch(asList(
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 0,
+                                 0,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "todelete".getBytes(UTF_8),
+                                 hexStringToByteArray(toDeleteBinaryValue),
+                                 new RecordHeaders(),
+                                 Optional.empty()),
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 1,
+                                 1,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "asdf".getBytes(UTF_8),
+                                 hexStringToByteArray(asdfBinaryValue),
+                                 new RecordHeaders(),
+                                 Optional.empty()),
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 2,
+                                 2,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "zxcv".getBytes(UTF_8),
+                                 hexStringToByteArray(zxcvBinaryValue1),
+                                 new RecordHeaders(),
+                                 Optional.empty()),
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 3,
+                                 3,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "zxcv".getBytes(UTF_8),
+                                 hexStringToByteArray(zxcvBinaryValue2),
+                                 new RecordHeaders(),
+                                 Optional.empty())
+        ));
 
         assertThat(buffer.numRecords(), is(3));
         assertThat(buffer.minTimestamp(), is(0L));
         assertThat(buffer.bufferSize(), is(172L));
 
-        stateRestoreCallback.restoreBatch(singletonList(new ConsumerRecord<>("changelog-topic", 0, 3, 3, TimestampType.CREATE_TIME, -1, -1, "todelete".getBytes(UTF_8), null, new RecordHeaders(), Optional.empty())
+        stateRestoreCallback.restoreBatch(singletonList(
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 3,
+                                 3,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "todelete".getBytes(UTF_8),
+                                 null,
+                                 new RecordHeaders(),
+                                 Optional.empty())
         ));
 
         assertThat(buffer.numRecords(), is(2));
@@ -399,17 +503,20 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
         cleanup(context, buffer);
     }
 
-    @Test
-    public void shouldRestoreV1Format() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldRestoreV1Format(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
 
-        final RecordBatchingStateRestoreCallback stateRestoreCallback = (RecordBatchingStateRestoreCallback) context.stateRestoreCallback(testName);
+        final RecordBatchingStateRestoreCallback stateRestoreCallback =
+            (RecordBatchingStateRestoreCallback) context.stateRestoreCallback(testName);
 
         context.setRecordContext(new ProcessorRecordContext(0, 0, 0, "", new RecordHeaders()));
 
-        final RecordHeaders v1FlagHeaders = new RecordHeaders(new Header[]{new RecordHeader("v", new byte[]{(byte) 1})});
+        final RecordHeaders v1FlagHeaders = new RecordHeaders(new Header[] {new RecordHeader("v", new byte[] {(byte) 1})});
 
         // These serialized formats were captured by running version 2.2 code.
         // They verify that an upgrade from 2.2 will work.
@@ -419,13 +526,69 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
         final String zxcvBinary1 = "00000000000000010000000000000002000000000000000000000005746F70696300000000FFFFFFFF000000150000000870726576696F757300000005336F34696D";
         final String zxcvBinary2 = "00000000000000010000000000000003000000000000000000000005746F70696300000000FFFFFFFF0000001100000005336F34696D000000046E657874";
 
-        stateRestoreCallback.restoreBatch(asList(new ConsumerRecord<>("changelog-topic", 0, 0, 999, TimestampType.CREATE_TIME, -1, -1, "todelete".getBytes(UTF_8), hexStringToByteArray(toDeleteBinary), v1FlagHeaders, Optional.empty()), new ConsumerRecord<>("changelog-topic", 0, 1, 9999, TimestampType.CREATE_TIME, -1, -1, "asdf".getBytes(UTF_8), hexStringToByteArray(asdfBinary), v1FlagHeaders, Optional.empty()), new ConsumerRecord<>("changelog-topic", 0, 2, 99, TimestampType.CREATE_TIME, -1, -1, "zxcv".getBytes(UTF_8), hexStringToByteArray(zxcvBinary1), v1FlagHeaders, Optional.empty()), new ConsumerRecord<>("changelog-topic", 0, 3, 100, TimestampType.CREATE_TIME, -1, -1, "zxcv".getBytes(UTF_8), hexStringToByteArray(zxcvBinary2), v1FlagHeaders, Optional.empty())));
+        stateRestoreCallback.restoreBatch(asList(
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 0,
+                                 999,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "todelete".getBytes(UTF_8),
+                                 hexStringToByteArray(toDeleteBinary),
+                                 v1FlagHeaders,
+                                 Optional.empty()),
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 1,
+                                 9999,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "asdf".getBytes(UTF_8),
+                                 hexStringToByteArray(asdfBinary),
+                                 v1FlagHeaders,
+                                 Optional.empty()),
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 2,
+                                 99,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "zxcv".getBytes(UTF_8),
+                                 hexStringToByteArray(zxcvBinary1),
+                                 v1FlagHeaders,
+                                 Optional.empty()),
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 3,
+                                 100,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "zxcv".getBytes(UTF_8),
+                                 hexStringToByteArray(zxcvBinary2),
+                                 v1FlagHeaders,
+                                 Optional.empty())
+        ));
 
         assertThat(buffer.numRecords(), is(3));
         assertThat(buffer.minTimestamp(), is(0L));
         assertThat(buffer.bufferSize(), is(142L));
 
-        stateRestoreCallback.restoreBatch(singletonList(new ConsumerRecord<>("changelog-topic", 0, 3, 3, TimestampType.CREATE_TIME, -1, -1, "todelete".getBytes(UTF_8), null, new RecordHeaders(), Optional.empty())
+        stateRestoreCallback.restoreBatch(singletonList(
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 3,
+                                 3,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "todelete".getBytes(UTF_8),
+                                 null,
+                                 new RecordHeaders(),
+                                 Optional.empty())
         ));
 
         assertThat(buffer.numRecords(), is(2));
@@ -464,17 +627,20 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
     }
 
 
-    @Test
-    public void shouldRestoreV2Format() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldRestoreV2Format(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
 
-        final RecordBatchingStateRestoreCallback stateRestoreCallback = (RecordBatchingStateRestoreCallback) context.stateRestoreCallback(testName);
+        final RecordBatchingStateRestoreCallback stateRestoreCallback =
+            (RecordBatchingStateRestoreCallback) context.stateRestoreCallback(testName);
 
         context.setRecordContext(new ProcessorRecordContext(0, 0, 0, "", new RecordHeaders()));
 
-        final RecordHeaders v2FlagHeaders = new RecordHeaders(new Header[]{new RecordHeader("v", new byte[]{(byte) 2})});
+        final RecordHeaders v2FlagHeaders = new RecordHeaders(new Header[] {new RecordHeader("v", new byte[] {(byte) 2})});
 
         // These serialized formats were captured by running version 2.3 code.
         // They verify that an upgrade from 2.3 will work.
@@ -484,124 +650,70 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
         final String zxcvBinary1 = "0000000000000002000000000000000000000005746F70696300000000FFFFFFFF000000140000000749474E4F52454400000005336F34696D0000000870726576696F75730000000000000001";
         final String zxcvBinary2 = "0000000000000003000000000000000000000005746F70696300000000FFFFFFFF0000001100000005336F34696D000000046E6578740000000870726576696F75730000000000000001";
 
-        stateRestoreCallback.restoreBatch(asList(new ConsumerRecord<>("changelog-topic", 0, 0, 999, TimestampType.CREATE_TIME, -1, -1, "todelete".getBytes(UTF_8), hexStringToByteArray(toDeleteBinary), v2FlagHeaders, Optional.empty()), new ConsumerRecord<>("changelog-topic", 0, 1, 9999, TimestampType.CREATE_TIME, -1, -1, "asdf".getBytes(UTF_8), hexStringToByteArray(asdfBinary), v2FlagHeaders, Optional.empty()), new ConsumerRecord<>("changelog-topic", 0, 2, 99, TimestampType.CREATE_TIME, -1, -1, "zxcv".getBytes(UTF_8), hexStringToByteArray(zxcvBinary1), v2FlagHeaders, Optional.empty()), new ConsumerRecord<>("changelog-topic", 0, 2, 100, TimestampType.CREATE_TIME, -1, -1, "zxcv".getBytes(UTF_8), hexStringToByteArray(zxcvBinary2), v2FlagHeaders, Optional.empty())));
+        stateRestoreCallback.restoreBatch(asList(
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 0,
+                                 999,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "todelete".getBytes(UTF_8),
+                                 hexStringToByteArray(toDeleteBinary),
+                                 v2FlagHeaders,
+                                 Optional.empty()),
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 1,
+                                 9999,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "asdf".getBytes(UTF_8),
+                                 hexStringToByteArray(asdfBinary),
+                                 v2FlagHeaders,
+                                 Optional.empty()),
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 2,
+                                 99,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "zxcv".getBytes(UTF_8),
+                                 hexStringToByteArray(zxcvBinary1),
+                                 v2FlagHeaders,
+                                 Optional.empty()),
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 2,
+                                 100,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "zxcv".getBytes(UTF_8),
+                                 hexStringToByteArray(zxcvBinary2),
+                                 v2FlagHeaders,
+                                 Optional.empty())
+        ));
 
         assertThat(buffer.numRecords(), is(3));
         assertThat(buffer.minTimestamp(), is(0L));
         assertThat(buffer.bufferSize(), is(142L));
 
-        stateRestoreCallback.restoreBatch(singletonList(new ConsumerRecord<>("changelog-topic", 0, 3, 3, TimestampType.CREATE_TIME, -1, -1, "todelete".getBytes(UTF_8), null, new RecordHeaders(), Optional.empty())));
-
-        assertThat(buffer.numRecords(), is(2));
-        assertThat(buffer.minTimestamp(), is(1L));
-        assertThat(buffer.bufferSize(), is(95L));
-
-        assertThat(buffer.priorValueForBuffered("todelete"), is(Maybe.undefined()));
-        assertThat(buffer.priorValueForBuffered("asdf"), is(Maybe.defined(null)));
-        assertThat(buffer.priorValueForBuffered("zxcv"), is(Maybe.defined(ValueAndTimestamp.make("previous", -1))));
-
-        // flush the buffer into a list in buffer order so we can make assertions about the contents.
-
-        final List<Eviction<String, Change<String>>> evicted = new LinkedList<>();
-        buffer.evictWhile(() -> true, evicted::add);
-
-        // Several things to note:
-        // * The buffered records are ordered according to their buffer time (serialized in the value of the changelog)
-        // * The record timestamps are properly restored, and not conflated with the record's buffer time.
-        // * The keys and values are properly restored
-        // * The record topic is set to the original input topic, *not* the changelog topic
-        // * The record offset preserves the original input record's offset, *not* the offset of the changelog record
-
-
-        assertThat(evicted, is(asList(new Eviction<>("zxcv", new Change<>("next", "3o4im"), getContext(3L)), new Eviction<>("asdf", new Change<>("qwer", null), getContext(1L)))));
-
-        cleanup(context, buffer);
-    }
-
-    @Test
-    public void shouldRestoreV3FormatWithV2Header() {
-        // versions 2.4.0, 2.4.1, and 2.5.0 would have erroneously encoded a V3 record with the
-        // V2 header, so we need to be sure to handle this case as well.
-        // Note the data is the same as the V3 test.
-        final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
-
-        final RecordBatchingStateRestoreCallback stateRestoreCallback = (RecordBatchingStateRestoreCallback) context.stateRestoreCallback(testName);
-
-        context.setRecordContext(new ProcessorRecordContext(0, 0, 0, "", new RecordHeaders()));
-
-        final RecordHeaders headers = new RecordHeaders(new Header[]{new RecordHeader("v", new byte[]{(byte) 2})});
-
-        // These serialized formats were captured by running version 2.4 code.
-        // They verify that an upgrade from 2.4 will work.
-        // Do not change them.
-        final String toDeleteBinary = "0000000000000000000000000000000000000005746F70696300000000FFFFFFFFFFFFFFFFFFFFFFFF00000006646F6F6D65640000000000000000";
-        final String asdfBinary = "0000000000000001000000000000000000000005746F70696300000000FFFFFFFFFFFFFFFFFFFFFFFF00000004717765720000000000000002";
-        final String zxcvBinary1 = "0000000000000002000000000000000000000005746F70696300000000FFFFFFFF0000000870726576696F75730000000749474E4F52454400000005336F34696D0000000000000001";
-        final String zxcvBinary2 = "0000000000000003000000000000000000000005746F70696300000000FFFFFFFF0000000870726576696F757300000005336F34696D000000046E6578740000000000000001";
-
-        stateRestoreCallback.restoreBatch(asList(new ConsumerRecord<>("changelog-topic", 0, 0, 999, TimestampType.CREATE_TIME, -1, -1, "todelete".getBytes(UTF_8), hexStringToByteArray(toDeleteBinary), headers, Optional.empty()), new ConsumerRecord<>("changelog-topic", 0, 1, 9999, TimestampType.CREATE_TIME, -1, -1, "asdf".getBytes(UTF_8), hexStringToByteArray(asdfBinary), headers, Optional.empty()), new ConsumerRecord<>("changelog-topic", 0, 2, 99, TimestampType.CREATE_TIME, -1, -1, "zxcv".getBytes(UTF_8), hexStringToByteArray(zxcvBinary1), headers, Optional.empty()), new ConsumerRecord<>("changelog-topic", 0, 2, 100, TimestampType.CREATE_TIME, -1, -1, "zxcv".getBytes(UTF_8), hexStringToByteArray(zxcvBinary2), headers, Optional.empty())));
-
-        assertThat(buffer.numRecords(), is(3));
-        assertThat(buffer.minTimestamp(), is(0L));
-        assertThat(buffer.bufferSize(), is(142L));
-
-        stateRestoreCallback.restoreBatch(singletonList(new ConsumerRecord<>("changelog-topic", 0, 3, 3, TimestampType.CREATE_TIME, -1, -1, "todelete".getBytes(UTF_8), null, new RecordHeaders(), Optional.empty())));
-
-        assertThat(buffer.numRecords(), is(2));
-        assertThat(buffer.minTimestamp(), is(1L));
-        assertThat(buffer.bufferSize(), is(95L));
-
-        assertThat(buffer.priorValueForBuffered("todelete"), is(Maybe.undefined()));
-        assertThat(buffer.priorValueForBuffered("asdf"), is(Maybe.defined(null)));
-        assertThat(buffer.priorValueForBuffered("zxcv"), is(Maybe.defined(ValueAndTimestamp.make("previous", -1))));
-
-        // flush the buffer into a list in buffer order so we can make assertions about the contents.
-
-        final List<Eviction<String, Change<String>>> evicted = new LinkedList<>();
-        buffer.evictWhile(() -> true, evicted::add);
-
-        // Several things to note:
-        // * The buffered records are ordered according to their buffer time (serialized in the value of the changelog)
-        // * The record timestamps are properly restored, and not conflated with the record's buffer time.
-        // * The keys and values are properly restored
-        // * The record topic is set to the original input topic, *not* the changelog topic
-        // * The record offset preserves the original input record's offset, *not* the offset of the changelog record
-
-
-        assertThat(evicted, is(asList(new Eviction<>("zxcv", new Change<>("next", "3o4im"), getContext(3L)), new Eviction<>("asdf", new Change<>("qwer", null), getContext(1L)))));
-
-        cleanup(context, buffer);
-    }
-
-    @Test
-    public void shouldRestoreV3Format() {
-        final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
-
-        final RecordBatchingStateRestoreCallback stateRestoreCallback = (RecordBatchingStateRestoreCallback) context.stateRestoreCallback(testName);
-
-        context.setRecordContext(new ProcessorRecordContext(0, 0, 0, "", new RecordHeaders()));
-
-        final RecordHeaders headers = new RecordHeaders(new Header[]{new RecordHeader("v", new byte[]{(byte) 3})});
-
-        // These serialized formats were captured by running version 2.4 code.
-        // They verify that an upgrade from 2.4 will work.
-        // Do not change them.
-        final String toDeleteBinary = "0000000000000000000000000000000000000005746F70696300000000FFFFFFFFFFFFFFFFFFFFFFFF00000006646F6F6D65640000000000000000";
-        final String asdfBinary = "0000000000000001000000000000000000000005746F70696300000000FFFFFFFFFFFFFFFFFFFFFFFF00000004717765720000000000000002";
-        final String zxcvBinary1 = "0000000000000002000000000000000000000005746F70696300000000FFFFFFFF0000000870726576696F75730000000749474E4F52454400000005336F34696D0000000000000001";
-        final String zxcvBinary2 = "0000000000000003000000000000000000000005746F70696300000000FFFFFFFF0000000870726576696F757300000005336F34696D000000046E6578740000000000000001";
-
-        stateRestoreCallback.restoreBatch(asList(new ConsumerRecord<>("changelog-topic", 0, 0, 999, TimestampType.CREATE_TIME, -1, -1, "todelete".getBytes(UTF_8), hexStringToByteArray(toDeleteBinary), headers, Optional.empty()), new ConsumerRecord<>("changelog-topic", 0, 1, 9999, TimestampType.CREATE_TIME, -1, -1, "asdf".getBytes(UTF_8), hexStringToByteArray(asdfBinary), headers, Optional.empty()), new ConsumerRecord<>("changelog-topic", 0, 2, 99, TimestampType.CREATE_TIME, -1, -1, "zxcv".getBytes(UTF_8), hexStringToByteArray(zxcvBinary1), headers, Optional.empty()), new ConsumerRecord<>("changelog-topic", 0, 2, 100, TimestampType.CREATE_TIME, -1, -1, "zxcv".getBytes(UTF_8), hexStringToByteArray(zxcvBinary2), headers, Optional.empty())));
-
-        assertThat(buffer.numRecords(), is(3));
-        assertThat(buffer.minTimestamp(), is(0L));
-        assertThat(buffer.bufferSize(), is(142L));
-
-        stateRestoreCallback.restoreBatch(singletonList(new ConsumerRecord<>("changelog-topic", 0, 3, 3, TimestampType.CREATE_TIME, -1, -1, "todelete".getBytes(UTF_8), null, new RecordHeaders(), Optional.empty())));
+        stateRestoreCallback.restoreBatch(singletonList(
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 3,
+                                 3,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "todelete".getBytes(UTF_8),
+                                 null,
+                                 new RecordHeaders(),
+                                 Optional.empty())
+        ));
 
         assertThat(buffer.numRecords(), is(2));
         assertThat(buffer.minTimestamp(), is(1L));
@@ -638,11 +750,262 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
         cleanup(context, buffer);
     }
 
-    @Test
-    public void shouldNotRestoreUnrecognizedVersionRecord() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldRestoreV3FormatWithV2Header(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
+        // versions 2.4.0, 2.4.1, and 2.5.0 would have erroneously encoded a V3 record with the
+        // V2 header, so we need to be sure to handle this case as well.
+        // Note the data is the same as the V3 test.
         final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
-        final MockInternalProcessorContext context = makeContext();
-        buffer.init((StateStoreContext) context, buffer);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
+
+        final RecordBatchingStateRestoreCallback stateRestoreCallback =
+            (RecordBatchingStateRestoreCallback) context.stateRestoreCallback(testName);
+
+        context.setRecordContext(new ProcessorRecordContext(0, 0, 0, "", new RecordHeaders()));
+
+        final RecordHeaders headers = new RecordHeaders(new Header[] {new RecordHeader("v", new byte[] {(byte) 2})});
+
+        // These serialized formats were captured by running version 2.4 code.
+        // They verify that an upgrade from 2.4 will work.
+        // Do not change them.
+        final String toDeleteBinary = "0000000000000000000000000000000000000005746F70696300000000FFFFFFFFFFFFFFFFFFFFFFFF00000006646F6F6D65640000000000000000";
+        final String asdfBinary = "0000000000000001000000000000000000000005746F70696300000000FFFFFFFFFFFFFFFFFFFFFFFF00000004717765720000000000000002";
+        final String zxcvBinary1 = "0000000000000002000000000000000000000005746F70696300000000FFFFFFFF0000000870726576696F75730000000749474E4F52454400000005336F34696D0000000000000001";
+        final String zxcvBinary2 = "0000000000000003000000000000000000000005746F70696300000000FFFFFFFF0000000870726576696F757300000005336F34696D000000046E6578740000000000000001";
+
+        stateRestoreCallback.restoreBatch(asList(
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 0,
+                                 999,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "todelete".getBytes(UTF_8),
+                                 hexStringToByteArray(toDeleteBinary),
+                                 headers,
+                                 Optional.empty()),
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 1,
+                                 9999,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "asdf".getBytes(UTF_8),
+                                 hexStringToByteArray(asdfBinary),
+                                 headers,
+                                 Optional.empty()),
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 2,
+                                 99,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "zxcv".getBytes(UTF_8),
+                                 hexStringToByteArray(zxcvBinary1),
+                                 headers,
+                                 Optional.empty()),
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 2,
+                                 100,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "zxcv".getBytes(UTF_8),
+                                 hexStringToByteArray(zxcvBinary2),
+                                 headers,
+                                 Optional.empty())
+        ));
+
+        assertThat(buffer.numRecords(), is(3));
+        assertThat(buffer.minTimestamp(), is(0L));
+        assertThat(buffer.bufferSize(), is(142L));
+
+        stateRestoreCallback.restoreBatch(singletonList(
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 3,
+                                 3,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "todelete".getBytes(UTF_8),
+                                 null,
+                                 new RecordHeaders(),
+                                 Optional.empty())
+        ));
+
+        assertThat(buffer.numRecords(), is(2));
+        assertThat(buffer.minTimestamp(), is(1L));
+        assertThat(buffer.bufferSize(), is(95L));
+
+        assertThat(buffer.priorValueForBuffered("todelete"), is(Maybe.undefined()));
+        assertThat(buffer.priorValueForBuffered("asdf"), is(Maybe.defined(null)));
+        assertThat(buffer.priorValueForBuffered("zxcv"), is(Maybe.defined(ValueAndTimestamp.make("previous", -1))));
+
+        // flush the buffer into a list in buffer order so we can make assertions about the contents.
+
+        final List<Eviction<String, Change<String>>> evicted = new LinkedList<>();
+        buffer.evictWhile(() -> true, evicted::add);
+
+        // Several things to note:
+        // * The buffered records are ordered according to their buffer time (serialized in the value of the changelog)
+        // * The record timestamps are properly restored, and not conflated with the record's buffer time.
+        // * The keys and values are properly restored
+        // * The record topic is set to the original input topic, *not* the changelog topic
+        // * The record offset preserves the original input record's offset, *not* the offset of the changelog record
+
+
+        assertThat(evicted, is(asList(
+            new Eviction<>(
+                "zxcv",
+                new Change<>("next", "3o4im"),
+                getContext(3L)),
+            new Eviction<>(
+                "asdf",
+                new Change<>("qwer", null),
+                getContext(1L)
+            ))));
+
+        cleanup(context, buffer);
+    }
+
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldRestoreV3Format(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
+        final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
+
+        final RecordBatchingStateRestoreCallback stateRestoreCallback =
+            (RecordBatchingStateRestoreCallback) context.stateRestoreCallback(testName);
+
+        context.setRecordContext(new ProcessorRecordContext(0, 0, 0, "", new RecordHeaders()));
+
+        final RecordHeaders headers = new RecordHeaders(new Header[] {new RecordHeader("v", new byte[] {(byte) 3})});
+
+        // These serialized formats were captured by running version 2.4 code.
+        // They verify that an upgrade from 2.4 will work.
+        // Do not change them.
+        final String toDeleteBinary = "0000000000000000000000000000000000000005746F70696300000000FFFFFFFFFFFFFFFFFFFFFFFF00000006646F6F6D65640000000000000000";
+        final String asdfBinary = "0000000000000001000000000000000000000005746F70696300000000FFFFFFFFFFFFFFFFFFFFFFFF00000004717765720000000000000002";
+        final String zxcvBinary1 = "0000000000000002000000000000000000000005746F70696300000000FFFFFFFF0000000870726576696F75730000000749474E4F52454400000005336F34696D0000000000000001";
+        final String zxcvBinary2 = "0000000000000003000000000000000000000005746F70696300000000FFFFFFFF0000000870726576696F757300000005336F34696D000000046E6578740000000000000001";
+
+        stateRestoreCallback.restoreBatch(asList(
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 0,
+                                 999,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "todelete".getBytes(UTF_8),
+                                 hexStringToByteArray(toDeleteBinary),
+                                 headers,
+                                 Optional.empty()),
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 1,
+                                 9999,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "asdf".getBytes(UTF_8),
+                                 hexStringToByteArray(asdfBinary),
+                                 headers,
+                                 Optional.empty()),
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 2,
+                                 99,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "zxcv".getBytes(UTF_8),
+                                 hexStringToByteArray(zxcvBinary1),
+                                 headers,
+                                 Optional.empty()),
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 2,
+                                 100,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "zxcv".getBytes(UTF_8),
+                                 hexStringToByteArray(zxcvBinary2),
+                                 headers,
+                                 Optional.empty())
+        ));
+
+        assertThat(buffer.numRecords(), is(3));
+        assertThat(buffer.minTimestamp(), is(0L));
+        assertThat(buffer.bufferSize(), is(142L));
+
+        stateRestoreCallback.restoreBatch(singletonList(
+            new ConsumerRecord<>("changelog-topic",
+                                 0,
+                                 3,
+                                 3,
+                                 TimestampType.CREATE_TIME,
+                                 -1,
+                                 -1,
+                                 "todelete".getBytes(UTF_8),
+                                 null,
+                                 new RecordHeaders(),
+                                 Optional.empty())
+        ));
+
+        assertThat(buffer.numRecords(), is(2));
+        assertThat(buffer.minTimestamp(), is(1L));
+        assertThat(buffer.bufferSize(), is(95L));
+
+        assertThat(buffer.priorValueForBuffered("todelete"), is(Maybe.undefined()));
+        assertThat(buffer.priorValueForBuffered("asdf"), is(Maybe.defined(null)));
+        assertThat(buffer.priorValueForBuffered("zxcv"), is(Maybe.defined(ValueAndTimestamp.make("previous", -1))));
+
+        // flush the buffer into a list in buffer order so we can make assertions about the contents.
+
+        final List<Eviction<String, Change<String>>> evicted = new LinkedList<>();
+        buffer.evictWhile(() -> true, evicted::add);
+
+        // Several things to note:
+        // * The buffered records are ordered according to their buffer time (serialized in the value of the changelog)
+        // * The record timestamps are properly restored, and not conflated with the record's buffer time.
+        // * The keys and values are properly restored
+        // * The record topic is set to the original input topic, *not* the changelog topic
+        // * The record offset preserves the original input record's offset, *not* the offset of the changelog record
+
+
+        assertThat(evicted, is(asList(
+            new Eviction<>(
+                "zxcv",
+                new Change<>("next", "3o4im"),
+                getContext(3L)),
+            new Eviction<>(
+                "asdf",
+                new Change<>("qwer", null),
+                getContext(1L)
+            ))));
+
+        cleanup(context, buffer);
+    }
+
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void shouldNotRestoreUnrecognizedVersionRecord(final String testName, final Function<String, B> bufferSupplier) {
+        setup(testName, bufferSupplier);
+        final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer = bufferSupplier.apply(testName);
+        final MockInternalProcessorContext<?, ?> context = makeContext();
+        buffer.init(context, buffer);
 
         final RecordBatchingStateRestoreCallback stateRestoreCallback =
             (RecordBatchingStateRestoreCallback) context.stateRestoreCallback(testName);
@@ -654,7 +1017,17 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
         final byte[] todeleteValue = getBufferValue("doomed", 0).serialize(0).array();
         try {
             stateRestoreCallback.restoreBatch(singletonList(
-                new ConsumerRecord<>("changelog-topic", 0, 0, 999, TimestampType.CREATE_TIME, -1, -1, "todelete".getBytes(UTF_8), ByteBuffer.allocate(Long.BYTES + todeleteValue.length).putLong(0L).put(todeleteValue).array(), unknownFlagHeaders, Optional.empty())
+                new ConsumerRecord<>("changelog-topic",
+                                     0,
+                                     0,
+                                     999,
+                                     TimestampType.CREATE_TIME,
+                                     -1,
+                                     -1,
+                                     "todelete".getBytes(UTF_8),
+                                     ByteBuffer.allocate(Long.BYTES + todeleteValue.length).putLong(0L).put(todeleteValue).array(),
+                                     unknownFlagHeaders,
+                                     Optional.empty())
             ));
             fail("expected an exception");
         } catch (final IllegalArgumentException expected) {
@@ -664,14 +1037,25 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
         }
     }
 
-    private static void putRecord(final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer, final MockInternalProcessorContext context, final long streamTime, final long recordTimestamp, final String key, final String value) {
+    private static void putRecord(final TimeOrderedKeyValueBuffer<String, String, Change<String>> buffer,
+                                  final MockInternalProcessorContext<?, ?> context,
+                                  final long streamTime,
+                                  final long recordTimestamp,
+                                  final String key,
+                                  final String value) {
         final ProcessorRecordContext recordContext = getContext(recordTimestamp);
         context.setRecordContext(recordContext);
         buffer.put(streamTime, new Record<>(key, new Change<>(value, null), 0L), recordContext);
     }
 
+    @SuppressWarnings("resource")
     private static BufferValue getBufferValue(final String value, final long timestamp) {
-        return new BufferValue(null, null, Serdes.String().serializer().serialize(null, value), getContext(timestamp));
+        return new BufferValue(
+            null,
+            null,
+            new StringSerializer().serialize(null, value),
+            getContext(timestamp)
+        );
     }
 
     private static ProcessorRecordContext getContext(final long recordTimestamp) {
@@ -680,22 +1064,23 @@ public class TimeOrderedKeyValueBufferTest<B extends TimeOrderedKeyValueBuffer<S
 
 
     // to be used to generate future hex-encoded values
-    //    private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();
-    //    private static String bytesToHex(final byte[] bytes) {
-    //        final char[] hexChars = new char[bytes.length * 2];
-    //        for (int j = 0; j < bytes.length; j++) {
-    //            final int v = bytes[j] & 0xFF;
-    //            hexChars[j * 2] = HEX_ARRAY[v >>> 4];
-    //            hexChars[j * 2 + 1] = HEX_ARRAY[v & 0x0F];
-    //        }
-    //        return new String(hexChars);
-    //    }
+//    private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();
+//    private static String bytesToHex(final byte[] bytes) {
+//        final char[] hexChars = new char[bytes.length * 2];
+//        for (int j = 0; j < bytes.length; j++) {
+//            final int v = bytes[j] & 0xFF;
+//            hexChars[j * 2] = HEX_ARRAY[v >>> 4];
+//            hexChars[j * 2 + 1] = HEX_ARRAY[v & 0x0F];
+//        }
+//        return new String(hexChars);
+//    }
 
     private static byte[] hexStringToByteArray(final String hexString) {
         final int len = hexString.length();
         final byte[] data = new byte[len / 2];
         for (int i = 0; i < len; i += 2) {
-            data[i / 2] = (byte) ((Character.digit(hexString.charAt(i), 16) << 4) + Character.digit(hexString.charAt(i + 1), 16));
+            data[i / 2] = (byte) ((Character.digit(hexString.charAt(i), 16) << 4)
+                + Character.digit(hexString.charAt(i + 1), 16));
         }
         return data;
     }

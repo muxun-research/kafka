@@ -19,6 +19,7 @@ package org.apache.kafka.common.config.provider;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.StringReader;
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -28,37 +29,39 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class MockFileConfigProvider extends FileConfigProvider {
 
-	private static final Map<String, MockFileConfigProvider> INSTANCES = Collections.synchronizedMap(new HashMap<>());
-	private String id;
-	private boolean closed = false;
+    private static final Map<String, MockFileConfigProvider> INSTANCES = Collections.synchronizedMap(new HashMap<>());
+    private String id;
+    private boolean closed = false;
 
-	public void configure(Map<String, ?> configs) {
-		Object id = configs.get("testId");
-		if (id == null) {
-			throw new RuntimeException(getClass().getName() + " missing 'testId' config");
-		}
-		if (this.id != null) {
-			throw new RuntimeException(getClass().getName() + " instance was configured twice");
-		}
-		this.id = id.toString();
-		INSTANCES.put(id.toString(), this);
-	}
+    public void configure(Map<String, ?> configs) {
+        super.configure(configs);
 
-	@Override
-	protected Reader reader(String path) throws IOException {
-		return new StringReader("key=testKey\npassword=randomPassword");
-	}
+        Object id = configs.get("testId");
+        if (id == null) {
+            throw new RuntimeException(getClass().getName() + " missing 'testId' config");
+        }
+        if (this.id != null) {
+            throw new RuntimeException(getClass().getName() + " instance was configured twice");
+        }
+        this.id = id.toString();
+        INSTANCES.put(id.toString(), this);
+    }
 
-	@Override
-	public synchronized void close() {
-		closed = true;
-	}
+    @Override
+    protected Reader reader(Path path) throws IOException {
+        return new StringReader("key=testKey\npassword=randomPassword");
+    }
 
-	public static void assertClosed(String id) {
-		MockFileConfigProvider instance = INSTANCES.remove(id);
-		assertNotNull(instance);
-		synchronized (instance) {
-			assertTrue(instance.closed);
-		}
-	}
+    @Override
+    public synchronized void close() {
+        closed = true;
+    }
+
+    public static void assertClosed(String id) {
+        MockFileConfigProvider instance = INSTANCES.remove(id);
+        assertNotNull(instance);
+        synchronized (instance) {
+            assertTrue(instance.closed);
+        }
+    }
 }

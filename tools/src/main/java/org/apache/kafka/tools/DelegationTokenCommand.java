@@ -16,8 +16,15 @@
  */
 package org.apache.kafka.tools;
 
-import joptsimple.OptionSpec;
-import org.apache.kafka.clients.admin.*;
+import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.CreateDelegationTokenOptions;
+import org.apache.kafka.clients.admin.CreateDelegationTokenResult;
+import org.apache.kafka.clients.admin.DescribeDelegationTokenOptions;
+import org.apache.kafka.clients.admin.DescribeDelegationTokenResult;
+import org.apache.kafka.clients.admin.ExpireDelegationTokenOptions;
+import org.apache.kafka.clients.admin.ExpireDelegationTokenResult;
+import org.apache.kafka.clients.admin.RenewDelegationTokenOptions;
+import org.apache.kafka.clients.admin.RenewDelegationTokenResult;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
 import org.apache.kafka.common.security.token.delegation.DelegationToken;
 import org.apache.kafka.common.security.token.delegation.TokenInformation;
@@ -29,9 +36,17 @@ import org.apache.kafka.server.util.CommandLineUtils;
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Stream;
+
+import joptsimple.OptionSpec;
 
 public class DelegationTokenCommand {
     public static void main(String... args) {
@@ -82,7 +97,7 @@ public class DelegationTokenCommand {
         Long maxLifeTimeMs = opts.maxLifeTime();
 
         System.out.println("Calling create token operation with renewers :" + renewerPrincipals + " , max-life-time-period :" + maxLifeTimeMs);
-        CreateDelegationTokenOptions createDelegationTokenOptions = new CreateDelegationTokenOptions().maxlifeTimeMs(maxLifeTimeMs).renewers(renewerPrincipals);
+        CreateDelegationTokenOptions createDelegationTokenOptions = new CreateDelegationTokenOptions().maxLifetimeMs(maxLifeTimeMs).renewers(renewerPrincipals);
 
         List<KafkaPrincipal> ownerPrincipals = getPrincipals(opts, opts.ownerPrincipalsOpt);
         if (!ownerPrincipals.isEmpty()) {
@@ -103,7 +118,15 @@ public class DelegationTokenCommand {
 
         for (DelegationToken token : tokens) {
             TokenInformation tokenInfo = token.tokenInfo();
-            System.out.printf("%n%-15s %-30s %-15s %-15s %-25s %-15s %-15s %-15s%n", tokenInfo.tokenId(), token.hmacAsBase64String(), tokenInfo.owner(), tokenInfo.tokenRequester(), tokenInfo.renewersAsString(), dateFormat.format(tokenInfo.issueTimestamp()), dateFormat.format(tokenInfo.expiryTimestamp()), dateFormat.format(tokenInfo.maxTimestamp()));
+            System.out.printf("%n%-15s %-30s %-15s %-15s %-25s %-15s %-15s %-15s%n",
+                    tokenInfo.tokenId(),
+                    token.hmacAsBase64String(),
+                    tokenInfo.owner(),
+                    tokenInfo.tokenRequester(),
+                    tokenInfo.renewersAsString(),
+                    dateFormat.format(tokenInfo.issueTimestamp()),
+                    dateFormat.format(tokenInfo.expiryTimestamp()),
+                    dateFormat.format(tokenInfo.maxTimestamp()));
         }
     }
 
@@ -180,28 +203,49 @@ public class DelegationTokenCommand {
             super(args);
 
             String bootstrapServerDoc = "REQUIRED: server(s) to use for bootstrapping.";
-            String commandConfigDoc = "REQUIRED: A property file containing configs to be passed to Admin Client. Token management" + " operations are allowed in secure mode only. This config file is used to pass security related configs.";
+            String commandConfigDoc = "REQUIRED: A property file containing configs to be passed to Admin Client. Token management" +
+                    " operations are allowed in secure mode only. This config file is used to pass security related configs.";
 
-            this.bootstrapServerOpt = parser.accepts("bootstrap-server", bootstrapServerDoc).withRequiredArg().ofType(String.class);
+            this.bootstrapServerOpt = parser.accepts("bootstrap-server", bootstrapServerDoc)
+                    .withRequiredArg()
+                    .ofType(String.class);
 
-            this.commandConfigOpt = parser.accepts("command-config", commandConfigDoc).withRequiredArg().ofType(String.class);
+            this.commandConfigOpt = parser.accepts("command-config", commandConfigDoc)
+                    .withRequiredArg()
+                    .ofType(String.class);
 
             this.createOpt = parser.accepts("create", "Create a new delegation token. Use --renewer-principal option to pass renewer principals.");
             this.renewOpt = parser.accepts("renew", "Renew delegation token. Use --renew-time-period option to set renew time period.");
             this.expiryOpt = parser.accepts("expire", "Expire delegation token. Use --expiry-time-period option to expire the token.");
-            this.describeOpt = parser.accepts("describe", "Describe delegation tokens for the given principals. Use --owner-principal to pass owner/renewer principals." + " If --owner-principal option is not supplied, all the user-owned tokens and tokens where the user has Describe permissions will be returned.");
+            this.describeOpt = parser.accepts("describe", "Describe delegation tokens for the given principals. Use --owner-principal to pass owner/renewer principals." +
+                    " If --owner-principal option is not supplied, all the user-owned tokens and tokens where the user has Describe permissions will be returned.");
 
-            this.ownerPrincipalsOpt = parser.accepts("owner-principal", "owner is a Kafka principal. They should be in principalType:name format.").withOptionalArg().ofType(String.class);
+            this.ownerPrincipalsOpt = parser.accepts("owner-principal", "owner is a Kafka principal. They should be in principalType:name format.")
+                    .withOptionalArg()
+                    .ofType(String.class);
 
-            this.renewPrincipalsOpt = parser.accepts("renewer-principal", "renewer is a Kafka principal. They should be in principalType:name format.").withOptionalArg().ofType(String.class);
+            this.renewPrincipalsOpt = parser.accepts("renewer-principal", "renewer is a Kafka principal. They should be in principalType:name format.")
+                    .withOptionalArg()
+                    .ofType(String.class);
 
-            this.maxLifeTimeOpt = parser.accepts("max-life-time-period", "Max life period for the token in milliseconds. If the value is -1," + " then token max life time will default to the server side config value of (delegation.token.max.lifetime.ms).").withOptionalArg().ofType(Long.class);
+            this.maxLifeTimeOpt = parser.accepts("max-life-time-period", "Max life period for the token in milliseconds. If the value is -1," +
+                            " then token max life time will default to the server side config value of (delegation.token.max.lifetime.ms).")
+                    .withOptionalArg()
+                    .ofType(Long.class);
 
-            this.renewTimePeriodOpt = parser.accepts("renew-time-period", "Renew time period in milliseconds. If the value is -1, then the" + " renew time period will default to the server side config value of (delegation.token.expiry.time.ms).").withOptionalArg().ofType(Long.class);
+            this.renewTimePeriodOpt = parser.accepts("renew-time-period", "Renew time period in milliseconds. If the value is -1, then the" +
+                            " renew time period will default to the server side config value of (delegation.token.expiry.time.ms).")
+                    .withOptionalArg()
+                    .ofType(Long.class);
 
-            this.expiryTimePeriodOpt = parser.accepts("expiry-time-period", "Expiry time period in milliseconds. If the value is -1, then the" + " token will get invalidated immediately.").withOptionalArg().ofType(Long.class);
+            this.expiryTimePeriodOpt = parser.accepts("expiry-time-period", "Expiry time period in milliseconds. If the value is -1, then the" +
+                            " token will get invalidated immediately.")
+                    .withOptionalArg()
+                    .ofType(Long.class);
 
-            this.hmacOpt = parser.accepts("hmac", "HMAC of the delegation token").withOptionalArg().ofType(String.class);
+            this.hmacOpt = parser.accepts("hmac", "HMAC of the delegation token")
+                    .withOptionalArg()
+                    .ofType(String.class);
 
             options = parser.parse(args);
         }
@@ -223,11 +267,11 @@ public class DelegationTokenCommand {
         }
 
         public long maxLifeTime() {
-            return options.valueOf(maxLifeTimeOpt);
+            return  options.valueOf(maxLifeTimeOpt);
         }
 
         public long renewTimePeriod() {
-            return options.valueOf(renewTimePeriodOpt);
+            return  options.valueOf(renewTimePeriodOpt);
         }
 
         public long expiryTimePeriod() {
@@ -237,7 +281,7 @@ public class DelegationTokenCommand {
         public String hmac() {
             return options.valueOf(hmacOpt);
         }
-
+        
         public void checkArgs() {
             // check required args
             CommandLineUtils.checkRequiredArgs(parser, options, bootstrapServerOpt, commandConfigOpt);
@@ -262,5 +306,3 @@ public class DelegationTokenCommand {
         }
     }
 }
-
-

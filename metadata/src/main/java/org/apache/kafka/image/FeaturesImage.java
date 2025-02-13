@@ -21,36 +21,42 @@ import org.apache.kafka.common.metadata.FeatureLevelRecord;
 import org.apache.kafka.image.node.FeaturesImageNode;
 import org.apache.kafka.image.writer.ImageWriter;
 import org.apache.kafka.image.writer.ImageWriterOptions;
-import org.apache.kafka.metadata.migration.ZkMigrationState;
 import org.apache.kafka.server.common.MetadataVersion;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
-import java.util.stream.Collectors;
+import java.util.Objects;
+import java.util.Optional;
 
 
 /**
  * Represents the feature levels in the metadata image.
- * <p>
+ *
  * This class is thread-safe.
  */
 public final class FeaturesImage {
-    public static final FeaturesImage EMPTY = new FeaturesImage(Collections.emptyMap(), MetadataVersion.MINIMUM_KRAFT_VERSION, ZkMigrationState.NONE);
+    public static final FeaturesImage EMPTY = new FeaturesImage(
+        Collections.emptyMap(),
+        MetadataVersion.MINIMUM_KRAFT_VERSION
+    );
 
     private final Map<String, Short> finalizedVersions;
 
     private final MetadataVersion metadataVersion;
 
-    private final ZkMigrationState zkMigrationState;
-
-    public FeaturesImage(Map<String, Short> finalizedVersions, MetadataVersion metadataVersion, ZkMigrationState zkMigrationState) {
+    public FeaturesImage(
+        Map<String, Short> finalizedVersions,
+        MetadataVersion metadataVersion) {
         this.finalizedVersions = Collections.unmodifiableMap(finalizedVersions);
         this.metadataVersion = metadataVersion;
-        this.zkMigrationState = zkMigrationState;
     }
 
     public boolean isEmpty() {
-        return finalizedVersions.isEmpty() && metadataVersion.equals(MetadataVersion.MINIMUM_KRAFT_VERSION) && zkMigrationState.equals(ZkMigrationState.NONE);
+        return finalizedVersions.isEmpty() &&
+            metadataVersion.equals(MetadataVersion.MINIMUM_KRAFT_VERSION);
     }
 
     public MetadataVersion metadataVersion() {
@@ -59,10 +65,6 @@ public final class FeaturesImage {
 
     public Map<String, Short> finalizedVersions() {
         return finalizedVersions;
-    }
-
-    public ZkMigrationState zkMigrationState() {
-        return zkMigrationState;
     }
 
     private Optional<Short> finalizedVersion(String feature) {
@@ -75,14 +77,6 @@ public final class FeaturesImage {
         } else {
             writeFeatureLevels(writer, options);
         }
-
-        if (options.metadataVersion().isMigrationSupported()) {
-            writer.write(0, zkMigrationState.toRecord().message());
-        } else {
-            if (!zkMigrationState.equals(ZkMigrationState.NONE)) {
-                options.handleLoss("the ZK Migration state which was " + zkMigrationState);
-            }
-        }
     }
 
     private void handleFeatureLevelNotSupported(ImageWriterOptions options) {
@@ -91,7 +85,7 @@ public final class FeaturesImage {
         if (!finalizedVersions.isEmpty()) {
             List<String> features = new ArrayList<>(finalizedVersions.keySet());
             features.sort(String::compareTo);
-            options.handleLoss("feature flag(s): " + features.stream().collect(Collectors.joining(", ")));
+            options.handleLoss("feature flag(s): " + String.join(", ", features));
         }
     }
 
@@ -101,27 +95,30 @@ public final class FeaturesImage {
         //
         // Note: it's important that this initial FeatureLevelRecord be written with version 0 and
         // not any later version, so that any modern reader can process it.
-        writer.write(0, new FeatureLevelRecord().setName(MetadataVersion.FEATURE_NAME).setFeatureLevel(options.metadataVersion().featureLevel()));
+        writer.write(0, new FeatureLevelRecord().
+                setName(MetadataVersion.FEATURE_NAME).
+                setFeatureLevel(options.metadataVersion().featureLevel()));
 
         // Write out the metadata versions for other features.
         for (Entry<String, Short> entry : finalizedVersions.entrySet()) {
             if (!entry.getKey().equals(MetadataVersion.FEATURE_NAME)) {
-                writer.write(0, new FeatureLevelRecord().setName(entry.getKey()).setFeatureLevel(entry.getValue()));
+                writer.write(0, new FeatureLevelRecord().
+                        setName(entry.getKey()).
+                        setFeatureLevel(entry.getValue()));
             }
         }
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(finalizedVersions, metadataVersion, zkMigrationState);
+        return Objects.hash(finalizedVersions, metadataVersion);
     }
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof FeaturesImage))
-            return false;
-        FeaturesImage other = (FeaturesImage) o;
-        return finalizedVersions.equals(other.finalizedVersions) && metadataVersion.equals(other.metadataVersion) && zkMigrationState.equals(other.zkMigrationState);
+        if (!(o instanceof FeaturesImage other)) return false;
+        return finalizedVersions.equals(other.finalizedVersions) &&
+            metadataVersion.equals(other.metadataVersion);
     }
 
     @Override

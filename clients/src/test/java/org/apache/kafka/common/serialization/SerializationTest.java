@@ -18,22 +18,34 @@ package org.apache.kafka.common.serialization;
 
 import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.utils.Bytes;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Stack;
+import java.util.UUID;
 
-import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.apache.kafka.common.utils.Utils.wrapNullable;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class SerializationTest {
 
-    final private String topic = "testTopic";
-    final private Map<Class<?>, List<Object>> testData = new HashMap<Class<?>, List<Object>>() {
+    private final String topic = "testTopic";
+    private final Map<Class<?>, List<Object>> testData = new HashMap<>() {
         {
             put(String.class, Arrays.asList(null, "my string"));
             put(Short.class, Arrays.asList(null, (short) 32767, (short) -32768));
@@ -42,13 +54,17 @@ public class SerializationTest {
             put(Float.class, Arrays.asList(null, 5678567.12312f, -5678567.12341f));
             put(Double.class, Arrays.asList(null, 5678567.12312d, -5678567.12341d));
             put(byte[].class, Arrays.asList(null, "my string".getBytes()));
-            put(ByteBuffer.class, Arrays.asList(null, ByteBuffer.wrap("my string".getBytes()), ByteBuffer.allocate(10).put("my string".getBytes()), ByteBuffer.allocateDirect(10).put("my string".getBytes())));
+            put(ByteBuffer.class, Arrays.asList(
+                    null,
+                    ByteBuffer.wrap("my string".getBytes()),
+                    ByteBuffer.allocate(10).put("my string".getBytes()),
+                    ByteBuffer.allocateDirect(10).put("my string".getBytes())));
             put(Bytes.class, Arrays.asList(null, new Bytes("my string".getBytes())));
             put(UUID.class, Arrays.asList(null, UUID.randomUUID()));
         }
     };
 
-    private class DummyClass {
+    private static class DummyClass {
     }
 
     @SuppressWarnings("unchecked")
@@ -58,12 +74,15 @@ public class SerializationTest {
             try (Serde<Object> serde = Serdes.serdeFrom((Class<Object>) test.getKey())) {
                 for (Object value : test.getValue()) {
                     final byte[] serialized = serde.serializer().serialize(topic, value);
-                    assertEquals(value, serde.deserializer().deserialize(topic, serialized), "Should get the original " + test.getKey().getSimpleName() + " after serialization and deserialization");
+                    assertEquals(value, serde.deserializer().deserialize(topic, serialized),
+                        "Should get the original " + test.getKey().getSimpleName() + " after serialization and deserialization");
 
                     if (value instanceof byte[]) {
-                        assertArrayEquals((byte[]) value, (byte[]) serde.deserializer().deserialize(topic, null, (byte[]) value), "Should get the original " + test.getKey().getSimpleName() + " after serialization and deserialization");
+                        assertArrayEquals((byte[]) value, (byte[]) serde.deserializer().deserialize(topic, null, (byte[]) value),
+                                "Should get the original " + test.getKey().getSimpleName() + " after serialization and deserialization");
                     } else {
-                        assertEquals(value, serde.deserializer().deserialize(topic, null, wrapNullable(serialized)), "Should get the original " + test.getKey().getSimpleName() + " after serialization and deserialization");
+                        assertEquals(value, serde.deserializer().deserialize(topic, null, wrapNullable(serialized)),
+                                "Should get the original " + test.getKey().getSimpleName() + " after serialization and deserialization");
                     }
                 }
             }
@@ -74,9 +93,12 @@ public class SerializationTest {
     public void allSerdesShouldSupportNull() {
         for (Class<?> cls : testData.keySet()) {
             try (Serde<?> serde = Serdes.serdeFrom(cls)) {
-                assertNull(serde.serializer().serialize(topic, null), "Should support null in " + cls.getSimpleName() + " serialization");
-                assertNull(serde.deserializer().deserialize(topic, null), "Should support null in " + cls.getSimpleName() + " deserialization");
-                assertNull(serde.deserializer().deserialize(topic, null, (ByteBuffer) null), "Should support null in " + cls.getSimpleName() + " deserialization");
+                assertNull(serde.serializer().serialize(topic, null),
+                    "Should support null in " + cls.getSimpleName() + " serialization");
+                assertNull(serde.deserializer().deserialize(topic, null),
+                    "Should support null in " + cls.getSimpleName() + " deserialization");
+                assertNull(serde.deserializer().deserialize(topic, null, (ByteBuffer) null),
+                        "Should support null in " + cls.getSimpleName() + " deserialization");
             }
         }
     }
@@ -103,17 +125,35 @@ public class SerializationTest {
 
                 Serializer<String> serializer = serDeser.serializer();
                 Deserializer<String> deserializer = serDeser.deserializer();
-                assertEquals(str, deserializer.deserialize(topic, serializer.serialize(topic, str)), "Should get the original string after serialization and deserialization with encoding " + encoding);
+                assertEquals(str, deserializer.deserialize(topic, serializer.serialize(topic, str)),
+                    "Should get the original string after serialization and deserialization with encoding " + encoding);
             }
+        }
+    }
+
+
+    @Test
+    public void stringSerdeConfigureThrowsOnUnknownEncoding() {
+        String encoding = "encoding-does-not-exist";
+        try (Serde<String> serDeser = Serdes.String()) {
+            Map<String, Object> serializerConfigs = new HashMap<>();
+            serializerConfigs.put("key.serializer.encoding", encoding);
+            assertThrows(SerializationException.class, () -> serDeser.serializer().configure(serializerConfigs, true));
+
+            Map<String, Object> deserializerConfigs = new HashMap<>();
+            deserializerConfigs.put("key.deserializer.encoding", encoding);
+            assertThrows(SerializationException.class, () -> serDeser.deserializer().configure(deserializerConfigs, true));
         }
     }
 
     @SuppressWarnings("unchecked")
     @Test
     public void listSerdeShouldReturnEmptyCollection() {
-        List<Integer> testData = Arrays.asList();
+        List<Integer> testData = Collections.emptyList();
         Serde<List<Integer>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.Integer());
-        assertEquals(testData, listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)), "Should get empty collection after serialization and deserialization on an empty list");
+        assertEquals(testData,
+            listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)),
+            "Should get empty collection after serialization and deserialization on an empty list");
     }
 
     @SuppressWarnings("unchecked")
@@ -121,7 +161,9 @@ public class SerializationTest {
     public void listSerdeShouldReturnNull() {
         List<Integer> testData = null;
         Serde<List<Integer>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.Integer());
-        assertEquals(testData, listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)), "Should get null after serialization and deserialization on an empty list");
+        assertEquals(testData,
+            listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)),
+            "Should get null after serialization and deserialization on an empty list");
     }
 
     @SuppressWarnings("unchecked")
@@ -129,7 +171,9 @@ public class SerializationTest {
     public void listSerdeShouldRoundtripIntPrimitiveInput() {
         List<Integer> testData = Arrays.asList(1, 2, 3);
         Serde<List<Integer>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.Integer());
-        assertEquals(testData, listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)), "Should get the original collection of integer primitives after serialization and deserialization");
+        assertEquals(testData,
+            listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)),
+            "Should get the original collection of integer primitives after serialization and deserialization");
     }
 
     @SuppressWarnings("unchecked")
@@ -137,7 +181,8 @@ public class SerializationTest {
     public void listSerdeSerializerShouldReturnByteArrayOfFixedSizeForIntPrimitiveInput() {
         List<Integer> testData = Arrays.asList(1, 2, 3);
         Serde<List<Integer>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.Integer());
-        assertEquals(21, listSerde.serializer().serialize(topic, testData).length, "Should get length of 21 bytes after serialization");
+        assertEquals(21, listSerde.serializer().serialize(topic, testData).length,
+            "Should get length of 21 bytes after serialization");
     }
 
     @SuppressWarnings("unchecked")
@@ -145,7 +190,9 @@ public class SerializationTest {
     public void listSerdeShouldRoundtripShortPrimitiveInput() {
         List<Short> testData = Arrays.asList((short) 1, (short) 2, (short) 3);
         Serde<List<Short>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.Short());
-        assertEquals(testData, listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)), "Should get the original collection of short primitives after serialization and deserialization");
+        assertEquals(testData,
+            listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)),
+            "Should get the original collection of short primitives after serialization and deserialization");
     }
 
     @SuppressWarnings("unchecked")
@@ -153,7 +200,8 @@ public class SerializationTest {
     public void listSerdeSerializerShouldReturnByteArrayOfFixedSizeForShortPrimitiveInput() {
         List<Short> testData = Arrays.asList((short) 1, (short) 2, (short) 3);
         Serde<List<Short>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.Short());
-        assertEquals(15, listSerde.serializer().serialize(topic, testData).length, "Should get length of 15 bytes after serialization");
+        assertEquals(15, listSerde.serializer().serialize(topic, testData).length,
+            "Should get length of 15 bytes after serialization");
     }
 
     @SuppressWarnings("unchecked")
@@ -161,7 +209,9 @@ public class SerializationTest {
     public void listSerdeShouldRoundtripFloatPrimitiveInput() {
         List<Float> testData = Arrays.asList((float) 1, (float) 2, (float) 3);
         Serde<List<Float>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.Float());
-        assertEquals(testData, listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)), "Should get the original collection of float primitives after serialization and deserialization");
+        assertEquals(testData,
+            listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)),
+            "Should get the original collection of float primitives after serialization and deserialization");
     }
 
     @SuppressWarnings("unchecked")
@@ -169,7 +219,8 @@ public class SerializationTest {
     public void listSerdeSerializerShouldReturnByteArrayOfFixedSizeForFloatPrimitiveInput() {
         List<Float> testData = Arrays.asList((float) 1, (float) 2, (float) 3);
         Serde<List<Float>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.Float());
-        assertEquals(21, listSerde.serializer().serialize(topic, testData).length, "Should get length of 21 bytes after serialization");
+        assertEquals(21, listSerde.serializer().serialize(topic, testData).length,
+            "Should get length of 21 bytes after serialization");
     }
 
     @SuppressWarnings("unchecked")
@@ -177,7 +228,9 @@ public class SerializationTest {
     public void listSerdeShouldRoundtripLongPrimitiveInput() {
         List<Long> testData = Arrays.asList((long) 1, (long) 2, (long) 3);
         Serde<List<Long>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.Long());
-        assertEquals(testData, listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)), "Should get the original collection of long primitives after serialization and deserialization");
+        assertEquals(testData,
+            listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)),
+            "Should get the original collection of long primitives after serialization and deserialization");
     }
 
     @SuppressWarnings("unchecked")
@@ -185,7 +238,8 @@ public class SerializationTest {
     public void listSerdeSerializerShouldReturnByteArrayOfFixedSizeForLongPrimitiveInput() {
         List<Long> testData = Arrays.asList((long) 1, (long) 2, (long) 3);
         Serde<List<Long>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.Long());
-        assertEquals(33, listSerde.serializer().serialize(topic, testData).length, "Should get length of 33 bytes after serialization");
+        assertEquals(33, listSerde.serializer().serialize(topic, testData).length,
+            "Should get length of 33 bytes after serialization");
     }
 
     @SuppressWarnings("unchecked")
@@ -193,7 +247,9 @@ public class SerializationTest {
     public void listSerdeShouldRoundtripDoublePrimitiveInput() {
         List<Double> testData = Arrays.asList((double) 1, (double) 2, (double) 3);
         Serde<List<Double>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.Double());
-        assertEquals(testData, listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)), "Should get the original collection of double primitives after serialization and deserialization");
+        assertEquals(testData,
+            listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)),
+            "Should get the original collection of double primitives after serialization and deserialization");
     }
 
     @SuppressWarnings("unchecked")
@@ -201,7 +257,8 @@ public class SerializationTest {
     public void listSerdeSerializerShouldReturnByteArrayOfFixedSizeForDoublePrimitiveInput() {
         List<Double> testData = Arrays.asList((double) 1, (double) 2, (double) 3);
         Serde<List<Double>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.Double());
-        assertEquals(33, listSerde.serializer().serialize(topic, testData).length, "Should get length of 33 bytes after serialization");
+        assertEquals(33, listSerde.serializer().serialize(topic, testData).length,
+            "Should get length of 33 bytes after serialization");
     }
 
     @SuppressWarnings("unchecked")
@@ -209,7 +266,9 @@ public class SerializationTest {
     public void listSerdeShouldRoundtripUUIDInput() {
         List<UUID> testData = Arrays.asList(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
         Serde<List<UUID>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.UUID());
-        assertEquals(testData, listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)), "Should get the original collection of UUID after serialization and deserialization");
+        assertEquals(testData,
+            listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)),
+            "Should get the original collection of UUID after serialization and deserialization");
     }
 
     @SuppressWarnings("unchecked")
@@ -217,7 +276,8 @@ public class SerializationTest {
     public void listSerdeSerializerShouldReturnByteArrayOfFixedSizeForUUIDInput() {
         List<UUID> testData = Arrays.asList(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
         Serde<List<UUID>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.UUID());
-        assertEquals(117, listSerde.serializer().serialize(topic, testData).length, "Should get length of 117 bytes after serialization");
+        assertEquals(117, listSerde.serializer().serialize(topic, testData).length,
+            "Should get length of 117 bytes after serialization");
     }
 
     @SuppressWarnings("unchecked")
@@ -225,7 +285,9 @@ public class SerializationTest {
     public void listSerdeShouldRoundtripNonPrimitiveInput() {
         List<String> testData = Arrays.asList("A", "B", "C");
         Serde<List<String>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.String());
-        assertEquals(testData, listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)), "Should get the original collection of strings list after serialization and deserialization");
+        assertEquals(testData,
+            listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)),
+            "Should get the original collection of strings list after serialization and deserialization");
     }
 
     @SuppressWarnings("unchecked")
@@ -233,7 +295,10 @@ public class SerializationTest {
     public void listSerdeShouldRoundtripPrimitiveInputWithNullEntries() {
         List<Integer> testData = Arrays.asList(1, null, 3);
         Serde<List<Integer>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.Integer());
-        assertEquals(testData, listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)), "Should get the original collection of integer primitives with null entries " + "after serialization and deserialization");
+        assertEquals(testData,
+            listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)),
+            "Should get the original collection of integer primitives with null entries "
+                + "after serialization and deserialization");
     }
 
     @SuppressWarnings("unchecked")
@@ -241,7 +306,10 @@ public class SerializationTest {
     public void listSerdeShouldRoundtripNonPrimitiveInputWithNullEntries() {
         List<String> testData = Arrays.asList("A", null, "C");
         Serde<List<String>> listSerde = Serdes.ListSerde(ArrayList.class, Serdes.String());
-        assertEquals(testData, listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)), "Should get the original collection of strings list with null entries " + "after serialization and deserialization");
+        assertEquals(testData,
+            listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)),
+            "Should get the original collection of strings list with null entries "
+                + "after serialization and deserialization");
     }
 
     @SuppressWarnings("unchecked")
@@ -249,7 +317,7 @@ public class SerializationTest {
     public void listSerdeShouldReturnLinkedList() {
         List<Integer> testData = new LinkedList<>();
         Serde<List<Integer>> listSerde = Serdes.ListSerde(LinkedList.class, Serdes.Integer());
-        assertTrue(listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)) instanceof LinkedList, "Should return List instance of type LinkedList");
+        assertInstanceOf(LinkedList.class, listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)), "Should return List instance of type LinkedList");
     }
 
     @SuppressWarnings("unchecked")
@@ -257,7 +325,7 @@ public class SerializationTest {
     public void listSerdeShouldReturnStack() {
         List<Integer> testData = new Stack<>();
         Serde<List<Integer>> listSerde = Serdes.ListSerde(Stack.class, Serdes.Integer());
-        assertTrue(listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)) instanceof Stack, "Should return List instance of type Stack");
+        assertInstanceOf(Stack.class, listSerde.deserializer().deserialize(topic, listSerde.serializer().serialize(topic, testData)), "Should return List instance of type Stack");
     }
 
     @Test
@@ -291,9 +359,11 @@ public class SerializationTest {
 
         try (Serde<Float> serde = Serdes.Float()) {
             // Because of NaN semantics we must assert based on the raw int bits.
-            Float roundtrip = serde.deserializer().deserialize(topic, serde.serializer().serialize(topic, someNaN));
+            Float roundtrip = serde.deserializer().deserialize(topic,
+                    serde.serializer().serialize(topic, someNaN));
             assertEquals(someNaNAsIntBits, Float.floatToRawIntBits(roundtrip));
-            Float otherRoundtrip = serde.deserializer().deserialize(topic, serde.serializer().serialize(topic, anotherNaN));
+            Float otherRoundtrip = serde.deserializer().deserialize(topic,
+                    serde.serializer().serialize(topic, anotherNaN));
             assertEquals(anotherNaNAsIntBits, Float.floatToRawIntBits(otherRoundtrip));
         }
     }
@@ -350,25 +420,8 @@ public class SerializationTest {
         return Serdes.serdeFrom(serializer, deserializer);
     }
 
-    @Test
-    public void testByteBufferSerializer() {
-        final byte[] bytes = "Hello".getBytes(UTF_8);
-        final ByteBuffer heapBuffer0 = ByteBuffer.allocate(bytes.length + 1).put(bytes);
-        final ByteBuffer heapBuffer1 = ByteBuffer.allocate(bytes.length).put(bytes);
-        final ByteBuffer heapBuffer2 = ByteBuffer.wrap(bytes);
-        final ByteBuffer directBuffer0 = ByteBuffer.allocateDirect(bytes.length + 1).put(bytes);
-        final ByteBuffer directBuffer1 = ByteBuffer.allocateDirect(bytes.length).put(bytes);
-        try (final ByteBufferSerializer serializer = new ByteBufferSerializer()) {
-            assertArrayEquals(bytes, serializer.serialize(topic, heapBuffer0));
-            assertArrayEquals(bytes, serializer.serialize(topic, heapBuffer1));
-            assertArrayEquals(bytes, serializer.serialize(topic, heapBuffer2));
-            assertArrayEquals(bytes, serializer.serialize(topic, directBuffer0));
-            assertArrayEquals(bytes, serializer.serialize(topic, directBuffer1));
-        }
-    }
-
     @ParameterizedTest
-    @ValueSource(booleans = {true, false})
+    @ValueSource(booleans = { true, false })
     public void testBooleanSerializer(Boolean dataToSerialize) {
         byte[] testData = new byte[1];
         testData[0] = (byte) (dataToSerialize ? 1 : 0);
@@ -378,7 +431,7 @@ public class SerializationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {true, false})
+    @ValueSource(booleans = { true, false })
     public void testBooleanDeserializer(Boolean dataToDeserialize) {
         byte[] testData = new byte[1];
         testData[0] = (byte) (dataToDeserialize ? 1 : 0);

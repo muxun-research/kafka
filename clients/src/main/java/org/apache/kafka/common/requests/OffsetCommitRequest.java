@@ -28,9 +28,7 @@ import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 public class OffsetCommitRequest extends AbstractRequest {
@@ -39,7 +37,7 @@ public class OffsetCommitRequest extends AbstractRequest {
     public static final String DEFAULT_MEMBER_ID = "";
     public static final long DEFAULT_RETENTION_TIME = -1L;
 
-	// default values for old versions, will be removed after these versions are no longer supported
+    // default values for old versions, will be removed after these versions are no longer supported
     public static final long DEFAULT_TIMESTAMP = -1L;            // for V0, V1
 
     private final OffsetCommitRequestData data;
@@ -48,9 +46,13 @@ public class OffsetCommitRequest extends AbstractRequest {
 
         private final OffsetCommitRequestData data;
 
-        public Builder(OffsetCommitRequestData data) {
-            super(ApiKeys.OFFSET_COMMIT);
+        public Builder(OffsetCommitRequestData data, boolean enableUnstableLastVersion) {
+            super(ApiKeys.OFFSET_COMMIT, enableUnstableLastVersion);
             this.data = data;
+        }
+
+        public Builder(OffsetCommitRequestData data) {
+            this(data, false);
         }
 
         @Override
@@ -73,46 +75,45 @@ public class OffsetCommitRequest extends AbstractRequest {
         this.data = data;
     }
 
-	@Override
+    @Override
     public OffsetCommitRequestData data() {
         return data;
     }
 
     public Map<TopicPartition, Long> offsets() {
-		Map<TopicPartition, Long> offsets = new HashMap<>();
-		for (OffsetCommitRequestTopic topic : data.topics()) {
-			for (OffsetCommitRequestData.OffsetCommitRequestPartition partition : topic.partitions()) {
-				offsets.put(new TopicPartition(topic.name(), partition.partitionIndex()),
-						partition.committedOffset());
-			}
-		}
-		return offsets;
-	}
-
-	public static List<OffsetCommitResponseTopic> getErrorResponseTopics(
-			List<OffsetCommitRequestTopic> requestTopics,
-			Errors e) {
-		List<OffsetCommitResponseTopic> responseTopicData = new ArrayList<>();
-		for (OffsetCommitRequestTopic entry : requestTopics) {
-			List<OffsetCommitResponsePartition> responsePartitions =
-					new ArrayList<>();
-			for (OffsetCommitRequestData.OffsetCommitRequestPartition requestPartition : entry.partitions()) {
-				responsePartitions.add(new OffsetCommitResponsePartition()
-						.setPartitionIndex(requestPartition.partitionIndex())
-						.setErrorCode(e.code()));
-			}
-			responseTopicData.add(new OffsetCommitResponseTopic()
-					.setName(entry.name())
-					.setPartitions(responsePartitions)
-			);
+        Map<TopicPartition, Long> offsets = new HashMap<>();
+        for (OffsetCommitRequestTopic topic : data.topics()) {
+            for (OffsetCommitRequestData.OffsetCommitRequestPartition partition : topic.partitions()) {
+                offsets.put(new TopicPartition(topic.name(), partition.partitionIndex()),
+                        partition.committedOffset());
+            }
         }
-        return responseTopicData;
+        return offsets;
+    }
+
+    public static OffsetCommitResponseData getErrorResponse(
+        OffsetCommitRequestData request,
+        Errors error
+    ) {
+        OffsetCommitResponseData response = new OffsetCommitResponseData();
+        request.topics().forEach(topic -> {
+            OffsetCommitResponseTopic responseTopic = new OffsetCommitResponseTopic()
+                .setName(topic.name());
+            response.topics().add(responseTopic);
+
+            topic.partitions().forEach(partition ->
+                responseTopic.partitions().add(new OffsetCommitResponsePartition()
+                    .setPartitionIndex(partition.partitionIndex())
+                    .setErrorCode(error.code()))
+            );
+        });
+        return response;
     }
 
     @Override
     public OffsetCommitResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-        List<OffsetCommitResponseTopic> responseTopicData = getErrorResponseTopics(data.topics(), Errors.forException(e));
-        return new OffsetCommitResponse(new OffsetCommitResponseData().setTopics(responseTopicData).setThrottleTimeMs(throttleTimeMs));
+        return new OffsetCommitResponse(getErrorResponse(data, Errors.forException(e))
+            .setThrottleTimeMs(throttleTimeMs));
     }
 
     @Override

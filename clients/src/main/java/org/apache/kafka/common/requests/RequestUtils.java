@@ -16,6 +16,13 @@
  */
 package org.apache.kafka.common.requests;
 
+import org.apache.kafka.common.errors.AuthenticationException;
+import org.apache.kafka.common.errors.AuthorizationException;
+import org.apache.kafka.common.errors.MismatchedEndpointTypeException;
+import org.apache.kafka.common.errors.SecurityDisabledException;
+import org.apache.kafka.common.errors.UnsupportedEndpointTypeException;
+import org.apache.kafka.common.errors.UnsupportedForMessageFormatException;
+import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.message.ProduceRequestData;
 import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Message;
@@ -30,52 +37,61 @@ import java.util.function.Predicate;
 
 public final class RequestUtils {
 
-	private RequestUtils() {
-	}
+    private RequestUtils() {}
 
-	public static Optional<Integer> getLeaderEpoch(int leaderEpoch) {
-		return leaderEpoch == RecordBatch.NO_PARTITION_LEADER_EPOCH ?
-				Optional.empty() : Optional.of(leaderEpoch);
-	}
+    public static Optional<Integer> getLeaderEpoch(int leaderEpoch) {
+        return leaderEpoch == RecordBatch.NO_PARTITION_LEADER_EPOCH ?
+            Optional.empty() : Optional.of(leaderEpoch);
+    }
 
-	public static boolean hasTransactionalRecords(ProduceRequest request) {
-		return flag(request, RecordBatch::isTransactional);
-	}
+    public static boolean hasTransactionalRecords(ProduceRequest request) {
+        return flag(request, RecordBatch::isTransactional);
+    }
 
-	/**
-	 * find a flag from all records of a produce request.
-	 * @param request   produce request
-	 * @param predicate used to predicate the record
-	 * @return true if there is any matched flag in the produce request. Otherwise, false
-	 */
-	static boolean flag(ProduceRequest request, Predicate<RecordBatch> predicate) {
-		for (ProduceRequestData.TopicProduceData tp : request.data().topicData()) {
-			for (ProduceRequestData.PartitionProduceData p : tp.partitionData()) {
-				if (p.records() instanceof Records) {
-					Iterator<? extends RecordBatch> iter = (((Records) p.records())).batchIterator();
-					if (iter.hasNext() && predicate.test(iter.next())) return true;
-				}
-			}
-		}
-		return false;
-	}
+    /**
+     * find a flag from all records of a produce request.
+     * @param request produce request
+     * @param predicate used to predicate the record
+     * @return true if there is any matched flag in the produce request. Otherwise, false
+     */
+    static boolean flag(ProduceRequest request, Predicate<RecordBatch> predicate) {
+        for (ProduceRequestData.TopicProduceData tp : request.data().topicData()) {
+            for (ProduceRequestData.PartitionProduceData p : tp.partitionData()) {
+                if (p.records() instanceof Records) {
+                    Iterator<? extends RecordBatch> iter = (((Records) p.records())).batchIterator();
+                    if (iter.hasNext() && predicate.test(iter.next())) return true;
+                }
+            }
+        }
+        return false;
+    }
 
-	public static ByteBuffer serialize(
-			Message header,
-			short headerVersion,
-			Message apiMessage,
-			short apiVersion
-	) {
-		ObjectSerializationCache cache = new ObjectSerializationCache();
+    public static ByteBuffer serialize(
+        Message header,
+        short headerVersion,
+        Message apiMessage,
+        short apiVersion
+    ) {
+        ObjectSerializationCache cache = new ObjectSerializationCache();
 
-		int headerSize = header.size(cache, headerVersion);
-		int messageSize = apiMessage.size(cache, apiVersion);
-		ByteBufferAccessor writable = new ByteBufferAccessor(ByteBuffer.allocate(headerSize + messageSize));
+        int headerSize = header.size(cache, headerVersion);
+        int messageSize = apiMessage.size(cache, apiVersion);
+        ByteBufferAccessor writable = new ByteBufferAccessor(ByteBuffer.allocate(headerSize + messageSize));
 
-		header.write(writable, cache, headerVersion);
-		apiMessage.write(writable, cache, apiVersion);
+        header.write(writable, cache, headerVersion);
+        apiMessage.write(writable, cache, apiVersion);
 
-		writable.flip();
-		return writable.buffer();
-	}
+        writable.flip();
+        return writable.buffer();
+    }
+
+    public static boolean isFatalException(Throwable e) {
+        return e instanceof AuthenticationException ||
+            e instanceof AuthorizationException ||
+            e instanceof MismatchedEndpointTypeException ||
+            e instanceof SecurityDisabledException ||
+            e instanceof UnsupportedVersionException ||
+            e instanceof UnsupportedEndpointTypeException ||
+            e instanceof UnsupportedForMessageFormatException;
+    }
 }

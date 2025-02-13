@@ -23,7 +23,13 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.utils.Utils;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.kafka.clients.consumer.internals.AbstractStickyAssignor.DEFAULT_GENERATION;
 
@@ -155,13 +161,20 @@ public interface ConsumerPartitionAssignor {
 
         @Override
         public String toString() {
-            return "Subscription(" + "topics=" + topics + (userData == null ? "" : ", userDataSize=" + userData.remaining()) + ", ownedPartitions=" + ownedPartitions + ", groupInstanceId=" + groupInstanceId.map(String::toString).orElse("null") + ", generationId=" + generationId.orElse(-1) + ", rackId=" + (rackId.orElse("null")) + ")";
+            return "Subscription(" +
+                "topics=" + topics +
+                (userData == null ? "" : ", userDataSize=" + userData.remaining()) +
+                ", ownedPartitions=" + ownedPartitions +
+                ", groupInstanceId=" + groupInstanceId.map(String::toString).orElse("null") +
+                ", generationId=" + generationId.orElse(-1) +
+                ", rackId=" + (rackId.orElse("null")) +
+                ")";
         }
     }
 
     final class Assignment {
-        private List<TopicPartition> partitions;
-        private ByteBuffer userData;
+        private final List<TopicPartition> partitions;
+        private final ByteBuffer userData;
 
         public Assignment(List<TopicPartition> partitions, ByteBuffer userData) {
             this.partitions = partitions;
@@ -182,7 +195,10 @@ public interface ConsumerPartitionAssignor {
 
         @Override
         public String toString() {
-            return "Assignment(" + "partitions=" + partitions + (userData == null ? "" : ", userDataSize=" + userData.remaining()) + ')';
+            return "Assignment(" +
+                "partitions=" + partitions +
+                (userData == null ? "" : ", userDataSize=" + userData.remaining()) +
+                ')';
         }
     }
 
@@ -199,7 +215,9 @@ public interface ConsumerPartitionAssignor {
 
         @Override
         public String toString() {
-            return "GroupSubscription(" + "subscriptions=" + subscriptions + ")";
+            return "GroupSubscription(" +
+                "subscriptions=" + subscriptions +
+                ")";
         }
     }
 
@@ -216,7 +234,9 @@ public interface ConsumerPartitionAssignor {
 
         @Override
         public String toString() {
-            return "GroupAssignment(" + "assignments=" + assignments + ")";
+            return "GroupAssignment(" +
+                "assignments=" + assignments +
+                ")";
         }
     }
 
@@ -227,10 +247,10 @@ public interface ConsumerPartitionAssignor {
      * {@link ConsumerPartitionAssignor#supportedProtocols()}, and it is their responsibility to respect the rules
      * of those protocols in their {@link ConsumerPartitionAssignor#assign(Cluster, GroupSubscription)} implementations.
      * Failures to follow the rules of the supported protocols would lead to runtime error or undefined behavior.
-     * <p>
+     *
      * The {@link RebalanceProtocol#EAGER} rebalance protocol requires a consumer to always revoke all its owned
      * partitions before participating in a rebalance event. It therefore allows a complete reshuffling of the assignment.
-     * <p>
+     *
      * {@link RebalanceProtocol#COOPERATIVE} rebalance protocol allows a consumer to retain its currently owned
      * partitions before participating in a rebalance event. The assignor should not reassign any owned partitions
      * immediately, but instead may indicate consumers the need for partition revocation so that the revoked
@@ -278,7 +298,7 @@ public interface ConsumerPartitionAssignor {
             // first try to get the class if passed in as a string
             if (klass instanceof String) {
                 try {
-                    klass = Class.forName((String) klass, true, Utils.getContextOrKafkaClassLoader());
+                    klass = Utils.loadClass((String) klass, Object.class);
                 } catch (ClassNotFoundException classNotFound) {
                     throw new KafkaException(klass + " ClassNotFoundException exception occurred", classNotFound);
                 }
@@ -292,7 +312,8 @@ public interface ConsumerPartitionAssignor {
                 if (assignor instanceof ConsumerPartitionAssignor) {
                     String assignorName = ((ConsumerPartitionAssignor) assignor).name();
                     if (assignorNameMap.containsKey(assignorName)) {
-                        throw new KafkaException("The assignor name: '" + assignorName + "' is used in more than one assignor: " + assignorNameMap.get(assignorName) + ", " + assignor.getClass().getName());
+                        throw new KafkaException("The assignor name: '" + assignorName + "' is used in more than one assignor: " +
+                            assignorNameMap.get(assignorName) + ", " + assignor.getClass().getName());
                     }
                     assignorNameMap.put(assignorName, assignor.getClass().getName());
                     assignors.add((ConsumerPartitionAssignor) assignor);

@@ -17,19 +17,28 @@
 
 package org.apache.kafka.common.security.oauthbearer;
 
-import org.apache.kafka.common.security.oauthbearer.internals.secured.*;
+import org.apache.kafka.common.security.oauthbearer.internals.secured.AccessTokenBuilder;
+import org.apache.kafka.common.security.oauthbearer.internals.secured.AccessTokenValidator;
+import org.apache.kafka.common.security.oauthbearer.internals.secured.AccessTokenValidatorFactory;
+import org.apache.kafka.common.security.oauthbearer.internals.secured.CloseableVerificationKeyResolver;
+import org.apache.kafka.common.security.oauthbearer.internals.secured.OAuthBearerTest;
 import org.apache.kafka.common.utils.Utils;
+
 import org.jose4j.jws.AlgorithmIdentifiers;
 import org.junit.jupiter.api.Test;
 
-import javax.security.auth.callback.Callback;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
+import javax.security.auth.callback.Callback;
+
 import static org.apache.kafka.common.config.SaslConfigs.SASL_OAUTHBEARER_EXPECTED_AUDIENCE;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class OAuthBearerValidatorCallbackHandlerTest extends OAuthBearerTest {
 
@@ -37,7 +46,10 @@ public class OAuthBearerValidatorCallbackHandlerTest extends OAuthBearerTest {
     public void testBasic() throws Exception {
         String expectedAudience = "a";
         List<String> allAudiences = Arrays.asList(expectedAudience, "b", "c");
-        AccessTokenBuilder builder = new AccessTokenBuilder().audience(expectedAudience).jwk(createRsaJwk()).alg(AlgorithmIdentifiers.RSA_USING_SHA256);
+        AccessTokenBuilder builder = new AccessTokenBuilder()
+            .audience(expectedAudience)
+            .jwk(createRsaJwk())
+            .alg(AlgorithmIdentifiers.RSA_USING_SHA256);
         String accessToken = builder.build();
 
         Map<String, ?> configs = getSaslConfigs(SASL_OAUTHBEARER_EXPECTED_AUDIENCE, allAudiences);
@@ -75,7 +87,7 @@ public class OAuthBearerValidatorCallbackHandlerTest extends OAuthBearerTest {
 
         try {
             OAuthBearerValidatorCallback callback = new OAuthBearerValidatorCallback(accessToken);
-            handler.handle(new Callback[]{callback});
+            handler.handle(new Callback[] {callback});
 
             assertNull(callback.token());
             String actualMessage = callback.errorStatus();
@@ -86,9 +98,11 @@ public class OAuthBearerValidatorCallbackHandlerTest extends OAuthBearerTest {
         }
     }
 
-    private OAuthBearerValidatorCallbackHandler createHandler(Map<String, ?> options, AccessTokenBuilder builder) {
+    private OAuthBearerValidatorCallbackHandler createHandler(Map<String, ?> options,
+        AccessTokenBuilder builder) {
         OAuthBearerValidatorCallbackHandler handler = new OAuthBearerValidatorCallbackHandler();
-        CloseableVerificationKeyResolver verificationKeyResolver = (jws, nestingContext) -> builder.jwk().getPublicKey();
+        CloseableVerificationKeyResolver verificationKeyResolver = (jws, nestingContext) ->
+                builder.jwk().getPublicKey();
         AccessTokenValidator accessTokenValidator = AccessTokenValidatorFactory.create(options, verificationKeyResolver);
         handler.init(verificationKeyResolver, accessTokenValidator);
         return handler;

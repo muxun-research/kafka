@@ -17,22 +17,29 @@
 
 package org.apache.kafka.server.metrics;
 
-import com.yammer.metrics.core.MetricName;
-import com.yammer.metrics.core.MetricsRegistry;
 import org.apache.kafka.common.Reconfigurable;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.metrics.JmxReporter;
 import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.common.utils.Sanitizer;
 
-import java.util.*;
+import com.yammer.metrics.core.MetricName;
+import com.yammer.metrics.core.MetricsRegistry;
+
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.SortedMap;
+import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
  * This class encapsulates the default yammer metrics registry for Kafka server,
  * and configures the set of exported JMX metrics for Yammer metrics.
- * <p>
+ * <br>
  * KafkaYammerMetrics.defaultRegistry() should always be used instead of Metrics.defaultRegistry()
  */
 public class KafkaYammerMetrics implements Reconfigurable {
@@ -47,7 +54,8 @@ public class KafkaYammerMetrics implements Reconfigurable {
     }
 
     private final MetricsRegistry metricsRegistry = new MetricsRegistry();
-    private final FilteringJmxReporter jmxReporter = new FilteringJmxReporter(metricsRegistry, metricName -> true);
+    private final FilteringJmxReporter jmxReporter = new FilteringJmxReporter(metricsRegistry,
+        metricName -> true);
 
     private KafkaYammerMetrics() {
         jmxReporter.start();
@@ -75,17 +83,31 @@ public class KafkaYammerMetrics implements Reconfigurable {
         jmxReporter.updatePredicate(metricName -> mBeanPredicate.test(metricName.getMBeanName()));
     }
 
-    public static MetricName getMetricName(String group, String typeName, String name) {
-        return getMetricName(group, typeName, name, null);
+    public static MetricName getMetricName(
+        String group,
+        String typeName,
+        String name
+    ) {
+        return getMetricName(
+            group,
+            typeName,
+            name,
+            null
+        );
     }
 
-    public static MetricName getMetricName(String group, String typeName, String name, LinkedHashMap<String, String> tags) {
+    public static MetricName getMetricName(
+        String group,
+        String typeName,
+        String name,
+        LinkedHashMap<String, String> tags
+    ) {
         StringBuilder nameBuilder = new StringBuilder();
         nameBuilder.append(group);
         nameBuilder.append(":type=");
         nameBuilder.append(typeName);
 
-        if (name.length() > 0) {
+        if (!name.isEmpty()) {
             nameBuilder.append(",name=");
             nameBuilder.append(name);
         }
@@ -118,7 +140,10 @@ public class KafkaYammerMetrics implements Reconfigurable {
         }
     }
 
-    private static <T extends Map<String, String>> T collectNonEmptyTags(Map<String, String> tags, Supplier<T> mapSupplier) {
+    private static <T extends Map<String, String>> T collectNonEmptyTags(
+        Map<String, String> tags,
+        Supplier<T> mapSupplier
+    ) {
         T result = mapSupplier.get();
         for (Map.Entry<String, String> tagEntry : tags.entrySet()) {
             String tagValue = tagEntry.getValue();
@@ -140,7 +165,7 @@ public class KafkaYammerMetrics implements Reconfigurable {
         } else {
             StringBuilder tagsString = new StringBuilder();
 
-            for (Iterator<Map.Entry<String, String>> iterator = nonEmptyTags.entrySet().iterator(); iterator.hasNext(); ) {
+            for (Iterator<Map.Entry<String, String>> iterator = nonEmptyTags.entrySet().iterator(); iterator.hasNext();) {
                 // convert dot to _ since reporters like Graphite typically use dot to represent hierarchy
                 Map.Entry<String, String> tagEntry = iterator.next();
                 String convertedValue = tagEntry.getValue().replaceAll("\\.", "_");

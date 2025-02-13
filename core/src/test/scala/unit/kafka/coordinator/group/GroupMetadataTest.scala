@@ -17,15 +17,16 @@
 
 package kafka.coordinator.group
 
-import kafka.common.OffsetAndMetadata
 import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor.Subscription
 import org.apache.kafka.clients.consumer.internals.ConsumerProtocol
+import org.apache.kafka.common.{TopicIdPartition, TopicPartition, Uuid}
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.utils.{MockTime, Time}
-import org.apache.kafka.common.{TopicIdPartition, TopicPartition, Uuid}
+import org.apache.kafka.coordinator.group.OffsetAndMetadata
 import org.junit.jupiter.api.Assertions._
 import org.junit.jupiter.api.{BeforeEach, Test}
 
+import java.util.{OptionalInt, OptionalLong}
 import scala.jdk.CollectionConverters._
 
 /**
@@ -325,7 +326,7 @@ class GroupMetadataTest {
 
     assertEquals(Some(Set.empty), group.getSubscribedTopics)
 
-    val memberWithFaultyProtocol = new MemberMetadata(memberId, None, clientId, clientHost, rebalanceTimeoutMs,
+    val memberWithFaultyProtocol  = new MemberMetadata(memberId, None, clientId, clientHost, rebalanceTimeoutMs,
       sessionTimeoutMs, protocolType, List(("range", Array.empty[Byte])))
 
     group.transitionTo(PreparingRebalance)
@@ -661,7 +662,6 @@ class GroupMetadataTest {
 
     var shouldFail = true
     var result: Option[JoinGroupResult] = None
-
     def joinCallback(joinGroupResult: JoinGroupResult): Unit = {
       if (shouldFail) {
         shouldFail = false
@@ -697,7 +697,6 @@ class GroupMetadataTest {
 
     var shouldFail = true
     var result: Option[SyncGroupResult] = None
-
     def syncCallback(syncGroupResult: SyncGroupResult): Unit = {
       if (shouldFail) {
         shouldFail = false
@@ -861,7 +860,7 @@ class GroupMetadataTest {
   }
 
   private def offsetAndMetadata(offset: Long, timestamp: Long = Time.SYSTEM.milliseconds()): OffsetAndMetadata = {
-    OffsetAndMetadata(offset, "", timestamp)
+    new OffsetAndMetadata(offset, OptionalInt.empty(), "", timestamp, OptionalLong.empty())
   }
 
 }

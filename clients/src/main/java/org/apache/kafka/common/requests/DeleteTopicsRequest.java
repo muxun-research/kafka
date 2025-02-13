@@ -33,89 +33,89 @@ import java.util.stream.Collectors;
 public class DeleteTopicsRequest extends AbstractRequest {
 
     public static class Builder extends AbstractRequest.Builder<DeleteTopicsRequest> {
-        private DeleteTopicsRequestData data;
+        private final DeleteTopicsRequestData data;
 
         public Builder(DeleteTopicsRequestData data) {
             super(ApiKeys.DELETE_TOPICS);
-			this.data = data;
-		}
+            this.data = data;
+        }
 
-		@Override
-		public DeleteTopicsRequest build(short version) {
-			if (version >= 6 && !data.topicNames().isEmpty()) {
-				data.setTopics(groupByTopic(data.topicNames()));
-			}
-			return new DeleteTopicsRequest(data, version);
-		}
+        @Override
+        public DeleteTopicsRequest build(short version) {
+            if (version >= 6 && !data.topicNames().isEmpty()) {
+                data.setTopics(groupByTopic(data.topicNames()));
+            }
+            return new DeleteTopicsRequest(data, version);
+        }
+        
+        private List<DeleteTopicState> groupByTopic(List<String> topics) {
+            List<DeleteTopicState> topicStates = new ArrayList<>();
+            for (String topic : topics) {
+                topicStates.add(new DeleteTopicState().setName(topic));
+            }
+            return topicStates;
+        }
 
-		private List<DeleteTopicState> groupByTopic(List<String> topics) {
-			List<DeleteTopicState> topicStates = new ArrayList<>();
-			for (String topic : topics) {
-				topicStates.add(new DeleteTopicState().setName(topic));
-			}
-			return topicStates;
-		}
+        @Override
+        public String toString() {
+            return data.toString();
+        }
+    }
 
-		@Override
-		public String toString() {
-			return data.toString();
-		}
-	}
+    private final DeleteTopicsRequestData data;
 
-	private DeleteTopicsRequestData data;
+    private DeleteTopicsRequest(DeleteTopicsRequestData data, short version) {
+        super(ApiKeys.DELETE_TOPICS, version);
+        this.data = data;
+    }
 
-	private DeleteTopicsRequest(DeleteTopicsRequestData data, short version) {
-		super(ApiKeys.DELETE_TOPICS, version);
-		this.data = data;
-	}
-
-	@Override
-	public DeleteTopicsRequestData data() {
-		return data;
-	}
+    @Override
+    public DeleteTopicsRequestData data() {
+        return data;
+    }
 
     @Override
     public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
         DeleteTopicsResponseData response = new DeleteTopicsResponseData();
-		if (version() >= 1) {
-			response.setThrottleTimeMs(throttleTimeMs);
-		}
-		ApiError apiError = ApiError.fromThrowable(e);
-		for (DeleteTopicState topic : topics()) {
-			response.responses().add(new DeletableTopicResult()
-					.setName(topic.name())
-					.setTopicId(topic.topicId())
-					.setErrorCode(apiError.error().code()));
-		}
-		return new DeleteTopicsResponse(response);
-	}
+        if (version() >= 1) {
+            response.setThrottleTimeMs(throttleTimeMs);
+        }
+        ApiError apiError = ApiError.fromThrowable(e);
+        for (DeleteTopicState topic : topics()) {
+            response.responses().add(new DeletableTopicResult()
+                    .setName(topic.name())
+                    .setTopicId(topic.topicId())
+                    .setErrorCode(apiError.error().code()));
+        }
+        return new DeleteTopicsResponse(response);
+    }
+    
+    public List<String> topicNames() {
+        if (version() >= 6)
+            return data.topics().stream().map(DeleteTopicState::name).collect(Collectors.toList());
+        return data.topicNames(); 
+    }
 
-	public List<String> topicNames() {
-		if (version() >= 6)
-			return data.topics().stream().map(topic -> topic.name()).collect(Collectors.toList());
-		return data.topicNames();
-	}
+    public int numberOfTopics() {
+        if (version() >= 6)
+            return data.topics().size();
+        return data.topicNames().size();
+    }
+    
+    public List<Uuid> topicIds() {
+        if (version() >= 6)
+            return data.topics().stream().map(DeleteTopicState::topicId).collect(Collectors.toList());
+        return Collections.emptyList();
+    }
+    
+    public List<DeleteTopicState> topics() {
+        if (version() >= 6)
+            return data.topics();
+        return data.topicNames().stream().map(name -> new DeleteTopicState().setName(name)).collect(Collectors.toList()); 
+    }
 
-	public int numberOfTopics() {
-		if (version() >= 6)
-			return data.topics().size();
-		return data.topicNames().size();
-	}
-
-	public List<Uuid> topicIds() {
-		if (version() >= 6)
-			return data.topics().stream().map(topic -> topic.topicId()).collect(Collectors.toList());
-		return Collections.emptyList();
-	}
-
-	public List<DeleteTopicState> topics() {
-		if (version() >= 6)
-			return data.topics();
-		return data.topicNames().stream().map(name -> new DeleteTopicState().setName(name)).collect(Collectors.toList());
-	}
-
-	public static DeleteTopicsRequest parse(ByteBuffer buffer, short version) {
-		return new DeleteTopicsRequest(new DeleteTopicsRequestData(new ByteBufferAccessor(buffer), version), version);
-	}
+    public static DeleteTopicsRequest parse(ByteBuffer buffer, short version) {
+        return new DeleteTopicsRequest(new DeleteTopicsRequestData(new ByteBufferAccessor(buffer), version), version);
+    }
 
 }

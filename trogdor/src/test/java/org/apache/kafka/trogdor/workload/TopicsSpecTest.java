@@ -17,73 +17,73 @@
 
 package org.apache.kafka.trogdor.workload;
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.apache.kafka.trogdor.common.JsonUtil;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.kafka.trogdor.common.JsonUtil;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@Timeout(value = 120000, unit = MILLISECONDS)
+@Timeout(value = 120)
 public class TopicsSpecTest {
 
-	private final static TopicsSpec FOO;
-	private final static PartitionsSpec PARTSA;
-	private final static PartitionsSpec PARTSB;
+    private static final TopicsSpec FOO;
+    private static final PartitionsSpec PARTSA;
+    private static final PartitionsSpec PARTSB;
 
-	static {
-		FOO = new TopicsSpec();
+    static {
+        FOO = new TopicsSpec();
 
-		PARTSA = new PartitionsSpec(3, (short) 3, null, null);
-		FOO.set("topicA[0-2]", PARTSA);
+        PARTSA = new PartitionsSpec(3, (short) 3, null, null);
+        FOO.set("topicA[0-2]", PARTSA);
 
-		Map<Integer, List<Integer>> assignmentsB = new HashMap<>();
-		assignmentsB.put(0, Arrays.asList(0, 1, 2));
-		assignmentsB.put(1, Arrays.asList(2, 3, 4));
-		PARTSB = new PartitionsSpec(0, (short) 0, assignmentsB, null);
-		FOO.set("topicB", PARTSB);
-	}
+        Map<Integer, List<Integer>> assignmentsB = new HashMap<>();
+        assignmentsB.put(0, Arrays.asList(0, 1, 2));
+        assignmentsB.put(1, Arrays.asList(2, 3, 4));
+        PARTSB = new PartitionsSpec(0, (short) 0, assignmentsB, null);
+        FOO.set("topicB", PARTSB);
+    }
 
-	@Test
-	public void testMaterialize() {
-		Map<String, PartitionsSpec> parts = FOO.materialize();
-		assertTrue(parts.containsKey("topicA0"));
-		assertTrue(parts.containsKey("topicA1"));
-		assertTrue(parts.containsKey("topicA2"));
-		assertTrue(parts.containsKey("topicB"));
-		assertEquals(4, parts.keySet().size());
-		assertEquals(PARTSA, parts.get("topicA0"));
-		assertEquals(PARTSA, parts.get("topicA1"));
-		assertEquals(PARTSA, parts.get("topicA2"));
-		assertEquals(PARTSB, parts.get("topicB"));
-	}
+    @Test
+    public void testMaterialize() {
+        Map<String, PartitionsSpec> parts = FOO.materialize();
+        assertTrue(parts.containsKey("topicA0"));
+        assertTrue(parts.containsKey("topicA1"));
+        assertTrue(parts.containsKey("topicA2"));
+        assertTrue(parts.containsKey("topicB"));
+        assertEquals(4, parts.keySet().size());
+        assertEquals(PARTSA, parts.get("topicA0"));
+        assertEquals(PARTSA, parts.get("topicA1"));
+        assertEquals(PARTSA, parts.get("topicA2"));
+        assertEquals(PARTSB, parts.get("topicB"));
+    }
 
-	@Test
-	public void testPartitionNumbers() {
-		List<Integer> partsANumbers = PARTSA.partitionNumbers();
-		assertEquals(Integer.valueOf(0), partsANumbers.get(0));
-		assertEquals(Integer.valueOf(1), partsANumbers.get(1));
-		assertEquals(Integer.valueOf(2), partsANumbers.get(2));
-		assertEquals(3, partsANumbers.size());
+    @Test
+    public void testPartitionNumbers() {
+        List<Integer> partsANumbers = PARTSA.partitionNumbers();
+        assertEquals(Integer.valueOf(0), partsANumbers.get(0));
+        assertEquals(Integer.valueOf(1), partsANumbers.get(1));
+        assertEquals(Integer.valueOf(2), partsANumbers.get(2));
+        assertEquals(3, partsANumbers.size());
 
-		List<Integer> partsBNumbers = PARTSB.partitionNumbers();
-		assertEquals(Integer.valueOf(0), partsBNumbers.get(0));
-		assertEquals(Integer.valueOf(1), partsBNumbers.get(1));
-		assertEquals(2, partsBNumbers.size());
-	}
+        List<Integer> partsBNumbers = PARTSB.partitionNumbers();
+        assertEquals(Integer.valueOf(0), partsBNumbers.get(0));
+        assertEquals(Integer.valueOf(1), partsBNumbers.get(1));
+        assertEquals(2, partsBNumbers.size());
+    }
 
-	@Test
-	public void testPartitionsSpec() throws Exception {
-		String text = "{\"numPartitions\": 5, \"configs\": {\"foo\": \"bar\"}}";
-		PartitionsSpec spec = JsonUtil.JSON_SERDE.readValue(text, PartitionsSpec.class);
-		assertEquals(5, spec.numPartitions());
-		assertEquals("bar", spec.configs().get("foo"));
-		assertEquals(1, spec.configs().size());
-	}
+    @Test
+    public void testPartitionsSpec() throws Exception {
+        String text = "{\"numPartitions\": 5, \"configs\": {\"foo\": \"bar\"}}";
+        PartitionsSpec spec = JsonUtil.JSON_SERDE.readValue(text, PartitionsSpec.class);
+        assertEquals(5, spec.numPartitions());
+        assertEquals("bar", spec.configs().get("foo"));
+        assertEquals(1, spec.configs().size());
+    }
 }

@@ -18,52 +18,77 @@
 package org.apache.kafka.streams.kstream.internals;
 
 import org.apache.kafka.common.serialization.Serde;
+import org.apache.kafka.streams.TopologyConfig;
 import org.apache.kafka.streams.kstream.StreamJoined;
+import org.apache.kafka.streams.state.DslStoreSuppliers;
 import org.apache.kafka.streams.state.WindowBytesStoreSupplier;
 
 import java.util.Map;
 
 public class StreamJoinedInternal<K, V1, V2> extends StreamJoined<K, V1, V2> {
 
-	//Needs to be public for testing
-	public StreamJoinedInternal(final StreamJoined<K, V1, V2> streamJoined) {
-		super(streamJoined);
-	}
+    // this tracks the original dsl store suppliers that were passed
+    // in -- this helps ensure that we can resolve the outer join
+    // store in the desired order (see comments in OuterStreamJoinFactory)
+    private final DslStoreSuppliers passedInDslStoreSuppliers;
 
-	public Serde<K> keySerde() {
-		return keySerde;
-	}
+    //Needs to be public for testing
+    public StreamJoinedInternal(
+        final StreamJoined<K, V1, V2> streamJoined,
+        final InternalStreamsBuilder builder
+    ) {
+        super(streamJoined);
+        passedInDslStoreSuppliers = dslStoreSuppliers;
+        if (dslStoreSuppliers == null) {
+            final TopologyConfig topologyConfig = builder.internalTopologyBuilder().topologyConfigs();
+            if (topologyConfig != null) {
+                dslStoreSuppliers = topologyConfig.resolveDslStoreSuppliers().orElse(null);
+            }
+        }
+    }
 
-	public Serde<V1> valueSerde() {
-		return valueSerde;
-	}
+    public Serde<K> keySerde() {
+        return keySerde;
+    }
 
-	public Serde<V2> otherValueSerde() {
-		return otherValueSerde;
-	}
+    public Serde<V1> valueSerde() {
+        return valueSerde;
+    }
 
-	public String name() {
-		return name;
-	}
+    public Serde<V2> otherValueSerde() {
+        return otherValueSerde;
+    }
 
-	public String storeName() {
-		return storeName;
-	}
+    public String name() {
+        return name;
+    }
 
-	public WindowBytesStoreSupplier thisStoreSupplier() {
-		return thisStoreSupplier;
-	}
+    public String storeName() {
+        return storeName;
+    }
 
-	public WindowBytesStoreSupplier otherStoreSupplier() {
-		return otherStoreSupplier;
-	}
+    public DslStoreSuppliers passedInDslStoreSuppliers() {
+        return passedInDslStoreSuppliers;
+    }
 
-	public boolean loggingEnabled() {
-		return loggingEnabled;
-	}
+    public DslStoreSuppliers dslStoreSuppliers() {
+        return dslStoreSuppliers;
+    }
 
-	Map<String, String> logConfig() {
-		return topicConfig;
-	}
+    public WindowBytesStoreSupplier thisStoreSupplier() {
+        return thisStoreSupplier;
+    }
+
+    public WindowBytesStoreSupplier otherStoreSupplier() {
+        return otherStoreSupplier;
+    }
+
+    public boolean loggingEnabled() {
+        return loggingEnabled;
+    }
+
+    Map<String, String> logConfig() {
+        return topicConfig;
+    }
 
 }

@@ -247,7 +247,7 @@ public class ChunkedBytesStream extends FilterInputStream {
             if (avail <= 0)
                 return -1;
         }
-        int cnt = (avail < len) ? avail : len;
+        int cnt = Math.min(avail, len);
         System.arraycopy(getBufIfOpen(), pos, b, off, cnt);
         pos += cnt;
         return cnt;

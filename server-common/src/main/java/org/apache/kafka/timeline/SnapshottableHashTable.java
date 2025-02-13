@@ -57,13 +57,13 @@ import java.util.NoSuchElementException;
  * new, we know that its value at epoch E must be null, so we can return that immediately.
  * <p>
  * The class hierarchy looks like this:
- * <p>
- * Revertable       BaseHashTable
- * ↑              ↑
- * SnapshottableHashTable → SnapshotRegistry → Snapshot
- * ↑             ↑
- * TimelineHashSet       TimelineHashMap
- * <p>
+ * <pre>
+ *        Revertable       BaseHashTable
+ *              ↑              ↑
+ *           SnapshottableHashTable → SnapshotRegistry → Snapshot
+ *               ↑             ↑
+ *   TimelineHashSet       TimelineHashMap
+ * </pre>
  * BaseHashTable is a simple hash table that uses separate chaining.  The interface is
  * pretty bare-bones since this class is not intended to be used directly by end-users.
  * <p>
@@ -86,16 +86,16 @@ import java.util.NoSuchElementException;
  * All of these classes require external synchronization, and don't support null keys or
  * values.
  */
-class SnapshottableHashTable<T extends SnapshottableHashTable.ElementWithStartEpoch> extends BaseHashTable<T> implements Revertable {
+class SnapshottableHashTable<T extends SnapshottableHashTable.ElementWithStartEpoch>
+        extends BaseHashTable<T> implements Revertable {
 
     /**
      * A special epoch value that represents the latest data.
      */
-    final static long LATEST_EPOCH = Long.MAX_VALUE;
+    static final long LATEST_EPOCH = Long.MAX_VALUE;
 
     interface ElementWithStartEpoch {
         void setStartEpoch(long startEpoch);
-
         long startEpoch();
     }
 
@@ -256,12 +256,15 @@ class SnapshottableHashTable<T extends SnapshottableHashTable.ElementWithStartEp
                     HashTier<T> tier = curSnapshot.getDelta(SnapshottableHashTable.this);
                     if (tier != null && tier.deltaTable != null) {
                         BaseHashTable<T> deltaTable = tier.deltaTable;
-                        int shift = Integer.numberOfLeadingZeros(deltaTable.baseElements().length) - Integer.numberOfLeadingZeros(topTier.length);
+                        int shift = Integer.numberOfLeadingZeros(deltaTable.baseElements().length) -
+                            Integer.numberOfLeadingZeros(topTier.length);
                         int tierSlot = slot >>> shift;
                         BaseHashTable.unpackSlot(temp, deltaTable.baseElements(), tierSlot);
                         for (T object : temp) {
-                            if (BaseHashTable.findSlot(object, topTier.length) == slot) {
-                                ready.add(object);
+                            if (object.startEpoch() <= snapshot.epoch()) {
+                                if (BaseHashTable.findSlot(object, topTier.length) == slot) {
+                                    ready.add(object);
+                                }
                             }
                         }
                         temp.clear();
@@ -403,37 +406,6 @@ class SnapshottableHashTable<T extends SnapshottableHashTable.ElementWithStartEp
         } else {
             return new HistoricalIterator(baseElements(), snapshotRegistry.getSnapshot(epoch));
         }
-    }
-
-    String snapshottableToDebugString() {
-        StringBuilder bld = new StringBuilder();
-        bld.append(String.format("SnapshottableHashTable{%n"));
-        bld.append("top tier: ");
-        bld.append(baseToDebugString());
-        bld.append(String.format(",%nsnapshot tiers: [%n"));
-        String prefix = "";
-        for (Iterator<Snapshot> iter = snapshotRegistry.iterator(); iter.hasNext(); ) {
-            Snapshot snapshot = iter.next();
-            bld.append(prefix);
-            bld.append("epoch ").append(snapshot.epoch()).append(": ");
-            HashTier<T> tier = snapshot.getDelta(this);
-            if (tier == null) {
-                bld.append("null");
-            } else {
-                bld.append("HashTier{");
-                bld.append("size=").append(tier.size);
-                bld.append(", deltaTable=");
-                if (tier.deltaTable == null) {
-                    bld.append("null");
-                } else {
-                    bld.append(tier.deltaTable.baseToDebugString());
-                }
-                bld.append("}");
-            }
-            bld.append(String.format("%n"));
-        }
-        bld.append(String.format("]}%n"));
-        return bld.toString();
     }
 
     @SuppressWarnings("unchecked")

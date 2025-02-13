@@ -73,14 +73,10 @@ import static org.apache.kafka.streams.kstream.Windows.NO_GRACE_PERIOD;
 
 public final class SlidingWindows {
 
-    /**
-     * The size of the windows in milliseconds, defined by the max time difference between records.
-     */
+    /** The size of the windows in milliseconds, defined by the max time difference between records. */
     private final long timeDifferenceMs;
 
-    /**
-     * The grace period in milliseconds.
-     */
+    /** The grace period in milliseconds. */
     private final long graceMs;
 
     private SlidingWindows(final long timeDifferenceMs, final long graceMs) {
@@ -103,6 +99,7 @@ public final class SlidingWindows {
      * <p>
      * CAUTION: Using this method implicitly sets the grace period to zero, which means that any out-of-order
      * records arriving after the window ends are considered late and will be dropped.
+     *
      * @param timeDifference the max time difference (inclusive) between two records in a window
      * @return a new window definition with no grace period. Note that this means out-of-order records arriving after the window end will be dropped
      * @throws IllegalArgumentException if the timeDifference is negative or can't be represented as {@code long milliseconds}
@@ -115,8 +112,9 @@ public final class SlidingWindows {
      * Return a window definition with the window size based on the given maximum time difference (inclusive) between
      * records in the same window and given window grace period. Reject out-of-order events that arrive after {@code afterWindowEnd}.
      * A window is closed when {@code stream-time > window-end + grace-period}.
+     *
      * @param timeDifference the max time difference (inclusive) between two records in a window
-     * @param afterWindowEnd the grace period to admit out-of-order events to a window
+     * @param afterWindowEnd  the grace period to admit out-of-order events to a window
      * @return a new window definition with the specified grace period
      * @throws IllegalArgumentException if the timeDifference or afterWindowEnd (grace period) is negative or can't be represented as {@code long milliseconds}
      */
@@ -127,27 +125,6 @@ public final class SlidingWindows {
         final long afterWindowEndMs = validateMillisecondDuration(afterWindowEnd, afterWindowEndMsgPrefix);
 
         return new SlidingWindows(timeDifferenceMs, afterWindowEndMs);
-    }
-
-    /**
-     * Return a window definition with the window size based on the given maximum time difference (inclusive) between
-     * records in the same window and given window grace period. Reject out-of-order events that arrive after {@code grace}.
-     * A window is closed when {@code stream-time > window-end + grace-period}.
-     * @param timeDifference the max time difference (inclusive) between two records in a window
-     * @param grace          the grace period to admit out-of-order events to a window
-     * @return a new window definition
-     * @throws IllegalArgumentException if the specified window size is &lt; 0 or grace &lt; 0, or either can't be represented as {@code long milliseconds}
-     * @deprecated since 3.0. Use {@link #ofTimeDifferenceWithNoGrace(Duration)} or {@link #ofTimeDifferenceAndGrace(Duration, Duration)} instead
-     */
-    @Deprecated
-    public static SlidingWindows withTimeDifferenceAndGrace(final Duration timeDifference, final Duration grace) throws IllegalArgumentException {
-        final String msgPrefixSize = prepareMillisCheckFailMsgPrefix(timeDifference, "timeDifference");
-        final long timeDifferenceMs = validateMillisecondDuration(timeDifference, msgPrefixSize);
-
-        final String msgPrefixGrace = prepareMillisCheckFailMsgPrefix(grace, "grace");
-        final long graceMs = validateMillisecondDuration(grace, msgPrefixGrace);
-
-        return new SlidingWindows(timeDifferenceMs, graceMs);
     }
 
     public long timeDifferenceMs() {
@@ -167,7 +144,8 @@ public final class SlidingWindows {
             return false;
         }
         final SlidingWindows that = (SlidingWindows) o;
-        return timeDifferenceMs == that.timeDifferenceMs && graceMs == that.graceMs;
+        return timeDifferenceMs == that.timeDifferenceMs &&
+            graceMs == that.graceMs;
     }
 
     @Override
@@ -177,6 +155,9 @@ public final class SlidingWindows {
 
     @Override
     public String toString() {
-        return "SlidingWindows{" + ", sizeMs=" + timeDifferenceMs + ", graceMs=" + graceMs + '}';
+        return "SlidingWindows{" +
+            ", sizeMs=" + timeDifferenceMs +
+            ", graceMs=" + graceMs +
+            '}';
     }
 }

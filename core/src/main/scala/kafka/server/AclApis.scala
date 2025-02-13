@@ -6,7 +6,7 @@
  * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,23 +18,26 @@
 package kafka.server
 
 import kafka.network.RequestChannel
-import kafka.security.authorizer.AuthorizerUtils
 import kafka.utils.Logging
-import org.apache.kafka.common.acl.AclBinding
 import org.apache.kafka.common.acl.AclOperation._
+import org.apache.kafka.common.acl.AclBinding
 import org.apache.kafka.common.errors._
+import org.apache.kafka.common.message.CreateAclsResponseData.AclCreationResult
+import org.apache.kafka.common.message.DeleteAclsResponseData.DeleteAclsFilterResult
+import org.apache.kafka.common.message._
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.requests._
 import org.apache.kafka.common.resource.Resource.CLUSTER_NAME
 import org.apache.kafka.common.resource.ResourceType
+import org.apache.kafka.security.authorizer.AuthorizerUtils
 import org.apache.kafka.server.authorizer._
 
 import java.util
 import java.util.concurrent.CompletableFuture
-import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
-import scala.compat.java8.OptionConverters._
+import scala.collection.mutable
 import scala.jdk.CollectionConverters._
+import scala.jdk.OptionConverters.RichOptional
 
 /**
  * Logic to handle ACL requests.
@@ -46,7 +49,7 @@ class AclApis(authHelper: AuthHelper,
               config: KafkaConfig) extends Logging {
   this.logIdent = "[AclApis-%s-%s] ".format(name, config.nodeId)
   private val alterAclsPurgatory =
-    new DelayedFuturePurgatory(purgatoryName = "AlterAcls", brokerId = config.nodeId)
+      new DelayedFuturePurgatory(purgatoryName = "AlterAcls", brokerId = config.nodeId)
 
   def isClosed: Boolean = alterAclsPurgatory.isShutdown
 
@@ -62,16 +65,14 @@ class AclApis(authHelper: AuthHelper,
             .setErrorCode(Errors.SECURITY_DISABLED.code)
             .setErrorMessage("No Authorizer is configured on the broker")
             .setThrottleTimeMs(requestThrottleMs),
-            describeAclsRequest.version))
+          describeAclsRequest.version))
       case Some(auth) =>
         val filter = describeAclsRequest.filter
-        val returnedAcls = new util.HashSet[AclBinding]()
-        auth.acls(filter).forEach(returnedAcls.add)
         requestHelper.sendResponseMaybeThrottle(request, requestThrottleMs =>
           new DescribeAclsResponse(new DescribeAclsResponseData()
             .setThrottleTimeMs(requestThrottleMs)
-            .setResources(DescribeAclsResponse.aclsResources(returnedAcls)),
-            describeAclsRequest.version))
+            .setResources(DescribeAclsResponse.aclsResources(auth.acls(filter))),
+          describeAclsRequest.version))
     }
     CompletableFuture.completedFuture[Unit](())
   }
@@ -92,7 +93,7 @@ class AclApis(authHelper: AuthHelper,
         allBindings.foreach { acl =>
           val resource = acl.pattern
           val throwable = if (resource.resourceType == ResourceType.CLUSTER && !AuthorizerUtils.isClusterResource(resource.name))
-            new InvalidRequestException("The only valid name for the CLUSTER resource is " + CLUSTER_NAME)
+              new InvalidRequestException("The only valid name for the CLUSTER resource is " + CLUSTER_NAME)
           else if (resource.name.isEmpty)
             new InvalidRequestException("Invalid empty resource name")
           else
@@ -111,7 +112,7 @@ class AclApis(authHelper: AuthHelper,
           val aclCreationResults = allBindings.map { acl =>
             val result = errorResults.getOrElse(acl, createResults(validBindings.indexOf(acl)).get)
             val creationResult = new AclCreationResult()
-            result.exception.asScala.foreach { throwable =>
+            result.exception.toScala.foreach { throwable =>
               val apiError = ApiError.fromThrowable(throwable)
               creationResult
                 .setErrorCode(apiError.error.code)
@@ -121,7 +122,6 @@ class AclApis(authHelper: AuthHelper,
           }
           future.complete(aclCreationResults.asJava)
         }
-
         alterAclsPurgatory.tryCompleteElseWatch(config.connectionsMaxIdleMs, createResults, sendResponseCallback)
 
         future.thenApply[Unit] { aclCreationResults =>
@@ -164,4 +164,4 @@ class AclApis(authHelper: AuthHelper,
         }
     }
   }
-}
+ }

@@ -20,7 +20,11 @@ import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.connect.runtime.SourceConnectorConfig;
 import org.apache.kafka.connect.runtime.TopicCreationConfig;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 import static org.apache.kafka.connect.runtime.SourceConnectorConfig.TOPIC_CREATION_GROUPS_CONFIG;
@@ -29,6 +33,7 @@ import static org.apache.kafka.connect.runtime.TopicCreationConfig.DEFAULT_TOPIC
 /**
  * Represents a group of topics defined by inclusion/exclusion regex patterns along with the group's topic creation
  * configurations.
+ *
  * @see TopicCreationConfig
  * @see TopicCreation
  */
@@ -52,7 +57,9 @@ public class TopicCreationGroup {
     /**
      * Parses the configuration of a source connector and returns the topic creation groups
      * defined in the given configuration as a map of group names to {@link TopicCreationGroup} objects.
+     *
      * @param config the source connector configuration
+     *
      * @return the map of topic creation groups; may be empty but not {@code null}
      */
     public static Map<String, TopicCreationGroup> configuredGroups(SourceConnectorConfig config) {
@@ -73,6 +80,7 @@ public class TopicCreationGroup {
 
     /**
      * Return the name of the topic creation group.
+     *
      * @return the name of the topic creation group
      */
     public String name() {
@@ -82,23 +90,31 @@ public class TopicCreationGroup {
     /**
      * Answer whether this topic creation group is configured to allow the creation of the given
      * {@code topic} name.
+     *
      * @param topic the topic name to check against the groups configuration
+     *
      * @return true if the topic name matches the inclusion regex and does
      * not match the exclusion regex of this group's configuration; false otherwise
      */
     public boolean matches(String topic) {
-        return !exclusionPattern.matcher(topic).matches() && inclusionPattern.matcher(topic).matches();
+        return !exclusionPattern.matcher(topic).matches() && inclusionPattern.matcher(topic)
+                .matches();
     }
 
     /**
      * Return the description for a new topic with the given {@code topic} name with the topic
      * settings defined for this topic creation group.
+     *
      * @param topic the name of the topic to be created
+     *
      * @return the topic description of the given topic with settings of this topic creation group
      */
     public NewTopic newTopic(String topic) {
         TopicAdmin.NewTopicBuilder builder = new TopicAdmin.NewTopicBuilder(topic);
-        return builder.partitions(numPartitions).replicationFactor(replicationFactor).config(otherConfigs).build();
+        return builder.partitions(numPartitions)
+                .replicationFactor(replicationFactor)
+                .config(otherConfigs)
+                .build();
     }
 
     @Override
@@ -106,20 +122,33 @@ public class TopicCreationGroup {
         if (this == o) {
             return true;
         }
-        if (!(o instanceof TopicCreationGroup)) {
+        if (!(o instanceof TopicCreationGroup that)) {
             return false;
         }
-        TopicCreationGroup that = (TopicCreationGroup) o;
-        return Objects.equals(name, that.name) && numPartitions == that.numPartitions && replicationFactor == that.replicationFactor && Objects.equals(inclusionPattern.pattern(), that.inclusionPattern.pattern()) && Objects.equals(exclusionPattern.pattern(), that.exclusionPattern.pattern()) && Objects.equals(otherConfigs, that.otherConfigs);
+        return Objects.equals(name, that.name)
+                && numPartitions == that.numPartitions
+                && replicationFactor == that.replicationFactor
+                && Objects.equals(inclusionPattern.pattern(), that.inclusionPattern.pattern())
+                && Objects.equals(exclusionPattern.pattern(), that.exclusionPattern.pattern())
+                && Objects.equals(otherConfigs, that.otherConfigs);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(name, numPartitions, replicationFactor, inclusionPattern.pattern(), exclusionPattern.pattern(), otherConfigs);
+        return Objects.hash(name, numPartitions, replicationFactor, inclusionPattern.pattern(),
+                exclusionPattern.pattern(), otherConfigs
+        );
     }
 
     @Override
     public String toString() {
-        return "TopicCreationGroup{" + "name='" + name + '\'' + ", inclusionPattern=" + inclusionPattern + ", exclusionPattern=" + exclusionPattern + ", numPartitions=" + numPartitions + ", replicationFactor=" + replicationFactor + ", otherConfigs=" + otherConfigs + '}';
+        return "TopicCreationGroup{" +
+                "name='" + name + '\'' +
+                ", inclusionPattern=" + inclusionPattern +
+                ", exclusionPattern=" + exclusionPattern +
+                ", numPartitions=" + numPartitions +
+                ", replicationFactor=" + replicationFactor +
+                ", otherConfigs=" + otherConfigs +
+                '}';
     }
 }

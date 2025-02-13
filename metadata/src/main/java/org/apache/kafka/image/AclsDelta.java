@@ -24,8 +24,11 @@ import org.apache.kafka.metadata.authorizer.StandardAcl;
 import org.apache.kafka.metadata.authorizer.StandardAclWithId;
 import org.apache.kafka.server.common.MetadataVersion;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 
@@ -35,8 +38,6 @@ import java.util.stream.Collectors;
 public final class AclsDelta {
     private final AclsImage image;
     private final Map<Uuid, Optional<StandardAcl>> changes = new LinkedHashMap<>();
-    private final Set<StandardAcl> deleted = new HashSet<>();
-    private boolean isSnapshotDelta = false;
 
     public AclsDelta(AclsImage image) {
         this.image = image;
@@ -45,30 +46,23 @@ public final class AclsDelta {
     /**
      * Returns a Map of deltas from ACL ID to optional StandardAcl. An empty optional value indicates the ACL
      * is for removal. An optional with a value indicates the ACL is to be added.
+     *
      * @return Map of deltas.
      */
     public Map<Uuid, Optional<StandardAcl>> changes() {
         return changes;
     }
 
-    /**
-     * Return a Set of the ACLs which were deleted in this delta. This is used by the ZK migration components.
-     * @return Set of deleted ACLs
-     */
-    public Set<StandardAcl> deleted() {
-        return deleted;
-    }
-
     void finishSnapshot() {
-        this.isSnapshotDelta = true;
+        for (Entry<Uuid, StandardAcl> entry : image.acls().entrySet()) {
+            if (!changes.containsKey(entry.getKey())) {
+                changes.put(entry.getKey(), Optional.empty());
+            }
+        }
     }
 
     public void handleMetadataVersionChange(MetadataVersion newVersion) {
         // no-op
-    }
-
-    public boolean isSnapshotDelta() {
-        return isSnapshotDelta;
     }
 
     public void replay(AccessControlEntryRecord record) {
@@ -81,12 +75,12 @@ public final class AclsDelta {
      * the removal is stored as an Optional.empty() value in the Map. If the changes Map contains the ACL
      * it means the ACL was recently applied and isn't in the image yet, in which case the ACL can be totally removed
      * from the Map because there is no need to add it then delete it when the changes are applied.
+     *
      * @param record Log metadata record to replay.
      */
     public void replay(RemoveAccessControlEntryRecord record) {
         if (image.acls().containsKey(record.id())) {
             changes.put(record.id(), Optional.empty());
-            deleted.add(image.acls().get(record.id()));
         } else if (changes.containsKey(record.id())) {
             changes.remove(record.id());
             // No need to track a ACL that was added and deleted within the same delta
@@ -97,14 +91,12 @@ public final class AclsDelta {
 
     public AclsImage apply() {
         Map<Uuid, StandardAcl> newAcls = new HashMap<>();
-        if (!isSnapshotDelta) {
-            for (Entry<Uuid, StandardAcl> entry : image.acls().entrySet()) {
-                Optional<StandardAcl> change = changes.get(entry.getKey());
-                if (change == null) {
-                    newAcls.put(entry.getKey(), entry.getValue());
-                } else if (change.isPresent()) {
-                    newAcls.put(entry.getKey(), change.get());
-                }
+        for (Entry<Uuid, StandardAcl> entry : image.acls().entrySet()) {
+            Optional<StandardAcl> change = changes.get(entry.getKey());
+            if (change == null) {
+                newAcls.put(entry.getKey(), entry.getValue());
+            } else if (change.isPresent()) {
+                newAcls.put(entry.getKey(), change.get());
             }
         }
         for (Entry<Uuid, Optional<StandardAcl>> entry : changes.entrySet()) {
@@ -119,6 +111,9 @@ public final class AclsDelta {
 
     @Override
     public String toString() {
-        return "AclsDelta(isSnapshotDelta=" + isSnapshotDelta + ", changes=" + changes.entrySet().stream().map(e -> "" + e.getKey() + "=" + e.getValue()).collect(Collectors.joining(", ")) + ")";
+        return "AclsDelta(" +
+            ", changes=" + changes.entrySet().stream().
+                map(e -> e.getKey() + "=" + e.getValue()).
+                collect(Collectors.joining(", ")) + ")";
     }
 }

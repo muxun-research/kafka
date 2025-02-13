@@ -21,7 +21,11 @@ import org.apache.kafka.image.node.MetadataNode;
 import org.apache.kafka.shell.command.CommandUtils;
 import org.apache.kafka.shell.state.MetadataShellState;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 /**
@@ -31,7 +35,8 @@ public final class GlobVisitor implements Consumer<MetadataShellState> {
     private final String glob;
     private final Consumer<Optional<MetadataNodeInfo>> handler;
 
-    public GlobVisitor(String glob, Consumer<Optional<MetadataNodeInfo>> handler) {
+    public GlobVisitor(String glob,
+                       Consumer<Optional<MetadataNodeInfo>> handler) {
         this.glob = glob;
         this.handler = handler;
     }
@@ -43,10 +48,6 @@ public final class GlobVisitor implements Consumer<MetadataShellState> {
         MetadataNodeInfo(String[] path, MetadataNode node) {
             this.path = path;
             this.node = node;
-        }
-
-        public String[] path() {
-            return path;
         }
 
         public MetadataNode node() {
@@ -67,27 +68,22 @@ public final class GlobVisitor implements Consumer<MetadataShellState> {
 
         @Override
         public int hashCode() {
-            return Objects.hash(path, node);
+            return Objects.hash(Arrays.hashCode(path), node);
         }
 
         @Override
         public boolean equals(Object o) {
-            if (!(o instanceof MetadataNodeInfo))
-                return false;
-            MetadataNodeInfo other = (MetadataNodeInfo) o;
-            if (!Arrays.equals(path, other.path))
-                return false;
-            if (!node.equals(other.node))
-                return false;
-            return true;
+            if (!(o instanceof MetadataNodeInfo other)) return false;
+            if (!Arrays.equals(path, other.path)) return false;
+            return node.equals(other.node);
         }
 
         @Override
         public String toString() {
             StringBuilder bld = new StringBuilder("MetadataNodeInfo(path=");
-            for (int i = 0; i < path.length; i++) {
+            for (String s : path) {
                 bld.append("/");
-                bld.append(path[i]);
+                bld.append(s);
             }
             bld.append(", node=").append(node).append(")");
             return bld.toString();
@@ -96,8 +92,10 @@ public final class GlobVisitor implements Consumer<MetadataShellState> {
 
     @Override
     public void accept(MetadataShellState state) {
-        String fullGlob = glob.startsWith("/") ? glob : state.workingDirectory() + "/" + glob;
-        List<String> globComponents = CommandUtils.stripDotPathComponents(CommandUtils.splitPath(fullGlob));
+        String fullGlob = glob.startsWith("/") ? glob :
+            state.workingDirectory() + "/" + glob;
+        List<String> globComponents =
+            CommandUtils.stripDotPathComponents(CommandUtils.splitPath(fullGlob));
         MetadataNode root = state.root();
         if (root == null) {
             throw new RuntimeException("Invalid null root");
@@ -107,7 +105,12 @@ public final class GlobVisitor implements Consumer<MetadataShellState> {
         }
     }
 
-    private boolean accept(List<String> globComponents, int componentIndex, MetadataNode node, String[] path) {
+    private boolean accept(
+        List<String> globComponents,
+        int componentIndex,
+        MetadataNode node,
+        String[] path
+    ) {
         if (componentIndex >= globComponents.size()) {
             handler.accept(Optional.of(new MetadataNodeInfo(path, node)));
             return true;
@@ -140,7 +143,8 @@ public final class GlobVisitor implements Consumer<MetadataShellState> {
                 newPath[path.length] = nodeName;
                 MetadataNode child = node.child(nodeName);
                 if (child == null) {
-                    throw new RuntimeException("Expected " + nodeName + " to be a valid child of " + node.getClass() + ", but it was not.");
+                    throw new RuntimeException("Expected " + nodeName + " to be a valid child of " +
+                            node.getClass() + ", but it was not.");
                 }
                 if (accept(globComponents, componentIndex + 1, child, newPath)) {
                     matchedAny = true;

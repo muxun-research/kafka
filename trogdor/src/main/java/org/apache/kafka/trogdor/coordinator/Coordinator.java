@@ -17,18 +17,26 @@
 
 package org.apache.kafka.trogdor.coordinator;
 
-import net.sourceforge.argparse4j.ArgumentParsers;
-import net.sourceforge.argparse4j.inf.ArgumentParser;
-import net.sourceforge.argparse4j.inf.ArgumentParserException;
-import net.sourceforge.argparse4j.inf.Namespace;
 import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.common.utils.Scheduler;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.trogdor.common.Node;
 import org.apache.kafka.trogdor.common.Platform;
-import org.apache.kafka.trogdor.rest.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.kafka.trogdor.rest.CoordinatorStatusResponse;
+import org.apache.kafka.trogdor.rest.CreateTaskRequest;
+import org.apache.kafka.trogdor.rest.DestroyTaskRequest;
+import org.apache.kafka.trogdor.rest.JsonRestServer;
+import org.apache.kafka.trogdor.rest.StopTaskRequest;
+import org.apache.kafka.trogdor.rest.TaskRequest;
+import org.apache.kafka.trogdor.rest.TaskState;
+import org.apache.kafka.trogdor.rest.TasksRequest;
+import org.apache.kafka.trogdor.rest.TasksResponse;
+import org.apache.kafka.trogdor.rest.UptimeResponse;
+
+import net.sourceforge.argparse4j.ArgumentParsers;
+import net.sourceforge.argparse4j.inf.ArgumentParser;
+import net.sourceforge.argparse4j.inf.ArgumentParserException;
+import net.sourceforge.argparse4j.inf.Namespace;
 
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -36,11 +44,10 @@ import static net.sourceforge.argparse4j.impl.Arguments.store;
 
 /**
  * The Trogdor coordinator.
- * <p>
- * The coordinator manages the agent processes in the cluster.
+ *
+ * The coordinator manages the agent processes in the cluster. 
  */
 public final class Coordinator {
-    private static final Logger log = LoggerFactory.getLogger(Coordinator.class);
 
     public static final int DEFAULT_PORT = 8889;
 
@@ -63,12 +70,14 @@ public final class Coordinator {
 
     /**
      * Create a new Coordinator.
-     * @param platform   The platform object to use.
-     * @param scheduler  The scheduler to use for this Coordinator.
-     * @param restServer The REST server to use.
-     * @param resource   The AgentRestResource to use.
+     *
+     * @param platform      The platform object to use.
+     * @param scheduler     The scheduler to use for this Coordinator.
+     * @param restServer    The REST server to use.
+     * @param resource      The AgentRestResource to use.
      */
-    public Coordinator(Platform platform, Scheduler scheduler, JsonRestServer restServer, CoordinatorRestResource resource, long firstWorkerId) {
+    public Coordinator(Platform platform, Scheduler scheduler, JsonRestServer restServer,
+                       CoordinatorRestResource resource, long firstWorkerId) {
         this.time = scheduler.time();
         this.startTimeMs = time.milliseconds();
         this.taskManager = new TaskManager(platform, scheduler, firstWorkerId);
@@ -119,9 +128,24 @@ public final class Coordinator {
     }
 
     public static void main(String[] args) throws Exception {
-        ArgumentParser parser = ArgumentParsers.newArgumentParser("trogdor-coordinator").defaultHelp(true).description("The Trogdor fault injection coordinator");
-        parser.addArgument("--coordinator.config", "-c").action(store()).required(true).type(String.class).dest("config").metavar("CONFIG").help("The configuration file to use.");
-        parser.addArgument("--node-name", "-n").action(store()).required(true).type(String.class).dest("node_name").metavar("NODE_NAME").help("The name of this node.");
+        ArgumentParser parser = ArgumentParsers
+            .newArgumentParser("trogdor-coordinator")
+            .defaultHelp(true)
+            .description("The Trogdor fault injection coordinator");
+        parser.addArgument("--coordinator.config", "-c")
+            .action(store())
+            .required(true)
+            .type(String.class)
+            .dest("config")
+            .metavar("CONFIG")
+            .help("The configuration file to use.");
+        parser.addArgument("--node-name", "-n")
+            .action(store())
+            .required(true)
+            .type(String.class)
+            .dest("node_name")
+            .metavar("NODE_NAME")
+            .help("The name of this node.");
         Namespace res = null;
         try {
             res = parser.parseArgs(args);
@@ -138,18 +162,20 @@ public final class Coordinator {
         String nodeName = res.getString("node_name");
 
         Platform platform = Platform.Config.parse(nodeName, configPath);
-        JsonRestServer restServer = new JsonRestServer(Node.Util.getTrogdorCoordinatorPort(platform.curNode()));
+        JsonRestServer restServer = new JsonRestServer(
+            Node.Util.getTrogdorCoordinatorPort(platform.curNode()));
         CoordinatorRestResource resource = new CoordinatorRestResource();
-        log.info("Starting coordinator process.");
-        final Coordinator coordinator = new Coordinator(platform, Scheduler.SYSTEM, restServer, resource, ThreadLocalRandom.current().nextLong(0, Long.MAX_VALUE / 2));
+        System.out.println("Starting coordinator process.");
+        final Coordinator coordinator = new Coordinator(platform, Scheduler.SYSTEM,
+            restServer, resource, ThreadLocalRandom.current().nextLong(0, Long.MAX_VALUE / 2));
         restServer.start(resource);
         Exit.addShutdownHook("coordinator-shutdown-hook", () -> {
-            log.warn("Running coordinator shutdown hook.");
+            System.out.println("Running coordinator shutdown hook.");
             try {
                 coordinator.beginShutdown(false);
                 coordinator.waitForShutdown();
             } catch (Exception e) {
-                log.error("Got exception while running coordinator shutdown hook.", e);
+                System.out.println("Got exception while running coordinator shutdown hook. " + e);
             }
         });
         coordinator.waitForShutdown();

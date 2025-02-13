@@ -27,25 +27,44 @@ import org.apache.kafka.common.internals.FatalExitError;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
 
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 
 /**
  * An inter-broker send thread that utilizes a non-blocking network client.
  */
 public abstract class InterBrokerSendThread extends ShutdownableThread {
 
-    protected volatile KafkaClient networkClient;
+    protected final KafkaClient networkClient;
 
     private final int requestTimeoutMs;
     private final Time time;
     private final UnsentRequests unsentRequests;
 
-    public InterBrokerSendThread(String name, KafkaClient networkClient, int requestTimeoutMs, Time time) {
+    protected InterBrokerSendThread(
+        String name,
+        KafkaClient networkClient,
+        int requestTimeoutMs,
+        Time time
+    ) {
         this(name, networkClient, requestTimeoutMs, time, true);
     }
 
-    public InterBrokerSendThread(String name, KafkaClient networkClient, int requestTimeoutMs, Time time, boolean isInterruptible) {
+    protected InterBrokerSendThread(
+        String name,
+        KafkaClient networkClient,
+        int requestTimeoutMs,
+        Time time,
+        boolean isInterruptible
+    ) {
         super(name, isInterruptible);
         this.networkClient = networkClient;
         this.requestTimeoutMs = requestTimeoutMs;
@@ -68,7 +87,19 @@ public abstract class InterBrokerSendThread extends ShutdownableThread {
     }
 
     private void drainGeneratedRequests() {
-        generateRequests().forEach(request -> unsentRequests.put(request.destination, networkClient.newClientRequest(request.destination.idString(), request.request, request.creationTimeMs, true, requestTimeoutMs, request.handler)));
+        generateRequests().forEach(request ->
+            unsentRequests.put(
+                request.destination(),
+                networkClient.newClientRequest(
+                    request.destination().idString(),
+                    request.request(),
+                    request.creationTimeMs(),
+                    true,
+                    requestTimeoutMs,
+                    request.handler()
+                )
+            )
+        );
     }
 
     protected void pollOnce(long maxTimeoutMs) {
@@ -155,9 +186,25 @@ public abstract class InterBrokerSendThread extends ShutdownableThread {
         }
     }
 
-    private static void completeWithDisconnect(ClientRequest request, long now, AuthenticationException authenticationException) {
+    private static void completeWithDisconnect(
+        ClientRequest request,
+        long now,
+        AuthenticationException authenticationException
+    ) {
         final RequestCompletionHandler handler = request.callback();
-        handler.onComplete(new ClientResponse(request.makeHeader(request.requestBuilder().latestAllowedVersion()), handler, request.destination(), now /* createdTimeMs */, now /* receivedTimeMs */, true /* disconnected */, null /* versionMismatch */, authenticationException, null));
+        handler.onComplete(
+            new ClientResponse(
+                request.makeHeader(request.requestBuilder().latestAllowedVersion()),
+                handler,
+                request.destination(),
+                now /* createdTimeMs */,
+                now /* receivedTimeMs */,
+                true /* disconnected */,
+                null /* versionMismatch */,
+                authenticationException,
+                null
+            )
+        );
     }
 
     public void wakeup() {

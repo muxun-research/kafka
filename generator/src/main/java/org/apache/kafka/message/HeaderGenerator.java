@@ -42,51 +42,51 @@ public final class HeaderGenerator {
         " * limitations under the License.",
         " */",
         "",
-			"// THIS CODE IS AUTOMATICALLY GENERATED.  DO NOT EDIT.",
-			""
-	};
+        "// THIS CODE IS AUTOMATICALLY GENERATED.  DO NOT EDIT.",
+        ""
+    };
 
 
-	private final CodeBuffer buffer;
+    private final CodeBuffer buffer;
 
-	private final TreeSet<String> imports;
-	private final String packageName;
+    private final TreeSet<String> imports;
+    private final String packageName;
 
-	private final TreeSet<String> staticImports;
+    private final TreeSet<String> staticImports;
 
-	public HeaderGenerator(String packageName) {
-		this.buffer = new CodeBuffer();
-		this.imports = new TreeSet<>();
-		this.packageName = packageName;
-		this.staticImports = new TreeSet<>();
-	}
+    public HeaderGenerator(String packageName) {
+        this.buffer = new CodeBuffer();
+        this.imports = new TreeSet<>();
+        this.packageName = packageName;
+        this.staticImports = new TreeSet<>();
+    }
 
-	public void addImport(String newImport) {
-		this.imports.add(newImport);
-	}
+    public void addImport(String newImport) {
+        this.imports.add(newImport);
+    }
 
-	public void addStaticImport(String newImport) {
-		this.staticImports.add(newImport);
-	}
+    public void addStaticImport(String newImport) {
+        this.staticImports.add(newImport);
+    }
 
-	public void generate() {
-		Objects.requireNonNull(packageName);
-		for (int i = 0; i < HEADER.length; i++) {
-			buffer.printf("%s%n", HEADER[i]);
-		}
-		buffer.printf("package %s;%n", packageName);
-		buffer.printf("%n");
-		for (String newImport : imports) {
-			buffer.printf("import %s;%n", newImport);
-		}
-		buffer.printf("%n");
-		if (!staticImports.isEmpty()) {
-			for (String newImport : staticImports) {
-				buffer.printf("import static %s;%n", newImport);
-			}
-			buffer.printf("%n");
-		}
-	}
+    public void generate() {
+        Objects.requireNonNull(packageName);
+        for (String header : HEADER) {
+            buffer.printf("%s%n", header);
+        }
+        buffer.printf("package %s;%n", packageName);
+        buffer.printf("%n");
+        for (String newImport : imports) {
+            buffer.printf("import %s;%n", newImport);
+        }
+        buffer.printf("%n");
+        if (!staticImports.isEmpty()) {
+            for (String newImport : staticImports) {
+                buffer.printf("import static %s;%n", newImport);
+            }
+            buffer.printf("%n");
+        }
+    }
 
     public CodeBuffer buffer() {
         return buffer;

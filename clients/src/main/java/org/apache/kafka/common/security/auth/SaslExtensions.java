@@ -16,12 +16,16 @@
  */
 package org.apache.kafka.common.security.auth;
 
+import java.util.Collections;
+import java.util.Map;
+import java.util.Set;
+import java.util.StringJoiner;
+
 import javax.security.auth.Subject;
-import java.util.*;
 
 /**
  * A simple immutable value object class holding customizable SASL extensions.
- * <p>
+ *
  * <p/>
  *
  * <b>Note on object identity and equality</b>: <code>SaslExtensions</code> <em>intentionally</em>
@@ -29,9 +33,9 @@ import java.util.*;
  * respective {@link Object#equals(Object)} and {@link Object#hashCode()} implementations. In so
  * doing, it provides equality <em>only</em> via reference identity and will not base equality on
  * the underlying values of its {@link #extensionsMap extensions map}.
- * <p>
+ *
  * <p/>
- * <p>
+ *
  * The reason for this approach to equality is based off of the manner in which
  * credentials are stored in a {@link Subject}. <code>SaslExtensions</code> are added to and
  * removed from a {@link Subject} via its {@link Subject#getPublicCredentials() public credentials}.
@@ -39,14 +43,14 @@ import java.util.*;
  * therefore becomes a concern. With shallow, reference-based equality, distinct
  * <code>SaslExtensions</code> instances with the same map values can be considered unique. This is
  * critical to operations like token refresh.
- * <p>
+ *
  * See <a href="https://issues.apache.org/jira/browse/KAFKA-14062">KAFKA-14062</a> for more detail.
  */
 public class SaslExtensions {
     private final Map<String, String> extensionsMap;
 
     public SaslExtensions(Map<String, String> extensionsMap) {
-        this.extensionsMap = Collections.unmodifiableMap(new HashMap<>(extensionsMap));
+        this.extensionsMap = Map.copyOf(extensionsMap);
     }
 
     /**
@@ -60,9 +64,9 @@ public class SaslExtensions {
      * Creates an "empty" instance indicating no SASL extensions. <em>Do not cache the result of
      * this method call</em> for use by multiple {@link Subject}s as the references need to be
      * unique.
-     * <p>
+     *
      * <p/>
-     * <p>
+     *
      * See the class-level documentation for details.
      * @return Unique, but empty, <code>SaslExtensions</code> instance
      */
@@ -76,10 +80,11 @@ public class SaslExtensions {
     /**
      * Implements equals using the reference comparison implementation from
      * {@link Object#equals(Object)}.
-     * <p>
+     *
      * <p/>
-     * <p>
+     *
      * See the class-level documentation for details.
+     *
      * @param o Other object to compare
      * @return True if <code>o == this</code>
      */
@@ -91,10 +96,11 @@ public class SaslExtensions {
     /**
      * Implements <code>hashCode</code> using the native implementation from
      * {@link Object#hashCode()}.
-     * <p>
+     *
      * <p/>
-     * <p>
+     *
      * See the class-level documentation for details.
+     *
      * @return Hash code of instance
      */
     @Override
@@ -104,7 +110,9 @@ public class SaslExtensions {
 
     @Override
     public String toString() {
-        return new StringJoiner(", ", SaslExtensions.class.getSimpleName() + "[", "]").add("extensionsMap=" + extensionsMap).toString();
+        return new StringJoiner(", ", SaslExtensions.class.getSimpleName() + "[", "]")
+            .add("extensionsMap=" + extensionsMap)
+            .toString();
     }
 
 }

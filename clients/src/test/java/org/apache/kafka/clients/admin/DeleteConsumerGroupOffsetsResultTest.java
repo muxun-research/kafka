@@ -22,6 +22,7 @@ import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.apache.kafka.common.internals.KafkaFutureImpl;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.test.TestUtils;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -31,7 +32,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class DeleteConsumerGroupOffsetsResultTest {
 
@@ -58,8 +61,9 @@ public class DeleteConsumerGroupOffsetsResultTest {
     @Test
     public void testTopLevelErrorConstructor() throws InterruptedException {
         partitionFutures.completeExceptionally(Errors.GROUP_AUTHORIZATION_FAILED.exception());
-        DeleteConsumerGroupOffsetsResult topLevelErrorResult = new DeleteConsumerGroupOffsetsResult(partitionFutures, partitions);
-        TestUtils.assertFutureError(topLevelErrorResult.all(), GroupAuthorizationException.class);
+        DeleteConsumerGroupOffsetsResult topLevelErrorResult =
+            new DeleteConsumerGroupOffsetsResult(partitionFutures, partitions);
+        TestUtils.assertFutureThrows(topLevelErrorResult.all(), GroupAuthorizationException.class);
     }
 
     @Test
@@ -72,11 +76,12 @@ public class DeleteConsumerGroupOffsetsResultTest {
         errorsMap.remove(tpOne);
         partitionFutures.complete(errorsMap);
         assertFalse(partitionFutures.isCompletedExceptionally());
-        DeleteConsumerGroupOffsetsResult missingPartitionResult = new DeleteConsumerGroupOffsetsResult(partitionFutures, partitions);
+        DeleteConsumerGroupOffsetsResult missingPartitionResult =
+            new DeleteConsumerGroupOffsetsResult(partitionFutures, partitions);
 
-        TestUtils.assertFutureError(missingPartitionResult.all(), IllegalArgumentException.class);
+        TestUtils.assertFutureThrows(missingPartitionResult.all(), IllegalArgumentException.class);
         assertNull(missingPartitionResult.partitionResult(tpZero).get());
-        TestUtils.assertFutureError(missingPartitionResult.partitionResult(tpOne), IllegalArgumentException.class);
+        TestUtils.assertFutureThrows(missingPartitionResult.partitionResult(tpOne), IllegalArgumentException.class);
     }
 
     @Test
@@ -90,7 +95,8 @@ public class DeleteConsumerGroupOffsetsResultTest {
         Map<TopicPartition, Errors> errorsMap = new HashMap<>();
         errorsMap.put(tpZero, Errors.NONE);
         errorsMap.put(tpOne, Errors.NONE);
-        DeleteConsumerGroupOffsetsResult noErrorResult = new DeleteConsumerGroupOffsetsResult(partitionFutures, partitions);
+        DeleteConsumerGroupOffsetsResult noErrorResult =
+            new DeleteConsumerGroupOffsetsResult(partitionFutures, partitions);
         partitionFutures.complete(errorsMap);
 
         assertNull(noErrorResult.all().get());
@@ -101,11 +107,12 @@ public class DeleteConsumerGroupOffsetsResultTest {
     private DeleteConsumerGroupOffsetsResult createAndVerifyPartitionLevelError() throws InterruptedException, ExecutionException {
         partitionFutures.complete(errorsMap);
         assertFalse(partitionFutures.isCompletedExceptionally());
-        DeleteConsumerGroupOffsetsResult partitionLevelErrorResult = new DeleteConsumerGroupOffsetsResult(partitionFutures, partitions);
+        DeleteConsumerGroupOffsetsResult partitionLevelErrorResult =
+            new DeleteConsumerGroupOffsetsResult(partitionFutures, partitions);
 
-        TestUtils.assertFutureError(partitionLevelErrorResult.all(), UnknownTopicOrPartitionException.class);
+        TestUtils.assertFutureThrows(partitionLevelErrorResult.all(), UnknownTopicOrPartitionException.class);
         assertNull(partitionLevelErrorResult.partitionResult(tpZero).get());
-        TestUtils.assertFutureError(partitionLevelErrorResult.partitionResult(tpOne), UnknownTopicOrPartitionException.class);
+        TestUtils.assertFutureThrows(partitionLevelErrorResult.partitionResult(tpOne), UnknownTopicOrPartitionException.class);
         return partitionLevelErrorResult;
     }
 }

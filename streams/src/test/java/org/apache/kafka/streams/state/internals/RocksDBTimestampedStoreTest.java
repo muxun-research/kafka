@@ -21,11 +21,15 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.common.utils.LogCaptureAppender;
 import org.apache.kafka.streams.KeyValue;
-import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.state.KeyValueIterator;
+
 import org.hamcrest.core.IsNull;
-import org.junit.Test;
-import org.rocksdb.*;
+import org.junit.jupiter.api.Test;
+import org.rocksdb.ColumnFamilyDescriptor;
+import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.ColumnFamilyOptions;
+import org.rocksdb.DBOptions;
+import org.rocksdb.RocksDB;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -36,54 +40,54 @@ import static java.util.Arrays.asList;
 import static org.hamcrest.CoreMatchers.hasItem;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 public class RocksDBTimestampedStoreTest extends RocksDBStoreTest {
 
-	private final Serializer<String> stringSerializer = new StringSerializer();
+    private final Serializer<String> stringSerializer = new StringSerializer();
 
-	RocksDBStore getRocksDBStore() {
-		return new RocksDBTimestampedStore(DB_NAME, METRICS_SCOPE);
-	}
+    RocksDBStore getRocksDBStore() {
+        return new RocksDBTimestampedStore(DB_NAME, METRICS_SCOPE);
+    }
 
-	@Test
-	public void shouldOpenNewStoreInRegularMode() {
-		try (final LogCaptureAppender appender = LogCaptureAppender.createAndRegister(RocksDBTimestampedStore.class)) {
-			rocksDBStore.init((StateStoreContext) context, rocksDBStore);
+    @Test
+    public void shouldOpenNewStoreInRegularMode() {
+        try (final LogCaptureAppender appender = LogCaptureAppender.createAndRegister(RocksDBTimestampedStore.class)) {
+            rocksDBStore.init(context, rocksDBStore);
 
-			assertThat(appender.getMessages(), hasItem("Opening store " + DB_NAME + " in regular mode"));
-		}
+            assertThat(appender.getMessages(), hasItem("Opening store " + DB_NAME + " in regular mode"));
+        }
 
-		try (final KeyValueIterator<Bytes, byte[]> iterator = rocksDBStore.all()) {
-			assertThat(iterator.hasNext(), is(false));
-		}
-	}
+        try (final KeyValueIterator<Bytes, byte[]> iterator = rocksDBStore.all()) {
+            assertThat(iterator.hasNext(), is(false));
+        }
+    }
 
     @Test
     public void shouldOpenExistingStoreInRegularMode() throws Exception {
-		// prepare store
-		rocksDBStore.init((StateStoreContext) context, rocksDBStore);
-		rocksDBStore.put(new Bytes("key".getBytes()), "timestamped".getBytes());
-		rocksDBStore.close();
+        // prepare store
+        rocksDBStore.init(context, rocksDBStore);
+        rocksDBStore.put(new Bytes("key".getBytes()), "timestamped".getBytes());
+        rocksDBStore.close();
 
-		// re-open store
-		try (final LogCaptureAppender appender = LogCaptureAppender.createAndRegister(RocksDBTimestampedStore.class)) {
-			rocksDBStore.init((StateStoreContext) context, rocksDBStore);
+        // re-open store
+        try (final LogCaptureAppender appender = LogCaptureAppender.createAndRegister(RocksDBTimestampedStore.class)) {
+            rocksDBStore.init(context, rocksDBStore);
 
-			assertThat(appender.getMessages(), hasItem("Opening store " + DB_NAME + " in regular mode"));
-		} finally {
-			rocksDBStore.close();
-		}
+            assertThat(appender.getMessages(), hasItem("Opening store " + DB_NAME + " in regular mode"));
+        } finally {
+            rocksDBStore.close();
+        }
 
-		// verify store
-		final DBOptions dbOptions = new DBOptions();
-		final ColumnFamilyOptions columnFamilyOptions = new ColumnFamilyOptions();
+        // verify store
+        final DBOptions dbOptions = new DBOptions();
+        final ColumnFamilyOptions columnFamilyOptions = new ColumnFamilyOptions();
 
-		final List<ColumnFamilyDescriptor> columnFamilyDescriptors = asList(
-				new ColumnFamilyDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY, columnFamilyOptions),
-				new ColumnFamilyDescriptor("keyValueWithTimestamp".getBytes(StandardCharsets.UTF_8), columnFamilyOptions));
-		final List<ColumnFamilyHandle> columnFamilies = new ArrayList<>(columnFamilyDescriptors.size());
+        final List<ColumnFamilyDescriptor> columnFamilyDescriptors = asList(
+            new ColumnFamilyDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY, columnFamilyOptions),
+            new ColumnFamilyDescriptor("keyValueWithTimestamp".getBytes(StandardCharsets.UTF_8), columnFamilyOptions));
+        final List<ColumnFamilyHandle> columnFamilies = new ArrayList<>(columnFamilyDescriptors.size());
 
         RocksDB db = null;
         ColumnFamilyHandle noTimestampColumnFamily = null, withTimestampColumnFamily = null;
@@ -119,20 +123,20 @@ public class RocksDBTimestampedStoreTest extends RocksDBStoreTest {
 
     @Test
     public void shouldMigrateDataFromDefaultToTimestampColumnFamily() throws Exception {
-		prepareOldStore();
+        prepareOldStore();
 
-		try (final LogCaptureAppender appender = LogCaptureAppender.createAndRegister(RocksDBTimestampedStore.class)) {
-			rocksDBStore.init((StateStoreContext) context, rocksDBStore);
+        try (final LogCaptureAppender appender = LogCaptureAppender.createAndRegister(RocksDBTimestampedStore.class)) {
+            rocksDBStore.init(context, rocksDBStore);
 
-			assertThat(appender.getMessages(), hasItem("Opening store " + DB_NAME + " in upgrade mode"));
-		}
+            assertThat(appender.getMessages(), hasItem("Opening store " + DB_NAME + " in upgrade mode"));
+        }
 
-		// approx: 7 entries on old CF, 0 in new CF
-		assertThat(rocksDBStore.approximateNumEntries(), is(7L));
+        // approx: 7 entries on old CF, 0 in new CF
+        assertThat(rocksDBStore.approximateNumEntries(), is(7L));
 
-		// get()
+        // get()
 
-		// should be no-op on both CF
+        // should be no-op on both CF
         assertThat(rocksDBStore.get(new Bytes("unknown".getBytes())), new IsNull<>());
         // approx: 7 entries on old CF, 0 in new CF
         assertThat(rocksDBStore.approximateNumEntries(), is(7L));
@@ -262,97 +266,97 @@ public class RocksDBTimestampedStoreTest extends RocksDBStoreTest {
                 final KeyValue<Bytes, byte[]> keyValue = it.next();
                 assertArrayEquals("key4".getBytes(), keyValue.key.get());
                 // unknown timestamp == -1 plus value == 4444
-				assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '4', '4', '4', '4'}, keyValue.value);
-			}
-			{
-				final KeyValue<Bytes, byte[]> keyValue = it.next();
-				assertArrayEquals("key5".getBytes(), keyValue.key.get());
-				// unknown timestamp == -1 plus value == 55555
-				assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '5', '5', '5', '5', '5'}, keyValue.value);
-			}
-			assertFalse(it.hasNext());
-		}
+                assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '4', '4', '4', '4'}, keyValue.value);
+            }
+            {
+                final KeyValue<Bytes, byte[]> keyValue = it.next();
+                assertArrayEquals("key5".getBytes(), keyValue.key.get());
+                // unknown timestamp == -1 plus value == 55555
+                assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '5', '5', '5', '5', '5'}, keyValue.value);
+            }
+            assertFalse(it.hasNext());
+        }
 
-		try (final KeyValueIterator<Bytes, byte[]> itAll = rocksDBStore.reverseAll()) {
-			{
-				final KeyValue<Bytes, byte[]> keyValue = itAll.next();
-				assertArrayEquals("key8".getBytes(), keyValue.key.get());
-				assertArrayEquals(new byte[]{'t', 'i', 'm', 'e', 's', 't', 'a', 'm', 'p', '+', '8', '8', '8', '8', '8', '8', '8', '8'}, keyValue.value);
-			}
-			{
-				final KeyValue<Bytes, byte[]> keyValue = itAll.next();
-				assertArrayEquals("key7".getBytes(), keyValue.key.get());
-				// unknown timestamp == -1 plus value == 7777777
-				assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '7', '7', '7', '7', '7', '7', '7'}, keyValue.value);
-			}
-			{
-				final KeyValue<Bytes, byte[]> keyValue = itAll.next();
-				assertArrayEquals("key5".getBytes(), keyValue.key.get());
-				// unknown timestamp == -1 plus value == 55555
-				assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '5', '5', '5', '5', '5'}, keyValue.value);
-			}
-			{
-				final KeyValue<Bytes, byte[]> keyValue = itAll.next();
-				assertArrayEquals("key4".getBytes(), keyValue.key.get());
-				// unknown timestamp == -1 plus value == 4444
-				assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '4', '4', '4', '4'}, keyValue.value);
-			}
-			{
-				final KeyValue<Bytes, byte[]> keyValue = itAll.next();
-				assertArrayEquals("key2".getBytes(), keyValue.key.get());
-				assertArrayEquals(new byte[]{'t', 'i', 'm', 'e', 's', 't', 'a', 'm', 'p', '+', '2', '2'}, keyValue.value);
-			}
-			{
-				final KeyValue<Bytes, byte[]> keyValue = itAll.next();
-				assertArrayEquals("key11".getBytes(), keyValue.key.get());
-				assertArrayEquals(new byte[]{'t', 'i', 'm', 'e', 's', 't', 'a', 'm', 'p', '+', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'}, keyValue.value);
-			}
-			{
-				final KeyValue<Bytes, byte[]> keyValue = itAll.next();
-				assertArrayEquals("key1".getBytes(), keyValue.key.get());
-				// unknown timestamp == -1 plus value == 1
-				assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '1'}, keyValue.value);
-			}
-			assertFalse(itAll.hasNext());
-		}
+        try (final KeyValueIterator<Bytes, byte[]> itAll = rocksDBStore.reverseAll()) {
+            {
+                final KeyValue<Bytes, byte[]> keyValue = itAll.next();
+                assertArrayEquals("key8".getBytes(), keyValue.key.get());
+                assertArrayEquals(new byte[]{'t', 'i', 'm', 'e', 's', 't', 'a', 'm', 'p', '+', '8', '8', '8', '8', '8', '8', '8', '8'}, keyValue.value);
+            }
+            {
+                final KeyValue<Bytes, byte[]> keyValue = itAll.next();
+                assertArrayEquals("key7".getBytes(), keyValue.key.get());
+                // unknown timestamp == -1 plus value == 7777777
+                assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '7', '7', '7', '7', '7', '7', '7'}, keyValue.value);
+            }
+            {
+                final KeyValue<Bytes, byte[]> keyValue = itAll.next();
+                assertArrayEquals("key5".getBytes(), keyValue.key.get());
+                // unknown timestamp == -1 plus value == 55555
+                assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '5', '5', '5', '5', '5'}, keyValue.value);
+            }
+            {
+                final KeyValue<Bytes, byte[]> keyValue = itAll.next();
+                assertArrayEquals("key4".getBytes(), keyValue.key.get());
+                // unknown timestamp == -1 plus value == 4444
+                assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '4', '4', '4', '4'}, keyValue.value);
+            }
+            {
+                final KeyValue<Bytes, byte[]> keyValue = itAll.next();
+                assertArrayEquals("key2".getBytes(), keyValue.key.get());
+                assertArrayEquals(new byte[]{'t', 'i', 'm', 'e', 's', 't', 'a', 'm', 'p', '+', '2', '2'}, keyValue.value);
+            }
+            {
+                final KeyValue<Bytes, byte[]> keyValue = itAll.next();
+                assertArrayEquals("key11".getBytes(), keyValue.key.get());
+                assertArrayEquals(new byte[]{'t', 'i', 'm', 'e', 's', 't', 'a', 'm', 'p', '+', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'}, keyValue.value);
+            }
+            {
+                final KeyValue<Bytes, byte[]> keyValue = itAll.next();
+                assertArrayEquals("key1".getBytes(), keyValue.key.get());
+                // unknown timestamp == -1 plus value == 1
+                assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '1'}, keyValue.value);
+            }
+            assertFalse(itAll.hasNext());
+        }
 
-		try (final KeyValueIterator<Bytes, byte[]> it =
-					 rocksDBStore.reverseRange(new Bytes("key2".getBytes()), new Bytes("key5".getBytes()))) {
-			{
-				final KeyValue<Bytes, byte[]> keyValue = it.next();
-				assertArrayEquals("key5".getBytes(), keyValue.key.get());
-				// unknown timestamp == -1 plus value == 55555
-				assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '5', '5', '5', '5', '5'}, keyValue.value);
-			}
-			{
-				final KeyValue<Bytes, byte[]> keyValue = it.next();
-				assertArrayEquals("key4".getBytes(), keyValue.key.get());
-				// unknown timestamp == -1 plus value == 4444
-				assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '4', '4', '4', '4'}, keyValue.value);
-			}
-			{
-				final KeyValue<Bytes, byte[]> keyValue = it.next();
-				assertArrayEquals("key2".getBytes(), keyValue.key.get());
-				assertArrayEquals(new byte[]{'t', 'i', 'm', 'e', 's', 't', 'a', 'm', 'p', '+', '2', '2'}, keyValue.value);
-			}
-			assertFalse(it.hasNext());
-		}
+        try (final KeyValueIterator<Bytes, byte[]> it =
+                 rocksDBStore.reverseRange(new Bytes("key2".getBytes()), new Bytes("key5".getBytes()))) {
+            {
+                final KeyValue<Bytes, byte[]> keyValue = it.next();
+                assertArrayEquals("key5".getBytes(), keyValue.key.get());
+                // unknown timestamp == -1 plus value == 55555
+                assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '5', '5', '5', '5', '5'}, keyValue.value);
+            }
+            {
+                final KeyValue<Bytes, byte[]> keyValue = it.next();
+                assertArrayEquals("key4".getBytes(), keyValue.key.get());
+                // unknown timestamp == -1 plus value == 4444
+                assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '4', '4', '4', '4'}, keyValue.value);
+            }
+            {
+                final KeyValue<Bytes, byte[]> keyValue = it.next();
+                assertArrayEquals("key2".getBytes(), keyValue.key.get());
+                assertArrayEquals(new byte[]{'t', 'i', 'm', 'e', 's', 't', 'a', 'm', 'p', '+', '2', '2'}, keyValue.value);
+            }
+            assertFalse(it.hasNext());
+        }
 
-		try (final KeyValueIterator<Bytes, byte[]> it = rocksDBStore.prefixScan("key1", stringSerializer)) {
-			{
-				final KeyValue<Bytes, byte[]> keyValue = it.next();
-				assertArrayEquals("key1".getBytes(), keyValue.key.get());
-				// unknown timestamp == -1 plus value == 1
-				assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '1'}, keyValue.value);
-			}
-			{
-				final KeyValue<Bytes, byte[]> keyValue = it.next();
-				assertArrayEquals("key11".getBytes(), keyValue.key.get());
-				assertArrayEquals(new byte[]{'t', 'i', 'm', 'e', 's', 't', 'a', 'm', 'p', '+', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'}, keyValue.value);
-			}
-			assertFalse(it.hasNext());
-		}
-	}
+        try (final KeyValueIterator<Bytes, byte[]> it = rocksDBStore.prefixScan("key1", stringSerializer)) {
+            {
+                final KeyValue<Bytes, byte[]> keyValue = it.next();
+                assertArrayEquals("key1".getBytes(), keyValue.key.get());
+                // unknown timestamp == -1 plus value == 1
+                assertArrayEquals(new byte[]{-1, -1, -1, -1, -1, -1, -1, -1, '1'}, keyValue.value);
+            }
+            {
+                final KeyValue<Bytes, byte[]> keyValue = it.next();
+                assertArrayEquals("key11".getBytes(), keyValue.key.get());
+                assertArrayEquals(new byte[]{'t', 'i', 'm', 'e', 's', 't', 'a', 'm', 'p', '+', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1'}, keyValue.value);
+            }
+            assertFalse(it.hasNext());
+        }
+    }
 
     private void verifyOldAndNewColumnFamily() throws Exception {
         final DBOptions dbOptions = new DBOptions();
@@ -409,33 +413,33 @@ public class RocksDBTimestampedStoreTest extends RocksDBStoreTest {
             if (withTimestampColumnFamily != null) {
                 withTimestampColumnFamily.close();
             }
-			if (db != null) {
-				db.close();
-			}
-			if (errorOccurred) {
-				dbOptions.close();
-				columnFamilyOptions.close();
-			}
-		}
+            if (db != null) {
+                db.close();
+            }
+            if (errorOccurred) {
+                dbOptions.close();
+                columnFamilyOptions.close();
+            }
+        }
 
-		// check that still in upgrade mode
-		try (LogCaptureAppender appender = LogCaptureAppender.createAndRegister(RocksDBTimestampedStore.class)) {
-			rocksDBStore.init((StateStoreContext) context, rocksDBStore);
+        // check that still in upgrade mode
+        try (LogCaptureAppender appender = LogCaptureAppender.createAndRegister(RocksDBTimestampedStore.class)) {
+            rocksDBStore.init(context, rocksDBStore);
 
-			assertThat(appender.getMessages(), hasItem("Opening store " + DB_NAME + " in upgrade mode"));
-		} finally {
-			rocksDBStore.close();
-		}
+            assertThat(appender.getMessages(), hasItem("Opening store " + DB_NAME + " in upgrade mode"));
+        } finally {
+            rocksDBStore.close();
+        }
 
-		// clear old CF
-		columnFamilies.clear();
-		db = null;
-		noTimestampColumnFamily = null;
-		try {
-			db = RocksDB.open(
-					dbOptions,
-					new File(new File(context.stateDir(), "rocksdb"), DB_NAME).getAbsolutePath(),
-					columnFamilyDescriptors,
+        // clear old CF
+        columnFamilies.clear();
+        db = null;
+        noTimestampColumnFamily = null;
+        try {
+            db = RocksDB.open(
+                dbOptions,
+                new File(new File(context.stateDir(), "rocksdb"), DB_NAME).getAbsolutePath(),
+                columnFamilyDescriptors,
                 columnFamilies);
 
             noTimestampColumnFamily = columnFamilies.get(0);
@@ -443,27 +447,27 @@ public class RocksDBTimestampedStoreTest extends RocksDBStoreTest {
         } finally {
             // Order of closing must follow: ColumnFamilyHandle > RocksDB > DBOptions > ColumnFamilyOptions
             if (noTimestampColumnFamily != null) {
-				noTimestampColumnFamily.close();
-			}
-			if (db != null) {
-				db.close();
-			}
-			dbOptions.close();
-			columnFamilyOptions.close();
-		}
+                noTimestampColumnFamily.close();
+            }
+            if (db != null) {
+                db.close();
+            }
+            dbOptions.close();
+            columnFamilyOptions.close();
+        }
 
-		// check that still in regular mode
-		try (LogCaptureAppender appender = LogCaptureAppender.createAndRegister(RocksDBTimestampedStore.class)) {
-			rocksDBStore.init((StateStoreContext) context, rocksDBStore);
+        // check that still in regular mode
+        try (LogCaptureAppender appender = LogCaptureAppender.createAndRegister(RocksDBTimestampedStore.class)) {
+            rocksDBStore.init(context, rocksDBStore);
 
-			assertThat(appender.getMessages(), hasItem("Opening store " + DB_NAME + " in regular mode"));
-		}
-	}
+            assertThat(appender.getMessages(), hasItem("Opening store " + DB_NAME + " in regular mode"));
+        }
+    }
 
     private void prepareOldStore() {
-		final RocksDBStore keyValueStore = new RocksDBStore(DB_NAME, METRICS_SCOPE);
+        final RocksDBStore keyValueStore = new RocksDBStore(DB_NAME, METRICS_SCOPE);
         try {
-			keyValueStore.init((StateStoreContext) context, keyValueStore);
+            keyValueStore.init(context, keyValueStore);
 
             keyValueStore.put(new Bytes("key1".getBytes()), "1".getBytes());
             keyValueStore.put(new Bytes("key2".getBytes()), "22".getBytes());

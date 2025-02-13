@@ -17,12 +17,14 @@
 
 package org.apache.kafka.controller.metrics;
 
-import com.yammer.metrics.core.MetricsRegistry;
+import org.apache.kafka.common.DirectoryId;
 import org.apache.kafka.common.Uuid;
 import org.apache.kafka.image.TopicImage;
 import org.apache.kafka.image.TopicsImage;
 import org.apache.kafka.metadata.LeaderRecoveryState;
 import org.apache.kafka.metadata.PartitionRegistration;
+
+import com.yammer.metrics.core.MetricsRegistry;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -32,7 +34,11 @@ import java.util.TreeSet;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class ControllerMetricsTestUtils {
-    public static void assertMetricsForTypeEqual(MetricsRegistry registry, String expectedPrefix, Set<String> expected) {
+    public static void assertMetricsForTypeEqual(
+        MetricsRegistry registry,
+        String expectedPrefix,
+        Set<String> expected
+    ) {
         Set<String> actual = new TreeSet<>();
         registry.allMetrics().forEach((name, __) -> {
             StringBuilder bld = new StringBuilder();
@@ -47,10 +53,14 @@ public class ControllerMetricsTestUtils {
     }
 
     enum FakePartitionRegistrationType {
-        NORMAL, NON_PREFERRED_LEADER, OFFLINE
+        NORMAL,
+        NON_PREFERRED_LEADER,
+        OFFLINE
     }
 
-    public static PartitionRegistration fakePartitionRegistration(FakePartitionRegistrationType type) {
+    public static PartitionRegistration fakePartitionRegistration(
+        FakePartitionRegistrationType  type
+    ) {
         int leader = 0;
         switch (type) {
             case NORMAL:
@@ -63,10 +73,22 @@ public class ControllerMetricsTestUtils {
                 leader = -1;
                 break;
         }
-        return new PartitionRegistration.Builder().setReplicas(new int[]{0, 1, 2}).setIsr(new int[]{0, 1, 2}).setLeader(leader).setLeaderRecoveryState(LeaderRecoveryState.RECOVERED).setLeaderEpoch(100).setPartitionEpoch(200).build();
+        return new PartitionRegistration.Builder().
+            setReplicas(new int[] {0, 1, 2}).
+            setDirectories(DirectoryId.migratingArray(3)).
+            setIsr(new int[] {0, 1, 2}).
+            setLeader(leader).
+            setLeaderRecoveryState(LeaderRecoveryState.RECOVERED).
+            setLeaderEpoch(100).
+            setPartitionEpoch(200).
+            build();
     }
 
-    public static TopicImage fakeTopicImage(String topicName, Uuid topicId, PartitionRegistration... registrations) {
+    public static TopicImage fakeTopicImage(
+        String topicName,
+        Uuid topicId,
+        PartitionRegistration... registrations
+    ) {
         Map<Integer, PartitionRegistration> partitions = new HashMap<>();
         int i = 0;
         for (PartitionRegistration registration : registrations) {
@@ -76,7 +98,9 @@ public class ControllerMetricsTestUtils {
         return new TopicImage(topicName, topicId, partitions);
     }
 
-    public static TopicsImage fakeTopicsImage(TopicImage... topics) {
+    public static TopicsImage fakeTopicsImage(
+        TopicImage... topics
+    ) {
         TopicsImage image = TopicsImage.EMPTY;
         for (TopicImage topic : topics) {
             image = image.including(topic);

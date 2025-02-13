@@ -17,14 +17,19 @@
 
 package org.apache.kafka.server.util;
 
-import java.util.*;
+import java.util.AbstractMap;
+import java.util.AbstractSet;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 
 
 /**
  * A map which presents a lightweight view of another "underlying" map. Values in the
  * underlying map will be translated by a callback before they are returned.
- * <p>
+ * <br>
  * This class is not internally synchronized. (Typically the underlyingMap is treated as
  * immutable.)
  */
@@ -38,11 +43,8 @@ public final class TranslatedValueMapView<K, V, B> extends AbstractMap<K, V> {
         @SuppressWarnings("rawtypes")
         @Override
         public boolean contains(Object o) {
-            if (!(o instanceof Entry))
-                return false;
-            Entry other = (Entry) o;
-            if (!underlyingMap.containsKey(other.getKey()))
-                return false;
+            if (!(o instanceof Entry other)) return false;
+            if (!underlyingMap.containsKey(other.getKey())) return false;
             B value = underlyingMap.get(other.getKey());
             V translatedValue = valueMapping.apply(value);
             return Objects.equals(translatedValue, other.getValue());
@@ -74,7 +76,8 @@ public final class TranslatedValueMapView<K, V, B> extends AbstractMap<K, V> {
         @Override
         public Entry<K, V> next() {
             Entry<K, B> underlyingEntry = underlyingIterator.next();
-            return new AbstractMap.SimpleImmutableEntry<>(underlyingEntry.getKey(), valueMapping.apply(underlyingEntry.getValue()));
+            return new AbstractMap.SimpleImmutableEntry<>(underlyingEntry.getKey(),
+                valueMapping.apply(underlyingEntry.getValue()));
         }
     }
 
@@ -82,7 +85,8 @@ public final class TranslatedValueMapView<K, V, B> extends AbstractMap<K, V> {
     private final Function<B, V> valueMapping;
     private final TranslatedValueSetView set;
 
-    public TranslatedValueMapView(Map<K, B> underlyingMap, Function<B, V> valueMapping) {
+    public TranslatedValueMapView(Map<K, B> underlyingMap,
+                                  Function<B, V> valueMapping) {
         this.underlyingMap = underlyingMap;
         this.valueMapping = valueMapping;
         this.set = new TranslatedValueSetView();
@@ -95,8 +99,7 @@ public final class TranslatedValueMapView<K, V, B> extends AbstractMap<K, V> {
 
     @Override
     public V get(Object key) {
-        if (!underlyingMap.containsKey(key))
-            return null;
+        if (!underlyingMap.containsKey(key)) return null;
         B value = underlyingMap.get(key);
         return valueMapping.apply(value);
     }

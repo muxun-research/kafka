@@ -17,13 +17,15 @@
 
 package org.apache.kafka.trogdor.workload;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.trogdor.common.JsonUtil;
+
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,15 +36,15 @@ import java.nio.ByteOrder;
  * This class will process records containing timestamps and generate a histogram based on the data.  It will then be
  * present in the status from the `ConsumeBenchWorker` class.  This must be used with a timestamped PayloadGenerator
  * implementation.
- * <p>
+ *
  * Example spec:
  * {
- * "type": "timestamp",
- * "histogramMaxMs": 10000,
- * "histogramMinMs": 0,
- * "histogramStepMs": 1
+ *    "type": "timestamp",
+ *    "histogramMaxMs": 10000,
+ *    "histogramMinMs": 0,
+ *    "histogramStepMs": 1
  * }
- * <p>
+ *
  * This will track total E2E latency up to 10 seconds, using 1ms resolution and a timestamp size of 8 bytes.
  */
 
@@ -53,12 +55,14 @@ public class TimestampRecordProcessor implements RecordProcessor {
     private final ByteBuffer buffer;
     private final Histogram histogram;
 
-    private final Logger log = LoggerFactory.getLogger(TimestampRecordProcessor.class);
+    private static final Logger log = LoggerFactory.getLogger(TimestampRecordProcessor.class);
 
-    final static float[] PERCENTILES = {0.5f, 0.95f, 0.99f};
+    static final float[] PERCENTILES = {0.5f, 0.95f, 0.99f};
 
     @JsonCreator
-    public TimestampRecordProcessor(@JsonProperty("histogramMaxMs") int histogramMaxMs, @JsonProperty("histogramMinMs") int histogramMinMs, @JsonProperty("histogramStepMs") int histogramStepMs) {
+    public TimestampRecordProcessor(@JsonProperty("histogramMaxMs") int histogramMaxMs,
+                                    @JsonProperty("histogramMinMs") int histogramMinMs,
+                                    @JsonProperty("histogramStepMs") int histogramStepMs) {
         this.histogramMaxMs = histogramMaxMs;
         this.histogramMinMs = histogramMinMs;
         this.histogramStepMs = histogramStepMs;
@@ -105,7 +109,11 @@ public class TimestampRecordProcessor implements RecordProcessor {
     @Override
     public JsonNode processorStatus() {
         Histogram.Summary summary = histogram.summarize(PERCENTILES);
-        StatusData statusData = new StatusData(summary.average() * histogramStepMs + histogramMinMs, summary.percentiles().get(0).value() * histogramStepMs + histogramMinMs, summary.percentiles().get(1).value() * histogramStepMs + histogramMinMs, summary.percentiles().get(2).value() * histogramStepMs + histogramMinMs);
+        StatusData statusData = new StatusData(
+                summary.average() * histogramStepMs + histogramMinMs,
+                summary.percentiles().get(0).value() * histogramStepMs + histogramMinMs,
+                summary.percentiles().get(1).value() * histogramStepMs + histogramMinMs,
+                summary.percentiles().get(2).value() * histogramStepMs + histogramMinMs);
         return JsonUtil.JSON_SERDE.valueToTree(statusData);
     }
 
@@ -119,10 +127,13 @@ public class TimestampRecordProcessor implements RecordProcessor {
          * The percentiles to use when calculating the histogram data.
          * These should match up with the p50LatencyMs, p95LatencyMs, etc. fields.
          */
-        final static float[] PERCENTILES = {0.5f, 0.95f, 0.99f};
+        static final float[] PERCENTILES = {0.5f, 0.95f, 0.99f};
 
         @JsonCreator
-        StatusData(@JsonProperty("averageLatencyMs") float averageLatencyMs, @JsonProperty("p50LatencyMs") int p50latencyMs, @JsonProperty("p95LatencyMs") int p95latencyMs, @JsonProperty("p99LatencyMs") int p99latencyMs) {
+        StatusData(@JsonProperty("averageLatencyMs") float averageLatencyMs,
+                   @JsonProperty("p50LatencyMs") int p50latencyMs,
+                   @JsonProperty("p95LatencyMs") int p95latencyMs,
+                   @JsonProperty("p99LatencyMs") int p99latencyMs) {
             this.averageLatencyMs = averageLatencyMs;
             this.p50LatencyMs = p50latencyMs;
             this.p95LatencyMs = p95latencyMs;

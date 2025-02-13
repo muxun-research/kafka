@@ -17,14 +17,14 @@
 
 package org.apache.kafka.jmh.producer;
 
+import org.apache.kafka.common.compress.Compression;
 import org.apache.kafka.common.message.ProduceRequestData;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.record.CompressionType;
 import org.apache.kafka.common.record.MemoryRecords;
-import org.apache.kafka.common.record.RecordBatch;
 import org.apache.kafka.common.record.SimpleRecord;
 import org.apache.kafka.common.requests.ProduceRequest;
 import org.apache.kafka.common.requests.ProduceResponse;
+
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -49,39 +49,39 @@ import java.util.stream.IntStream;
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 public class ProducerRequestBenchmark {
-	private static final int NUMBER_OF_PARTITIONS = 3;
-	private static final int NUMBER_OF_RECORDS = 3;
-	private static final List<ProduceRequestData.TopicProduceData> TOPIC_PRODUCE_DATA = Collections.singletonList(new ProduceRequestData.TopicProduceData()
-			.setName("tp")
-			.setPartitionData(IntStream.range(0, NUMBER_OF_PARTITIONS).mapToObj(partitionIndex -> new ProduceRequestData.PartitionProduceData()
-					.setIndex(partitionIndex)
-					.setRecords(MemoryRecords.withRecords(CompressionType.NONE, IntStream.range(0, NUMBER_OF_RECORDS)
-							.mapToObj(recordIndex -> new SimpleRecord(100, "hello0".getBytes(StandardCharsets.UTF_8)))
-							.collect(Collectors.toList())
-							.toArray(new SimpleRecord[0]))))
-					.collect(Collectors.toList()))
-	);
-	private static final ProduceRequestData PRODUCE_REQUEST_DATA = new ProduceRequestData()
-			.setTimeoutMs(100)
-			.setAcks((short) 1)
-			.setTopicData(new ProduceRequestData.TopicProduceDataCollection(TOPIC_PRODUCE_DATA.iterator()));
+    private static final int NUMBER_OF_PARTITIONS = 3;
+    private static final int NUMBER_OF_RECORDS = 3;
+    private static final List<ProduceRequestData.TopicProduceData> TOPIC_PRODUCE_DATA = Collections.singletonList(new ProduceRequestData.TopicProduceData()
+            .setName("tp")
+            .setPartitionData(IntStream.range(0, NUMBER_OF_PARTITIONS).mapToObj(partitionIndex -> new ProduceRequestData.PartitionProduceData()
+                .setIndex(partitionIndex)
+                .setRecords(MemoryRecords.withRecords(Compression.NONE, IntStream.range(0, NUMBER_OF_RECORDS)
+                    .mapToObj(recordIndex -> new SimpleRecord(100, "hello0".getBytes(StandardCharsets.UTF_8)))
+                    .collect(Collectors.toList())
+                    .toArray(new SimpleRecord[0]))))
+                .collect(Collectors.toList()))
+    );
+    private static final ProduceRequestData PRODUCE_REQUEST_DATA = new ProduceRequestData()
+            .setTimeoutMs(100)
+            .setAcks((short) 1)
+            .setTopicData(new ProduceRequestData.TopicProduceDataCollection(TOPIC_PRODUCE_DATA.iterator()));
 
-	private static ProduceRequest request() {
-		return ProduceRequest.forMagic(RecordBatch.CURRENT_MAGIC_VALUE, PRODUCE_REQUEST_DATA).build();
-	}
+    private static ProduceRequest request() {
+        return ProduceRequest.builder(PRODUCE_REQUEST_DATA, false).build();
+    }
 
-	private static final ProduceRequest REQUEST = request();
+    private static final ProduceRequest REQUEST = request();
 
-	@Benchmark
-	@OutputTimeUnit(TimeUnit.NANOSECONDS)
-	public ProduceRequest constructorProduceRequest() {
-		return request();
-	}
+    @Benchmark
+    @OutputTimeUnit(TimeUnit.NANOSECONDS)
+    public ProduceRequest constructorProduceRequest() {
+        return request();
+    }
 
-	@Benchmark
-	@OutputTimeUnit(TimeUnit.NANOSECONDS)
-	public ProduceResponse constructorErrorResponse() {
-		return REQUEST.getErrorResponse(0, Errors.INVALID_REQUEST.exception());
-	}
+    @Benchmark
+    @OutputTimeUnit(TimeUnit.NANOSECONDS)
+    public ProduceResponse constructorErrorResponse() {
+        return REQUEST.getErrorResponse(0, Errors.INVALID_REQUEST.exception());
+    }
 
 }

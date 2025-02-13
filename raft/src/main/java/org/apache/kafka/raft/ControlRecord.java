@@ -16,9 +16,11 @@
  */
 package org.apache.kafka.raft;
 
+import org.apache.kafka.common.message.KRaftVersionRecord;
 import org.apache.kafka.common.message.LeaderChangeMessage;
 import org.apache.kafka.common.message.SnapshotFooterRecord;
 import org.apache.kafka.common.message.SnapshotHeaderRecord;
+import org.apache.kafka.common.message.VotersRecord;
 import org.apache.kafka.common.protocol.ApiMessage;
 import org.apache.kafka.common.record.ControlRecordType;
 
@@ -29,7 +31,13 @@ public final class ControlRecord {
     private final ApiMessage message;
 
     private static void throwIllegalArgument(ControlRecordType recordType, ApiMessage message) {
-        throw new IllegalArgumentException(String.format("Record type %s doesn't match message class %s", recordType, message.getClass()));
+        throw new IllegalArgumentException(
+            String.format(
+                "Record type %s doesn't match message class %s",
+                recordType,
+                message.getClass()
+            )
+        );
     }
 
     public ControlRecord(ControlRecordType recordType, ApiMessage message) {
@@ -46,6 +54,16 @@ public final class ControlRecord {
                 break;
             case SNAPSHOT_FOOTER:
                 if (!(message instanceof SnapshotFooterRecord)) {
+                    throwIllegalArgument(recordType, message);
+                }
+                break;
+            case KRAFT_VERSION:
+                if (!(message instanceof KRaftVersionRecord)) {
+                    throwIllegalArgument(recordType, message);
+                }
+                break;
+            case KRAFT_VOTERS:
+                if (!(message instanceof VotersRecord)) {
                     throwIllegalArgument(recordType, message);
                 }
                 break;
@@ -69,6 +87,10 @@ public final class ControlRecord {
                 return ((SnapshotHeaderRecord) message).version();
             case SNAPSHOT_FOOTER:
                 return ((SnapshotFooterRecord) message).version();
+            case KRAFT_VERSION:
+                return ((KRaftVersionRecord) message).version();
+            case KRAFT_VOTERS:
+                return ((VotersRecord) message).version();
             default:
                 throw new IllegalStateException(String.format("Unknown control record type %s", recordType));
         }
@@ -80,12 +102,11 @@ public final class ControlRecord {
 
     @Override
     public boolean equals(Object other) {
-        if (this == other)
-            return true;
-        if (other == null || getClass() != other.getClass())
-            return false;
+        if (this == other) return true;
+        if (other == null || getClass() != other.getClass()) return false;
         ControlRecord that = (ControlRecord) other;
-        return Objects.equals(recordType, that.recordType) && Objects.equals(message, that.message);
+        return Objects.equals(recordType, that.recordType) &&
+            Objects.equals(message, that.message);
     }
 
     @Override

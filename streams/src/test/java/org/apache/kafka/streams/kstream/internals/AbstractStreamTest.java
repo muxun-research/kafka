@@ -24,7 +24,6 @@ import org.apache.kafka.streams.TestInputTopic;
 import org.apache.kafka.streams.TopologyTestDriver;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KStream;
-import org.apache.kafka.streams.kstream.ValueTransformerSupplier;
 import org.apache.kafka.streams.kstream.ValueTransformerWithKeySupplier;
 import org.apache.kafka.streams.kstream.internals.graph.ProcessorGraphNode;
 import org.apache.kafka.streams.kstream.internals.graph.ProcessorParameters;
@@ -33,38 +32,32 @@ import org.apache.kafka.streams.processor.api.Processor;
 import org.apache.kafka.streams.processor.api.ProcessorSupplier;
 import org.apache.kafka.streams.processor.api.Record;
 import org.apache.kafka.test.MockApiProcessorSupplier;
-import org.apache.kafka.test.NoopValueTransformer;
 import org.apache.kafka.test.NoopValueTransformerWithKey;
-import org.junit.Test;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.util.Random;
 
-import static org.easymock.EasyMock.*;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)
 public class AbstractStreamTest {
 
     @Test
-    public void testToInternalValueTransformerSupplierSuppliesNewTransformers() {
-        final ValueTransformerSupplier<?, ?> valueTransformerSupplier = createMock(ValueTransformerSupplier.class);
-        expect(valueTransformerSupplier.get()).andAnswer(NoopValueTransformer::new).atLeastOnce();
-        replay(valueTransformerSupplier);
-        final ValueTransformerWithKeySupplier<?, ?, ?> valueTransformerWithKeySupplier = AbstractStream.toValueTransformerWithKeySupplier(valueTransformerSupplier);
-        valueTransformerWithKeySupplier.get();
-        valueTransformerWithKeySupplier.get();
-        valueTransformerWithKeySupplier.get();
-        verify(valueTransformerSupplier);
-    }
-
-    @Test
     public void testToInternalValueTransformerWithKeySupplierSuppliesNewTransformers() {
-        final ValueTransformerWithKeySupplier<?, ?, ?> valueTransformerWithKeySupplier = createMock(ValueTransformerWithKeySupplier.class);
-        expect(valueTransformerWithKeySupplier.get()).andAnswer(NoopValueTransformerWithKey::new).atLeastOnce();
-        replay(valueTransformerWithKeySupplier);
+        final ValueTransformerWithKeySupplier<?, ?, ?> valueTransformerWithKeySupplier =
+            mock(ValueTransformerWithKeySupplier.class);
+        when(valueTransformerWithKeySupplier.get()).thenReturn(new NoopValueTransformerWithKey<>());
         valueTransformerWithKeySupplier.get();
         valueTransformerWithKeySupplier.get();
         valueTransformerWithKeySupplier.get();
-        verify(valueTransformerWithKeySupplier);
     }
 
     @Test
@@ -97,7 +90,9 @@ public class AbstractStreamTest {
 
         KStream<K, V> randomFilter() {
             final String name = builder.newProcessorName("RANDOM-FILTER-");
-            final ProcessorGraphNode<K, V> processorNode = new ProcessorGraphNode<>(name, new ProcessorParameters<>(new ExtendedKStreamDummy<>(), name));
+            final ProcessorGraphNode<K, V> processorNode = new ProcessorGraphNode<>(
+                name,
+                new ProcessorParameters<>(new ExtendedKStreamDummy<>(), name));
             builder.addGraphNode(this.graphNode, processorNode);
             return new KStreamImpl<>(name, null, null, subTopologySourceNodes, false, processorNode, builder);
         }

@@ -22,15 +22,17 @@ import org.apache.kafka.common.protocol.ApiMessage;
 import org.apache.kafka.server.common.ApiMessageAndVersion;
 import org.apache.kafka.server.common.serialization.BytesApiMessageSerde;
 import org.apache.kafka.server.log.remote.metadata.storage.RemoteLogSegmentMetadataSnapshot;
-import org.apache.kafka.server.log.remote.metadata.storage.generated.*;
+import org.apache.kafka.server.log.remote.metadata.storage.generated.MetadataRecordType;
+import org.apache.kafka.server.log.remote.metadata.storage.generated.RemoteLogSegmentMetadataRecord;
+import org.apache.kafka.server.log.remote.metadata.storage.generated.RemoteLogSegmentMetadataSnapshotRecord;
+import org.apache.kafka.server.log.remote.metadata.storage.generated.RemoteLogSegmentMetadataUpdateRecord;
+import org.apache.kafka.server.log.remote.metadata.storage.generated.RemotePartitionDeleteMetadataRecord;
 import org.apache.kafka.server.log.remote.storage.RemoteLogMetadata;
 import org.apache.kafka.server.log.remote.storage.RemoteLogSegmentMetadata;
 import org.apache.kafka.server.log.remote.storage.RemoteLogSegmentMetadataUpdate;
 import org.apache.kafka.server.log.remote.storage.RemotePartitionDeleteMetadata;
 
 import java.io.PrintStream;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * This class provides serialization and deserialization for {@link RemoteLogMetadata}. This is the root serde
@@ -42,50 +44,45 @@ public class RemoteLogMetadataSerde {
     private static final short REMOTE_PARTITION_DELETE_API_KEY = new RemotePartitionDeleteMetadataRecord().apiKey();
     private static final short REMOTE_LOG_SEGMENT_METADATA_SNAPSHOT_API_KEY = new RemoteLogSegmentMetadataSnapshotRecord().apiKey();
 
-    private final Map<String, Short> remoteLogStorageClassToApiKey;
-    private final Map<Short, RemoteLogMetadataTransform> keyToTransform;
     private final BytesApiMessageSerde bytesApiMessageSerde;
 
+    private final RemoteLogSegmentMetadataTransform segmentTransform;
+    private final RemoteLogSegmentMetadataUpdateTransform segmentUpdateTransform;
+    private final RemotePartitionDeleteMetadataTransform partitionDeleteTransform;
+    private final RemoteLogSegmentMetadataSnapshotTransform segmentSnapshotTransform;
+
     public RemoteLogMetadataSerde() {
-        remoteLogStorageClassToApiKey = createRemoteLogStorageClassToApiKeyMap();
-        keyToTransform = createRemoteLogMetadataTransforms();
         bytesApiMessageSerde = new BytesApiMessageSerde() {
             @Override
             public ApiMessage apiMessageFor(short apiKey) {
                 return newApiMessage(apiKey);
             }
         };
+        segmentTransform = new RemoteLogSegmentMetadataTransform();
+        segmentUpdateTransform = new RemoteLogSegmentMetadataUpdateTransform();
+        partitionDeleteTransform = new RemotePartitionDeleteMetadataTransform();
+        segmentSnapshotTransform = new RemoteLogSegmentMetadataSnapshotTransform();
     }
 
     protected ApiMessage newApiMessage(short apiKey) {
         return MetadataRecordType.fromId(apiKey).newMetadataRecord();
     }
 
-    protected Map<Short, RemoteLogMetadataTransform> createRemoteLogMetadataTransforms() {
-        Map<Short, RemoteLogMetadataTransform> map = new HashMap<>();
-        map.put(REMOTE_LOG_SEGMENT_METADATA_API_KEY, new RemoteLogSegmentMetadataTransform());
-        map.put(REMOTE_LOG_SEGMENT_METADATA_UPDATE_API_KEY, new RemoteLogSegmentMetadataUpdateTransform());
-        map.put(REMOTE_PARTITION_DELETE_API_KEY, new RemotePartitionDeleteMetadataTransform());
-        map.put(REMOTE_LOG_SEGMENT_METADATA_SNAPSHOT_API_KEY, new RemoteLogSegmentMetadataSnapshotTransform());
-        return map;
-    }
-
-    protected Map<String, Short> createRemoteLogStorageClassToApiKeyMap() {
-        Map<String, Short> map = new HashMap<>();
-        map.put(RemoteLogSegmentMetadata.class.getName(), REMOTE_LOG_SEGMENT_METADATA_API_KEY);
-        map.put(RemoteLogSegmentMetadataUpdate.class.getName(), REMOTE_LOG_SEGMENT_METADATA_UPDATE_API_KEY);
-        map.put(RemotePartitionDeleteMetadata.class.getName(), REMOTE_PARTITION_DELETE_API_KEY);
-        map.put(RemoteLogSegmentMetadataSnapshot.class.getName(), REMOTE_LOG_SEGMENT_METADATA_SNAPSHOT_API_KEY);
-        return map;
-    }
-
     public byte[] serialize(RemoteLogMetadata remoteLogMetadata) {
-        Short apiKey = remoteLogStorageClassToApiKey.get(remoteLogMetadata.getClass().getName());
-        if (apiKey == null) {
-            throw new IllegalArgumentException("ApiKey for given RemoteStorageMetadata class: " + remoteLogMetadata.getClass() + " does not exist.");
-        }
 
-        @SuppressWarnings("unchecked") ApiMessageAndVersion apiMessageAndVersion = remoteLogMetadataTransform(apiKey).toApiMessageAndVersion(remoteLogMetadata);
+        ApiMessageAndVersion apiMessageAndVersion;
+        if (remoteLogMetadata instanceof RemoteLogSegmentMetadata) {
+            apiMessageAndVersion = segmentTransform.toApiMessageAndVersion((RemoteLogSegmentMetadata) remoteLogMetadata);
+        } else if (remoteLogMetadata instanceof RemoteLogSegmentMetadataUpdate) {
+            apiMessageAndVersion = segmentUpdateTransform.toApiMessageAndVersion((RemoteLogSegmentMetadataUpdate) remoteLogMetadata);
+        } else if (remoteLogMetadata instanceof RemotePartitionDeleteMetadata) {
+            apiMessageAndVersion = partitionDeleteTransform.toApiMessageAndVersion((RemotePartitionDeleteMetadata) remoteLogMetadata);
+        } else if (remoteLogMetadata instanceof RemoteLogSegmentMetadataSnapshot) {
+            apiMessageAndVersion = segmentSnapshotTransform.toApiMessageAndVersion((RemoteLogSegmentMetadataSnapshot) remoteLogMetadata);
+        } else {
+            throw new IllegalArgumentException("RemoteLogMetadataTransform for given RemoteStorageMetadata class: " + remoteLogMetadata.getClass()
+                    + " does not exist.");
+        }
 
         return bytesApiMessageSerde.serialize(apiMessageAndVersion);
     }
@@ -93,16 +90,19 @@ public class RemoteLogMetadataSerde {
     public RemoteLogMetadata deserialize(byte[] data) {
         ApiMessageAndVersion apiMessageAndVersion = bytesApiMessageSerde.deserialize(data);
 
-        return remoteLogMetadataTransform(apiMessageAndVersion.message().apiKey()).fromApiMessageAndVersion(apiMessageAndVersion);
-    }
-
-    private RemoteLogMetadataTransform remoteLogMetadataTransform(short apiKey) {
-        RemoteLogMetadataTransform metadataTransform = keyToTransform.get(apiKey);
-        if (metadataTransform == null) {
+        short apiKey = apiMessageAndVersion.message().apiKey();
+        if (apiKey == REMOTE_LOG_SEGMENT_METADATA_API_KEY) {
+            return segmentTransform.fromApiMessageAndVersion(apiMessageAndVersion);
+        } else if (apiKey == REMOTE_LOG_SEGMENT_METADATA_UPDATE_API_KEY) {
+            return segmentUpdateTransform.fromApiMessageAndVersion(apiMessageAndVersion);
+        } else if (apiKey == REMOTE_PARTITION_DELETE_API_KEY) {
+            return partitionDeleteTransform.fromApiMessageAndVersion(apiMessageAndVersion);
+        } else if (apiKey == REMOTE_LOG_SEGMENT_METADATA_SNAPSHOT_API_KEY) {
+            return segmentSnapshotTransform.fromApiMessageAndVersion(apiMessageAndVersion);
+        } else {
             throw new IllegalArgumentException("RemoteLogMetadataTransform for apikey: " + apiKey + " does not exist.");
         }
 
-        return metadataTransform;
     }
 
     public static class RemoteLogMetadataFormatter implements MessageFormatter {
@@ -111,7 +111,10 @@ public class RemoteLogMetadataSerde {
         @Override
         public void writeTo(ConsumerRecord<byte[], byte[]> consumerRecord, PrintStream output) {
             // The key is expected to be null.
-            output.printf("partition: %d, offset: %d, value: %s%n", consumerRecord.partition(), consumerRecord.offset(), remoteLogMetadataSerde.deserialize(consumerRecord.value()).toString());
+            output.printf("partition: %d, offset: %d, value: %s%n",
+                    consumerRecord.partition(),
+                    consumerRecord.offset(),
+                    remoteLogMetadataSerde.deserialize(consumerRecord.value()).toString());
         }
     }
 }

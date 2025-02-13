@@ -29,7 +29,12 @@ import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.Errors;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class ListOffsetsRequest extends AbstractRequest {
     public static final long EARLIEST_TIMESTAMP = -2L;
@@ -41,6 +46,8 @@ public class ListOffsetsRequest extends AbstractRequest {
      */
     public static final long EARLIEST_LOCAL_TIMESTAMP = -4L;
 
+    public static final long LATEST_TIERED_TIMESTAMP = -5L;
+
     public static final int CONSUMER_REPLICA_ID = -1;
     public static final int DEBUGGING_REPLICA_ID = -2;
 
@@ -50,13 +57,22 @@ public class ListOffsetsRequest extends AbstractRequest {
     public static class Builder extends AbstractRequest.Builder<ListOffsetsRequest> {
         private final ListOffsetsRequestData data;
 
-        public static Builder forReplica(short allowedVersion, int replicaId) {
-            return new Builder((short) 0, allowedVersion, replicaId, IsolationLevel.READ_UNCOMMITTED);
+        public static Builder forConsumer(boolean requireTimestamp,
+                                          IsolationLevel isolationLevel) {
+            return forConsumer(requireTimestamp, isolationLevel, false, false, false);
         }
 
-        public static Builder forConsumer(boolean requireTimestamp, IsolationLevel isolationLevel, boolean requireMaxTimestamp) {
+        public static Builder forConsumer(boolean requireTimestamp,
+                                          IsolationLevel isolationLevel,
+                                          boolean requireMaxTimestamp,
+                                          boolean requireEarliestLocalTimestamp,
+                                          boolean requireTieredStorageTimestamp) {
             short minVersion = 0;
-            if (requireMaxTimestamp)
+            if (requireTieredStorageTimestamp)
+                minVersion = 9;
+            else if (requireEarliestLocalTimestamp)
+                minVersion = 8;
+            else if (requireMaxTimestamp)
                 minVersion = 7;
             else if (isolationLevel == IsolationLevel.READ_COMMITTED)
                 minVersion = 2;
@@ -65,13 +81,27 @@ public class ListOffsetsRequest extends AbstractRequest {
             return new Builder(minVersion, ApiKeys.LIST_OFFSETS.latestVersion(), CONSUMER_REPLICA_ID, isolationLevel);
         }
 
-        private Builder(short oldestAllowedVersion, short latestAllowedVersion, int replicaId, IsolationLevel isolationLevel) {
+        public static Builder forReplica(short allowedVersion, int replicaId) {
+            return new Builder((short) 0, allowedVersion, replicaId, IsolationLevel.READ_UNCOMMITTED);
+        }
+
+        private Builder(short oldestAllowedVersion,
+                        short latestAllowedVersion,
+                        int replicaId,
+                        IsolationLevel isolationLevel) {
             super(ApiKeys.LIST_OFFSETS, oldestAllowedVersion, latestAllowedVersion);
-            data = new ListOffsetsRequestData().setIsolationLevel(isolationLevel.id()).setReplicaId(replicaId);
+            data = new ListOffsetsRequestData()
+                      .setIsolationLevel(isolationLevel.id())
+                      .setReplicaId(replicaId);
         }
 
         public Builder setTargetTimes(List<ListOffsetsTopic> topics) {
             data.setTopics(topics);
+            return this;
+        }
+
+        public Builder setTimeoutMs(int timeoutMs) {
+            data.setTimeoutMs(timeoutMs);
             return this;
         }
 
@@ -106,7 +136,6 @@ public class ListOffsetsRequest extends AbstractRequest {
 
     @Override
     public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-        short versionId = version();
         short errorCode = Errors.forException(e).code();
 
         List<ListOffsetsTopicResponse> responses = new ArrayList<>();
@@ -114,18 +143,19 @@ public class ListOffsetsRequest extends AbstractRequest {
             ListOffsetsTopicResponse topicResponse = new ListOffsetsTopicResponse().setName(topic.name());
             List<ListOffsetsPartitionResponse> partitions = new ArrayList<>();
             for (ListOffsetsPartition partition : topic.partitions()) {
-                ListOffsetsPartitionResponse partitionResponse = new ListOffsetsPartitionResponse().setErrorCode(errorCode).setPartitionIndex(partition.partitionIndex());
-                if (versionId == 0) {
-                    partitionResponse.setOldStyleOffsets(Collections.emptyList());
-                } else {
-                    partitionResponse.setOffset(ListOffsetsResponse.UNKNOWN_OFFSET).setTimestamp(ListOffsetsResponse.UNKNOWN_TIMESTAMP);
-                }
+                ListOffsetsPartitionResponse partitionResponse = new ListOffsetsPartitionResponse()
+                        .setErrorCode(errorCode)
+                        .setPartitionIndex(partition.partitionIndex());
+                partitionResponse.setOffset(ListOffsetsResponse.UNKNOWN_OFFSET)
+                         .setTimestamp(ListOffsetsResponse.UNKNOWN_TIMESTAMP);
                 partitions.add(partitionResponse);
             }
             topicResponse.setPartitions(partitions);
             responses.add(topicResponse);
         }
-        ListOffsetsResponseData responseData = new ListOffsetsResponseData().setThrottleTimeMs(throttleTimeMs).setTopics(responses);
+        ListOffsetsResponseData responseData = new ListOffsetsResponseData()
+                .setThrottleTimeMs(throttleTimeMs)
+                .setTopics(responses);
         return new ListOffsetsResponse(responseData);
     }
 
@@ -150,6 +180,10 @@ public class ListOffsetsRequest extends AbstractRequest {
         return duplicatePartitions;
     }
 
+    public int timeoutMs() {
+        return data.timeoutMs();
+    }
+
     public static ListOffsetsRequest parse(ByteBuffer buffer, short version) {
         return new ListOffsetsRequest(new ListOffsetsRequestData(new ByteBufferAccessor(buffer), version), version);
     }
@@ -162,9 +196,5 @@ public class ListOffsetsRequest extends AbstractRequest {
             topic.partitions().add(entry.getValue());
         }
         return new ArrayList<>(topics.values());
-    }
-
-    public static ListOffsetsTopic singletonRequestData(String topic, int partitionIndex, long timestamp, int maxNumOffsets) {
-        return new ListOffsetsTopic().setName(topic).setPartitions(Collections.singletonList(new ListOffsetsPartition().setPartitionIndex(partitionIndex).setTimestamp(timestamp).setMaxNumOffsets(maxNumOffsets)));
     }
 }

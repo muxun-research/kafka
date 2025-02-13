@@ -54,19 +54,23 @@ public class UsableBroker {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof UsableBroker))
-            return false;
-        UsableBroker other = (UsableBroker) o;
+        if (!(o instanceof UsableBroker other)) return false;
         return other.id == id && other.rack.equals(rack) && other.fenced == fenced;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, rack, fenced);
+        return Objects.hash(id,
+            rack,
+            fenced);
     }
 
     @Override
     public String toString() {
-        return "UsableBroker" + "(id=" + id + ", rack=" + rack + ", fenced=" + fenced + ")";
+        return "UsableBroker" +
+            "(id=" + id +
+            ", rack=" + rack +
+            ", fenced=" + fenced +
+            ")";
     }
 }

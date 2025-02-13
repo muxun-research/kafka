@@ -27,6 +27,7 @@ import java.util.stream.Collectors;
  * The response object for interactive queries. This wraps the individual partition results, as well
  * as metadata relating to the result as a whole.
  * <p>
+ *
  * @param <R> The type of the query result.
  */
 @Evolving
@@ -60,13 +61,22 @@ public class StateQueryResult<R> {
 
     /**
      * For queries that are expected to match records in only one partition, returns the result.
+     *
      * @throws IllegalArgumentException if the results are not for exactly one partition.
      */
     public QueryResult<R> getOnlyPartitionResult() {
-        final List<QueryResult<R>> nonempty = partitionResults.values().stream().filter(r -> r.getResult() != null).collect(Collectors.toList());
+        final List<QueryResult<R>> nonempty =
+            partitionResults
+                .values()
+                .stream()
+                .filter(QueryResult::isSuccess)
+                .filter(r -> r.getResult() != null)
+                .collect(Collectors.toList());
 
         if (nonempty.size() > 1) {
-            throw new IllegalArgumentException("The query did not return exactly one partition result: " + partitionResults);
+            throw new IllegalArgumentException(
+                "The query did not return exactly one partition result: " + partitionResults
+            );
         } else {
             return nonempty.isEmpty() ? null : nonempty.get(0);
         }
@@ -101,6 +111,9 @@ public class StateQueryResult<R> {
 
     @Override
     public String toString() {
-        return "StateQueryResult{" + "partitionResults=" + partitionResults + ", globalResult=" + globalResult + '}';
+        return "StateQueryResult{" +
+            "partitionResults=" + partitionResults +
+            ", globalResult=" + globalResult +
+            '}';
     }
 }

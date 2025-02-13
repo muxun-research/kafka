@@ -18,13 +18,13 @@ package org.apache.kafka.tools;
 
 import org.apache.kafka.common.utils.AppInfoParser;
 import org.apache.kafka.common.utils.Exit;
-import org.junit.jupiter.api.*;
 
-import javax.management.MBeanServer;
-import javax.management.ObjectName;
-import javax.management.remote.JMXConnectorServer;
-import javax.management.remote.JMXConnectorServerFactory;
-import javax.management.remote.JMXServiceURL;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
 import java.lang.management.ManagementFactory;
 import java.net.ServerSocket;
 import java.rmi.registry.LocateRegistry;
@@ -35,8 +35,15 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
+import javax.management.MBeanServer;
+import javax.management.ObjectName;
+import javax.management.remote.JMXConnectorServer;
+import javax.management.remote.JMXConnectorServerFactory;
+import javax.management.remote.JMXServiceURL;
+
 import static java.lang.String.format;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class JmxToolTest {
@@ -58,7 +65,8 @@ public class JmxToolTest {
         env.put("com.sun.management.jmxremote.ssl", "false");
         JMXServiceURL url = new JMXServiceURL(jmxUrl);
         MBeanServer server = ManagementFactory.getPlatformMBeanServer();
-        server.registerMBean(new Metrics(), new ObjectName("kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec"));
+        server.registerMBean(new Metrics(),
+            new ObjectName("kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec"));
         jmxAgent = JMXConnectorServerFactory.newJMXConnectorServer(url, env, server);
         jmxAgent.start();
     }
@@ -110,7 +118,11 @@ public class JmxToolTest {
 
     @Test
     public void helpOptions() {
-        String[] expectedOptions = new String[]{"--attributes", "--date-format", "--help", "--jmx-auth-prop", "--jmx-ssl-enable", "--jmx-url", "--object-name", "--one-time", "--report-format", "--reporting-interval", "--version", "--wait"};
+        String[] expectedOptions = new String[]{
+            "--attributes", "--date-format", "--help", "--jmx-auth-prop",
+            "--jmx-ssl-enable", "--jmx-url", "--object-name", "--one-time",
+            "--report-format", "--reporting-interval", "--version", "--wait"
+        };
         String err = executeAndGetErr("--help");
         assertCommandFailure();
         for (String option : expectedOptions) {
@@ -120,7 +132,12 @@ public class JmxToolTest {
 
     @Test
     public void csvFormat() {
-        String[] args = new String[]{"--jmx-url", jmxUrl, "--object-name", "kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec", "--report-format", "csv", "--one-time"};
+        String[] args = new String[]{
+            "--jmx-url", jmxUrl,
+            "--object-name", "kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec",
+            "--report-format", "csv",
+            "--one-time"
+        };
         String out = executeAndGetOut(args);
         Arrays.stream(out.split("\\r?\\n")).forEach(line -> {
             assertTrue(line.matches("([a-zA-Z0-9=:,.]+),\"([ -~]+)\""), line);
@@ -129,7 +146,12 @@ public class JmxToolTest {
 
     @Test
     public void tsvFormat() {
-        String[] args = new String[]{"--jmx-url", jmxUrl, "--object-name", "kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec", "--report-format", "tsv", "--one-time"};
+        String[] args = new String[]{
+            "--jmx-url", jmxUrl,
+            "--object-name", "kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec",
+            "--report-format", "tsv",
+            "--one-time"
+        };
         String out = executeAndGetOut(args);
         Arrays.stream(out.split("\\r?\\n")).forEach(line -> {
             assertTrue(line.matches("([a-zA-Z0-9=:,.]+)\\t([ -~]+)"), line);
@@ -138,17 +160,27 @@ public class JmxToolTest {
 
     @Test
     public void allMetrics() {
-        String[] args = new String[]{"--jmx-url", jmxUrl, "--report-format", "csv", "--reporting-interval", "-1"};
+        String[] args = new String[]{
+            "--jmx-url", jmxUrl,
+            "--report-format", "csv",
+            "--reporting-interval", "-1"
+        };
         String out = executeAndGetOut(args);
         assertNormalExit();
 
         Map<String, String> csv = parseCsv(out);
-        assertTrue(csv.size() > 0);
+        assertFalse(csv.isEmpty());
     }
 
     @Test
     public void filteredMetrics() {
-        String[] args = new String[]{"--jmx-url", jmxUrl, "--object-name", "kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec", "--attributes", "FifteenMinuteRate,FiveMinuteRate", "--report-format", "csv", "--one-time"};
+        String[] args = new String[]{
+            "--jmx-url", jmxUrl,
+            "--object-name", "kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec",
+            "--attributes", "FifteenMinuteRate,FiveMinuteRate",
+            "--report-format", "csv",
+            "--one-time"
+        };
         String out = executeAndGetOut(args);
         assertNormalExit();
 
@@ -159,7 +191,13 @@ public class JmxToolTest {
 
     @Test
     public void testDomainNamePattern() {
-        String[] args = new String[]{"--jmx-url", jmxUrl, "--object-name", "kafka.serve?:*", "--attributes", "FifteenMinuteRate,FiveMinuteRate", "--report-format", "csv", "--one-time"};
+        String[] args = new String[]{
+            "--jmx-url", jmxUrl,
+            "--object-name", "kafka.serve?:*",
+            "--attributes", "FifteenMinuteRate,FiveMinuteRate",
+            "--report-format", "csv",
+            "--one-time"
+        };
         String out = executeAndGetOut(args);
         assertNormalExit();
 
@@ -170,7 +208,12 @@ public class JmxToolTest {
 
     @Test
     public void testDomainNamePatternWithNoAttributes() {
-        String[] args = new String[]{"--jmx-url", jmxUrl, "--object-name", "kafka.serve?:*", "--report-format", "csv", "--one-time"};
+        String[] args = new String[]{
+            "--jmx-url", jmxUrl,
+            "--object-name", "kafka.serve?:*",
+            "--report-format", "csv",
+            "--one-time"
+        };
         String out = executeAndGetOut(args);
         assertNormalExit();
 
@@ -181,7 +224,13 @@ public class JmxToolTest {
 
     @Test
     public void testPropertyListPattern() {
-        String[] args = new String[]{"--jmx-url", jmxUrl, "--object-name", "kafka.server:type=BrokerTopicMetrics,*", "--attributes", "FifteenMinuteRate,FiveMinuteRate", "--report-format", "csv", "--one-time"};
+        String[] args = new String[]{
+            "--jmx-url", jmxUrl,
+            "--object-name", "kafka.server:type=BrokerTopicMetrics,*",
+            "--attributes", "FifteenMinuteRate,FiveMinuteRate",
+            "--report-format", "csv",
+            "--one-time"
+        };
         String out = executeAndGetOut(args);
         assertNormalExit();
 
@@ -192,7 +241,12 @@ public class JmxToolTest {
 
     @Test
     public void testPropertyListPatternWithNoAttributes() {
-        String[] args = new String[]{"--jmx-url", jmxUrl, "--object-name", "kafka.server:type=BrokerTopicMetrics,*", "--report-format", "csv", "--one-time"};
+        String[] args = new String[]{
+            "--jmx-url", jmxUrl,
+            "--object-name", "kafka.server:type=BrokerTopicMetrics,*",
+            "--report-format", "csv",
+            "--one-time"
+        };
         String out = executeAndGetOut(args);
         assertNormalExit();
 
@@ -203,7 +257,13 @@ public class JmxToolTest {
 
     @Test
     public void testPropertyValuePattern() {
-        String[] args = new String[]{"--jmx-url", jmxUrl, "--object-name", "kafka.server:type=BrokerTopicMetrics,name=*InPerSec", "--attributes", "FifteenMinuteRate,FiveMinuteRate", "--report-format", "csv", "--one-time"};
+        String[] args = new String[]{
+            "--jmx-url", jmxUrl,
+            "--object-name", "kafka.server:type=BrokerTopicMetrics,name=*InPerSec",
+            "--attributes", "FifteenMinuteRate,FiveMinuteRate",
+            "--report-format", "csv",
+            "--one-time"
+        };
         String out = executeAndGetOut(args);
         assertNormalExit();
 
@@ -214,7 +274,12 @@ public class JmxToolTest {
 
     @Test
     public void testPropertyValuePatternWithNoAttributes() {
-        String[] args = new String[]{"--jmx-url", jmxUrl, "--object-name", "kafka.server:type=BrokerTopicMetrics,name=*InPerSec", "--report-format", "csv", "--one-time"};
+        String[] args = new String[]{
+            "--jmx-url", jmxUrl,
+            "--object-name", "kafka.server:type=BrokerTopicMetrics,name=*InPerSec",
+            "--report-format", "csv",
+            "--one-time"
+        };
         String out = executeAndGetOut(args);
         assertNormalExit();
 
@@ -226,7 +291,13 @@ public class JmxToolTest {
     @Test
     // Combination of property-list and property-value patterns
     public void testPropertyPattern() {
-        String[] args = new String[]{"--jmx-url", jmxUrl, "--object-name", "kafka.server:type=*,*", "--attributes", "FifteenMinuteRate,FiveMinuteRate", "--report-format", "csv", "--one-time"};
+        String[] args = new String[]{
+            "--jmx-url", jmxUrl,
+            "--object-name", "kafka.server:type=*,*",
+            "--attributes", "FifteenMinuteRate,FiveMinuteRate",
+            "--report-format", "csv",
+            "--one-time"
+        };
         String out = executeAndGetOut(args);
         assertNormalExit();
 
@@ -238,7 +309,12 @@ public class JmxToolTest {
     @Test
     // Combination of property-list and property-value patterns
     public void testPropertyPatternWithNoAttributes() {
-        String[] args = new String[]{"--jmx-url", jmxUrl, "--object-name", "kafka.server:type=*,*", "--report-format", "csv", "--one-time"};
+        String[] args = new String[]{
+            "--jmx-url", jmxUrl,
+            "--object-name", "kafka.server:type=*,*",
+            "--report-format", "csv",
+            "--one-time"
+        };
         String out = executeAndGetOut(args);
         assertNormalExit();
 
@@ -250,7 +326,12 @@ public class JmxToolTest {
     @Test
     public void dateFormat() {
         String dateFormat = "yyyyMMdd-hh:mm:ss";
-        String[] args = new String[]{"--jmx-url", jmxUrl, "--date-format", dateFormat, "--report-format", "csv", "--one-time"};
+        String[] args = new String[]{
+            "--jmx-url", jmxUrl,
+            "--date-format", dateFormat,
+            "--report-format", "csv",
+            "--one-time"
+        };
         String out = executeAndGetOut(args);
         assertNormalExit();
 
@@ -260,7 +341,11 @@ public class JmxToolTest {
 
     @Test
     public void unknownObjectName() {
-        String[] args = new String[]{"--jmx-url", jmxUrl, "--object-name", "kafka.server:type=DummyMetrics,name=MessagesInPerSec", "--wait"};
+        String[] args = new String[]{
+            "--jmx-url", jmxUrl,
+            "--object-name", "kafka.server:type=DummyMetrics,name=MessagesInPerSec",
+            "--wait"
+        };
 
         String err = executeAndGetErr(args);
         assertCommandFailure();
@@ -289,7 +374,8 @@ public class JmxToolTest {
                 throw new RuntimeException(e);
             }
         };
-        return err ? ToolsTestUtils.captureStandardErr(runnable) : ToolsTestUtils.captureStandardOut(runnable);
+        return err ? ToolsTestUtils.captureStandardErr(runnable)
+                    : ToolsTestUtils.captureStandardOut(runnable);
     }
 
     private void assertNormalExit() {
@@ -326,7 +412,6 @@ public class JmxToolTest {
 
     public interface MetricsMBean {
         double getFifteenMinuteRate();
-
         double getFiveMinuteRate();
     }
 

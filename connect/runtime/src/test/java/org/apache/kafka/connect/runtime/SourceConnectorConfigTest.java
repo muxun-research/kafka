@@ -18,7 +18,8 @@
 package org.apache.kafka.connect.runtime;
 
 import org.apache.kafka.common.config.ConfigException;
-import org.junit.Test;
+
+import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -26,15 +27,22 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import static org.apache.kafka.common.config.TopicConfig.*;
+import static org.apache.kafka.common.config.TopicConfig.CLEANUP_POLICY_COMPACT;
+import static org.apache.kafka.common.config.TopicConfig.CLEANUP_POLICY_CONFIG;
+import static org.apache.kafka.common.config.TopicConfig.COMPRESSION_TYPE_CONFIG;
+import static org.apache.kafka.common.config.TopicConfig.RETENTION_MS_CONFIG;
 import static org.apache.kafka.connect.runtime.ConnectorConfig.CONNECTOR_CLASS_CONFIG;
 import static org.apache.kafka.connect.runtime.ConnectorConfig.NAME_CONFIG;
 import static org.apache.kafka.connect.runtime.ConnectorConfigTest.MOCK_PLUGINS;
 import static org.apache.kafka.connect.runtime.SourceConnectorConfig.TOPIC_CREATION_GROUPS_CONFIG;
-import static org.apache.kafka.connect.runtime.TopicCreationConfig.*;
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.*;
+import static org.apache.kafka.connect.runtime.TopicCreationConfig.DEFAULT_TOPIC_CREATION_GROUP;
+import static org.apache.kafka.connect.runtime.TopicCreationConfig.DEFAULT_TOPIC_CREATION_PREFIX;
+import static org.apache.kafka.connect.runtime.TopicCreationConfig.PARTITIONS_CONFIG;
+import static org.apache.kafka.connect.runtime.TopicCreationConfig.REPLICATION_FACTOR_CONFIG;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class SourceConnectorConfigTest {
 
@@ -61,10 +69,11 @@ public class SourceConnectorConfigTest {
     @Test
     public void shouldNotFailWithExplicitlySpecifiedDefaultTopicCreationGroup() {
         Map<String, String> props = defaultConnectorProps();
-        props.put(TOPIC_CREATION_GROUPS_CONFIG, String.join(",", DEFAULT_TOPIC_CREATION_GROUP, TOPIC_CREATION_GROUP_1, TOPIC_CREATION_GROUP_2));
+        props.put(TOPIC_CREATION_GROUPS_CONFIG, String.join(",", DEFAULT_TOPIC_CREATION_GROUP,
+            TOPIC_CREATION_GROUP_1, TOPIC_CREATION_GROUP_2));
         props.put(DEFAULT_TOPIC_CREATION_PREFIX + REPLICATION_FACTOR_CONFIG, "1");
         props.put(DEFAULT_TOPIC_CREATION_PREFIX + PARTITIONS_CONFIG, "1");
-        SourceConnectorConfig config = new SourceConnectorConfig(MOCK_PLUGINS, props, true);
+        new SourceConnectorConfig(MOCK_PLUGINS, props, true);
     }
 
     @Test
@@ -79,13 +88,15 @@ public class SourceConnectorConfigTest {
         Map<String, String> props = defaultConnectorPropsWithTopicCreation();
         props.put(DEFAULT_TOPIC_CREATION_PREFIX + PARTITIONS_CONFIG, String.valueOf(0));
         Exception e = assertThrows(ConfigException.class, () -> new SourceConnectorConfig(MOCK_PLUGINS, props, true));
-        assertThat(e.getMessage(), containsString("Number of partitions must be positive, or -1"));
+        assertTrue(e.getMessage().contains("Number of partitions must be positive, or -1"));
 
         props.put(DEFAULT_TOPIC_CREATION_PREFIX + PARTITIONS_CONFIG, String.valueOf(DEFAULT_PARTITIONS));
         props.put(DEFAULT_TOPIC_CREATION_PREFIX + REPLICATION_FACTOR_CONFIG, String.valueOf(0));
 
         e = assertThrows(ConfigException.class, () -> new SourceConnectorConfig(MOCK_PLUGINS, props, true));
-        assertThat(e.getMessage(), containsString("Replication factor must be positive and not " + "larger than the number of brokers in the Kafka cluster, or -1 to use the " + "broker's default"));
+        assertTrue(e.getMessage().contains("Replication factor must be positive and not "
+                + "larger than the number of brokers in the Kafka cluster, or -1 to use the "
+                + "broker's default"));
     }
 
     @Test
@@ -95,12 +106,14 @@ public class SourceConnectorConfigTest {
             props.put(DEFAULT_TOPIC_CREATION_PREFIX + PARTITIONS_CONFIG, String.valueOf(i));
             props.put(DEFAULT_TOPIC_CREATION_PREFIX + REPLICATION_FACTOR_CONFIG, String.valueOf(DEFAULT_REPLICATION_FACTOR));
             Exception e = assertThrows(ConfigException.class, () -> new SourceConnectorConfig(MOCK_PLUGINS, props, true));
-            assertThat(e.getMessage(), containsString("Number of partitions must be positive, or -1"));
+            assertTrue(e.getMessage().contains("Number of partitions must be positive, or -1"));
 
             props.put(DEFAULT_TOPIC_CREATION_PREFIX + PARTITIONS_CONFIG, String.valueOf(DEFAULT_PARTITIONS));
             props.put(DEFAULT_TOPIC_CREATION_PREFIX + REPLICATION_FACTOR_CONFIG, String.valueOf(i));
             e = assertThrows(ConfigException.class, () -> new SourceConnectorConfig(MOCK_PLUGINS, props, true));
-            assertThat(e.getMessage(), containsString("Replication factor must be positive and not " + "larger than the number of brokers in the Kafka cluster, or -1 to use the " + "broker's default"));
+            assertTrue(e.getMessage().contains("Replication factor must be positive and not "
+                    + "larger than the number of brokers in the Kafka cluster, or -1 to use the "
+                    + "broker's default"));
         }
     }
 
@@ -134,14 +147,16 @@ public class SourceConnectorConfigTest {
         topicProps.forEach((k, v) -> props.put(DEFAULT_TOPIC_CREATION_PREFIX + k, v));
 
         SourceConnectorConfig config = new SourceConnectorConfig(MOCK_PLUGINS, props, true);
-        assertEquals(topicProps, convertToStringValues(config.topicCreationOtherConfigs(DEFAULT_TOPIC_CREATION_GROUP)));
+        assertEquals(topicProps,
+                convertToStringValues(config.topicCreationOtherConfigs(DEFAULT_TOPIC_CREATION_GROUP)));
     }
 
     private static Map<String, String> convertToStringValues(Map<String, Object> config) {
         // null values are not allowed
-        return config.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> {
-            Objects.requireNonNull(e.getValue());
-            return e.getValue().toString();
-        }));
+        return config.entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> {
+                    Objects.requireNonNull(e.getValue());
+                    return e.getValue().toString();
+                }));
     }
 }

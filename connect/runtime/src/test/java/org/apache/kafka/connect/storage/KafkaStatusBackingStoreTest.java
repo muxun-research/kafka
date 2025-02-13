@@ -34,19 +34,41 @@ import org.apache.kafka.connect.runtime.distributed.DistributedConfig;
 import org.apache.kafka.connect.util.ConnectorTaskId;
 import org.apache.kafka.connect.util.KafkaBasedLog;
 import org.apache.kafka.connect.util.TopicAdmin;
-import org.junit.Before;
-import org.junit.Test;
-import org.mockito.ArgumentCaptor;
 
-import java.util.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
+
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 import static org.apache.kafka.clients.CommonClientConfigs.CLIENT_ID_CONFIG;
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @SuppressWarnings("unchecked")
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)
 public class KafkaStatusBackingStoreTest {
 
     private static final String STATUS_TOPIC = "status-topic";
@@ -60,9 +82,9 @@ public class KafkaStatusBackingStoreTest {
     Converter converter = mock(Converter.class);
     WorkerConfig workerConfig = mock(WorkerConfig.class);
 
-    @Before
+    @BeforeEach
     public void setup() {
-        store = new KafkaStatusBackingStore(new MockTime(), converter, STATUS_TOPIC, kafkaBasedLog);
+        store = new KafkaStatusBackingStore(new MockTime(), converter, STATUS_TOPIC, () -> null, kafkaBasedLog);
     }
 
     @Test
@@ -104,7 +126,8 @@ public class KafkaStatusBackingStoreTest {
         }).doAnswer(invocation -> {
             ((Callback) invocation.getArgument(2)).onCompletion(null, null);
             return null;
-        }).when(kafkaBasedLog).send(eq("status-connector-conn"), eq(value), any(Callback.class));
+        })
+        .when(kafkaBasedLog).send(eq("status-connector-conn"), eq(value), any(Callback.class));
 
         ConnectorStatus status = new ConnectorStatus(CONNECTOR, ConnectorStatus.State.RUNNING, WORKER_ID, 0);
         store.put(status);
@@ -182,9 +205,12 @@ public class KafkaStatusBackingStoreTest {
         secondStatusRead.put("state", "UNASSIGNED");
         secondStatusRead.put("generation", 0L);
 
-        when(converter.toConnectData(STATUS_TOPIC, value)).thenReturn(new SchemaAndValue(null, firstStatusRead)).thenReturn(new SchemaAndValue(null, secondStatusRead));
+        when(converter.toConnectData(STATUS_TOPIC, value))
+                .thenReturn(new SchemaAndValue(null, firstStatusRead))
+                .thenReturn(new SchemaAndValue(null, secondStatusRead));
 
-        when(converter.fromConnectData(eq(STATUS_TOPIC), any(Schema.class), any(Struct.class))).thenReturn(value);
+        when(converter.fromConnectData(eq(STATUS_TOPIC), any(Schema.class), any(Struct.class)))
+                .thenReturn(value);
 
         doAnswer(invocation -> {
             ((Callback) invocation.getArgument(2)).onCompletion(null, null);
@@ -215,9 +241,12 @@ public class KafkaStatusBackingStoreTest {
         secondStatusRead.put("state", "UNASSIGNED");
         secondStatusRead.put("generation", 0L);
 
-        when(converter.toConnectData(STATUS_TOPIC, value)).thenReturn(new SchemaAndValue(null, firstStatusRead)).thenReturn(new SchemaAndValue(null, secondStatusRead));
+        when(converter.toConnectData(STATUS_TOPIC, value))
+                .thenReturn(new SchemaAndValue(null, firstStatusRead))
+                .thenReturn(new SchemaAndValue(null, secondStatusRead));
 
-        when(converter.fromConnectData(eq(STATUS_TOPIC), any(Schema.class), any(Struct.class))).thenReturn(value);
+        when(converter.fromConnectData(eq(STATUS_TOPIC), any(Schema.class), any(Struct.class)))
+                .thenReturn(value);
 
         doAnswer(invocation -> {
             ((Callback) invocation.getArgument(2)).onCompletion(null, null);
@@ -241,7 +270,8 @@ public class KafkaStatusBackingStoreTest {
         statusMap.put("state", "RUNNING");
         statusMap.put("generation", 0L);
 
-        when(converter.toConnectData(STATUS_TOPIC, value)).thenReturn(new SchemaAndValue(null, statusMap));
+        when(converter.toConnectData(STATUS_TOPIC, value))
+                .thenReturn(new SchemaAndValue(null, statusMap));
 
         store.read(consumerRecord(0, "status-connector-conn", value));
 
@@ -252,7 +282,8 @@ public class KafkaStatusBackingStoreTest {
     @Test
     public void putTaskState() {
         byte[] value = new byte[0];
-        when(converter.fromConnectData(eq(STATUS_TOPIC), any(Schema.class), any(Struct.class))).thenReturn(value);
+        when(converter.fromConnectData(eq(STATUS_TOPIC), any(Schema.class), any(Struct.class)))
+                .thenReturn(value);
 
         doAnswer(invocation -> {
             ((Callback) invocation.getArgument(2)).onCompletion(null, null);
@@ -276,7 +307,8 @@ public class KafkaStatusBackingStoreTest {
         statusMap.put("state", "RUNNING");
         statusMap.put("generation", 0L);
 
-        when(converter.toConnectData(STATUS_TOPIC, value)).thenReturn(new SchemaAndValue(null, statusMap));
+        when(converter.toConnectData(STATUS_TOPIC, value))
+                .thenReturn(new SchemaAndValue(null, statusMap));
 
         store.read(consumerRecord(0, "status-task-conn-0", value));
 
@@ -308,9 +340,13 @@ public class KafkaStatusBackingStoreTest {
         thirdStatusRead.put("state", "RUNNING");
         thirdStatusRead.put("generation", 1L);
 
-        when(converter.toConnectData(STATUS_TOPIC, value)).thenReturn(new SchemaAndValue(null, firstStatusRead)).thenReturn(new SchemaAndValue(null, secondStatusRead)).thenReturn(new SchemaAndValue(null, thirdStatusRead));
+        when(converter.toConnectData(STATUS_TOPIC, value))
+                .thenReturn(new SchemaAndValue(null, firstStatusRead))
+                .thenReturn(new SchemaAndValue(null, secondStatusRead))
+                .thenReturn(new SchemaAndValue(null, thirdStatusRead));
 
-        when(converter.fromConnectData(eq(STATUS_TOPIC), any(Schema.class), any(Struct.class))).thenReturn(value);
+        when(converter.fromConnectData(eq(STATUS_TOPIC), any(Schema.class), any(Struct.class)))
+                .thenReturn(value);
 
         doAnswer(invocation -> {
             ((Callback) invocation.getArgument(2)).onCompletion(null, null);
@@ -340,7 +376,6 @@ public class KafkaStatusBackingStoreTest {
         statusMap.put("state", "RUNNING");
         statusMap.put("generation", 0L);
 
-        when(converter.fromConnectData(eq(STATUS_TOPIC), any(Schema.class), any(Struct.class))).thenReturn(value);
         when(converter.fromConnectData(eq(STATUS_TOPIC), any(Schema.class), any(Struct.class))).thenReturn(value);
         when(converter.toConnectData(STATUS_TOPIC, value)).thenReturn(new SchemaAndValue(null, statusMap));
 
@@ -392,7 +427,9 @@ public class KafkaStatusBackingStoreTest {
 
         store = spy(new KafkaStatusBackingStore(new MockTime(), converter, topicAdminSupplier, clientIdBase));
         KafkaBasedLog<String, byte[]> kafkaLog = mock(KafkaBasedLog.class);
-        doReturn(kafkaLog).when(store).createKafkaBasedLog(any(), capturedProducerProps.capture(), capturedConsumerProps.capture(), any(), any(), any(), any(), any());
+        doReturn(kafkaLog).when(store).createKafkaBasedLog(any(), capturedProducerProps.capture(),
+                capturedConsumerProps.capture(), any(),
+                any(), any(), any(), any());
 
 
         when(workerConfig.getString(DistributedConfig.STATUS_STORAGE_TOPIC_CONFIG)).thenReturn("connect-statuses");
@@ -404,7 +441,8 @@ public class KafkaStatusBackingStoreTest {
     }
 
     private static ConsumerRecord<String, byte[]> consumerRecord(long offset, String key, byte[] value) {
-        return new ConsumerRecord<>(STATUS_TOPIC, 0, offset, System.currentTimeMillis(), TimestampType.CREATE_TIME, 0, 0, key, value, new RecordHeaders(), Optional.empty());
+        return new ConsumerRecord<>(STATUS_TOPIC, 0, offset, System.currentTimeMillis(),
+                TimestampType.CREATE_TIME, 0, 0, key, value, new RecordHeaders(), Optional.empty());
     }
 
 }

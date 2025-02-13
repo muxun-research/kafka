@@ -18,30 +18,35 @@ package org.apache.kafka.connect.runtime;
 
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.MetricNameTemplate;
-import org.apache.kafka.common.metrics.CompoundStat;
 import org.apache.kafka.common.metrics.Sensor;
-import org.apache.kafka.common.metrics.stats.CumulativeSum;
 import org.apache.kafka.connect.util.ConnectorTaskId;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.mockito.junit.MockitoJUnitRunner;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.util.HashMap;
 
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
-@RunWith(MockitoJUnitRunner.StrictStubs.class)
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)
 public class WorkerMetricsGroupTest {
     private final String connector = "org.FakeConnector";
     private final ConnectorTaskId task = new ConnectorTaskId(connector, 0);
     private final RuntimeException exception = new RuntimeException();
 
-    @Mock
-    private ConnectMetrics connectMetrics;
-
+    @Mock private ConnectMetrics connectMetrics;
+    
     private Sensor connectorStartupResults;
     private Sensor connectorStartupAttempts;
     private Sensor connectorStartupSuccesses;
@@ -52,18 +57,13 @@ public class WorkerMetricsGroupTest {
     private Sensor taskStartupSuccesses;
     private Sensor taskStartupFailures;
 
-    @Mock
-    private ConnectorStatus.Listener delegateConnectorListener;
-    @Mock
-    private TaskStatus.Listener delegateTaskListener;
-    @Mock
-    private ConnectMetricsRegistry connectMetricsRegistry;
-    @Mock
-    private ConnectMetrics.MetricGroup metricGroup;
-    @Mock
-    private MetricName metricName;
+    @Mock private ConnectorStatus.Listener delegateConnectorListener;
+    @Mock private TaskStatus.Listener delegateTaskListener;
+    @Mock private ConnectMetricsRegistry connectMetricsRegistry;
+    @Mock private ConnectMetrics.MetricGroup metricGroup;
+    @Mock private MetricName metricName;
 
-    @Before
+    @BeforeEach
     public void setup() {
         // We don't expect metricGroup.metricName to be invoked with null in practice,
         // but it's easier to test this way, and should have no impact
@@ -87,11 +87,9 @@ public class WorkerMetricsGroupTest {
     private Sensor mockSensor(ConnectMetrics.MetricGroup metricGroup, String name) {
         Sensor sensor = mock(Sensor.class);
         when(metricGroup.sensor(name)).thenReturn(sensor);
-        when(sensor.add(any(CompoundStat.class))).thenReturn(true);
-        when(sensor.add(any(MetricName.class), any(CumulativeSum.class))).thenReturn(true);
         return sensor;
     }
-
+    
     @Test
     public void testConnectorStartupRecordedMetrics() {
         WorkerMetricsGroup workerMetricsGroup = new WorkerMetricsGroup(new HashMap<>(), new HashMap<>(), connectMetrics);
@@ -122,7 +120,7 @@ public class WorkerMetricsGroupTest {
     public void testConnectorFailureBeforeStartupRecordedMetrics() {
         WorkerMetricsGroup workerMetricsGroup = new WorkerMetricsGroup(new HashMap<>(), new HashMap<>(), connectMetrics);
         final ConnectorStatus.Listener connectorListener = workerMetricsGroup.wrapStatusListener(delegateConnectorListener);
-
+        
         connectorListener.onFailure(connector, exception);
 
         verify(delegateConnectorListener).onFailure(connector, exception);
@@ -139,7 +137,7 @@ public class WorkerMetricsGroupTest {
         verify(delegateTaskListener).onStartup(task);
         verifyRecordTaskSuccess();
     }
-
+    
     @Test
     public void testTaskFailureAfterStartupRecordedMetrics() {
         WorkerMetricsGroup workerMetricsGroup = new WorkerMetricsGroup(new HashMap<>(), new HashMap<>(), connectMetrics);

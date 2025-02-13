@@ -35,16 +35,19 @@ public class GlobalStateManagerStub implements GlobalStateManager {
     private final File baseDirectory;
     public boolean initialized;
     public boolean closed;
+    public boolean flushed;
+    public boolean checkpointWritten;
 
-    public GlobalStateManagerStub(final Set<String> storeNames, final Map<TopicPartition, Long> offsets, final File baseDirectory) {
+    public GlobalStateManagerStub(final Set<String> storeNames,
+                                  final Map<TopicPartition, Long> offsets,
+                                  final File baseDirectory) {
         this.storeNames = storeNames;
         this.offsets = offsets;
         this.baseDirectory = baseDirectory;
     }
 
     @Override
-    public void setGlobalProcessorContext(final InternalProcessorContext processorContext) {
-    }
+    public void setGlobalProcessorContext(final InternalProcessorContext processorContext) {}
 
     @Override
     public Set<String> initialize() {
@@ -58,11 +61,13 @@ public class GlobalStateManagerStub implements GlobalStateManager {
     }
 
     @Override
-    public void registerStore(final StateStore store, final StateRestoreCallback stateRestoreCallback, final CommitCallback checkpoint) {
-    }
+    public void registerStore(final StateStore store,
+                              final StateRestoreCallback stateRestoreCallback,
+                              final CommitCallback checkpoint) {}
 
     @Override
     public void flush() {
+        flushed = true;
     }
 
     @Override
@@ -77,15 +82,16 @@ public class GlobalStateManagerStub implements GlobalStateManager {
 
     @Override
     public void checkpoint() {
+        checkpointWritten = true;
     }
 
     @Override
-    public StateStore getStore(final String name) {
+    public StateStore store(final String name) {
         return null;
     }
 
     @Override
-    public StateStore getGlobalStore(final String name) {
+    public StateStore globalStore(final String name) {
         return null;
     }
 

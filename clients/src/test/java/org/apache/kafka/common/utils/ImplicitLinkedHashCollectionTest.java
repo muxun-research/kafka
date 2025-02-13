@@ -19,9 +19,24 @@ package org.apache.kafka.common.utils;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Random;
+import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * A unit test for ImplicitLinkedHashCollection.
@@ -29,7 +44,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Timeout(120)
 public class ImplicitLinkedHashCollectionTest {
 
-    final static class TestElement implements ImplicitLinkedHashCollection.Element {
+    static final class TestElement implements ImplicitLinkedHashCollection.Element {
         private int prev = ImplicitLinkedHashCollection.INVALID_INDEX;
         private int next = ImplicitLinkedHashCollection.INVALID_INDEX;
         private final int key;
@@ -67,20 +82,16 @@ public class ImplicitLinkedHashCollectionTest {
 
         @Override
         public boolean elementKeysAreEqual(Object o) {
-            if (this == o)
-                return true;
-            if ((o == null) || (o.getClass() != TestElement.class))
-                return false;
+            if (this == o) return true;
+            if ((o == null) || (o.getClass() != TestElement.class)) return false;
             TestElement that = (TestElement) o;
             return key == that.key;
         }
 
         @Override
         public boolean equals(Object o) {
-            if (this == o)
-                return true;
-            if ((o == null) || (o.getClass() != TestElement.class))
-                return false;
+            if (this == o) return true;
+            if ((o == null) || (o.getClass() != TestElement.class)) return false;
             TestElement that = (TestElement) o;
             return key == that.key && val == that.val;
         }
@@ -127,23 +138,27 @@ public class ImplicitLinkedHashCollectionTest {
         int i = 0;
         while (iterator.hasNext()) {
             TestElement element = iterator.next();
-            assertTrue(i < sequence.length, "Iterator yieled " + (i + 1) + " elements, but only " + sequence.length + " were expected.");
+            assertTrue(i < sequence.length, "Iterator yieled " + (i + 1) + " elements, but only " +
+                sequence.length + " were expected.");
             assertEquals(sequence[i].intValue(), element.key, "Iterator value number " + (i + 1) + " was incorrect.");
             i = i + 1;
         }
-        assertEquals(sequence.length, i, "Iterator yieled " + (i + 1) + " elements, but " + sequence.length + " were expected.");
+        assertEquals(sequence.length, i, "Iterator yieled " + (i + 1) + " elements, but " +
+                sequence.length + " were expected.");
     }
 
     static void expectTraversal(Iterator<TestElement> iter, Iterator<Integer> expectedIter) {
         int i = 0;
         while (iter.hasNext()) {
             TestElement element = iter.next();
-            assertTrue(expectedIter.hasNext(), "Iterator yieled " + (i + 1) + " elements, but only " + i + " were expected.");
+            assertTrue(expectedIter.hasNext(), "Iterator yieled " + (i + 1) + " elements, but only " + i +
+                " were expected.");
             Integer expected = expectedIter.next();
             assertEquals(expected.intValue(), element.key, "Iterator value number " + (i + 1) + " was incorrect.");
             i = i + 1;
         }
-        assertFalse(expectedIter.hasNext(), "Iterator yieled " + i + " elements, but at least " + (i + 1) + " were expected.");
+        assertFalse(expectedIter.hasNext(), "Iterator yieled " + i + " elements, but at least " + (i + 1) +
+            " were expected.");
     }
 
     @Test
@@ -534,7 +549,8 @@ public class ImplicitLinkedHashCollectionTest {
         assertFalse(coll.remove(new TestElement(2)));
     }
 
-    private void addRandomElement(Random random, LinkedHashSet<Integer> existing, ImplicitLinkedHashCollection<TestElement> set) {
+    private void addRandomElement(Random random, LinkedHashSet<Integer> existing,
+                                  ImplicitLinkedHashCollection<TestElement> set) {
         int next;
         do {
             next = random.nextInt();
@@ -582,9 +598,9 @@ public class ImplicitLinkedHashCollectionTest {
     @Test
     public void testRemovals() {
         ImplicitLinkedHashCollection<TestElement> coll = new ImplicitLinkedHashCollection<>();
-        List<TestElement> elements = new ArrayList<>();
+        List<TestElement> elements  = new ArrayList<>();
         for (int i = 0; i < 100; i++) {
-            TestElement element = new TestElement(i, i);
+            TestElement element  = new TestElement(i, i);
             elements.add(element);
             coll.add(element);
         }
@@ -609,13 +625,7 @@ public class ImplicitLinkedHashCollectionTest {
                 return -1;
             } else if (a.key > b.key) {
                 return 1;
-            } else if (a.val < b.val) {
-                return -1;
-            } else if (a.val > b.val) {
-                return 1;
-            } else {
-                return 0;
-            }
+            } else return Integer.compare(a.val, b.val);
         }
     }
 

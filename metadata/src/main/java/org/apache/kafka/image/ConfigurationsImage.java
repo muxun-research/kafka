@@ -31,11 +31,12 @@ import java.util.Properties;
 
 /**
  * Represents the configurations in the metadata image.
- * <p>
+ *
  * This class is thread-safe.
  */
 public final class ConfigurationsImage {
-    public static final ConfigurationsImage EMPTY = new ConfigurationsImage(Collections.emptyMap());
+    public static final ConfigurationsImage EMPTY =
+        new ConfigurationsImage(Collections.emptyMap());
 
     private final Map<ConfigResource, ConfigurationImage> data;
 
@@ -83,9 +84,7 @@ public final class ConfigurationsImage {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof ConfigurationsImage))
-            return false;
-        ConfigurationsImage other = (ConfigurationsImage) o;
+        if (!(o instanceof ConfigurationsImage other)) return false;
         return data.equals(other.data);
     }
 

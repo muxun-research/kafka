@@ -20,14 +20,11 @@ import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigDef.Importance;
 import org.apache.kafka.common.config.ConfigDef.Type;
-import org.apache.kafka.common.utils.ConfigUtils;
 
 import java.util.Map;
 import java.util.regex.Pattern;
 
-/**
- * Uses an include and exclude pattern.
- */
+/** Uses an include and exclude pattern. */
 public class DefaultGroupFilter implements GroupFilter {
 
     public static final String GROUPS_INCLUDE_CONFIG = "groups";
@@ -35,7 +32,6 @@ public class DefaultGroupFilter implements GroupFilter {
     public static final String GROUPS_INCLUDE_DEFAULT = ".*";
 
     public static final String GROUPS_EXCLUDE_CONFIG = "groups.exclude";
-    public static final String GROUPS_EXCLUDE_CONFIG_ALIAS = "groups.blacklist";
 
     private static final String GROUPS_EXCLUDE_DOC = "List of consumer group names and/or regexes that should not be replicated.";
     public static final String GROUPS_EXCLUDE_DEFAULT = "console-consumer-.*, connect-.*, __.*";
@@ -65,10 +61,20 @@ public class DefaultGroupFilter implements GroupFilter {
 
     static class GroupFilterConfig extends AbstractConfig {
 
-        static final ConfigDef DEF = new ConfigDef().define(GROUPS_INCLUDE_CONFIG, Type.LIST, GROUPS_INCLUDE_DEFAULT, Importance.HIGH, GROUPS_INCLUDE_DOC).define(GROUPS_EXCLUDE_CONFIG, Type.LIST, GROUPS_EXCLUDE_DEFAULT, Importance.HIGH, GROUPS_EXCLUDE_DOC).define(GROUPS_EXCLUDE_CONFIG_ALIAS, Type.LIST, null, Importance.HIGH, "Deprecated. Use " + GROUPS_EXCLUDE_CONFIG + " instead.");
+        static final ConfigDef DEF = new ConfigDef()
+            .define(GROUPS_INCLUDE_CONFIG,
+                    Type.LIST,
+                    GROUPS_INCLUDE_DEFAULT,
+                    Importance.HIGH,
+                    GROUPS_INCLUDE_DOC)
+            .define(GROUPS_EXCLUDE_CONFIG,
+                    Type.LIST,
+                    GROUPS_EXCLUDE_DEFAULT,
+                    Importance.HIGH,
+                    GROUPS_EXCLUDE_DOC);
 
         GroupFilterConfig(Map<String, ?> props) {
-            super(DEF, ConfigUtils.translateDeprecatedConfigs(props, new String[][]{{GROUPS_EXCLUDE_CONFIG, GROUPS_EXCLUDE_CONFIG_ALIAS}}), false);
+            super(DEF, props, false);
         }
 
         Pattern includePattern() {

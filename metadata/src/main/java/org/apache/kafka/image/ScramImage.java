@@ -29,14 +29,17 @@ import org.apache.kafka.image.writer.ImageWriter;
 import org.apache.kafka.image.writer.ImageWriterOptions;
 import org.apache.kafka.metadata.ScramCredentialData;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
-import java.util.stream.Collectors;
 
 
 /**
  * Represents the SCRAM credentials in the metadata image.
- * <p>
+ *
  * This class is thread-safe.
  */
 public final class ScramImage {
@@ -57,12 +60,12 @@ public final class ScramImage {
             }
         } else {
             boolean isEmpty = true;
-            StringBuffer scramImageString = new StringBuffer("ScramImage({");
+            StringBuilder scramImageString = new StringBuilder("ScramImage({");
             for (Entry<ScramMechanism, Map<String, ScramCredentialData>> mechanismEntry : mechanisms.entrySet()) {
                 if (!mechanismEntry.getValue().isEmpty()) {
-                    scramImageString.append(mechanismEntry.getKey() + ":");
+                    scramImageString.append(mechanismEntry.getKey()).append(":");
                     List<String> users = new ArrayList<>(mechanismEntry.getValue().keySet());
-                    scramImageString.append(users.stream().collect(Collectors.joining(", ")));
+                    scramImageString.append(String.join(", ", users));
                     scramImageString.append("},{");
                     isEmpty = false;
                 }
@@ -80,9 +83,9 @@ public final class ScramImage {
 
     public DescribeUserScramCredentialsResponseData describe(DescribeUserScramCredentialsRequestData request) {
         List<UserName> users = request.users();
-        Map<String, Boolean> uniqueUsers = new HashMap<String, Boolean>();
+        Map<String, Boolean> uniqueUsers = new HashMap<>();
 
-        if ((users == null) || (users.size() == 0)) {
+        if ((users == null) || (users.isEmpty())) {
             // If there are no users listed then get all the users
             for (Map<String, ScramCredentialData> scramCredentialDataSet : mechanisms.values()) {
                 for (String user : scramCredentialDataSet.keySet()) {
@@ -107,21 +110,24 @@ public final class ScramImage {
 
             if (!user.getValue()) {
                 boolean datafound = false;
-                List<CredentialInfo> credentialInfos = new ArrayList<CredentialInfo>();
+                List<CredentialInfo> credentialInfos = new ArrayList<>();
                 for (Map.Entry<ScramMechanism, Map<String, ScramCredentialData>> mechanismsEntry : mechanisms.entrySet()) {
                     Map<String, ScramCredentialData> credentialDataSet = mechanismsEntry.getValue();
                     if (credentialDataSet.containsKey(user.getKey())) {
-                        credentialInfos.add(new CredentialInfo().setMechanism(mechanismsEntry.getKey().type()).setIterations(credentialDataSet.get(user.getKey()).iterations()));
+                        credentialInfos.add(new CredentialInfo().setMechanism(mechanismsEntry.getKey().type())
+                                                                .setIterations(credentialDataSet.get(user.getKey()).iterations()));
                         datafound = true;
                     }
                 }
                 if (datafound) {
                     result.setCredentialInfos(credentialInfos);
                 } else {
-                    result.setErrorCode(Errors.RESOURCE_NOT_FOUND.code()).setErrorMessage(DESCRIBE_USER_THAT_DOES_NOT_EXIST + user.getKey());
+                    result.setErrorCode(Errors.RESOURCE_NOT_FOUND.code())
+                          .setErrorMessage(DESCRIBE_USER_THAT_DOES_NOT_EXIST + user.getKey());
                 }
             } else {
-                result.setErrorCode(Errors.DUPLICATE_RESOURCE.code()).setErrorMessage(DESCRIBE_DUPLICATE_USER + user.getKey());
+                result.setErrorCode(Errors.DUPLICATE_RESOURCE.code())
+                      .setErrorMessage(DESCRIBE_DUPLICATE_USER + user.getKey());
             }
             retval.results().add(result);
         }
@@ -143,10 +149,8 @@ public final class ScramImage {
 
     @Override
     public boolean equals(Object o) {
-        if (o == null)
-            return false;
-        if (!o.getClass().equals(ScramImage.class))
-            return false;
+        if (o == null) return false;
+        if (!o.getClass().equals(ScramImage.class)) return false;
         ScramImage other = (ScramImage) o;
         return mechanisms.equals(other.mechanisms);
     }

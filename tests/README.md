@@ -9,10 +9,9 @@ result reporter and utilities to pull up and tear down services.)
 Running tests using docker
 --------------------------
 Docker containers can be used for running kafka system tests locally.
-
 * Requirements
-    - Docker 1.12.3 (or higher) is installed and running on the machine.
-    - Test requires that Kafka, including system test libs, is built. This can be done by running
+  - Docker 1.12.3 (or higher) is installed and running on the machine.
+  - Test requires that Kafka, including system test libs, is built. This can be done by running
 ```
 ./gradlew clean systemTestLibs
 ```
@@ -32,6 +31,10 @@ TC_PATHS="tests/kafkatest/tests/streams tests/kafkatest/tests/tools" bash tests/
 ```
 TC_PATHS="tests/kafkatest/tests/client/pluggable_test.py" bash tests/docker/run_tests.sh
 ```
+* Run multiple test files
+```
+TC_PATHS="tests/kafkatest/tests/client/pluggable_test.py tests/kafkatest/services/console_consumer.py" bash tests/docker/run_tests.sh
+```
 * Run a specific test class
 ```
 TC_PATHS="tests/kafkatest/tests/client/pluggable_test.py::PluggableConsumerTest" bash tests/docker/run_tests.sh
@@ -44,90 +47,110 @@ TC_PATHS="tests/kafkatest/tests/client/pluggable_test.py::PluggableConsumerTest.
 ```
 TC_PATHS="tests/kafkatest/tests/streams/streams_upgrade_test.py::StreamsUpgradeTest.test_metadata_upgrade" _DUCKTAPE_OPTIONS='--parameters '\''{"from_version":"0.10.1.1","to_version":"2.6.0-SNAPSHOT"}'\' bash tests/docker/run_tests.sh
 ```
+* Run tests with a specific image name
+```
+image_name="ducker-ak-openjdk:17-buster" bash tests/docker/run_tests.sh
+```
 * Run tests with a different JVM
 ```
-bash tests/docker/ducker-ak up -j 'openjdk:11'; tests/docker/run_tests.sh
+bash tests/docker/ducker-ak up -j 'openjdk:17-buster'; tests/docker/run_tests.sh
+```
+* Remove ducker-ak containers
+```
+bash tests/docker/ducker-ak down -f
 ```
 * Rebuild first and then run tests
 ```
 REBUILD="t" bash tests/docker/run_tests.sh
 ```
-
+* Run tests with Kafka in `native` mode
+  - To run tests with Kafka in `native` mode, pass `{"kafka_mode": "native"}` to the ducktape globals. This will bring up ducker nodes with the native Kafka binary inside them and use it to start Kafka while running the tests.
+    ```
+    _DUCKTAPE_OPTIONS="--globals '{\"kafka_mode\":\"native\"}'" TC_PATHS="tests/kafkatest/tests/"  bash tests/docker/run_tests.sh
+    ```
+  - To only bring up ducker nodes with kafka native binary inside it.
+    ```
+    bash tests/docker/ducker-ak up -m native
+    ```
+  - To run tests with Kafka in `native` mode using `ducker-ak test`(Make sure that the ducker nodes are already up with kafka native binary inside it).
+    ```
+    tests/docker/ducker-ak test tests/kafkatest/tests/client/compression_test.py -- --globals '{\"kafka_mode\":\"native\"}'
+    ```
 * Debug tests in VS Code:
-    - Run test with `--debug` flag (can be before or after file name):
-      ```
-      tests/docker/ducker-ak up; tests/docker/ducker-ak test tests/kafkatest/tests/core/security_test.py --debug
-      ```
-    - Test will run in debug mode and wait for a debugger to attach.
-    - Launch VS Code debugger with `"attach"` request - here's an example:
-      ```json
-      {
-      "version": "0.2.0",
-      "configurations": [
-          {
-              "name": "Python: Attach to Ducker",
-              "type": "python",
-              "request": "attach",
-              "connect": {
-                  "host": "localhost",
-                  "port": 5678
-              },
-              "justMyCode": false,
-              "pathMappings": [
-                  {
-                      "localRoot": "${workspaceFolder}",
-                      "remoteRoot": "."
-                  }
-              ]
-          }
-        ]
-      }
-      ```
-    - To pass `--debug` flag to ducktape itself, use `--`:
-      ```
-      tests/docker/ducker-ak test tests/kafkatest/tests/core/security_test.py --debug -- --debug
-      ```
+  - Run test with `--debug` flag (can be before or after file name):
+    ```
+    tests/docker/ducker-ak up; tests/docker/ducker-ak test tests/kafkatest/tests/core/security_test.py --debug
+    ```
+  - Test will run in debug mode and wait for a debugger to attach. 
+  - Launch VS Code debugger with `"attach"` request - here's an example:
+    ```json
+    {
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Attach to Ducker",
+            "type": "python",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            },
+            "justMyCode": false,
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "."
+                }
+            ]
+        }
+      ]
+    }
+    ```
+  - To pass `--debug` flag to ducktape itself, use `--`:
+    ```
+    tests/docker/ducker-ak test tests/kafkatest/tests/core/security_test.py --debug -- --debug
+    ```
 
 * Notes
-    - The scripts to run tests creates and destroys docker network named *knw*.
-      This network can't be used for any other purpose.
-    - The docker containers are named knode01, knode02 etc.
-      These nodes can't be used for any other purpose.
+  - The scripts to run tests creates and destroys docker network named *knw*.
+   This network can't be used for any other purpose.
+  - The docker containers are named knode01, knode02 etc.
+   These nodes can't be used for any other purpose.
 
 * Exposing ports using --expose-ports option of `ducker-ak up` command
 
-  If `--expose-ports` is specified then we will expose those ports to random ephemeral ports
-  on the host. The argument can be a single port (like 5005), a port range like (5005-5009)
-  or a combination of port/port-range separated by comma (like 2181,9092 or 2181,5005-5008).
-  By default no port is exposed.
+    If `--expose-ports` is specified then we will expose those ports to random ephemeral ports
+    on the host. The argument can be a single port (like 5005), a port range like (5005-5009)
+    or a combination of port/port-range separated by comma (like 2181,9092 or 2181,5005-5008).
+    By default no port is exposed.
+    
+    The exposed port mapping can be seen by executing `docker ps` command. The PORT column
+    of the output shows the mapping like this (maps port 33891 on host to port 2182 in container):
 
-  The exposed port mapping can be seen by executing `docker ps` command. The PORT column
-  of the output shows the mapping like this (maps port 33891 on host to port 2182 in container):
+    0.0.0.0:33891->2182/tcp
 
-  0.0.0.0:33891->2182/tcp
-
-  Behind the scene Docker is setting up a DNAT rule for the mapping and it is visible in
-  the DOCKER section of iptables command (`sudo iptables -t nat -L -n`), something like:
+    Behind the scene Docker is setting up a DNAT rule for the mapping and it is visible in
+    the DOCKER section of iptables command (`sudo iptables -t nat -L -n`), something like:
 
     <pre>DNAT       tcp  --  0.0.0.0/0      0.0.0.0/0      tcp       dpt:33882       to:172.22.0.2:9092</pre>
 
-  The exposed port(s) are useful to attach a remote debugger to the process running
-  in the docker image. For example if port 5005 was exposed and is mapped to an ephemeral
-  port (say 33891), then a debugger attaching to port 33891 on host will be connecting to
-  a debug session started at port 5005 in the docker image. As an example, for above port
-  numbers, run following commands in the docker image (say by ssh using `./docker/ducker-ak ssh ducker02`):
+    The exposed port(s) are useful to attach a remote debugger to the process running
+    in the docker image. For example if port 5005 was exposed and is mapped to an ephemeral
+    port (say 33891), then a debugger attaching to port 33891 on host will be connecting to
+    a debug session started at port 5005 in the docker image. As an example, for above port
+    numbers, run following commands in the docker image (say by ssh using `./docker/ducker-ak ssh ducker02`):
 
-  > $ export KAFKA_OPTS="-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005"
+    > $ export KAFKA_OPTS="-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005"
+    
+    > $ /opt/kafka-dev/bin/kafka-topics.sh --bootstrap-server ducker03:9095 --topic __consumer_offsets --describe
 
-  > $ /opt/kafka-dev/bin/kafka-topics.sh --bootstrap-server ducker03:9095 --topic __consumer_offsets --describe
+    This will run the TopicCommand to describe the __consumer-offset topic. The java process
+    will stop and wait for debugger to attach as `suspend=y` option was specified. Now starting
+    a debugger on host with host `localhost` and following parameter as JVM setting:
 
-  This will run the TopicCommand to describe the __consumer-offset topic. The java process
-  will stop and wait for debugger to attach as `suspend=y` option was specified. Now starting
-  a debugger on host with host `localhost` and following parameter as JVM setting:
+    `-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=33891`
 
-  `-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=33891`
-
-  will attach it to the TopicCommand process running in the docker image.
+    will attach it to the TopicCommand process running in the docker image.
 
 Local Quickstart
 ----------------
@@ -142,7 +165,7 @@ https://cwiki.apache.org/confluence/display/KAFKA/tutorial+-+set+up+and+run+Kafk
         $ cd kafka/tests
         $ virtualenv -p python3 venv
         $ . ./venv/bin/activate
-        $ python3 setup.py develop
+        $ python3 -m pip install --editable .
         $ cd ..  # back to base kafka directory
 
 * Run the bootstrap script to set up Vagrant for testing

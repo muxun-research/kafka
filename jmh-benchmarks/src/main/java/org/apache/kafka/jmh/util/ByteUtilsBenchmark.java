@@ -18,36 +18,46 @@
 package org.apache.kafka.jmh.util;
 
 import org.apache.kafka.common.utils.ByteUtils;
-import org.openjdk.jmh.annotations.*;
+
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.CompilerControl;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.RunnerException;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.security.SecureRandom;
 import java.util.concurrent.TimeUnit;
 
-@OutputTimeUnit(TimeUnit.SECONDS)
-@Fork(3)
-@Warmup(iterations = 3, time = 1)
-@Measurement(iterations = 5, time = 1)
 /**
  * This benchmark calculates the empirical evidence of different implementation for encoding/decoding a protobuf
  * <a href="https://protobuf.dev/programming-guides/encoding/#varints">VarInt</a> and VarLong.
  *
  * The benchmark uses JMH and calculates results for different sizes of variable length integer. We expect most of the
  * usage in Kafka code base to be 1 or 2 byte integers.
- */ public class ByteUtilsBenchmark {
+ */
+@OutputTimeUnit(TimeUnit.SECONDS)
+@Fork(3)
+@Warmup(iterations = 3, time = 1)
+@Measurement(iterations = 5, time = 1)
+public class ByteUtilsBenchmark {
     private static final int DATA_SET_SAMPLE_SIZE = 16384;
 
     @State(Scope.Benchmark)
     public static class BaseBenchmarkState {
         private ByteBuffer testBuffer;
         private SecureRandom random;
-
         @Setup(Level.Trial)
         public void setUpBenchmarkLevel() {
             // Initialize the random number generator with a seed so that for each benchmark it produces the same sequence
@@ -63,15 +73,15 @@ import java.util.concurrent.TimeUnit;
 
         /**
          * Generates a random int64 number which occupies exactly bytesSet in the variable length encoding for int64
-         * <p>
+         *
          * Upper bound is set by finding the largest number that can be represented by N bits. This number is found
          * by bit shifting by N and subtracting decimal 1. For example, for 2 bytes = 16 bits, we calculate the
          * upper bound by:
          * 1. 0001 0000 0000 0000 0000 // bit shift by 16 = 65536 decimal
          * 2. Subtract 1 from 65536 = 65535
          * 3. 65535 is the upper bound which is represented in binary as 1111 1111 1111 1111 i.e. largest number
-         * that could be represented by 2 bytes.
-         * <p>
+         *    that could be represented by 2 bytes.
+         *
          * Hence, range of random number of different byte length is:
          * 1 byte - [1, 255)
          * 2 byte - [256, 65535)
@@ -83,12 +93,16 @@ import java.util.concurrent.TimeUnit;
             if (lowerBound >= upperBound) {
                 throw new IllegalArgumentException();
             }
-            return lowerBound + random.longs(lowerBound, upperBound).findFirst().orElseThrow(() -> new IllegalStateException("Unable to create a random long in the range=[" + lowerBound + ", " + upperBound + "]"));
+            return lowerBound +
+                random.longs(lowerBound, upperBound).findFirst()
+                    .orElseThrow(() -> new IllegalStateException("Unable to create a random long in the range=[" + lowerBound + ", " + upperBound + "]"));
         }
 
         /**
          * Generates a random int32 number which occupies exactly bytesSet in the variable length encoding for int32
+         *
          * @see {@link #generateRandomLongWithExactBytesSet(int)} for implementation details.
+         *
          */
         int generateRandomIntWithExactBytesSet(int bytesSet) {
             int lowerBound = 1 << ((bytesSet - 1) * 8);
@@ -181,7 +195,7 @@ import java.util.concurrent.TimeUnit;
 
     @Benchmark
     @CompilerControl(CompilerControl.Mode.DONT_INLINE)
-    public void testUnsignedReadVarlongUnrolled(IterationStateForLong state, Blackhole bk) throws IOException {
+    public void testUnsignedReadVarlongUnrolled(IterationStateForLong state, Blackhole bk) {
         for (long randomValue : state.getRandomValues()) {
             ByteUtils.writeUnsignedVarlong(randomValue, state.getTestBuffer());
             // prepare for reading
@@ -270,13 +284,16 @@ import java.util.concurrent.TimeUnit;
     }
 
     public static void main(String[] args) throws RunnerException {
-        Options opt = new OptionsBuilder().include(ByteUtilsBenchmark.class.getSimpleName()).forks(2).build();
+        Options opt = new OptionsBuilder()
+                .include(ByteUtilsBenchmark.class.getSimpleName())
+                .forks(2)
+                .build();
 
         new Runner(opt).run();
     }
 
 
-    /******************* Implementations **********************/
+    /* Implementations */
 
     /*
      * Implementation in Trunk as of Apr 2023 / v3.4
@@ -298,7 +315,7 @@ import java.util.concurrent.TimeUnit;
     /*
      * Implementation in Trunk as of Apr 2023 / v3.4
      */
-    private static long readUnsignedVarlongLegacy(ByteBuffer buffer) {
+    private static long readUnsignedVarlongLegacy(ByteBuffer buffer)  {
         long value = 0L;
         int i = 0;
         long b;
@@ -343,7 +360,12 @@ import java.util.concurrent.TimeUnit;
                 int y = buffer[tempPos++];
                 x ^= y << 28;
                 x ^= (~0 << 7) ^ (~0 << 14) ^ (~0 << 21) ^ (~0 << 28);
-                if (y < 0 && buffer[tempPos++] < 0 && buffer[tempPos++] < 0 && buffer[tempPos++] < 0 && buffer[tempPos++] < 0 && buffer[tempPos++] < 0) {
+                if (y < 0
+                    && buffer[tempPos++] < 0
+                    && buffer[tempPos++] < 0
+                    && buffer[tempPos++] < 0
+                    && buffer[tempPos++] < 0
+                    && buffer[tempPos++] < 0) {
                     break fastpath; // Will throw malformedVarint()
                 }
             }

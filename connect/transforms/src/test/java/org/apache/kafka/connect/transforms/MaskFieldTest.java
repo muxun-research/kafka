@@ -17,15 +17,28 @@
 package org.apache.kafka.connect.transforms;
 
 import org.apache.kafka.common.config.ConfigException;
-import org.apache.kafka.connect.data.*;
+import org.apache.kafka.common.utils.AppInfoParser;
+import org.apache.kafka.connect.data.Decimal;
+import org.apache.kafka.connect.data.Field;
+import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.SchemaBuilder;
+import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.connect.data.Time;
+import org.apache.kafka.connect.data.Timestamp;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.sink.SinkRecord;
+
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static java.util.Collections.singletonList;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,7 +46,24 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class MaskFieldTest {
 
-    private static final Schema SCHEMA = SchemaBuilder.struct().field("magic", Schema.INT32_SCHEMA).field("bool", Schema.BOOLEAN_SCHEMA).field("byte", Schema.INT8_SCHEMA).field("short", Schema.INT16_SCHEMA).field("int", Schema.INT32_SCHEMA).field("long", Schema.INT64_SCHEMA).field("float", Schema.FLOAT32_SCHEMA).field("double", Schema.FLOAT64_SCHEMA).field("string", Schema.STRING_SCHEMA).field("date", org.apache.kafka.connect.data.Date.SCHEMA).field("time", Time.SCHEMA).field("timestamp", Timestamp.SCHEMA).field("decimal", Decimal.schema(0)).field("array", SchemaBuilder.array(Schema.INT32_SCHEMA)).field("map", SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.STRING_SCHEMA)).build();
+    private static final Schema SCHEMA = SchemaBuilder.struct()
+            .field("magic", Schema.INT32_SCHEMA)
+            .field("bool", Schema.BOOLEAN_SCHEMA)
+            .field("byte", Schema.INT8_SCHEMA)
+            .field("short", Schema.INT16_SCHEMA)
+            .field("int", Schema.INT32_SCHEMA)
+            .field("long", Schema.INT64_SCHEMA)
+            .field("float", Schema.FLOAT32_SCHEMA)
+            .field("double", Schema.FLOAT64_SCHEMA)
+            .field("string", Schema.STRING_SCHEMA)
+            .field("date", org.apache.kafka.connect.data.Date.SCHEMA)
+            .field("time", Time.SCHEMA)
+            .field("timestamp", Timestamp.SCHEMA)
+            .field("decimal", Decimal.schema(0))
+            .field("array", SchemaBuilder.array(Schema.INT32_SCHEMA))
+            .field("map", SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.STRING_SCHEMA))
+            .field("withDefault", SchemaBuilder.string().optional().defaultValue("default").build())
+            .build();
     private static final Map<String, Object> VALUES = new HashMap<>();
     private static final Struct VALUES_WITH_SCHEMA = new Struct(SCHEMA);
 
@@ -68,6 +98,7 @@ public class MaskFieldTest {
         VALUES_WITH_SCHEMA.put("decimal", new BigDecimal(42));
         VALUES_WITH_SCHEMA.put("array", Arrays.asList(1, 2, 3));
         VALUES_WITH_SCHEMA.put("map", Collections.singletonMap("what", "what"));
+        VALUES_WITH_SCHEMA.put("withDefault", null);
     }
 
     private static MaskField<SinkRecord> transform(List<String> fields, String replacement) {
@@ -75,6 +106,7 @@ public class MaskFieldTest {
         Map<String, Object> props = new HashMap<>();
         props.put("fields", fields);
         props.put("replacement", replacement);
+        props.put("replace.null.with.default", false);
         xform.configure(props);
         return xform;
     }
@@ -96,7 +128,9 @@ public class MaskFieldTest {
     @SuppressWarnings("unchecked")
     private static void checkReplacementSchemaless(List<String> maskFields, Object replacement) {
         SinkRecord record = record(null, VALUES);
-        final Map<String, Object> updatedValue = (Map) transform(maskFields, String.valueOf(replacement)).apply(record).value();
+        final Map<String, Object> updatedValue = (Map) transform(maskFields, String.valueOf(replacement))
+                .apply(record)
+                .value();
         for (String maskField : maskFields) {
             assertEquals(replacement, updatedValue.get(maskField), "Invalid replacement for " + maskField + " value");
         }
@@ -150,6 +184,7 @@ public class MaskFieldTest {
         assertEquals(BigDecimal.ZERO, updatedValue.get("decimal"));
         assertEquals(Collections.emptyList(), updatedValue.get("array"));
         assertEquals(Collections.emptyMap(), updatedValue.get("map"));
+        assertEquals(null, updatedValue.getWithoutDefault("withDefault"));
     }
 
     @Test
@@ -235,5 +270,11 @@ public class MaskFieldTest {
         assertEquals(Collections.emptyMap(), actualMap);
         actualMap.put("k", "v");
         assertEquals(Collections.singletonMap("k", "v"), actualMap);
+    }
+
+    @Test
+    public void testMaskFieldReturnsVersionFromAppInfoParser() {
+        final MaskField<SinkRecord> xform = new MaskField.Value<>();
+        assertEquals(AppInfoParser.getVersion(), xform.version());
     }
 }

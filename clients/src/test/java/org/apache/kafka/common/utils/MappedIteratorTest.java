@@ -29,33 +29,33 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class MappedIteratorTest {
 
-	@Test
-	public void testStringToInteger() {
-		List<String> list = asList("foo", "", "bar2", "baz45");
-		Function<String, Integer> mapper = s -> s.length();
+    @Test
+    public void testStringToInteger() {
+        List<String> list = asList("foo", "", "bar2", "baz45");
+        Function<String, Integer> mapper = String::length;
 
-		Iterable<Integer> mappedIterable = () -> new MappedIterator<>(list.iterator(), mapper);
-		List<Integer> mapped = new ArrayList<>();
-		mappedIterable.forEach(mapped::add);
+        Iterable<Integer> mappedIterable = () -> new MappedIterator<>(list.iterator(), mapper);
+        List<Integer> mapped = new ArrayList<>();
+        mappedIterable.forEach(mapped::add);
 
-		assertEquals(list.stream().map(mapper).collect(Collectors.toList()), mapped);
+        assertEquals(list.stream().map(mapper).collect(Collectors.toList()), mapped);
 
-		// Ensure that we can iterate a second time
-		List<Integer> mapped2 = new ArrayList<>();
-		mappedIterable.forEach(mapped2::add);
-		assertEquals(mapped, mapped2);
-	}
+        // Ensure that we can iterate a second time
+        List<Integer> mapped2 = new ArrayList<>();
+        mappedIterable.forEach(mapped2::add);
+        assertEquals(mapped, mapped2);
+    }
 
-	@Test
-	public void testEmptyList() {
-		List<String> list = emptyList();
-		Function<String, Integer> mapper = s -> s.length();
+    @Test
+    public void testEmptyList() {
+        List<String> list = emptyList();
+        Function<String, Integer> mapper = String::length;
 
-		Iterable<Integer> mappedIterable = () -> new MappedIterator<>(list.iterator(), mapper);
-		List<Integer> mapped = new ArrayList<>();
-		mappedIterable.forEach(mapped::add);
+        Iterable<Integer> mappedIterable = () -> new MappedIterator<>(list.iterator(), mapper);
+        List<Integer> mapped = new ArrayList<>();
+        mappedIterable.forEach(mapped::add);
 
-		assertEquals(emptyList(), mapped);
-	}
+        assertEquals(emptyList(), mapped);
+    }
 
 }

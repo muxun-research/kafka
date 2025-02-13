@@ -19,6 +19,7 @@ package org.apache.kafka.common.metrics.stats;
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.metrics.CompoundStat.NamedMeasurable;
 import org.apache.kafka.common.metrics.MetricConfig;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;

@@ -25,7 +25,13 @@ import org.apache.kafka.common.protocol.types.Struct;
 import org.apache.kafka.common.protocol.types.Type;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * A cooperative version of the {@link AbstractStickyAssignor AbstractStickyAssignor}. This follows the same (sticky)
@@ -47,7 +53,8 @@ public class CooperativeStickyAssignor extends AbstractStickyAssignor {
 
     // these schemas are used for preserving useful metadata for the assignment, such as the last stable generation
     private static final String GENERATION_KEY_NAME = "generation";
-    private static final Schema COOPERATIVE_STICKY_ASSIGNOR_USER_DATA_V0 = new Schema(new Field(GENERATION_KEY_NAME, Type.INT32));
+    private static final Schema COOPERATIVE_STICKY_ASSIGNOR_USER_DATA_V0 = new Schema(
+        new Field(GENERATION_KEY_NAME, Type.INT32));
 
     private int generation = DEFAULT_GENERATION; // consumer group generation
 
@@ -100,23 +107,28 @@ public class CooperativeStickyAssignor extends AbstractStickyAssignor {
     }
 
     @Override
-    public Map<String, List<TopicPartition>> assignPartitions(Map<String, List<PartitionInfo>> partitionsPerTopic, Map<String, Subscription> subscriptions) {
+    public Map<String, List<TopicPartition>> assignPartitions(Map<String, List<PartitionInfo>> partitionsPerTopic,
+                                                              Map<String, Subscription> subscriptions) {
         Map<String, List<TopicPartition>> assignments = super.assignPartitions(partitionsPerTopic, subscriptions);
 
-        Map<TopicPartition, String> partitionsTransferringOwnership = super.partitionsTransferringOwnership == null ? computePartitionsTransferringOwnership(subscriptions, assignments) : super.partitionsTransferringOwnership;
+        Map<TopicPartition, String> partitionsTransferringOwnership = super.partitionsTransferringOwnership == null ?
+            computePartitionsTransferringOwnership(subscriptions, assignments) :
+            super.partitionsTransferringOwnership;
 
         adjustAssignment(assignments, partitionsTransferringOwnership);
         return assignments;
     }
 
     // Following the cooperative rebalancing protocol requires removing partitions that must first be revoked from the assignment
-    private void adjustAssignment(Map<String, List<TopicPartition>> assignments, Map<TopicPartition, String> partitionsTransferringOwnership) {
+    private void adjustAssignment(Map<String, List<TopicPartition>> assignments,
+                                  Map<TopicPartition, String> partitionsTransferringOwnership) {
         for (Map.Entry<TopicPartition, String> partitionEntry : partitionsTransferringOwnership.entrySet()) {
             assignments.get(partitionEntry.getValue()).remove(partitionEntry.getKey());
         }
     }
 
-    private Map<TopicPartition, String> computePartitionsTransferringOwnership(Map<String, Subscription> subscriptions, Map<String, List<TopicPartition>> assignments) {
+    private Map<TopicPartition, String> computePartitionsTransferringOwnership(Map<String, Subscription> subscriptions,
+                                                                               Map<String, List<TopicPartition>> assignments) {
         Map<TopicPartition, String> allAddedPartitions = new HashMap<>();
         Set<TopicPartition> allRevokedPartitions = new HashSet<>();
 

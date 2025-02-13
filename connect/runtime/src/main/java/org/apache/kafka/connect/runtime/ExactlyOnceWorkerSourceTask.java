@@ -20,6 +20,7 @@ import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.errors.InvalidProducerEpochException;
+import org.apache.kafka.common.internals.Plugin;
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.metrics.stats.Avg;
 import org.apache.kafka.common.metrics.stats.Max;
@@ -28,24 +29,35 @@ import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.runtime.errors.ErrorHandlingMetrics;
+import org.apache.kafka.connect.runtime.errors.ErrorReporter;
+import org.apache.kafka.connect.runtime.errors.ProcessingContext;
 import org.apache.kafka.connect.runtime.errors.RetryWithToleranceOperator;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
 import org.apache.kafka.connect.source.SourceTask.TransactionBoundary;
-import org.apache.kafka.connect.storage.*;
+import org.apache.kafka.connect.storage.CloseableOffsetStorageReader;
+import org.apache.kafka.connect.storage.ClusterConfigState;
+import org.apache.kafka.connect.storage.ConnectorOffsetBackingStore;
+import org.apache.kafka.connect.storage.Converter;
+import org.apache.kafka.connect.storage.HeaderConverter;
+import org.apache.kafka.connect.storage.OffsetStorageWriter;
+import org.apache.kafka.connect.storage.StatusBackingStore;
 import org.apache.kafka.connect.util.ConnectorTaskId;
 import org.apache.kafka.connect.util.LoggingContext;
 import org.apache.kafka.connect.util.TopicAdmin;
 import org.apache.kafka.connect.util.TopicCreationGroup;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 
 /**
@@ -63,8 +75,37 @@ class ExactlyOnceWorkerSourceTask extends AbstractWorkerSourceTask {
     private final Runnable preProducerCheck;
     private final Runnable postProducerCheck;
 
-    public ExactlyOnceWorkerSourceTask(ConnectorTaskId id, SourceTask task, TaskStatus.Listener statusListener, TargetState initialState, Converter keyConverter, Converter valueConverter, HeaderConverter headerConverter, TransformationChain<SourceRecord> transformationChain, Producer<byte[], byte[]> producer, TopicAdmin admin, Map<String, TopicCreationGroup> topicGroups, CloseableOffsetStorageReader offsetReader, OffsetStorageWriter offsetWriter, ConnectorOffsetBackingStore offsetStore, WorkerConfig workerConfig, ClusterConfigState configState, ConnectMetrics connectMetrics, ErrorHandlingMetrics errorMetrics, ClassLoader loader, Time time, RetryWithToleranceOperator retryWithToleranceOperator, StatusBackingStore statusBackingStore, SourceConnectorConfig sourceConfig, Executor closeExecutor, Runnable preProducerCheck, Runnable postProducerCheck) {
-        super(id, task, statusListener, initialState, keyConverter, valueConverter, headerConverter, transformationChain, new WorkerSourceTaskContext(offsetReader, id, configState, buildTransactionContext(sourceConfig)), producer, admin, topicGroups, offsetReader, offsetWriter, offsetStore, workerConfig, connectMetrics, errorMetrics, loader, time, retryWithToleranceOperator, statusBackingStore, closeExecutor);
+    public ExactlyOnceWorkerSourceTask(ConnectorTaskId id,
+                                       SourceTask task,
+                                       TaskStatus.Listener statusListener,
+                                       TargetState initialState,
+                                       Plugin<Converter> keyConverterPlugin,
+                                       Plugin<Converter> valueConverterPlugin,
+                                       Plugin<HeaderConverter> headerConverterPlugin,
+                                       TransformationChain<SourceRecord, SourceRecord> transformationChain,
+                                       Producer<byte[], byte[]> producer,
+                                       TopicAdmin admin,
+                                       Map<String, TopicCreationGroup> topicGroups,
+                                       CloseableOffsetStorageReader offsetReader,
+                                       OffsetStorageWriter offsetWriter,
+                                       ConnectorOffsetBackingStore offsetStore,
+                                       WorkerConfig workerConfig,
+                                       ClusterConfigState configState,
+                                       ConnectMetrics connectMetrics,
+                                       ErrorHandlingMetrics errorMetrics,
+                                       ClassLoader loader,
+                                       Time time,
+                                       RetryWithToleranceOperator<SourceRecord> retryWithToleranceOperator,
+                                       StatusBackingStore statusBackingStore,
+                                       SourceConnectorConfig sourceConfig,
+                                       Executor closeExecutor,
+                                       Runnable preProducerCheck,
+                                       Runnable postProducerCheck,
+                                       Supplier<List<ErrorReporter<SourceRecord>>> errorReportersSupplier) {
+        super(id, task, statusListener, initialState, configState, keyConverterPlugin, valueConverterPlugin, headerConverterPlugin, transformationChain,
+                buildTransactionContext(sourceConfig),
+                producer, admin, topicGroups, offsetReader, offsetWriter, offsetStore, workerConfig, connectMetrics, errorMetrics,
+                loader, time, retryWithToleranceOperator, statusBackingStore, closeExecutor, errorReportersSupplier);
 
         this.transactionOpen = false;
         this.committableRecords = new LinkedHashMap<>();
@@ -77,7 +118,9 @@ class ExactlyOnceWorkerSourceTask extends AbstractWorkerSourceTask {
     }
 
     private static WorkerTransactionContext buildTransactionContext(SourceConnectorConfig sourceConfig) {
-        return TransactionBoundary.CONNECTOR.equals(sourceConfig.transactionBoundary()) ? new WorkerTransactionContext() : null;
+        return TransactionBoundary.CONNECTOR.equals(sourceConfig.transactionBoundary())
+                ? new WorkerTransactionContext()
+                : null;
     }
 
     @Override
@@ -117,7 +160,10 @@ class ExactlyOnceWorkerSourceTask extends AbstractWorkerSourceTask {
     }
 
     @Override
-    protected Optional<SubmittedRecords.SubmittedRecord> prepareToSendRecord(SourceRecord sourceRecord, ProducerRecord<byte[], byte[]> producerRecord) {
+    protected Optional<SubmittedRecords.SubmittedRecord> prepareToSendRecord(
+            SourceRecord sourceRecord,
+            ProducerRecord<byte[], byte[]> producerRecord
+    ) {
         if (offsetStore.primaryOffsetsTopic().equals(producerRecord.topic())) {
             // This is to prevent deadlock that occurs when:
             //     1. A task provides a record whose topic is the task's offsets topic
@@ -148,16 +194,29 @@ class ExactlyOnceWorkerSourceTask extends AbstractWorkerSourceTask {
     }
 
     @Override
-    protected void recordSent(SourceRecord sourceRecord, ProducerRecord<byte[], byte[]> producerRecord, RecordMetadata recordMetadata) {
+    protected void recordSent(
+            SourceRecord sourceRecord,
+            ProducerRecord<byte[], byte[]> producerRecord,
+            RecordMetadata recordMetadata
+    ) {
         synchronized (committableRecords) {
             committableRecords.put(sourceRecord, recordMetadata);
         }
     }
 
     @Override
-    protected void producerSendFailed(boolean synchronous, ProducerRecord<byte[], byte[]> producerRecord, SourceRecord preTransformRecord, Exception e) {
+    protected void producerSendFailed(
+            ProcessingContext<SourceRecord> context,
+            boolean synchronous,
+            ProducerRecord<byte[], byte[]> producerRecord,
+            SourceRecord preTransformRecord,
+            Exception e
+    ) {
         if (synchronous) {
-            throw maybeWrapProducerSendException("Unrecoverable exception trying to send", e);
+            throw maybeWrapProducerSendException(
+                    "Unrecoverable exception trying to send",
+                    e
+            );
         } else {
             // No-op; all asynchronously-reported producer exceptions should be bubbled up again by Producer::commitTransaction
         }
@@ -263,9 +322,12 @@ class ExactlyOnceWorkerSourceTask extends AbstractWorkerSourceTask {
 
         error = flushError.get();
         if (error != null) {
-            recordCommitFailure(time.milliseconds() - started, null);
+            recordCommitFailure(time.milliseconds() - started);
             offsetWriter.cancelFlush();
-            throw maybeWrapProducerSendException("Failed to flush offsets and/or records for task " + id, error);
+            throw maybeWrapProducerSendException(
+                    "Failed to flush offsets and/or records for task " + id,
+                    error
+            );
         }
 
         transactionMetrics.commitTransaction();
@@ -291,16 +353,27 @@ class ExactlyOnceWorkerSourceTask extends AbstractWorkerSourceTask {
     }
 
     private static boolean isPossibleTransactionTimeoutError(Throwable error) {
-        return error instanceof InvalidProducerEpochException || error.getCause() instanceof InvalidProducerEpochException;
+        return error instanceof InvalidProducerEpochException
+            || error.getCause() instanceof InvalidProducerEpochException;
     }
 
     private ConnectException wrapTransactionTimeoutError(Throwable error) {
-        return new ConnectException("The task " + id + " was unable to finish writing records to Kafka before its producer transaction expired. " + "It may be necessary to reconfigure this connector in order for it to run healthily with exactly-once support. " + "Options for this include: tune the connector's producer configuration for higher throughput, " + "increase the transaction timeout for the connector's producers, " + "decrease the offset commit interval (if using interval-based transaction boundaries), " + "or use the 'poll' transaction boundary (if the connector is not already configured to use it).", error);
+        return new ConnectException(
+            "The task " + id + " was unable to finish writing records to Kafka before its producer transaction expired. "
+                + "It may be necessary to reconfigure this connector in order for it to run healthily with exactly-once support. "
+                + "Options for this include: tune the connector's producer configuration for higher throughput, "
+                + "increase the transaction timeout for the connector's producers, "
+                + "decrease the offset commit interval (if using interval-based transaction boundaries), "
+                + "or use the 'poll' transaction boundary (if the connector is not already configured to use it).",
+            error
+        );
     }
 
     @Override
     public String toString() {
-        return "ExactlyOnceWorkerSourceTask{" + "id=" + id + '}';
+        return "ExactlyOnceWorkerSourceTask{" +
+            "id=" + id +
+            '}';
     }
 
     private abstract class TransactionBoundaryManager {
@@ -347,7 +420,10 @@ class ExactlyOnceWorkerSourceTask extends AbstractWorkerSourceTask {
         }
     }
 
-    private TransactionBoundaryManager buildTransactionManager(WorkerConfig workerConfig, SourceConnectorConfig sourceConfig, WorkerTransactionContext transactionContext) {
+    private TransactionBoundaryManager buildTransactionManager(
+            WorkerConfig workerConfig,
+            SourceConnectorConfig sourceConfig,
+            WorkerTransactionContext transactionContext) {
         TransactionBoundary boundary = sourceConfig.transactionBoundary();
         switch (boundary) {
             case POLL:
@@ -364,7 +440,8 @@ class ExactlyOnceWorkerSourceTask extends AbstractWorkerSourceTask {
                 };
 
             case INTERVAL:
-                long transactionBoundaryInterval = Optional.ofNullable(sourceConfig.transactionBoundaryInterval()).orElse(workerConfig.offsetCommitInterval());
+                long transactionBoundaryInterval = Optional.ofNullable(sourceConfig.transactionBoundaryInterval())
+                        .orElse(workerConfig.offsetCommitInterval());
                 return new TransactionBoundaryManager() {
                     private final long commitInterval = transactionBoundaryInterval;
                     private long lastCommit;
@@ -385,7 +462,7 @@ class ExactlyOnceWorkerSourceTask extends AbstractWorkerSourceTask {
                     }
 
                     @Override
-                    protected boolean shouldCommitFinalTransaction() {
+                    protected  boolean shouldCommitFinalTransaction() {
                         return true;
                     }
                 };
@@ -450,7 +527,9 @@ class ExactlyOnceWorkerSourceTask extends AbstractWorkerSourceTask {
 
         public TransactionMetricsGroup(ConnectorTaskId id, ConnectMetrics connectMetrics) {
             ConnectMetricsRegistry registry = connectMetrics.registry();
-            metricGroup = connectMetrics.group(registry.sourceTaskGroupName(), registry.connectorTagName(), id.connector(), registry.taskTagName(), Integer.toString(id.task()));
+            metricGroup = connectMetrics.group(registry.sourceTaskGroupName(),
+                    registry.connectorTagName(), id.connector(),
+                    registry.taskTagName(), Integer.toString(id.task()));
 
             transactionSize = metricGroup.sensor("transaction-size");
             transactionSize.add(metricGroup.metricName(registry.transactionSizeAvg), new Avg());

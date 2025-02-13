@@ -17,14 +17,18 @@
 package kafka.server
 
 import kafka.network.RequestChannel
-import kafka.network.RequestChannel.Session
 import org.apache.kafka.common.MetricName
 import org.apache.kafka.common.errors.ThrottlingQuotaExceededException
-import org.apache.kafka.common.metrics.{Metrics, QuotaViolationException, Sensor}
-import org.apache.kafka.common.metrics.stats.{Rate, TokenBucket}
+import org.apache.kafka.common.metrics.Metrics
+import org.apache.kafka.common.metrics.QuotaViolationException
+import org.apache.kafka.common.metrics.Sensor
+import org.apache.kafka.common.metrics.stats.Rate
+import org.apache.kafka.common.metrics.stats.TokenBucket
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.utils.Time
-import org.apache.kafka.server.quota.ClientQuotaCallback
+import org.apache.kafka.network.Session
+import org.apache.kafka.server.quota.{ClientQuotaCallback, QuotaType}
+import org.apache.kafka.server.config.ClientQuotaManagerConfig
 
 import scala.jdk.CollectionConverters._
 
@@ -35,9 +39,7 @@ import scala.jdk.CollectionConverters._
  */
 trait ControllerMutationQuota {
   def isExceeded: Boolean
-
   def record(permits: Double): Unit
-
   def throttleTime: Int
 }
 
@@ -46,15 +48,14 @@ trait ControllerMutationQuota {
  */
 object UnboundedControllerMutationQuota extends ControllerMutationQuota {
   override def isExceeded: Boolean = false
-
   override def record(permits: Double): Unit = ()
-
   override def throttleTime: Int = 0
 }
 
 /**
  * The AbstractControllerMutationQuota is the base class of StrictControllerMutationQuota and
  * PermissiveControllerMutationQuota.
+ *
  * @param time @Time object to use
  */
 abstract class AbstractControllerMutationQuota(private val time: Time) extends ControllerMutationQuota {
@@ -80,12 +81,13 @@ abstract class AbstractControllerMutationQuota(private val time: Time) extends C
  * quota is strict meaning that 1) it does not accept any mutations once the quota is exhausted
  * until it gets back to the defined rate; and 2) it does not throttle for any number of mutations
  * if quota is not already exhausted.
- * @param time        @Time object to use
+ *
+ * @param time @Time object to use
  * @param quotaSensor @Sensor object with a defined quota for a given user/clientId pair
  */
 class StrictControllerMutationQuota(private val time: Time,
                                     private val quotaSensor: Sensor)
-  extends AbstractControllerMutationQuota(time) {
+    extends AbstractControllerMutationQuota(time) {
 
   override def isExceeded: Boolean = lastThrottleTimeMs > 0
 
@@ -109,12 +111,13 @@ class StrictControllerMutationQuota(private val time: Time,
  * The PermissiveControllerMutationQuota defines a permissive quota for a given user/clientId pair.
  * The quota is permissive meaning that 1) it does accept any mutations even if the quota is
  * exhausted; and 2) it does throttle as soon as the quota is exhausted.
- * @param time        @Time object to use
+ *
+ * @param time @Time object to use
  * @param quotaSensor @Sensor object with a defined quota for a given user/clientId pair
  */
 class PermissiveControllerMutationQuota(private val time: Time,
                                         private val quotaSensor: Sensor)
-  extends AbstractControllerMutationQuota(time) {
+    extends AbstractControllerMutationQuota(time) {
 
   override def isExceeded: Boolean = false
 
@@ -130,7 +133,6 @@ class PermissiveControllerMutationQuota(private val time: Time,
 }
 
 object ControllerMutationQuotaManager {
-  val QuotaControllerMutationDefault = Int.MaxValue.toDouble
 
   /**
    * This calculates the amount of time needed to bring the TokenBucket within quota
@@ -152,27 +154,28 @@ object ControllerMutationQuotaManager {
 /**
  * The ControllerMutationQuotaManager is a specialized ClientQuotaManager used in the context
  * of throttling controller's operations/mutations.
- * @param config           @ClientQuotaManagerConfig quota configs
- * @param metrics          @Metrics Metrics instance
- * @param time             @Time object to use
+ *
+ * @param config @ClientQuotaManagerConfig quota configs
+ * @param metrics @Metrics Metrics instance
+ * @param time @Time object to use
  * @param threadNamePrefix The thread prefix to use
- * @param quotaCallback    @ClientQuotaCallback ClientQuotaCallback to use
+ * @param quotaCallback @ClientQuotaCallback ClientQuotaCallback to use
  */
 class ControllerMutationQuotaManager(private val config: ClientQuotaManagerConfig,
                                      private val metrics: Metrics,
                                      private val time: Time,
                                      private val threadNamePrefix: String,
                                      private val quotaCallback: Option[ClientQuotaCallback])
-  extends ClientQuotaManager(config, metrics, QuotaType.ControllerMutation, time, threadNamePrefix, quotaCallback) {
+    extends ClientQuotaManager(config, metrics, QuotaType.CONTROLLER_MUTATION, time, threadNamePrefix, quotaCallback) {
 
   override protected def clientQuotaMetricName(quotaMetricTags: Map[String, String]): MetricName = {
-    metrics.metricName("tokens", QuotaType.ControllerMutation.toString,
+    metrics.metricName("tokens", QuotaType.CONTROLLER_MUTATION.toString,
       "Tracking remaining tokens in the token bucket per user/client-id",
       quotaMetricTags.asJava)
   }
 
   private def clientRateMetricName(quotaMetricTags: Map[String, String]): MetricName = {
-    metrics.metricName("mutation-rate", QuotaType.ControllerMutation.toString,
+    metrics.metricName("mutation-rate", QuotaType.CONTROLLER_MUTATION.toString,
       "Tracking mutation-rate per user/client-id",
       quotaMetricTags.asJava)
   }
@@ -191,12 +194,13 @@ class ControllerMutationQuotaManager(private val config: ClientQuotaManagerConfi
 
   /**
    * Records that a user/clientId accumulated or would like to accumulate the provided amount at the
-   * the specified time, returns throttle time in milliseconds. The quota is strict meaning that it
+   * specified time, returns throttle time in milliseconds. The quota is strict meaning that it
    * does not accept any mutations once the quota is exhausted until it gets back to the defined rate.
-   * @param session  The session from which the user is extracted
+   *
+   * @param session The session from which the user is extracted
    * @param clientId The client id
-   * @param value    The value to accumulate
-   * @param timeMs   The time at which to accumulate the value
+   * @param value The value to accumulate
+   * @param timeMs The time at which to accumulate the value
    * @return The throttle time in milliseconds defines as the time to wait until the average
    *         rate gets back to the defined quota
    */
@@ -220,7 +224,8 @@ class ControllerMutationQuotaManager(private val config: ClientQuotaManagerConfi
   /**
    * Returns a StrictControllerMutationQuota for the given user/clientId pair or
    * a UnboundedControllerMutationQuota$ if the quota is disabled.
-   * @param session  The session from which the user is extracted
+   *
+   * @param session The session from which the user is extracted
    * @param clientId The client id
    * @return ControllerMutationQuota
    */
@@ -239,7 +244,8 @@ class ControllerMutationQuotaManager(private val config: ClientQuotaManagerConfi
   /**
    * Returns a PermissiveControllerMutationQuota for the given user/clientId pair or
    * a UnboundedControllerMutationQuota$ if the quota is disabled.
-   * @param session  The session from which the user is extracted
+   *
+   * @param session The session from which the user is extracted
    * @param clientId The client id
    * @return ControllerMutationQuota
    */
@@ -258,11 +264,12 @@ class ControllerMutationQuotaManager(private val config: ClientQuotaManagerConfi
   /**
    * Returns a ControllerMutationQuota based on `strictSinceVersion`. It returns a strict
    * quota if the version is equal to or above of the `strictSinceVersion`, a permissive
-   * quota if the version is below, and a unbounded quota if the quota is disabled.
+   * quota if the version is below, and an unbounded quota if the quota is disabled.
    *
    * When the quota is strictly enforced. Any operation above the quota is not allowed
    * and rejected with a THROTTLING_QUOTA_EXCEEDED error.
-   * @param request            The request to extract the user and the clientId from
+   *
+   * @param request The request to extract the user and the clientId from
    * @param strictSinceVersion The version since quota is strict
    * @return
    */

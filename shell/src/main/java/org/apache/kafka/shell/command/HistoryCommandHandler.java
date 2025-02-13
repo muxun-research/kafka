@@ -17,10 +17,12 @@
 
 package org.apache.kafka.shell.command;
 
-import net.sourceforge.argparse4j.inf.ArgumentParser;
-import net.sourceforge.argparse4j.inf.Namespace;
 import org.apache.kafka.shell.InteractiveShell;
 import org.apache.kafka.shell.state.MetadataShellState;
+
+import net.sourceforge.argparse4j.inf.ArgumentParser;
+import net.sourceforge.argparse4j.inf.Namespace;
+
 import org.jline.reader.Candidate;
 
 import java.io.PrintWriter;
@@ -33,7 +35,7 @@ import java.util.Optional;
  * Implements the history command.
  */
 public final class HistoryCommandHandler implements Commands.Handler {
-    public final static Commands.Type TYPE = new HistoryCommandType();
+    public static final Commands.Type TYPE = new HistoryCommandType();
 
     public static class HistoryCommandType implements Commands.Type {
         private HistoryCommandType() {
@@ -56,17 +58,25 @@ public final class HistoryCommandHandler implements Commands.Handler {
 
         @Override
         public void addArguments(ArgumentParser parser) {
-            parser.addArgument("numEntriesToShow").nargs("?").type(Integer.class).help("The number of entries to show.");
+            parser.addArgument("numEntriesToShow").
+                nargs("?").
+                type(Integer.class).
+                help("The number of entries to show.");
         }
 
         @Override
         public Commands.Handler createHandler(Namespace namespace) {
             Integer numEntriesToShow = namespace.getInt("numEntriesToShow");
-            return new HistoryCommandHandler(numEntriesToShow == null ? Integer.MAX_VALUE : numEntriesToShow);
+            return new HistoryCommandHandler(numEntriesToShow == null ?
+                Integer.MAX_VALUE : numEntriesToShow);
         }
 
         @Override
-        public void completeNext(MetadataShellState state, List<String> nextWords, List<Candidate> candidates) throws Exception {
+        public void completeNext(
+            MetadataShellState state,
+            List<String> nextWords,
+            List<Candidate> candidates
+        ) throws Exception {
             // nothing to do
         }
     }
@@ -78,8 +88,12 @@ public final class HistoryCommandHandler implements Commands.Handler {
     }
 
     @Override
-    public void run(Optional<InteractiveShell> shell, PrintWriter writer, MetadataShellState state) throws Exception {
-        if (!shell.isPresent()) {
+    public void run(
+        Optional<InteractiveShell> shell,
+        PrintWriter writer,
+        MetadataShellState state
+    ) throws Exception {
+        if (shell.isEmpty()) {
             throw new RuntimeException("The history command requires a shell.");
         }
         Iterator<Map.Entry<Integer, String>> iter = shell.get().history(numEntriesToShow);
@@ -96,9 +110,7 @@ public final class HistoryCommandHandler implements Commands.Handler {
 
     @Override
     public boolean equals(Object other) {
-        if (!(other instanceof HistoryCommandHandler))
-            return false;
-        HistoryCommandHandler o = (HistoryCommandHandler) other;
+        if (!(other instanceof HistoryCommandHandler o)) return false;
         return o.numEntriesToShow == numEntriesToShow;
     }
 }

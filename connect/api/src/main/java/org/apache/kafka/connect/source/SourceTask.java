@@ -99,14 +99,16 @@ public abstract class SourceTask implements Task {
      * The task will be {@link #stop() stopped} on a separate thread, and when that happens
      * this method is expected to unblock, quickly finish up any remaining processing, and
      * return.
+     *
      * @return a list of source records
      */
     public abstract List<SourceRecord> poll() throws InterruptedException;
 
     /**
-     * <p>
-     * Commit the offsets, up to the offsets that have been returned by {@link #poll()}. This
-     * method should block until the commit is complete.
+     * This method is invoked periodically when offsets are committed for this source task. Note that the offsets
+     * being committed won't necessarily correspond to the latest offsets returned by this source task via
+     * {@link #poll()}. Also see {@link #commitRecord(SourceRecord, RecordMetadata)} which allows for a more
+     * fine-grained tracking of records that have been successfully delivered.
      * <p>
      * SourceTasks are not required to implement this functionality; Kafka Connect will record offsets
      * automatically. This hook is provided for systems that also need to store offsets internally
@@ -132,27 +134,6 @@ public abstract class SourceTask implements Task {
     /**
      * <p>
      * Commit an individual {@link SourceRecord} when the callback from the producer client is received. This method is
-     * also called when a record is filtered by a transformation, and thus will never be ACK'd by a broker.
-     * <p>
-     * This is an alias for {@link #commitRecord(SourceRecord, RecordMetadata)} for backwards compatibility. The default
-     * implementation of {@link #commitRecord(SourceRecord, RecordMetadata)} just calls this method. It is not necessary
-     * to override both methods.
-     * <p>
-     * SourceTasks are not required to implement this functionality; Kafka Connect will record offsets
-     * automatically. This hook is provided for systems that also need to store offsets internally
-     * in their own system.
-     * @param record {@link SourceRecord} that was successfully sent via the producer or filtered by a transformation
-     * @throws InterruptedException
-     * @deprecated Use {@link #commitRecord(SourceRecord, RecordMetadata)} instead.
-     */
-    @Deprecated
-    public void commitRecord(SourceRecord record) throws InterruptedException {
-        // This space intentionally left blank.
-    }
-
-    /**
-     * <p>
-     * Commit an individual {@link SourceRecord} when the callback from the producer client is received. This method is
      * also called when a record is filtered by a transformation or when "errors.tolerance" is set to "all"
      * and thus will never be ACK'd by a broker.
      * In both cases {@code metadata} will be null.
@@ -161,14 +142,14 @@ public abstract class SourceTask implements Task {
      * automatically. This hook is provided for systems that also need to store offsets internally
      * in their own system.
      * <p>
-     * The default implementation just calls {@link #commitRecord(SourceRecord)}, which is a nop by default. It is
-     * not necessary to implement both methods.
-     * @param record   {@link SourceRecord} that was successfully sent via the producer, filtered by a transformation, or dropped on producer exception
+     * The default implementation is a nop. It is not necessary to implement the method.
+     *
+     * @param record {@link SourceRecord} that was successfully sent via the producer, filtered by a transformation, or dropped on producer exception
      * @param metadata {@link RecordMetadata} record metadata returned from the broker, or null if the record was filtered or if producer exceptions are ignored
      * @throws InterruptedException
      */
-    public void commitRecord(SourceRecord record, RecordMetadata metadata) throws InterruptedException {
-        // by default, just call other method for backwards compatibility
-        commitRecord(record);
+    public void commitRecord(SourceRecord record, RecordMetadata metadata)
+            throws InterruptedException {
+        // by default, just do nothing
     }
 }

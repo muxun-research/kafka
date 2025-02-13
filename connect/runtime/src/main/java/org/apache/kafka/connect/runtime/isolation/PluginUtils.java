@@ -16,16 +16,37 @@
  */
 package org.apache.kafka.connect.runtime.isolation;
 
-import org.reflections.util.ClasspathHelper;
+import org.apache.maven.artifact.versioning.InvalidVersionSpecificationException;
+import org.apache.maven.artifact.versioning.VersionRange;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.lang.reflect.Modifier;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.nio.file.*;
-import java.util.*;
+import java.net.URLClassLoader;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 /**
@@ -35,7 +56,27 @@ public class PluginUtils {
     private static final Logger log = LoggerFactory.getLogger(PluginUtils.class);
 
     // Be specific about javax packages and exclude those existing in Java SE and Java EE libraries.
-    private static final Pattern EXCLUDE = Pattern.compile("^(?:" + "java" + "|javax\\.accessibility" + "|javax\\.activation" + "|javax\\.activity" + "|javax\\.annotation" + "|javax\\.batch\\.api" + "|javax\\.batch\\.operations" + "|javax\\.batch\\.runtime" + "|javax\\.crypto" + "|javax\\.decorator" + "|javax\\.ejb" + "|javax\\.el" + "|javax\\.enterprise\\.concurrent" + "|javax\\.enterprise\\.context" + "|javax\\.enterprise\\.context\\.spi" + "|javax\\.enterprise\\.deploy\\.model" + "|javax\\.enterprise\\.deploy\\.shared" + "|javax\\.enterprise\\.deploy\\.spi" + "|javax\\.enterprise\\.event" + "|javax\\.enterprise\\.inject"
+    private static final Pattern EXCLUDE = Pattern.compile("^(?:"
+            + "java"
+            + "|javax\\.accessibility"
+            + "|javax\\.activation"
+            + "|javax\\.activity"
+            + "|javax\\.annotation"
+            + "|javax\\.batch\\.api"
+            + "|javax\\.batch\\.operations"
+            + "|javax\\.batch\\.runtime"
+            + "|javax\\.crypto"
+            + "|javax\\.decorator"
+            + "|javax\\.ejb"
+            + "|javax\\.el"
+            + "|javax\\.enterprise\\.concurrent"
+            + "|javax\\.enterprise\\.context"
+            + "|javax\\.enterprise\\.context\\.spi"
+            + "|javax\\.enterprise\\.deploy\\.model"
+            + "|javax\\.enterprise\\.deploy\\.shared"
+            + "|javax\\.enterprise\\.deploy\\.spi"
+            + "|javax\\.enterprise\\.event"
+            + "|javax\\.enterprise\\.inject"
             + "|javax\\.enterprise\\.inject\\.spi"
             + "|javax\\.enterprise\\.util"
             + "|javax\\.faces"
@@ -83,21 +124,45 @@ public class PluginUtils {
             + "|org\\.omg\\.Dynamic"
             + "|org\\.omg\\.DynamicAny"
             + "|org\\.omg\\.IOP"
-            + "|org\\.omg\\.Messaging" + "|org\\.omg\\.PortableInterceptor" + "|org\\.omg\\.PortableServer" + "|org\\.omg\\.SendingContext" + "|org\\.omg\\.stub\\.java\\.rmi" + "|org\\.w3c\\.dom" + "|org\\.xml\\.sax" + "|org\\.apache\\.kafka" + "|org\\.slf4j" + ")\\..*$");
+            + "|org\\.omg\\.Messaging"
+            + "|org\\.omg\\.PortableInterceptor"
+            + "|org\\.omg\\.PortableServer"
+            + "|org\\.omg\\.SendingContext"
+            + "|org\\.omg\\.stub\\.java\\.rmi"
+            + "|org\\.w3c\\.dom"
+            + "|org\\.xml\\.sax"
+            + "|org\\.apache\\.kafka"
+            + "|org\\.slf4j"
+            + ")\\..*$");
 
     // If the base interface or class that will be used to identify Connect plugins resides within
     // the same java package as the plugins that need to be loaded in isolation (and thus are
     // added to the INCLUDE pattern), then this base interface or class needs to be excluded in the
     // regular expression pattern
-    private static final Pattern INCLUDE = Pattern.compile("^org\\.apache\\.kafka\\.(?:connect\\.(?:" + "transforms\\.(?!Transformation|predicates\\.Predicate$).*" + "|json\\..*" + "|file\\..*" + "|mirror\\..*" + "|mirror-client\\..*" + "|converters\\..*" + "|storage\\.StringConverter" + "|storage\\.SimpleHeaderConverter" + "|rest\\.basic\\.auth\\.extension\\.BasicAuthSecurityRestExtension" + "|connector\\.policy\\.(?!ConnectorClientConfig(?:OverridePolicy|Request(?:\\$ClientType)?)$).*" + ")" + "|common\\.config\\.provider\\.(?!ConfigProvider$).*" + ")$");
+    private static final Pattern INCLUDE = Pattern.compile("^org\\.apache\\.kafka\\.(?:connect\\.(?:"
+            + "transforms\\.(?!Transformation|predicates\\.Predicate$).*"
+            + "|json\\..*"
+            + "|file\\..*"
+            + "|mirror\\..*"
+            + "|mirror-client\\..*"
+            + "|converters\\..*"
+            + "|storage\\.StringConverter"
+            + "|storage\\.SimpleHeaderConverter"
+            + "|rest\\.basic\\.auth\\.extension\\.BasicAuthSecurityRestExtension"
+            + "|connector\\.policy\\.(?!ConnectorClientConfig(?:OverridePolicy|Request(?:\\$ClientType)?)$).*"
+            + ")"
+            + "|common\\.config\\.provider\\.(?!ConfigProvider$).*"
+            + ")$");
 
     private static final Pattern COMMA_WITH_WHITESPACE = Pattern.compile("\\s*,\\s*");
 
-    private static final DirectoryStream.Filter<Path> PLUGIN_PATH_FILTER = path -> Files.isDirectory(path) || isArchive(path) || isClassFile(path);
+    private static final DirectoryStream.Filter<Path> PLUGIN_PATH_FILTER = path ->
+        Files.isDirectory(path) || isArchive(path) || isClassFile(path);
 
     /**
      * Return whether the class with the given name should be loaded in isolation using a plugin
      * classloader.
+     *
      * @param name the fully qualified name of the class.
      * @return true if this class should be loaded in isolation, false otherwise.
      */
@@ -137,15 +202,21 @@ public class PluginUtils {
         return path.toString().toLowerCase(Locale.ROOT).endsWith(".class");
     }
 
-    public static List<Path> pluginLocations(String pluginPath) {
+    public static Set<Path> pluginLocations(String pluginPath, boolean failFast) {
         if (pluginPath == null) {
-            return Collections.emptyList();
+            return Collections.emptySet();
         }
         String[] pluginPathElements = COMMA_WITH_WHITESPACE.split(pluginPath.trim(), -1);
-        List<Path> pluginLocations = new ArrayList<>();
+        Set<Path> pluginLocations = new LinkedHashSet<>();
         for (String path : pluginPathElements) {
             try {
                 Path pluginPathElement = Paths.get(path).toAbsolutePath();
+                if (pluginPath.isEmpty()) {
+                    log.warn("Plugin path element is empty, evaluating to {}.", pluginPathElement);
+                }
+                if (!Files.exists(pluginPathElement)) {
+                    throw new FileNotFoundException(pluginPathElement.toString());
+                }
                 // Currently 'plugin.paths' property is a list of top-level directories
                 // containing plugins
                 if (Files.isDirectory(pluginPathElement)) {
@@ -154,6 +225,9 @@ public class PluginUtils {
                     pluginLocations.add(pluginPathElement);
                 }
             } catch (InvalidPathException | IOException e) {
+                if (failFast) {
+                    throw new RuntimeException(e);
+                }
                 log.error("Could not get listing for plugin path: {}. Ignoring.", path, e);
             }
         }
@@ -162,7 +236,12 @@ public class PluginUtils {
 
     private static List<Path> pluginLocations(Path pluginPathElement) throws IOException {
         List<Path> locations = new ArrayList<>();
-        try (DirectoryStream<Path> listing = Files.newDirectoryStream(pluginPathElement, PLUGIN_PATH_FILTER)) {
+        try (
+                DirectoryStream<Path> listing = Files.newDirectoryStream(
+                        pluginPathElement,
+                        PLUGIN_PATH_FILTER
+                )
+        ) {
             for (Path dir : listing) {
                 locations.add(dir);
             }
@@ -258,37 +337,63 @@ public class PluginUtils {
             if (archives.isEmpty()) {
                 return Collections.singletonList(topPath);
             }
-            log.warn("Plugin path contains both java archives and class files. Returning only the" + " archives");
+            log.warn("Plugin path contains both java archives and class files. Returning only the"
+                    + " archives");
         }
         return Arrays.asList(archives.toArray(new Path[0]));
     }
 
-    public static Set<PluginSource> pluginSources(List<Path> pluginLocations, ClassLoader classLoader, PluginClassLoaderFactory factory) {
-        Set<PluginSource> pluginSources = new HashSet<>();
+    public static Set<PluginSource> pluginSources(Set<Path> pluginLocations, ClassLoader classLoader, PluginClassLoaderFactory factory) {
+        Set<PluginSource> pluginSources = new LinkedHashSet<>();
         for (Path pluginLocation : pluginLocations) {
-
             try {
-                List<URL> pluginUrls = new ArrayList<>();
-                for (Path path : pluginUrls(pluginLocation)) {
-                    pluginUrls.add(path.toUri().toURL());
-                }
-                URL[] urls = pluginUrls.toArray(new URL[0]);
-                PluginClassLoader loader = factory.newPluginClassLoader(pluginLocation.toUri().toURL(), urls, classLoader);
-                pluginSources.add(new PluginSource(pluginLocation, loader, urls));
+                pluginSources.add(isolatedPluginSource(pluginLocation, classLoader, factory));
             } catch (InvalidPathException | MalformedURLException e) {
                 log.error("Invalid path in plugin path: {}. Ignoring.", pluginLocation, e);
             } catch (IOException e) {
                 log.error("Could not get listing for plugin path: {}. Ignoring.", pluginLocation, e);
             }
         }
-        URL[] classpathUrls = ClasspathHelper.forJavaClassPath().toArray(new URL[0]);
-        pluginSources.add(new PluginSource(null, classLoader.getParent(), classpathUrls));
+        pluginSources.add(classpathPluginSource(classLoader.getParent()));
         return pluginSources;
     }
 
+    public static PluginSource isolatedPluginSource(Path pluginLocation, ClassLoader parent, PluginClassLoaderFactory factory) throws IOException {
+        List<URL> pluginUrls = new ArrayList<>();
+        List<Path> paths = pluginUrls(pluginLocation);
+        // Infer the type of the source
+        PluginSource.Type type;
+        if (paths.size() == 1 && paths.get(0) == pluginLocation) {
+            if (PluginUtils.isArchive(pluginLocation)) {
+                type = PluginSource.Type.SINGLE_JAR;
+            } else {
+                type = PluginSource.Type.CLASS_HIERARCHY;
+            }
+        } else {
+            type = PluginSource.Type.MULTI_JAR;
+        }
+        for (Path path : paths) {
+            pluginUrls.add(path.toUri().toURL());
+        }
+        URL[] urls = pluginUrls.toArray(new URL[0]);
+        PluginClassLoader loader = factory.newPluginClassLoader(
+                pluginLocation.toUri().toURL(),
+                urls,
+                parent
+        );
+        return new PluginSource(pluginLocation, type, loader, urls);
+    }
+
+    public static PluginSource classpathPluginSource(ClassLoader classLoader) {
+        List<URL> parentUrls = new ArrayList<>();
+        parentUrls.addAll(forJavaClassPath());
+        parentUrls.addAll(forClassLoader(classLoader));
+        return new PluginSource(null, PluginSource.Type.CLASSPATH, classLoader, parentUrls.toArray(new URL[0]));
+    }
 
     /**
      * Return the simple class name of a plugin as {@code String}.
+     *
      * @param plugin the plugin descriptor.
      * @return the plugin's simple class name.
      */
@@ -336,7 +441,7 @@ public class PluginUtils {
             if (classNames.size() == 1) {
                 aliases.put(alias, classNames.stream().findAny().get());
             } else {
-                log.warn("Ignoring ambiguous alias '{}' since it refers to multiple distinct plugins {}", alias, classNames);
+                log.debug("Ignoring ambiguous alias '{}' since it refers to multiple distinct plugins {}", alias, classNames);
             }
         }
         return aliases;
@@ -352,4 +457,57 @@ public class PluginUtils {
         }
     }
 
+    private static Collection<URL> forJavaClassPath() {
+        Collection<URL> urls = new ArrayList<>();
+        String javaClassPath = System.getProperty("java.class.path");
+        if (javaClassPath != null) {
+            for (String path : javaClassPath.split(File.pathSeparator)) {
+                try {
+                    urls.add(new File(path).toURI().toURL());
+                } catch (Exception e) {
+                    log.debug("Could not get URL", e);
+                }
+            }
+        }
+        return distinctUrls(urls);
+    }
+
+    private static Collection<URL> forClassLoader(ClassLoader classLoader) {
+        final Collection<URL> result = new ArrayList<>();
+        while (classLoader != null) {
+            if (classLoader instanceof URLClassLoader) {
+                URL[] urls = ((URLClassLoader) classLoader).getURLs();
+                if (urls != null) {
+                    result.addAll(new HashSet<>(Arrays.asList(urls)));
+                }
+            }
+            classLoader = classLoader.getParent();
+        }
+        return distinctUrls(result);
+    }
+
+    private static Collection<URL> distinctUrls(Collection<URL> urls) {
+        Map<String, URL> distinct = new HashMap<>(urls.size());
+        for (URL url : urls) {
+            distinct.put(url.toExternalForm(), url);
+        }
+        return distinct.values();
+    }
+
+    public static VersionRange connectorVersionRequirement(String version) throws InvalidVersionSpecificationException {
+        if (version == null || version.equals("latest")) {
+            return null;
+        }
+        version = version.trim();
+
+        // check first if the given version is valid
+        VersionRange range = VersionRange.createFromVersionSpec(version);
+
+        if (range.hasRestrictions()) {
+            return range;
+        }
+        // now if the version is not enclosed we consider it as a hard requirement and enclose it in []
+        version = "[" + version + "]";
+        return VersionRange.createFromVersionSpec(version);
+    }
 }

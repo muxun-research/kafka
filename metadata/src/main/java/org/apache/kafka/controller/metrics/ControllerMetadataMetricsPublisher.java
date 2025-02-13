@@ -38,18 +38,17 @@ import java.util.Optional;
  * have been persisted to the metadata log. So on the active controller, it will run slightly
  * behind the latest in-memory state which has not yet been fully persisted to the log. This is
  * reasonable for metrics, which don't need up-to-the-millisecond update latency.
- * <p>
- * NOTE: the ZK controller has some special rules for calculating preferredReplicaImbalanceCount
- * which we haven't implemented here. Specifically, the ZK controller considers reassigning
- * partitions to always have their preferred leader, even if they don't.
- * All other metrics should be the same, as far as is possible.
+ *
  */
 public class ControllerMetadataMetricsPublisher implements MetadataPublisher {
     private final ControllerMetadataMetrics metrics;
     private final FaultHandler faultHandler;
     private MetadataImage prevImage = MetadataImage.EMPTY;
 
-    public ControllerMetadataMetricsPublisher(ControllerMetadataMetrics metrics, FaultHandler faultHandler) {
+    public ControllerMetadataMetricsPublisher(
+        ControllerMetadataMetrics metrics,
+        FaultHandler faultHandler
+    ) {
         this.metrics = metrics;
         this.faultHandler = faultHandler;
     }
@@ -60,13 +59,18 @@ public class ControllerMetadataMetricsPublisher implements MetadataPublisher {
     }
 
     @Override
-    public void onMetadataUpdate(MetadataDelta delta, MetadataImage newImage, LoaderManifest manifest) {
+    public void onMetadataUpdate(
+        MetadataDelta delta,
+        MetadataImage newImage,
+        LoaderManifest manifest
+    ) {
         switch (manifest.type()) {
             case LOG_DELTA:
                 try {
                     publishDelta(delta);
                 } catch (Throwable e) {
-                    faultHandler.handleFault("Failed to publish controller metrics from log delta " + " ending at offset " + manifest.provenance().lastContainedOffset(), e);
+                    faultHandler.handleFault("Failed to publish controller metrics from log delta " +
+                            " ending at offset " + manifest.provenance().lastContainedOffset(), e);
                 } finally {
                     prevImage = newImage;
                 }
@@ -75,7 +79,8 @@ public class ControllerMetadataMetricsPublisher implements MetadataPublisher {
                 try {
                     publishSnapshot(newImage);
                 } catch (Throwable e) {
-                    faultHandler.handleFault("Failed to publish controller metrics from " + manifest.provenance().snapshotName(), e);
+                    faultHandler.handleFault("Failed to publish controller metrics from " +
+                            manifest.provenance().snapshotName(), e);
                 } finally {
                     prevImage = newImage;
                 }
@@ -86,15 +91,18 @@ public class ControllerMetadataMetricsPublisher implements MetadataPublisher {
     private void publishDelta(MetadataDelta delta) {
         ControllerMetricsChanges changes = new ControllerMetricsChanges();
         if (delta.clusterDelta() != null) {
-            for (Entry<Integer, Optional<BrokerRegistration>> entry : delta.clusterDelta().changedBrokers().entrySet()) {
-                changes.handleBrokerChange(prevImage.cluster().brokers().get(entry.getKey()), entry.getValue().orElse(null));
+            for (Entry<Integer, Optional<BrokerRegistration>> entry :
+                    delta.clusterDelta().changedBrokers().entrySet()) {
+                changes.handleBrokerChange(prevImage.cluster().brokers().get(entry.getKey()),
+                        entry.getValue().orElse(null));
             }
         }
         if (delta.topicsDelta() != null) {
             for (Uuid topicId : delta.topicsDelta().deletedTopicIds()) {
                 TopicImage prevTopic = prevImage.topics().topicsById().get(topicId);
                 if (prevTopic == null) {
-                    throw new RuntimeException("Unable to find deleted topic id " + topicId + " in previous topics image.");
+                    throw new RuntimeException("Unable to find deleted topic id " + topicId +
+                            " in previous topics image.");
                 }
                 changes.handleDeletedTopic(prevTopic);
             }
@@ -103,9 +111,6 @@ public class ControllerMetadataMetricsPublisher implements MetadataPublisher {
             }
         }
         changes.apply(metrics);
-        if (delta.featuresDelta() != null) {
-            delta.featuresDelta().getZkMigrationStateChange().ifPresent(state -> metrics.setZkMigrationState(state.value()));
-        }
     }
 
     private void publishSnapshot(MetadataImage newImage) {
@@ -121,6 +126,7 @@ public class ControllerMetadataMetricsPublisher implements MetadataPublisher {
         }
         metrics.setFencedBrokerCount(fencedBrokers);
         metrics.setActiveBrokerCount(activeBrokers);
+
         int totalPartitions = 0;
         int offlinePartitions = 0;
         int partitionsWithoutPreferredLeader = 0;
@@ -138,7 +144,6 @@ public class ControllerMetadataMetricsPublisher implements MetadataPublisher {
         metrics.setGlobalPartitionCount(totalPartitions);
         metrics.setOfflinePartitionCount(offlinePartitions);
         metrics.setPreferredReplicaImbalanceCount(partitionsWithoutPreferredLeader);
-        metrics.setZkMigrationState(newImage.features().zkMigrationState().value());
     }
 
     @Override

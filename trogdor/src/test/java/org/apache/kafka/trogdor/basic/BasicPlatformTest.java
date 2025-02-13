@@ -17,9 +17,9 @@
 
 package org.apache.kafka.trogdor.basic;
 
-import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.test.TestUtils;
 import org.apache.kafka.trogdor.common.Platform;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -28,17 +28,17 @@ import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-@Timeout(value = 120000, unit = MILLISECONDS)
+@Timeout(value = 120)
 public class BasicPlatformTest {
 
     @Test
     public void testCreateBasicPlatform() throws Exception {
         File configFile = TestUtils.tempFile();
         try {
-            try (OutputStreamWriter writer = new OutputStreamWriter(Files.newOutputStream(configFile.toPath()), StandardCharsets.UTF_8)) {
+            try (OutputStreamWriter writer = new OutputStreamWriter(Files.newOutputStream(configFile.toPath()),
+                    StandardCharsets.UTF_8)) {
                 writer.write("{\n");
                 writer.write("  \"platform\": \"org.apache.kafka.trogdor.basic.BasicPlatform\",\n");
                 writer.write("  \"nodes\": {\n");
@@ -56,7 +56,7 @@ public class BasicPlatformTest {
             Platform platform = Platform.Config.parse("bob01", configFile.getPath());
             assertEquals("BasicPlatform", platform.name());
             assertEquals(2, platform.topology().nodes().size());
-            assertEquals("bob01, bob02", Utils.join(platform.topology().nodes().keySet(), ", "));
+            assertEquals("bob01, bob02", String.join(", ", platform.topology().nodes().keySet()));
         } finally {
             Files.delete(configFile.toPath());
         }

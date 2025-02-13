@@ -33,7 +33,9 @@ import org.apache.kafka.streams.state.internals.PrefixedWindowKeySchemas.TimeFir
 import java.util.Objects;
 
 
-public class RocksDBTimeOrderedWindowStore extends WrappedStateStore<RocksDBTimeOrderedWindowSegmentedBytesStore, Object, Object> implements WindowStore<Bytes, byte[]>, TimestampedBytesStore {
+public class RocksDBTimeOrderedWindowStore
+    extends WrappedStateStore<RocksDBTimeOrderedWindowSegmentedBytesStore, Object, Object>
+    implements WindowStore<Bytes, byte[]>, TimestampedBytesStore {
 
     private final boolean retainDuplicates;
     private final long windowSize;
@@ -41,7 +43,11 @@ public class RocksDBTimeOrderedWindowStore extends WrappedStateStore<RocksDBTime
     private int seqnum = 0;
     private StateStoreContext stateStoreContext;
 
-    RocksDBTimeOrderedWindowStore(final RocksDBTimeOrderedWindowSegmentedBytesStore store, final boolean retainDuplicates, final long windowSize) {
+    RocksDBTimeOrderedWindowStore(
+        final RocksDBTimeOrderedWindowSegmentedBytesStore store,
+        final boolean retainDuplicates,
+        final long windowSize
+    ) {
         super(store);
         Objects.requireNonNull(store, "store is null");
         this.retainDuplicates = retainDuplicates;
@@ -49,9 +55,9 @@ public class RocksDBTimeOrderedWindowStore extends WrappedStateStore<RocksDBTime
     }
 
     @Override
-    public void init(final StateStoreContext context, final StateStore root) {
-        stateStoreContext = context;
-        wrapped().init(context, root);
+    public void init(final StateStoreContext stateStoreContext, final StateStore root) {
+        wrapped().init(stateStoreContext, root);
+        this.stateStoreContext = stateStoreContext;
     }
 
     @Override
@@ -91,49 +97,79 @@ public class RocksDBTimeOrderedWindowStore extends WrappedStateStore<RocksDBTime
     @Override
     public WindowStoreIterator<byte[]> fetch(final Bytes key, final long timeFrom, final long timeTo) {
         final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().fetch(key, timeFrom, timeTo);
-        return new WindowStoreIteratorWrapper(bytesIterator, windowSize, TimeFirstWindowKeySchema::extractStoreTimestamp, TimeFirstWindowKeySchema::fromStoreBytesKey).valuesIterator();
+        return new WindowStoreIteratorWrapper(bytesIterator,
+            windowSize,
+            TimeFirstWindowKeySchema::extractStoreTimestamp,
+            TimeFirstWindowKeySchema::fromStoreBytesKey).valuesIterator();
     }
 
     @Override
     public WindowStoreIterator<byte[]> backwardFetch(final Bytes key, final long timeFrom, final long timeTo) {
         final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().backwardFetch(key, timeFrom, timeTo);
-        return new WindowStoreIteratorWrapper(bytesIterator, windowSize, TimeFirstWindowKeySchema::extractStoreTimestamp, TimeFirstWindowKeySchema::fromStoreBytesKey).valuesIterator();
+        return new WindowStoreIteratorWrapper(bytesIterator,
+            windowSize,
+            TimeFirstWindowKeySchema::extractStoreTimestamp,
+            TimeFirstWindowKeySchema::fromStoreBytesKey).valuesIterator();
     }
 
     @Override
-    public KeyValueIterator<Windowed<Bytes>, byte[]> fetch(final Bytes keyFrom, final Bytes keyTo, final long timeFrom, final long timeTo) {
+    public KeyValueIterator<Windowed<Bytes>, byte[]> fetch(final Bytes keyFrom,
+                                                           final Bytes keyTo,
+                                                           final long timeFrom,
+                                                           final long timeTo) {
         final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().fetch(keyFrom, keyTo, timeFrom, timeTo);
-        return new WindowStoreIteratorWrapper(bytesIterator, windowSize, TimeFirstWindowKeySchema::extractStoreTimestamp, TimeFirstWindowKeySchema::fromStoreBytesKey).keyValueIterator();
+        return new WindowStoreIteratorWrapper(bytesIterator,
+            windowSize,
+            TimeFirstWindowKeySchema::extractStoreTimestamp,
+            TimeFirstWindowKeySchema::fromStoreBytesKey).keyValueIterator();
     }
 
     @Override
-    public KeyValueIterator<Windowed<Bytes>, byte[]> backwardFetch(final Bytes keyFrom, final Bytes keyTo, final long timeFrom, final long timeTo) {
+    public KeyValueIterator<Windowed<Bytes>, byte[]> backwardFetch(final Bytes keyFrom,
+                                                                   final Bytes keyTo,
+                                                                   final long timeFrom,
+                                                                   final long timeTo) {
         final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().backwardFetch(keyFrom, keyTo, timeFrom, timeTo);
-        return new WindowStoreIteratorWrapper(bytesIterator, windowSize, TimeFirstWindowKeySchema::extractStoreTimestamp, TimeFirstWindowKeySchema::fromStoreBytesKey).keyValueIterator();
+        return new WindowStoreIteratorWrapper(bytesIterator,
+            windowSize,
+            TimeFirstWindowKeySchema::extractStoreTimestamp,
+            TimeFirstWindowKeySchema::fromStoreBytesKey).keyValueIterator();
     }
 
     @Override
     public KeyValueIterator<Windowed<Bytes>, byte[]> all() {
         final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().all();
-        return new WindowStoreIteratorWrapper(bytesIterator, windowSize, TimeFirstWindowKeySchema::extractStoreTimestamp, TimeFirstWindowKeySchema::fromStoreBytesKey).keyValueIterator();
+        return new WindowStoreIteratorWrapper(bytesIterator,
+            windowSize,
+            TimeFirstWindowKeySchema::extractStoreTimestamp,
+            TimeFirstWindowKeySchema::fromStoreBytesKey).keyValueIterator();
     }
 
     @Override
     public KeyValueIterator<Windowed<Bytes>, byte[]> backwardAll() {
         final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().backwardAll();
-        return new WindowStoreIteratorWrapper(bytesIterator, windowSize, TimeFirstWindowKeySchema::extractStoreTimestamp, TimeFirstWindowKeySchema::fromStoreBytesKey).keyValueIterator();
+        return new WindowStoreIteratorWrapper(bytesIterator,
+            windowSize,
+            TimeFirstWindowKeySchema::extractStoreTimestamp,
+            TimeFirstWindowKeySchema::fromStoreBytesKey).keyValueIterator();
     }
 
     @Override
     public KeyValueIterator<Windowed<Bytes>, byte[]> fetchAll(final long timeFrom, final long timeTo) {
         final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().fetchAll(timeFrom, timeTo);
-        return new WindowStoreIteratorWrapper(bytesIterator, windowSize, TimeFirstWindowKeySchema::extractStoreTimestamp, TimeFirstWindowKeySchema::fromStoreBytesKey).keyValueIterator();
+        return new WindowStoreIteratorWrapper(bytesIterator,
+            windowSize,
+            TimeFirstWindowKeySchema::extractStoreTimestamp,
+            TimeFirstWindowKeySchema::fromStoreBytesKey).keyValueIterator();
     }
 
     @Override
     public KeyValueIterator<Windowed<Bytes>, byte[]> backwardFetchAll(final long timeFrom, final long timeTo) {
         final KeyValueIterator<Bytes, byte[]> bytesIterator = wrapped().backwardFetchAll(timeFrom, timeTo);
-        return new WindowStoreIteratorWrapper(bytesIterator, windowSize, TimeFirstWindowKeySchema::extractStoreTimestamp, TimeFirstWindowKeySchema::fromStoreBytesKey).keyValueIterator();
+        return new WindowStoreIteratorWrapper(bytesIterator,
+            windowSize,
+            TimeFirstWindowKeySchema::extractStoreTimestamp,
+            TimeFirstWindowKeySchema::fromStoreBytesKey).keyValueIterator();
     }
 
     public boolean hasIndex() {
@@ -141,9 +177,18 @@ public class RocksDBTimeOrderedWindowStore extends WrappedStateStore<RocksDBTime
     }
 
     @Override
-    public <R> QueryResult<R> query(final Query<R> query, final PositionBound positionBound, final QueryConfig config) {
+    public <R> QueryResult<R> query(final Query<R> query,
+                                    final PositionBound positionBound,
+                                    final QueryConfig config) {
 
-        return StoreQueryUtils.handleBasicQueries(query, positionBound, config, this, getPosition(), stateStoreContext);
+        return StoreQueryUtils.handleBasicQueries(
+            query,
+            positionBound,
+            config,
+            this,
+            getPosition(),
+            stateStoreContext
+        );
     }
 
     private void maybeUpdateSeqnumForDups() {

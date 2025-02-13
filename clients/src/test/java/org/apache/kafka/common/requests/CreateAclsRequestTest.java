@@ -26,6 +26,7 @@ import org.apache.kafka.common.message.CreateAclsRequestData;
 import org.apache.kafka.common.resource.PatternType;
 import org.apache.kafka.common.resource.ResourcePattern;
 import org.apache.kafka.common.resource.ResourceType;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
@@ -52,50 +53,40 @@ public class CreateAclsRequestTest {
     private static final AclBinding UNKNOWN_ACL1 = new AclBinding(new ResourcePattern(ResourceType.UNKNOWN, "unknown", PatternType.LITERAL),
         new AccessControlEntry("User:*", "127.0.0.1", AclOperation.CREATE, AclPermissionType.ALLOW));
 
-	@Test
+    @Test
     public void shouldThrowOnV0IfNotLiteral() {
-		assertThrows(UnsupportedVersionException.class, () -> new CreateAclsRequest(data(PREFIXED_ACL1), V0));
-    }
-
-	@Test
-    public void shouldThrowOnIfUnknown() {
-		assertThrows(IllegalArgumentException.class, () -> new CreateAclsRequest(data(UNKNOWN_ACL1), V0));
+        assertThrows(UnsupportedVersionException.class, () -> new CreateAclsRequest(data(PREFIXED_ACL1), V0));
     }
 
     @Test
-    public void shouldRoundTripV0() {
-		final CreateAclsRequest original = new CreateAclsRequest(data(LITERAL_ACL1, LITERAL_ACL2), V0);
-		final ByteBuffer buffer = original.serialize();
-
-		final CreateAclsRequest result = CreateAclsRequest.parse(buffer, V0);
-
-		assertRequestEquals(original, result);
-	}
+    public void shouldThrowOnIfUnknown() {
+        assertThrows(IllegalArgumentException.class, () -> new CreateAclsRequest(data(UNKNOWN_ACL1), V1));
+    }
 
     @Test
     public void shouldRoundTripV1() {
-		final CreateAclsRequest original = new CreateAclsRequest(data(LITERAL_ACL1, PREFIXED_ACL1), V1);
-		final ByteBuffer buffer = original.serialize();
+        final CreateAclsRequest original = new CreateAclsRequest(data(LITERAL_ACL1, PREFIXED_ACL1), V1);
+        final ByteBuffer buffer = original.serialize();
 
-		final CreateAclsRequest result = CreateAclsRequest.parse(buffer, V1);
+        final CreateAclsRequest result = CreateAclsRequest.parse(buffer, V1);
 
-		assertRequestEquals(original, result);
-	}
+        assertRequestEquals(original, result);
+    }
 
-	private static void assertRequestEquals(final CreateAclsRequest original, final CreateAclsRequest actual) {
-		assertEquals(original.aclCreations().size(), actual.aclCreations().size(), "Number of Acls wrong");
+    private static void assertRequestEquals(final CreateAclsRequest original, final CreateAclsRequest actual) {
+        assertEquals(original.aclCreations().size(), actual.aclCreations().size(), "Number of Acls wrong");
 
-		for (int idx = 0; idx != original.aclCreations().size(); ++idx) {
-			final AclBinding originalBinding = CreateAclsRequest.aclBinding(original.aclCreations().get(idx));
-			final AclBinding actualBinding = CreateAclsRequest.aclBinding(actual.aclCreations().get(idx));
-			assertEquals(originalBinding, actualBinding);
-		}
-	}
+        for (int idx = 0; idx != original.aclCreations().size(); ++idx) {
+            final AclBinding originalBinding = CreateAclsRequest.aclBinding(original.aclCreations().get(idx));
+            final AclBinding actualBinding = CreateAclsRequest.aclBinding(actual.aclCreations().get(idx));
+            assertEquals(originalBinding, actualBinding);
+        }
+    }
 
-	private static CreateAclsRequestData data(final AclBinding... acls) {
-		List<CreateAclsRequestData.AclCreation> aclCreations = Arrays.stream(acls)
-				.map(CreateAclsRequest::aclCreation)
-				.collect(Collectors.toList());
-		return new CreateAclsRequestData().setCreations(aclCreations);
-	}
+    private static CreateAclsRequestData data(final AclBinding... acls) {
+        List<CreateAclsRequestData.AclCreation> aclCreations = Arrays.stream(acls)
+            .map(CreateAclsRequest::aclCreation)
+            .collect(Collectors.toList());
+        return new CreateAclsRequestData().setCreations(aclCreations);
+    }
 }

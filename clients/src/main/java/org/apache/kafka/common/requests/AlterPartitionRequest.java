@@ -49,7 +49,9 @@ public class AlterPartitionRequest extends AbstractRequest {
      */
     @Override
     public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-        return new AlterPartitionResponse(new AlterPartitionResponseData().setThrottleTimeMs(throttleTimeMs).setErrorCode(Errors.forException(e).code()));
+        return new AlterPartitionResponse(new AlterPartitionResponseData()
+            .setThrottleTimeMs(throttleTimeMs)
+            .setErrorCode(Errors.forException(e).code()));
     }
 
     public static AlterPartitionRequest parse(ByteBuffer buffer, short version) {
@@ -62,31 +64,37 @@ public class AlterPartitionRequest extends AbstractRequest {
 
         /**
          * Constructs a builder for AlterPartitionRequest.
-         * @param data           The data to be sent. Note that because the version of the
-         *                       request is not known at this time, it is expected that all
-         *                       topics have a topic id and a topic name set.
-         * @param canUseTopicIds True if version 2 and above can be used.
+         *
+         * @param data The data to be sent. Note that because the version of the
+         *             request is not known at this time, it is expected that all
+         *             topics have a topic id and a topic name set.
          */
-        public Builder(AlterPartitionRequestData data, boolean canUseTopicIds) {
-            super(ApiKeys.ALTER_PARTITION, ApiKeys.ALTER_PARTITION.oldestVersion(),
-                    // Version 1 is the maximum version that can be used without topic ids.
-                    canUseTopicIds ? ApiKeys.ALTER_PARTITION.latestVersion() : 1);
+        public Builder(AlterPartitionRequestData data) {
+            super(
+                ApiKeys.ALTER_PARTITION,
+                ApiKeys.ALTER_PARTITION.oldestVersion(),
+                ApiKeys.ALTER_PARTITION.latestVersion()
+            );
             this.data = data;
         }
 
         @Override
         public AlterPartitionRequest build(short version) {
             if (version < 3) {
-                data.topics().forEach(topicData -> {
+                data.topics().forEach(topicData ->
                     topicData.partitions().forEach(partitionData -> {
-                        List<Integer> newIsr = new ArrayList<>(partitionData.newIsrWithEpochs().size());
-                        partitionData.newIsrWithEpochs().forEach(brokerState -> {
-                            newIsr.add(brokerState.brokerId());
-                        });
-                        partitionData.setNewIsr(newIsr);
-                        partitionData.setNewIsrWithEpochs(Collections.emptyList());
-                    });
-                });
+                        // The newIsrWithEpochs will be empty after build. Then we can skip the conversion if the build
+                        // is called again.
+                        if (!partitionData.newIsrWithEpochs().isEmpty()) {
+                            List<Integer> newIsr = new ArrayList<>(partitionData.newIsrWithEpochs().size());
+                            partitionData.newIsrWithEpochs().forEach(brokerState ->
+                                newIsr.add(brokerState.brokerId())
+                            );
+                            partitionData.setNewIsr(newIsr);
+                            partitionData.setNewIsrWithEpochs(Collections.emptyList());
+                        }
+                    })
+                );
             }
             return new AlterPartitionRequest(data, version);
         }

@@ -48,7 +48,8 @@ public final class ConfigurationsDelta {
         for (Entry<ConfigResource, ConfigurationImage> entry : image.resourceData().entrySet()) {
             ConfigResource resource = entry.getKey();
             ConfigurationImage configImage = entry.getValue();
-            ConfigurationDelta configDelta = changes.computeIfAbsent(resource, __ -> new ConfigurationDelta(configImage));
+            ConfigurationDelta configDelta = changes.computeIfAbsent(resource,
+                __ -> new ConfigurationDelta(configImage));
             configDelta.finishSnapshot();
         }
     }
@@ -58,17 +59,24 @@ public final class ConfigurationsDelta {
     }
 
     public void replay(ConfigRecord record) {
-        ConfigResource resource = new ConfigResource(Type.forId(record.resourceType()), record.resourceName());
-        ConfigurationImage configImage = image.resourceData().getOrDefault(resource, new ConfigurationImage(resource, Collections.emptyMap()));
-        ConfigurationDelta delta = changes.computeIfAbsent(resource, __ -> new ConfigurationDelta(configImage));
+        ConfigResource resource =
+            new ConfigResource(Type.forId(record.resourceType()), record.resourceName());
+        ConfigurationImage configImage = image.resourceData().getOrDefault(resource,
+                new ConfigurationImage(resource, Collections.emptyMap()));
+        ConfigurationDelta delta = changes.computeIfAbsent(resource,
+            __ -> new ConfigurationDelta(configImage));
         delta.replay(record);
     }
 
     public void replay(RemoveTopicRecord record, String topicName) {
-        ConfigResource resource = new ConfigResource(Type.TOPIC, topicName);
-        ConfigurationImage configImage = image.resourceData().getOrDefault(resource, new ConfigurationImage(resource, Collections.emptyMap()));
-        ConfigurationDelta delta = changes.computeIfAbsent(resource, __ -> new ConfigurationDelta(configImage));
-        delta.deleteAll();
+        ConfigResource resource =
+            new ConfigResource(Type.TOPIC, topicName);
+        if (image.resourceData().containsKey(resource)) {
+            ConfigurationImage configImage = image.resourceData().get(resource);
+            ConfigurationDelta delta = changes.computeIfAbsent(resource,
+                __ -> new ConfigurationDelta(configImage));
+            delta.deleteAll();
+        }
     }
 
     public ConfigurationsImage apply() {
@@ -98,6 +106,8 @@ public final class ConfigurationsDelta {
 
     @Override
     public String toString() {
-        return "ConfigurationsDelta(" + "changes=" + changes + ')';
+        return "ConfigurationsDelta(" +
+            "changes=" + changes +
+            ')';
     }
 }

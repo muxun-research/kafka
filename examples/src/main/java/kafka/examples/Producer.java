@@ -71,7 +71,7 @@ public class Producer extends Thread {
                 sentRecords++;
             }
         } catch (Throwable e) {
-            Utils.printOut("Unhandled exception");
+            Utils.printErr("Unhandled exception");
             e.printStackTrace();
         }
         Utils.printOut("Sent %d records", sentRecords);

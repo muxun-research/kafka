@@ -16,16 +16,30 @@
  */
 package org.apache.kafka.streams.kstream.internals;
 
-import org.apache.kafka.clients.consumer.OffsetResetStrategy;
+import org.apache.kafka.clients.consumer.internals.AutoOffsetResetStrategy;
 import org.apache.kafka.common.utils.Bytes;
-import org.apache.kafka.common.utils.Utils;
+import org.apache.kafka.streams.AutoOffsetReset;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.errors.TopologyException;
-import org.apache.kafka.streams.kstream.*;
+import org.apache.kafka.streams.internals.AutoOffsetResetInternal;
+import org.apache.kafka.streams.kstream.Consumed;
+import org.apache.kafka.streams.kstream.GlobalKTable;
+import org.apache.kafka.streams.kstream.JoinWindows;
+import org.apache.kafka.streams.kstream.KStream;
+import org.apache.kafka.streams.kstream.KTable;
+import org.apache.kafka.streams.kstream.KeyValueMapper;
+import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.kstream.internals.foreignkeyjoin.ForeignTableJoinProcessorSupplier;
 import org.apache.kafka.streams.kstream.internals.foreignkeyjoin.SubscriptionSendProcessorSupplier;
-import org.apache.kafka.streams.kstream.internals.graph.*;
+import org.apache.kafka.streams.kstream.internals.graph.ForeignJoinSubscriptionSendNode;
+import org.apache.kafka.streams.kstream.internals.graph.ForeignTableJoinNode;
+import org.apache.kafka.streams.kstream.internals.graph.GraphNode;
+import org.apache.kafka.streams.kstream.internals.graph.KTableKTableJoinNode;
+import org.apache.kafka.streams.kstream.internals.graph.StreamStreamJoinNode;
+import org.apache.kafka.streams.kstream.internals.graph.TableFilterNode;
+import org.apache.kafka.streams.kstream.internals.graph.TableRepartitionMapNode;
+import org.apache.kafka.streams.kstream.internals.graph.WindowedStreamProcessorNode;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.api.ProcessorSupplier;
 import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
@@ -36,27 +50,39 @@ import org.apache.kafka.test.MockMapper;
 import org.apache.kafka.test.MockTimestampExtractor;
 import org.apache.kafka.test.MockValueJoiner;
 import org.apache.kafka.test.StreamsTestUtils;
-import org.junit.Test;
+
+import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 import static java.time.Duration.ofMillis;
 import static java.util.Arrays.asList;
-import static org.apache.kafka.streams.Topology.AutoOffsetReset;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.core.IsInstanceOf.instanceOf;
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class InternalStreamsBuilderTest {
 
     private static final String APP_ID = "app-id";
 
     private final InternalStreamsBuilder builder = new InternalStreamsBuilder(new InternalTopologyBuilder());
-    private final ConsumedInternal<String, String> consumed = new ConsumedInternal<>();
+    private final ConsumedInternal<String, String> consumed = new ConsumedInternal<>(Consumed.with(null, null));
     private final String storePrefix = "prefix-";
     private final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> materialized = new MaterializedInternal<>(Materialized.as("test-store"), builder, storePrefix);
     private final Properties props = StreamsTestUtils.getStreamsConfig();
@@ -95,7 +121,9 @@ public class InternalStreamsBuilderTest {
         final KStream<String, String> source1 = builder.stream(Collections.singleton(topic1), consumed);
         final KStream<String, String> source2 = builder.stream(Collections.singleton(topic2), consumed);
         final KStream<String, String> source3 = builder.stream(Collections.singleton(topic3), consumed);
-        final KStream<String, String> processedSource1 = source1.mapValues(v -> v).filter((k, v) -> true);
+        final KStream<String, String> processedSource1 =
+                source1.mapValues(v -> v)
+                .filter((k, v) -> true);
         final KStream<String, String> processedSource2 = source2.filter((k, v) -> true);
 
         final KStream<String, String> merged = processedSource1.merge(processedSource2).merge(source3);
@@ -107,11 +135,14 @@ public class InternalStreamsBuilderTest {
 
     @Test
     public void shouldNotMaterializeSourceKTableIfNotRequired() {
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> materializedInternal = new MaterializedInternal<>(Materialized.with(null, null), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> materializedInternal =
+            new MaterializedInternal<>(Materialized.with(null, null), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("topic2", consumed, materializedInternal);
 
         builder.buildAndOptimizeTopology();
-        final ProcessorTopology topology = builder.internalTopologyBuilder.rewriteTopology(new StreamsConfig(StreamsTestUtils.getStreamsConfig(APP_ID))).buildTopology();
+        final ProcessorTopology topology = builder.internalTopologyBuilder
+            .rewriteTopology(new StreamsConfig(StreamsTestUtils.getStreamsConfig(APP_ID)))
+            .buildTopology();
 
         assertEquals(0, topology.stateStores().size());
         assertEquals(0, topology.storeToChangelogTopic().size());
@@ -146,7 +177,9 @@ public class InternalStreamsBuilderTest {
             materializedInternal);
 
         builder.buildAndOptimizeTopology();
-        final ProcessorTopology topology = builder.internalTopologyBuilder.rewriteTopology(new StreamsConfig(StreamsTestUtils.getStreamsConfig(APP_ID))).buildGlobalStateTopology();
+        final ProcessorTopology topology = builder.internalTopologyBuilder
+            .rewriteTopology(new StreamsConfig(StreamsTestUtils.getStreamsConfig(APP_ID)))
+            .buildGlobalStateTopology();
         final List<StateStore> stateStores = topology.globalStateStores();
 
         assertEquals(1, stateStores.size());
@@ -155,18 +188,31 @@ public class InternalStreamsBuilderTest {
 
     @Test
     public void shouldThrowOnVersionedStoreSupplierForGlobalTable() {
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> materializedInternal = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("store", Duration.ZERO)), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> materializedInternal =
+                new MaterializedInternal<>(
+                        Materialized.as(Stores.persistentVersionedKeyValueStore("store", Duration.ZERO)),
+                        builder,
+                        storePrefix
+                );
 
-        assertThrows(TopologyException.class, () -> builder.globalTable("table", consumed, materializedInternal));
+        assertThrows(
+            TopologyException.class,
+            () -> builder.globalTable(
+                "table",
+                consumed,
+                materializedInternal)
+        );
     }
 
     private void doBuildGlobalTopologyWithAllGlobalTables() {
-        final ProcessorTopology topology = builder.internalTopologyBuilder.rewriteTopology(new StreamsConfig(StreamsTestUtils.getStreamsConfig(APP_ID))).buildGlobalStateTopology();
+        final ProcessorTopology topology = builder.internalTopologyBuilder
+            .rewriteTopology(new StreamsConfig(StreamsTestUtils.getStreamsConfig(APP_ID)))
+            .buildGlobalStateTopology();
 
         final List<StateStore> stateStores = topology.globalStateStores();
         final Set<String> sourceTopics = topology.sourceTopics();
 
-        assertEquals(Utils.mkSet("table", "table2"), sourceTopics);
+        assertEquals(Set.of("table", "table2"), sourceTopics);
         assertEquals(2, stateStores.size());
     }
 
@@ -230,7 +276,8 @@ public class InternalStreamsBuilderTest {
     public void shouldMapStateStoresToCorrectSourceTopics() {
         final KStream<String, String> playEvents = builder.stream(Collections.singleton("events"), consumed);
 
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> materializedInternal = new MaterializedInternal<>(Materialized.as("table-store"), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> materializedInternal =
+            new MaterializedInternal<>(Materialized.as("table-store"), builder, storePrefix);
         final KTable<String, String> table = builder.table("table-topic", consumed, materializedInternal);
 
         final KStream<String, String> mapped = playEvents.map(MockMapper.selectValueKeyValueMapper());
@@ -242,39 +289,77 @@ public class InternalStreamsBuilderTest {
     }
 
     @Test
-    public void shouldAddTopicToEarliestAutoOffsetResetList() {
+    public void shouldAddTopicToNoneAutoOffsetResetList() {
         final String topicName = "topic-1";
-        final ConsumedInternal<String, String> consumed = new ConsumedInternal<>(Consumed.with(AutoOffsetReset.EARLIEST));
+        final ConsumedInternal<String, String> consumed = new ConsumedInternal<>(Consumed.with(AutoOffsetReset.none()));
         builder.stream(Collections.singleton(topicName), consumed);
         builder.buildAndOptimizeTopology();
 
-        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName), equalTo(OffsetResetStrategy.EARLIEST));
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName), equalTo(AutoOffsetResetStrategy.NONE));
+    }
+
+    @Test
+    public void shouldAddTopicToEarliestAutoOffsetResetList() {
+        final String topicName = "topic-1";
+        final ConsumedInternal<String, String> consumed = new ConsumedInternal<>(Consumed.with(AutoOffsetReset.earliest()));
+        builder.stream(Collections.singleton(topicName), consumed);
+        builder.buildAndOptimizeTopology();
+
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName), equalTo(AutoOffsetResetStrategy.EARLIEST));
     }
 
     @Test
     public void shouldAddTopicToLatestAutoOffsetResetList() {
         final String topicName = "topic-1";
 
-        final ConsumedInternal<String, String> consumed = new ConsumedInternal<>(Consumed.with(AutoOffsetReset.LATEST));
+        final ConsumedInternal<String, String> consumed = new ConsumedInternal<>(Consumed.with(AutoOffsetReset.latest()));
         builder.stream(Collections.singleton(topicName), consumed);
         builder.buildAndOptimizeTopology();
-        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName), equalTo(OffsetResetStrategy.LATEST));
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName), equalTo(AutoOffsetResetStrategy.LATEST));
+    }
+
+    @Test
+    public void shouldAddTopicToDurationAutoOffsetResetList() {
+        final String topicName = "topic-1";
+
+        final ConsumedInternal<String, String> consumed = new ConsumedInternal<>(Consumed.with(new AutoOffsetResetInternal(AutoOffsetReset.byDuration(Duration.ofSeconds(42L)))));
+        builder.stream(Collections.singleton(topicName), consumed);
+        builder.buildAndOptimizeTopology();
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName).type(), equalTo(AutoOffsetResetStrategy.StrategyType.BY_DURATION));
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName).duration().get().toSeconds(), equalTo(42L));
+    }
+
+    @Test
+    public void shouldAddTableToNoneAutoOffsetResetList() {
+        final String topicName = "topic-1";
+        builder.table(topicName, new ConsumedInternal<>(Consumed.with(AutoOffsetReset.none())), materialized);
+        builder.buildAndOptimizeTopology();
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName), equalTo(AutoOffsetResetStrategy.NONE));
     }
 
     @Test
     public void shouldAddTableToEarliestAutoOffsetResetList() {
         final String topicName = "topic-1";
-        builder.table(topicName, new ConsumedInternal<>(Consumed.with(AutoOffsetReset.EARLIEST)), materialized);
+        builder.table(topicName, new ConsumedInternal<>(Consumed.with(AutoOffsetReset.earliest())), materialized);
         builder.buildAndOptimizeTopology();
-        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName), equalTo(OffsetResetStrategy.EARLIEST));
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName), equalTo(AutoOffsetResetStrategy.EARLIEST));
     }
 
     @Test
     public void shouldAddTableToLatestAutoOffsetResetList() {
         final String topicName = "topic-1";
-        builder.table(topicName, new ConsumedInternal<>(Consumed.with(AutoOffsetReset.LATEST)), materialized);
+        builder.table(topicName, new ConsumedInternal<>(Consumed.with(AutoOffsetReset.latest())), materialized);
         builder.buildAndOptimizeTopology();
-        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName), equalTo(OffsetResetStrategy.LATEST));
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName), equalTo(AutoOffsetResetStrategy.LATEST));
+    }
+
+    @Test
+    public void shouldAddTableToDurationAutoOffsetResetList() {
+        final String topicName = "topic-1";
+        builder.table(topicName, new ConsumedInternal<>(Consumed.with(AutoOffsetResetInternal.byDuration(Duration.ofSeconds(42L)))), materialized);
+        builder.buildAndOptimizeTopology();
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName).type(), equalTo(AutoOffsetResetStrategy.StrategyType.BY_DURATION));
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName).duration().get().toSeconds(), equalTo(42L));
     }
 
     @Test
@@ -284,7 +369,7 @@ public class InternalStreamsBuilderTest {
         builder.table(topicName, consumed, materialized);
         builder.buildAndOptimizeTopology();
 
-        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName), equalTo(OffsetResetStrategy.NONE));
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicName), equalTo(null));
     }
 
     @Test
@@ -295,7 +380,7 @@ public class InternalStreamsBuilderTest {
         builder.stream(topicPattern, consumed);
         builder.buildAndOptimizeTopology();
 
-        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topic), equalTo(OffsetResetStrategy.NONE));
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topic), equalTo(null));
     }
 
     @Test
@@ -303,10 +388,10 @@ public class InternalStreamsBuilderTest {
         final Pattern topicPattern = Pattern.compile("topic-\\d+");
         final String topicTwo = "topic-500000";
 
-        builder.stream(topicPattern, new ConsumedInternal<>(Consumed.with(AutoOffsetReset.EARLIEST)));
+        builder.stream(topicPattern, new ConsumedInternal<>(Consumed.with(AutoOffsetReset.earliest())));
         builder.buildAndOptimizeTopology();
 
-        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicTwo), equalTo(OffsetResetStrategy.EARLIEST));
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicTwo), equalTo(AutoOffsetResetStrategy.EARLIEST));
     }
 
     @Test
@@ -314,10 +399,22 @@ public class InternalStreamsBuilderTest {
         final Pattern topicPattern = Pattern.compile("topic-\\d+");
         final String topicTwo = "topic-1000000";
 
-        builder.stream(topicPattern, new ConsumedInternal<>(Consumed.with(AutoOffsetReset.LATEST)));
+        builder.stream(topicPattern, new ConsumedInternal<>(Consumed.with(AutoOffsetReset.latest())));
         builder.buildAndOptimizeTopology();
 
-        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicTwo), equalTo(OffsetResetStrategy.LATEST));
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicTwo), equalTo(AutoOffsetResetStrategy.LATEST));
+    }
+
+    @Test
+    public void shouldAddRegexTopicToDurationAutoOffsetResetList() {
+        final Pattern topicPattern = Pattern.compile("topic-\\d+");
+        final String topicTwo = "topic-1000000";
+
+        builder.stream(topicPattern, new ConsumedInternal<>(Consumed.with(AutoOffsetResetInternal.byDuration(Duration.ofSeconds(42L)))));
+        builder.buildAndOptimizeTopology();
+
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicTwo).type(), equalTo(AutoOffsetResetStrategy.StrategyType.BY_DURATION));
+        assertThat(builder.internalTopologyBuilder.offsetResetStrategy(topicTwo).duration().get().toSeconds(), equalTo(42L));
     }
 
     @Test
@@ -326,7 +423,7 @@ public class InternalStreamsBuilderTest {
         builder.buildAndOptimizeTopology();
         builder.internalTopologyBuilder.rewriteTopology(new StreamsConfig(StreamsTestUtils.getStreamsConfig(APP_ID)));
         final ProcessorTopology processorTopology = builder.internalTopologyBuilder.buildTopology();
-        assertNull(processorTopology.source("topic").getTimestampExtractor());
+        assertNull(processorTopology.source("topic").timestampExtractor());
     }
 
     @Test
@@ -334,16 +431,20 @@ public class InternalStreamsBuilderTest {
         final ConsumedInternal<String, String> consumed = new ConsumedInternal<>(Consumed.with(new MockTimestampExtractor()));
         builder.stream(Collections.singleton("topic"), consumed);
         builder.buildAndOptimizeTopology();
-        final ProcessorTopology processorTopology = builder.internalTopologyBuilder.rewriteTopology(new StreamsConfig(StreamsTestUtils.getStreamsConfig(APP_ID))).buildTopology();
-        assertThat(processorTopology.source("topic").getTimestampExtractor(), instanceOf(MockTimestampExtractor.class));
+        final ProcessorTopology processorTopology = builder.internalTopologyBuilder
+            .rewriteTopology(new StreamsConfig(StreamsTestUtils.getStreamsConfig(APP_ID)))
+            .buildTopology();
+        assertThat(processorTopology.source("topic").timestampExtractor(), instanceOf(MockTimestampExtractor.class));
     }
 
     @Test
     public void ktableShouldHaveNullTimestampExtractorWhenNoneSupplied() {
         builder.table("topic", consumed, materialized);
         builder.buildAndOptimizeTopology();
-        final ProcessorTopology processorTopology = builder.internalTopologyBuilder.rewriteTopology(new StreamsConfig(StreamsTestUtils.getStreamsConfig(APP_ID))).buildTopology();
-        assertNull(processorTopology.source("topic").getTimestampExtractor());
+        final ProcessorTopology processorTopology = builder.internalTopologyBuilder
+            .rewriteTopology(new StreamsConfig(StreamsTestUtils.getStreamsConfig(APP_ID)))
+            .buildTopology();
+        assertNull(processorTopology.source("topic").timestampExtractor());
     }
 
     @Test
@@ -351,8 +452,10 @@ public class InternalStreamsBuilderTest {
         final ConsumedInternal<String, String> consumed = new ConsumedInternal<>(Consumed.with(new MockTimestampExtractor()));
         builder.table("topic", consumed, materialized);
         builder.buildAndOptimizeTopology();
-        final ProcessorTopology processorTopology = builder.internalTopologyBuilder.rewriteTopology(new StreamsConfig(StreamsTestUtils.getStreamsConfig(APP_ID))).buildTopology();
-        assertThat(processorTopology.source("topic").getTimestampExtractor(), instanceOf(MockTimestampExtractor.class));
+        final ProcessorTopology processorTopology = builder.internalTopologyBuilder
+            .rewriteTopology(new StreamsConfig(StreamsTestUtils.getStreamsConfig(APP_ID)))
+            .buildTopology();
+        assertThat(processorTopology.source("topic").timestampExtractor(), instanceOf(MockTimestampExtractor.class));
     }
 
     @Test
@@ -423,7 +526,9 @@ public class InternalStreamsBuilderTest {
         final KStream<String, String> stream1 = builder.stream(Collections.singleton("t1"), consumed);
         final KStream<String, String> stream2 = builder.stream(Collections.singleton("t1"), consumed);
         final KStream<String, String> stream3 = builder.stream(Collections.singleton("t3"), consumed);
-        stream1.join(stream2, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100))).join(stream3, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)));
+        stream1
+            .join(stream2, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)))
+            .join(stream3, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)));
 
         // When:
         builder.buildAndOptimizeTopology(props);
@@ -448,8 +553,10 @@ public class InternalStreamsBuilderTest {
         final KStream<String, String> stream3 = builder.stream(Collections.singleton("t2"), consumed);
         final KStream<String, String> stream4 = builder.stream(Collections.singleton("t2"), consumed);
 
-        final KStream<String, String> firstResult = stream1.join(stream2, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)));
-        final KStream<String, String> secondResult = stream3.join(stream4, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)));
+        final KStream<String, String> firstResult =
+            stream1.join(stream2, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)));
+        final KStream<String, String> secondResult =
+            stream3.join(stream4, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)));
         firstResult.merge(secondResult);
 
         // When:
@@ -474,7 +581,9 @@ public class InternalStreamsBuilderTest {
         final KStream<String, String> stream2 = builder.stream(Collections.singleton("t1"), consumed);
         final KStream<String, String> stream3 = builder.stream(Collections.singleton("t1"), consumed);
 
-        stream1.join(stream2, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100))).join(stream3, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)));
+        stream1
+            .join(stream2, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)))
+            .join(stream3, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)));
 
         // When:
         builder.buildAndOptimizeTopology(props);
@@ -498,7 +607,9 @@ public class InternalStreamsBuilderTest {
         final KStream<String, String> stream2 = builder.stream(Collections.singleton("t1"), consumed);
         final KStream<String, String> stream3 = builder.stream(Collections.singleton("t2"), consumed);
 
-        stream1.join(stream2, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100))).join(stream3, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)));
+        stream1
+            .join(stream2, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)))
+            .join(stream3, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)));
 
         // When:
         builder.buildAndOptimizeTopology(props);
@@ -573,7 +684,9 @@ public class InternalStreamsBuilderTest {
         props.put(StreamsConfig.TOPOLOGY_OPTIMIZATION_CONFIG, StreamsConfig.OPTIMIZE);
         final KStream<String, String> stream1 = builder.stream(Collections.singleton("t1"), consumed);
         final KStream<String, String> stream2 = builder.stream(Collections.singleton("t1"), consumed);
-        stream1.filter((key, value) -> value != null).join(stream2, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)));
+        stream1
+            .filter((key, value) -> value != null)
+            .join(stream2, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)));
 
         // When:
         builder.buildAndOptimizeTopology(props);
@@ -656,7 +769,9 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldNotOptimizeJoinWhenNotInConfig() {
         // Given:
-        final String value = String.join(",", StreamsConfig.REUSE_KTABLE_SOURCE_TOPICS, StreamsConfig.MERGE_REPARTITION_TOPICS);
+        final String value = String.join(",",
+                                         StreamsConfig.REUSE_KTABLE_SOURCE_TOPICS,
+                                         StreamsConfig.MERGE_REPARTITION_TOPICS);
         props.put(StreamsConfig.TOPOLOGY_OPTIMIZATION_CONFIG, value);
         final KStream<String, String> stream1 = builder.stream(Collections.singleton("t1"), consumed);
         stream1.join(stream1, MockValueJoiner.TOSTRING_JOINER, JoinWindows.ofTimeDifferenceWithNoGrace(ofMillis(100)));
@@ -676,7 +791,8 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsOnTableFilter() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> materializedInternal = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("store", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> materializedInternal =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("store", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, materializedInternal);
         table1.filter((k, v) -> v != null);
 
@@ -692,7 +808,8 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsWithIntermediateNode() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, String> table2 = table1.mapValues(v -> v != null ? v + v : null);
         table2.filter((k, v) -> v != null);
@@ -709,8 +826,10 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldNotSetUseVersionedSemanticsWithMaterializedIntermediateNode() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> unversionedMaterialize = new MaterializedInternal<>(Materialized.as("unversioned"), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> unversionedMaterialize =
+            new MaterializedInternal<>(Materialized.as("unversioned"), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, String> table2 = table1.mapValues(v -> v != null ? v + v : null, unversionedMaterialize);
         table2.filter((k, v) -> v != null);
@@ -727,8 +846,10 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsWithIntermediateNodeMaterializedAsVersioned() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, String> table2 = table1.mapValues(v -> v != null ? v + v : null, versionedMaterialize2);
         table2.filter((k, v) -> v != null);
@@ -745,7 +866,8 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldNotSetUseVersionedSemanticsWithIntermediateAggregation() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, Long> table2 = table1.groupBy(KeyValue::new).count();
         table2.filter((k, v) -> v != null);
@@ -762,8 +884,10 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsWithIntermediateAggregationMaterializedAsVersioned() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, Long, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, Long, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, Long> table2 = table1.groupBy(KeyValue::new).count(versionedMaterialize2);
         table2.filter((k, v) -> v != null);
@@ -780,8 +904,10 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldNotSetUseVersionedSemanticsWithIntermediateJoin() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, String> table2 = builder.table("t2", consumed, versionedMaterialize2);
         final KTable<String, String> table3 = table1.join(table2, (v1, v2) -> v1 + v2);
@@ -801,9 +927,12 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsWithIntermediateJoinMaterializedAsVersioned() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize3 = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned3", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize3 =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned3", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, String> table2 = builder.table("t2", consumed, versionedMaterialize2);
         final KTable<String, String> table3 = table1.join(table2, (v1, v2) -> v1 + v2, versionedMaterialize3);
@@ -821,8 +950,10 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldNotSetUseVersionedSemanticsWithIntermediateForeignKeyJoin() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, String> table2 = builder.table("t2", consumed, versionedMaterialize2);
         final KTable<String, String> table3 = table1.join(table2, v -> v, (v1, v2) -> v1 + v2);
@@ -842,9 +973,12 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsWithIntermediateForeignKeyJoinMaterializedAsVersioned() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize3 = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned3", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize3 =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned3", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, String> table2 = builder.table("t2", consumed, versionedMaterialize2);
         final KTable<String, String> table3 = table1.join(table2, v -> v, (v1, v2) -> v1 + v2, versionedMaterialize3);
@@ -862,7 +996,8 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldNotSetUseVersionedSemanticsWithToStreamAndBack() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, String> table2 = table1.toStream().toTable();
         table2.filter((k, v) -> v != null);
@@ -879,8 +1014,10 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsWithToStreamAndBackIfMaterializedAsVersioned() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, String> table2 = table1.toStream().toTable(versionedMaterialize2);
         table2.filter((k, v) -> v != null);
@@ -897,7 +1034,8 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsOnTableRepartitionMap() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         table1.groupBy(KeyValue::new).count();
 
@@ -913,7 +1051,8 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsOnTableRepartitionMapWithIntermediateNodes() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, String> table2 = table1.filter((k, v) -> v != null).mapValues(v -> v + v);
         table2.groupBy(KeyValue::new).count();
@@ -930,8 +1069,10 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsOnTableJoin() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, String> table2 = builder.table("t2", consumed, versionedMaterialize2);
         table1.join(table2, (v1, v2) -> v1 + v2);
@@ -948,8 +1089,10 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsOnTableJoinLeftOnly() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> unversionedMaterialize = new MaterializedInternal<>(Materialized.as("unversioned"), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> unversionedMaterialize =
+            new MaterializedInternal<>(Materialized.as("unversioned"), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, String> table2 = builder.table("t2", consumed, unversionedMaterialize);
         table1.join(table2, (v1, v2) -> v1 + v2);
@@ -966,8 +1109,10 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsOnTableJoinRightOnly() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> unversionedMaterialize = new MaterializedInternal<>(Materialized.as("unversioned"), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> unversionedMaterialize =
+            new MaterializedInternal<>(Materialized.as("unversioned"), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, unversionedMaterialize);
         final KTable<String, String> table2 = builder.table("t2", consumed, versionedMaterialize);
         table1.join(table2, (v1, v2) -> v1 + v2);
@@ -984,7 +1129,8 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsOnTableSelfJoin() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         table1.join(table1, (v1, v2) -> v1 + v2);
 
@@ -1000,8 +1146,10 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsOnTableForeignJoin() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize2 =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned2", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, String> table2 = builder.table("t2", consumed, versionedMaterialize2);
         table1.join(table2, v -> v, (v1, v2) -> v1 + v2);
@@ -1022,8 +1170,10 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsOnTableForeignJoinLeftOnly() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> unversionedMaterialize = new MaterializedInternal<>(Materialized.as("unversioned"), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> unversionedMaterialize =
+            new MaterializedInternal<>(Materialized.as("unversioned"), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         final KTable<String, String> table2 = builder.table("t2", consumed, unversionedMaterialize);
         table1.join(table2, v -> v, (v1, v2) -> v1 + v2);
@@ -1044,8 +1194,10 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsOnTableForeignJoinRightOnly() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> unversionedMaterialize = new MaterializedInternal<>(Materialized.as("unversioned"), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> unversionedMaterialize =
+            new MaterializedInternal<>(Materialized.as("unversioned"), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, unversionedMaterialize);
         final KTable<String, String> table2 = builder.table("t2", consumed, versionedMaterialize);
         table1.join(table2, v -> v, (v1, v2) -> v1 + v2);
@@ -1066,7 +1218,8 @@ public class InternalStreamsBuilderTest {
     @Test
     public void shouldSetUseVersionedSemanticsOnTableForeignSelfJoin() {
         // Given:
-        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize = new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
+        final MaterializedInternal<String, String, KeyValueStore<Bytes, byte[]>> versionedMaterialize =
+            new MaterializedInternal<>(Materialized.as(Stores.persistentVersionedKeyValueStore("versioned", Duration.ofMinutes(5))), builder, storePrefix);
         final KTable<String, String> table1 = builder.table("t1", consumed, versionedMaterialize);
         table1.join(table1, v -> v, (v1, v2) -> v1 + v2);
 
@@ -1085,53 +1238,54 @@ public class InternalStreamsBuilderTest {
 
     private void verifyVersionedSemantics(final TableFilterNode<?, ?> filterNode, final boolean expectedValue) {
         final ProcessorSupplier<?, ?, ?, ?> processorSupplier = filterNode.processorParameters().processorSupplier();
-        assertTrue(processorSupplier instanceof KTableFilter);
+        assertInstanceOf(KTableFilter.class, processorSupplier);
         final KTableFilter<?, ?> tableFilter = (KTableFilter<?, ?>) processorSupplier;
         assertEquals(expectedValue, tableFilter.isUseVersionedSemantics());
     }
 
     private void verifyVersionedSemantics(final TableRepartitionMapNode<?, ?> repartitionMapNode, final boolean expectedValue) {
         final ProcessorSupplier<?, ?, ?, ?> processorSupplier = repartitionMapNode.processorParameters().processorSupplier();
-        assertTrue(processorSupplier instanceof KTableRepartitionMap);
+        assertInstanceOf(KTableRepartitionMap.class, processorSupplier);
         final KTableRepartitionMap<?, ?, ?, ?> repartitionMap = (KTableRepartitionMap<?, ?, ?, ?>) processorSupplier;
         assertEquals(expectedValue, repartitionMap.isUseVersionedSemantics());
     }
 
     private void verifyVersionedSemantics(final KTableKTableJoinNode<?, ?, ?, ?> joinNode, final boolean expectedValueLeft, final boolean expectedValueRight) {
         final ProcessorSupplier<?, ?, ?, ?> thisProcessorSupplier = joinNode.thisProcessorParameters().processorSupplier();
-        assertTrue(thisProcessorSupplier instanceof KTableKTableAbstractJoin);
+        assertInstanceOf(KTableKTableAbstractJoin.class, thisProcessorSupplier);
         final KTableKTableAbstractJoin<?, ?, ?, ?> thisJoin = (KTableKTableAbstractJoin<?, ?, ?, ?>) thisProcessorSupplier;
         assertEquals(expectedValueLeft, thisJoin.isUseVersionedSemantics());
 
         final ProcessorSupplier<?, ?, ?, ?> otherProcessorSupplier = joinNode.otherProcessorParameters().processorSupplier();
-        assertTrue(otherProcessorSupplier instanceof KTableKTableAbstractJoin);
+        assertInstanceOf(KTableKTableAbstractJoin.class, otherProcessorSupplier);
         final KTableKTableAbstractJoin<?, ?, ?, ?> otherJoin = (KTableKTableAbstractJoin<?, ?, ?, ?>) otherProcessorSupplier;
         assertEquals(expectedValueRight, otherJoin.isUseVersionedSemantics());
     }
 
     private void verifyVersionedSemantics(final ForeignJoinSubscriptionSendNode<?, ?> joinThisNode, final boolean expectedValue) {
         final ProcessorSupplier<?, ?, ?, ?> thisProcessorSupplier = joinThisNode.processorParameters().processorSupplier();
-        assertTrue(thisProcessorSupplier instanceof SubscriptionSendProcessorSupplier);
+        assertInstanceOf(SubscriptionSendProcessorSupplier.class, thisProcessorSupplier);
         final SubscriptionSendProcessorSupplier<?, ?, ?> joinThis = (SubscriptionSendProcessorSupplier<?, ?, ?>) thisProcessorSupplier;
         assertEquals(expectedValue, joinThis.isUseVersionedSemantics());
     }
 
     private void verifyVersionedSemantics(final ForeignTableJoinNode<?, ?> joinOtherNode, final boolean expectedValue) {
         final ProcessorSupplier<?, ?, ?, ?> otherProcessorSupplier = joinOtherNode.processorParameters().processorSupplier();
-        assertTrue(otherProcessorSupplier instanceof ForeignTableJoinProcessorSupplier);
+        assertInstanceOf(ForeignTableJoinProcessorSupplier.class, otherProcessorSupplier);
         final ForeignTableJoinProcessorSupplier<?, ?, ?> joinThis = (ForeignTableJoinProcessorSupplier<?, ?, ?>) otherProcessorSupplier;
         assertEquals(expectedValue, joinThis.isUseVersionedSemantics());
     }
 
-    private GraphNode getNodeByType(final GraphNode currentNode, final Class<? extends GraphNode> clazz, final Set<GraphNode> visited) {
+    private GraphNode getNodeByType(
+        final GraphNode currentNode,
+        final Class<? extends GraphNode> clazz,
+        final Set<GraphNode> visited) {
 
         if (clazz.isAssignableFrom(currentNode.getClass())) {
             return currentNode;
         }
-        for (final GraphNode child : currentNode.children()) {
-            if (!visited.contains(child)) {
-                visited.add(child);
-            }
+        for (final GraphNode child: currentNode.children()) {
+            visited.add(child);
             final GraphNode result = getNodeByType(child, clazz, visited);
             if (result != null) {
                 return result;
@@ -1140,12 +1294,16 @@ public class InternalStreamsBuilderTest {
         return null;
     }
 
-    private void getNodesByType(final GraphNode currentNode, final Class<? extends GraphNode> clazz, final Set<GraphNode> visited, final List<GraphNode> result) {
+    private void getNodesByType(
+        final GraphNode currentNode,
+        final Class<? extends GraphNode> clazz,
+        final Set<GraphNode> visited,
+        final List<GraphNode> result) {
 
         if (clazz.isAssignableFrom(currentNode.getClass())) {
             result.add(currentNode);
         }
-        for (final GraphNode child : currentNode.children()) {
+        for (final GraphNode child: currentNode.children()) {
             if (!visited.contains(child)) {
                 visited.add(child);
                 getNodesByType(child, clazz, visited, result);
@@ -1153,13 +1311,16 @@ public class InternalStreamsBuilderTest {
         }
     }
 
-    private void countJoinWindowNodes(final AtomicInteger count, final GraphNode currentNode, final Set<GraphNode> visited) {
+    private void countJoinWindowNodes(
+        final AtomicInteger count,
+        final GraphNode currentNode,
+        final Set<GraphNode> visited) {
 
         if (currentNode instanceof WindowedStreamProcessorNode) {
             count.incrementAndGet();
         }
 
-        for (final GraphNode child : currentNode.children()) {
+        for (final GraphNode child: currentNode.children()) {
             if (!visited.contains(child)) {
                 visited.add(child);
                 countJoinWindowNodes(count, child, visited);

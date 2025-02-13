@@ -17,13 +17,16 @@
 
 package org.apache.kafka.image;
 
+import org.apache.kafka.common.TopicIdPartition;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.Uuid;
+import org.apache.kafka.common.metadata.ClearElrRecord;
 import org.apache.kafka.common.metadata.PartitionChangeRecord;
 import org.apache.kafka.common.metadata.PartitionRecord;
 import org.apache.kafka.metadata.PartitionRegistration;
 import org.apache.kafka.metadata.Replicas;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -51,7 +54,11 @@ public final class TopicDelta {
     }
 
     public Map<Integer, PartitionRegistration> newPartitions() {
-        return partitionChanges.entrySet().stream().filter(entry -> !image.partitions().containsKey(entry.getKey())).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        return partitionChanges
+            .entrySet()
+            .stream()
+            .filter(entry -> !image.partitions().containsKey(entry.getKey()))
+            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
     public String name() {
@@ -71,10 +78,36 @@ public final class TopicDelta {
         if (partition == null) {
             partition = image.partitions().get(record.partitionId());
             if (partition == null) {
-                throw new RuntimeException("Unable to find partition " + record.topicId() + ":" + record.partitionId());
+                throw new RuntimeException("Unable to find partition " +
+                    record.topicId() + ":" + record.partitionId());
             }
         }
         partitionChanges.put(record.partitionId(), partition.merge(record));
+    }
+
+    public void replay(ClearElrRecord record) {
+        // Some partitions are not added to the image yet, let's check the partitionChanges first.
+        partitionChanges.forEach((partitionId, partition) -> {
+            maybeClearElr(partitionId, partition);
+        });
+
+        image.partitions().forEach((partitionId, partition) -> {
+            if (!partitionChanges.containsKey(partitionId)) {
+                maybeClearElr(partitionId, partition);
+            }
+        });
+    }
+
+    void maybeClearElr(int partitionId, PartitionRegistration partition) {
+        if (partition.elr.length != 0 || partition.lastKnownElr.length != 0) {
+            partitionChanges.put(partitionId, partition.merge(
+                new PartitionChangeRecord().
+                    setPartitionId(partitionId).
+                    setTopicId(image.id()).
+                    setEligibleLeaderReplicas(Collections.emptyList()).
+                    setLastKnownElr(Collections.emptyList())
+            ));
+        }
     }
 
     public TopicImage apply() {
@@ -114,17 +147,28 @@ public final class TopicDelta {
      * Find the partitions that have change based on the replica given.
      * <p>
      * The changes identified are:
-     * 1. partitions for which the broker is not a replica anymore
-     * 2. partitions for which the broker is now the leader
-     * 3. partitions for which the broker is now a follower
+     * <ul>
+     *   <li>deletes: partitions for which the broker is not a replica anymore</li>
+     *   <li>electedLeaders: partitions for which the broker is now a leader (leader epoch bump on the leader)</li>
+     *   <li>leaders: partitions for which the isr or replicas change if the broker is a leader (partition epoch bump on the leader)</li>
+     *   <li>followers: partitions for which the broker is now a follower or follower with isr or replica updates (partition epoch bump on follower)</li>
+     *   <li>topicIds: a map of topic names to topic IDs in leaders and followers changes</li>
+     *   <li>directoryIds: partitions for which directory id changes or newly added to the broker</li>
+     * </ul>
+     * <p>
+     * Leader epoch bumps are a strict subset of all partition epoch bumps, so all partitions in electedLeaders will be in leaders.
+     *
      * @param brokerId the broker id
-     * @return the list of partitions which the broker should remove, become leader or become follower.
+     * @return the LocalReplicaChanges that cover changes in the broker
      */
+    @SuppressWarnings("checkstyle:cyclomaticComplexity")
     public LocalReplicaChanges localChanges(int brokerId) {
         Set<TopicPartition> deletes = new HashSet<>();
+        Map<TopicPartition, LocalReplicaChanges.PartitionInfo> electedLeaders = new HashMap<>();
         Map<TopicPartition, LocalReplicaChanges.PartitionInfo> leaders = new HashMap<>();
         Map<TopicPartition, LocalReplicaChanges.PartitionInfo> followers = new HashMap<>();
         Map<String, Uuid> topicIds = new HashMap<>();
+        Map<TopicIdPartition, Uuid> directoryIds = new HashMap<>();
 
         for (Entry<Integer, PartitionRegistration> entry : partitionChanges.entrySet()) {
             if (!Replicas.contains(entry.getValue().replicas, brokerId)) {
@@ -135,23 +179,49 @@ public final class TopicDelta {
             } else if (entry.getValue().leader == brokerId) {
                 PartitionRegistration prevPartition = image.partitions().get(entry.getKey());
                 if (prevPartition == null || prevPartition.partitionEpoch != entry.getValue().partitionEpoch) {
-                    leaders.put(new TopicPartition(name(), entry.getKey()), new LocalReplicaChanges.PartitionInfo(id(), entry.getValue()));
+                    TopicPartition tp = new TopicPartition(name(), entry.getKey());
+                    LocalReplicaChanges.PartitionInfo partitionInfo = new LocalReplicaChanges.PartitionInfo(id(), entry.getValue());
+                    leaders.put(tp, partitionInfo);
+                    if (prevPartition == null || prevPartition.leaderEpoch != entry.getValue().leaderEpoch) {
+                        electedLeaders.put(tp, partitionInfo);
+                    }
                     topicIds.putIfAbsent(name(), id());
                 }
-            } else if (entry.getValue().leader != brokerId && Replicas.contains(entry.getValue().replicas, brokerId)) {
+            } else {
                 PartitionRegistration prevPartition = image.partitions().get(entry.getKey());
                 if (prevPartition == null || prevPartition.partitionEpoch != entry.getValue().partitionEpoch) {
-                    followers.put(new TopicPartition(name(), entry.getKey()), new LocalReplicaChanges.PartitionInfo(id(), entry.getValue()));
+                    followers.put(
+                        new TopicPartition(name(), entry.getKey()),
+                        new LocalReplicaChanges.PartitionInfo(id(), entry.getValue())
+                    );
                     topicIds.putIfAbsent(name(), id());
                 }
             }
+
+            try {
+                PartitionRegistration prevPartition = image.partitions().get(entry.getKey());
+                if (
+                        prevPartition == null ||
+                        prevPartition.directories == null ||
+                        prevPartition.directory(brokerId) != entry.getValue().directory(brokerId)
+                ) {
+                    directoryIds.put(
+                        new TopicIdPartition(id(), new TopicPartition(name(), entry.getKey())),
+                        entry.getValue().directory(brokerId)
+                    );
+                }
+            } catch (IllegalArgumentException e) {
+                // Do nothing if broker isn't part of the replica set.
+            }
         }
 
-        return new LocalReplicaChanges(deletes, leaders, followers, topicIds);
+        return new LocalReplicaChanges(deletes, electedLeaders, leaders, followers, topicIds, directoryIds);
     }
 
     @Override
     public String toString() {
-        return "TopicDelta(" + "partitionChanges=" + partitionChanges + ')';
+        return "TopicDelta(" +
+            "partitionChanges=" + partitionChanges +
+            ')';
     }
 }

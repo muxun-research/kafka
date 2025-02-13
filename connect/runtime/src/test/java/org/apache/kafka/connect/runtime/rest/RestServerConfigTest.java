@@ -18,21 +18,47 @@ package org.apache.kafka.connect.runtime.rest;
 
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.config.internals.BrokerSecurityConfigs;
-import org.junit.Test;
+
+import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.apache.kafka.connect.runtime.rest.RestServerConfig.LISTENERS_DEFAULT;
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class RestServerConfigTest {
 
-    private static final List<String> VALID_HEADER_CONFIGS = Arrays.asList("add \t Cache-Control: no-cache, no-store, must-revalidate", "add \r X-XSS-Protection: 1; mode=block", "\n add Strict-Transport-Security: max-age=31536000; includeSubDomains", "AdD   Strict-Transport-Security:  \r  max-age=31536000;  includeSubDomains", "AdD \t Strict-Transport-Security : \n   max-age=31536000;  includeSubDomains", "add X-Content-Type-Options: \r nosniff", "Set \t X-Frame-Options: \t Deny\n ", "seT \t X-Cache-Info: \t not cacheable\n ", "seTDate \t Expires: \r 31540000000", "adDdate \n Last-Modified: \t 0");
+    private static final List<String> VALID_HEADER_CONFIGS = Arrays.asList(
+            "add \t Cache-Control: no-cache, no-store, must-revalidate",
+            "add \r X-XSS-Protection: 1; mode=block",
+            "\n add Strict-Transport-Security: max-age=31536000; includeSubDomains",
+            "AdD   Strict-Transport-Security:  \r  max-age=31536000;  includeSubDomains",
+            "AdD \t Strict-Transport-Security : \n   max-age=31536000;  includeSubDomains",
+            "add X-Content-Type-Options: \r nosniff",
+            "Set \t X-Frame-Options: \t Deny\n ",
+            "seT \t X-Cache-Info: \t not cacheable\n ",
+            "seTDate \t Expires: \r 31540000000",
+            "adDdate \n Last-Modified: \t 0"
+    );
 
-    private static final List<String> INVALID_HEADER_CONFIGS = Arrays.asList("set \t", "badaction \t X-Frame-Options:DENY", "set add X-XSS-Protection:1", "addX-XSS-Protection", "X-XSS-Protection:", "add set X-XSS-Protection: 1", "add X-XSS-Protection:1 X-XSS-Protection:1 ", "add X-XSS-Protection", "set X-Frame-Options:DENY, add  :no-cache, no-store, must-revalidate ");
+    private static final List<String> INVALID_HEADER_CONFIGS = Arrays.asList(
+            "set \t",
+            "badaction \t X-Frame-Options:DENY",
+            "set add X-XSS-Protection:1",
+            "addX-XSS-Protection",
+            "X-XSS-Protection:",
+            "add set X-XSS-Protection: 1",
+            "add X-XSS-Protection:1 X-XSS-Protection:1 ",
+            "add X-XSS-Protection",
+            "set X-Frame-Options:DENY, add  :no-cache, no-store, must-revalidate "
+    );
 
     @Test
     public void testListenersConfigAllowedValues() {
@@ -44,13 +70,11 @@ public class RestServerConfigTest {
 
         props.put(RestServerConfig.LISTENERS_CONFIG, "http://a.b:9999");
         config = RestServerConfig.forPublic(null, props);
-        assertEquals(Arrays.asList("http://a.b:9999"), config.listeners());
+        assertEquals(Collections.singletonList("http://a.b:9999"), config.listeners());
 
         props.put(RestServerConfig.LISTENERS_CONFIG, "http://a.b:9999, https://a.b:7812");
         config = RestServerConfig.forPublic(null, props);
         assertEquals(Arrays.asList("http://a.b:9999", "https://a.b:7812"), config.listeners());
-
-        config = RestServerConfig.forPublic(null, props);
     }
 
     @Test
@@ -81,7 +105,7 @@ public class RestServerConfigTest {
 
         // no value set for "admin.listeners"
         RestServerConfig config = RestServerConfig.forPublic(null, props);
-        assertNull("Default value should be null.", config.adminListeners());
+        assertNull(config.adminListeners(), "Default value should be null.");
 
         props.put(RestServerConfig.ADMIN_LISTENERS_CONFIG, "");
         config = RestServerConfig.forPublic(null, props);

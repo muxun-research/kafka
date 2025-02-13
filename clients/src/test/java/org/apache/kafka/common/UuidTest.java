@@ -19,9 +19,15 @@ package org.apache.kafka.common;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.Base64;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class UuidTest {
 
@@ -47,13 +53,13 @@ public class UuidTest {
         assertEquals(id1.hashCode(), id2.hashCode());
         assertNotEquals(id1.hashCode(), id3.hashCode());
     }
-
+    
     @Test
     public void testHashCode() {
         Uuid id1 = new Uuid(16L, 7L);
         Uuid id2 = new Uuid(1043L, 20075L);
         Uuid id3 = new Uuid(104312423523523L, 200732425676585L);
-
+        
         assertEquals(23, id1.hashCode());
         assertEquals(19064, id2.hashCode());
         assertEquals(-2011255899, id3.hashCode());
@@ -71,7 +77,7 @@ public class UuidTest {
         assertEquals(Uuid.fromString(zeroIdString), Uuid.ZERO_UUID);
     }
 
-    @RepeatedTest(100)
+    @RepeatedTest(value = 100, name = RepeatedTest.LONG_DISPLAY_NAME)
     public void testRandomUuid() {
         Uuid randomID = Uuid.randomUuid();
 
@@ -105,4 +111,29 @@ public class UuidTest {
         assertThrows(IllegalArgumentException.class, () -> Uuid.fromString(undersizeString));
     }
 
+    @Test
+    void testToArray() {
+        assertNull(Uuid.toArray(null));
+        assertArrayEquals(
+                new Uuid[]{
+                    Uuid.ZERO_UUID, Uuid.fromString("UXyU9i5ARn6W00ON2taeWA")
+                },
+                Uuid.toArray(Arrays.asList(
+                    Uuid.ZERO_UUID, Uuid.fromString("UXyU9i5ARn6W00ON2taeWA")
+                ))
+        );
+    }
+
+    @Test
+    void testToList() {
+        assertNull(Uuid.toList(null));
+        assertEquals(
+                Arrays.asList(
+                    Uuid.ZERO_UUID, Uuid.fromString("UXyU9i5ARn6W00ON2taeWA")
+                ),
+                Uuid.toList(new Uuid[]{
+                    Uuid.ZERO_UUID, Uuid.fromString("UXyU9i5ARn6W00ON2taeWA")
+                })
+        );
+    }
 }

@@ -28,20 +28,29 @@ import org.apache.kafka.image.node.ClientQuotasImageNode;
 import org.apache.kafka.image.writer.ImageWriter;
 import org.apache.kafka.image.writer.ImageWriterOptions;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
+import java.util.Set;
 
-import static org.apache.kafka.common.quota.ClientQuotaEntity.*;
-import static org.apache.kafka.common.requests.DescribeClientQuotasRequest.*;
+import static org.apache.kafka.common.quota.ClientQuotaEntity.CLIENT_ID;
+import static org.apache.kafka.common.quota.ClientQuotaEntity.IP;
+import static org.apache.kafka.common.quota.ClientQuotaEntity.USER;
+import static org.apache.kafka.common.requests.DescribeClientQuotasRequest.MATCH_TYPE_DEFAULT;
+import static org.apache.kafka.common.requests.DescribeClientQuotasRequest.MATCH_TYPE_EXACT;
+import static org.apache.kafka.common.requests.DescribeClientQuotasRequest.MATCH_TYPE_SPECIFIED;
 
 
 /**
  * Represents the client quotas in the metadata image.
- * <p>
+ *
  * This class is thread-safe.
  */
 public final class ClientQuotasImage {
-    public final static ClientQuotasImage EMPTY = new ClientQuotasImage(Collections.emptyMap());
+    public static final ClientQuotasImage EMPTY = new ClientQuotasImage(Collections.emptyMap());
 
     private final Map<ClientQuotaEntity, ClientQuotaImage> entities;
 
@@ -73,28 +82,35 @@ public final class ClientQuotasImage {
         for (DescribeClientQuotasRequestData.ComponentData component : request.components()) {
             if (component.entityType().isEmpty()) {
                 throw new InvalidRequestException("Invalid empty entity type.");
-            } else if (exactMatch.containsKey(component.entityType()) || typeMatch.contains(component.entityType())) {
-                throw new InvalidRequestException("Entity type " + component.entityType() + " cannot appear more than once in the filter.");
+            } else if (exactMatch.containsKey(component.entityType()) ||
+                    typeMatch.contains(component.entityType())) {
+                throw new InvalidRequestException("Entity type " + component.entityType() +
+                    " cannot appear more than once in the filter.");
             }
-            if (!(component.entityType().equals(IP) || component.entityType().equals(USER) || component.entityType().equals(CLIENT_ID))) {
-                throw new UnsupportedVersionException("Unsupported entity type " + component.entityType());
+            if (!(component.entityType().equals(IP) || component.entityType().equals(USER) ||
+                    component.entityType().equals(CLIENT_ID))) {
+                throw new UnsupportedVersionException("Unsupported entity type " +
+                        component.entityType());
             }
             switch (component.matchType()) {
                 case MATCH_TYPE_EXACT:
                     if (component.match() == null) {
-                        throw new InvalidRequestException("Request specified " + "MATCH_TYPE_EXACT, but set match string to null.");
+                        throw new InvalidRequestException("Request specified " +
+                            "MATCH_TYPE_EXACT, but set match string to null.");
                     }
                     exactMatch.put(component.entityType(), component.match());
                     break;
                 case MATCH_TYPE_DEFAULT:
                     if (component.match() != null) {
-                        throw new InvalidRequestException("Request specified " + "MATCH_TYPE_DEFAULT, but also specified a match string.");
+                        throw new InvalidRequestException("Request specified " +
+                            "MATCH_TYPE_DEFAULT, but also specified a match string.");
                     }
                     exactMatch.put(component.entityType(), null);
                     break;
                 case MATCH_TYPE_SPECIFIED:
                     if (component.match() != null) {
-                        throw new InvalidRequestException("Request specified " + "MATCH_TYPE_SPECIFIED, but also specified a match string.");
+                        throw new InvalidRequestException("Request specified " +
+                            "MATCH_TYPE_SPECIFIED, but also specified a match string.");
                     }
                     typeMatch.add(component.entityType());
                     break;
@@ -103,8 +119,11 @@ public final class ClientQuotasImage {
             }
         }
         if (exactMatch.containsKey(IP) || typeMatch.contains(IP)) {
-            if ((exactMatch.containsKey(USER) || typeMatch.contains(USER)) || (exactMatch.containsKey(CLIENT_ID) || typeMatch.contains(CLIENT_ID))) {
-                throw new InvalidRequestException("Invalid entity filter component " + "combination. IP filter component should not be used with " + "user or clientId filter component.");
+            if ((exactMatch.containsKey(USER) || typeMatch.contains(USER)) ||
+                    (exactMatch.containsKey(CLIENT_ID) || typeMatch.contains(CLIENT_ID))) {
+                throw new InvalidRequestException("Invalid entity filter component " +
+                    "combination. IP filter component should not be used with " +
+                    "user or clientId filter component.");
             }
         }
         // TODO: this is O(N). We should add indexing here to speed it up. See KAFKA-13022.
@@ -118,7 +137,10 @@ public final class ClientQuotasImage {
         return response;
     }
 
-    private static boolean matches(ClientQuotaEntity entity, Map<String, String> exactMatch, Set<String> typeMatch, boolean strict) {
+    private static boolean matches(ClientQuotaEntity entity,
+                                   Map<String, String> exactMatch,
+                                   Set<String> typeMatch,
+                                   boolean strict) {
         if (strict) {
             if (entity.entries().size() != exactMatch.size() + typeMatch.size()) {
                 return false;
@@ -140,10 +162,13 @@ public final class ClientQuotasImage {
         return true;
     }
 
-    private static EntryData toDescribeEntry(ClientQuotaEntity entity, ClientQuotaImage quotaImage) {
+    private static EntryData toDescribeEntry(ClientQuotaEntity entity,
+                                             ClientQuotaImage quotaImage) {
         EntryData data = new EntryData();
         for (Entry<String, String> entry : entity.entries().entrySet()) {
-            data.entity().add(new EntityData().setEntityType(entry.getKey()).setEntityName(entry.getValue()));
+            data.entity().add(new EntityData().
+                setEntityType(entry.getKey()).
+                setEntityName(entry.getValue()));
         }
         data.setValues(quotaImage.toDescribeValues());
         return data;
@@ -151,9 +176,7 @@ public final class ClientQuotasImage {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof ClientQuotasImage))
-            return false;
-        ClientQuotasImage other = (ClientQuotasImage) o;
+        if (!(o instanceof ClientQuotasImage other)) return false;
         return entities.equals(other.entities);
     }
 

@@ -20,12 +20,14 @@ package org.apache.kafka.streams.processor.internals;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.MetricName;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.mockito.junit.MockitoJUnit;
-import org.mockito.junit.MockitoRule;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -36,6 +38,8 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)
 public class StreamThreadTotalBlockedTimeTest {
     private static final int IO_TIME_TOTAL = 1;
     private static final int IO_WAIT_TIME_TOTAL = 2;
@@ -54,20 +58,32 @@ public class StreamThreadTotalBlockedTimeTest {
 
     private StreamThreadTotalBlockedTime blockedTime;
 
-    @Rule
-    public final MockitoRule mockitoRule = MockitoJUnit.rule();
-
-    @Before
+    @BeforeEach
     public void setup() {
         blockedTime = new StreamThreadTotalBlockedTime(consumer, restoreConsumer, producerBlocked);
-        when(consumer.metrics()).thenAnswer(a -> new MetricsBuilder().addMetric("io-time-ns-total", IO_TIME_TOTAL).addMetric("io-wait-time-ns-total", IO_WAIT_TIME_TOTAL).addMetric("committed-time-ns-total", COMMITTED_TIME_TOTAL).addMetric("commit-sync-time-ns-total", COMMIT_SYNC_TIME_TOTAL).build());
-        when(restoreConsumer.metrics()).thenAnswer(a -> new MetricsBuilder().addMetric("io-time-ns-total", RESTORE_IOTIME_TOTAL).addMetric("io-wait-time-ns-total", RESTORE_IO_WAITTIME_TOTAL).build());
+        when(consumer.metrics()).thenAnswer(a -> new MetricsBuilder()
+            .addMetric("io-time-ns-total", IO_TIME_TOTAL)
+            .addMetric("io-wait-time-ns-total", IO_WAIT_TIME_TOTAL)
+            .addMetric("committed-time-ns-total", COMMITTED_TIME_TOTAL)
+            .addMetric("commit-sync-time-ns-total", COMMIT_SYNC_TIME_TOTAL)
+            .build()
+        );
+        when(restoreConsumer.metrics()).thenAnswer(a -> new MetricsBuilder()
+            .addMetric("io-time-ns-total", RESTORE_IOTIME_TOTAL)
+            .addMetric("io-wait-time-ns-total", RESTORE_IO_WAITTIME_TOTAL)
+            .build()
+        );
         when(producerBlocked.get()).thenReturn(PRODUCER_BLOCKED_TIME);
     }
 
     @Test
     public void shouldComputeTotalBlockedTime() {
-        assertThat(blockedTime.compute(), equalTo(IO_TIME_TOTAL + IO_WAIT_TIME_TOTAL + COMMITTED_TIME_TOTAL + COMMIT_SYNC_TIME_TOTAL + RESTORE_IOTIME_TOTAL + RESTORE_IO_WAITTIME_TOTAL + PRODUCER_BLOCKED_TIME));
+        assertThat(
+            blockedTime.compute(),
+            equalTo(IO_TIME_TOTAL + IO_WAIT_TIME_TOTAL + COMMITTED_TIME_TOTAL
+                + COMMIT_SYNC_TIME_TOTAL + RESTORE_IOTIME_TOTAL + RESTORE_IO_WAITTIME_TOTAL
+                + PRODUCER_BLOCKED_TIME)
+        );
     }
 
     private static class MetricsBuilder {
@@ -75,17 +91,20 @@ public class StreamThreadTotalBlockedTimeTest {
 
         private MetricsBuilder addMetric(final String name, final double value) {
             final MetricName metricName = new MetricName(name, "", "", Collections.emptyMap());
-            metrics.put(metricName, new Metric() {
-                @Override
-                public MetricName metricName() {
-                    return metricName;
-                }
+            metrics.put(
+                metricName,
+                new Metric() {
+                    @Override
+                    public MetricName metricName() {
+                        return metricName;
+                    }
 
-                @Override
-                public Object metricValue() {
-                    return value;
+                    @Override
+                    public Object metricValue() {
+                        return value;
+                    }
                 }
-            });
+            );
             return this;
         }
 

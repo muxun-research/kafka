@@ -21,12 +21,14 @@ import org.apache.kafka.common.utils.CloseableIterator;
 
 import java.nio.ByteBuffer;
 import java.util.Iterator;
+import java.util.Optional;
 import java.util.OptionalLong;
 
 /**
- * RecordBatch是一个用于存储records的容器，
- * 在record旧版本的格式中（0.x版本或者1.x版本），如果没有开启压缩功能，一个batch经常被认为是一条记录，但是却能存储多条记录
- * 在新版本中，在不考虑压缩的情况，通常也能存储多条记录
+ * A record batch is a container for records. In old versions of the record format (versions 0 and 1),
+ * a batch consisted always of a single record if no compression was enabled, but could contain
+ * many records otherwise. Newer versions (magic versions 2 and above) will generally contain many records
+ * regardless of compression.
  */
 public interface RecordBatch extends Iterable<Record> {
 
@@ -34,13 +36,7 @@ public interface RecordBatch extends Iterable<Record> {
      * The "magic" values
      */
     byte MAGIC_VALUE_V0 = 0;
-	/**
-	 * 0.9.0
-	 */
     byte MAGIC_VALUE_V1 = 1;
-	/**
-	 * 0.10.2
-	 */
     byte MAGIC_VALUE_V2 = 2;
 
     /**
@@ -68,27 +64,30 @@ public interface RecordBatch extends Iterable<Record> {
     int NO_PARTITION_LEADER_EPOCH = -1;
 
     /**
-	 * 检查当前batch的状态
+     * Check whether the checksum of this batch is correct.
+     *
      * @return true If so, false otherwise
      */
     boolean isValid();
 
     /**
-	 * 确认状态是否是合法的
+     * Raise an exception if the checksum is not valid.
      */
     void ensureValid();
 
     /**
-	 * 获取当前RecordBatch的checksum，将会覆盖batch header以及所有包含的record
-	 * @return 一个4字节无符号的checksum，类型为long
+     * Get the checksum of this record batch, which covers the batch header as well as all of the records.
+     *
+     * @return The 4-byte unsigned checksum represented as a long
      */
     long checksum();
 
     /**
-	 * 获取最大的时间戳，或者是记录添加时间
+     * Get the max timestamp or log append time of this record batch.
+     *
      * If the timestamp type is create time, this is the max timestamp among all records contained in this batch and
      * the value is updated during compaction.
-	 * 如果时间戳的类型是create time，这几塑化城
+     *
      * @return The max timestamp
      */
     long maxTimestamp();
@@ -159,9 +158,11 @@ public interface RecordBatch extends Iterable<Record> {
     boolean hasProducerId();
 
     /**
-	 * 获取当前batch的base sequence，比如{@link #baseOffset()}，并不会被压缩锁影响：始终保留原始batch的base sequence
-	 * @return 第一个base sequence，在没有的情况下返回-1
-	 */
+     * Get the base sequence number of this record batch. Like {@link #baseOffset()}, this value is not
+     * affected by compaction: it always retains the base sequence number from the original batch.
+     *
+     * @return The first sequence number or -1 if there is none
+     */
     int baseSequence();
 
     /**
@@ -228,21 +229,40 @@ public interface RecordBatch extends Iterable<Record> {
      * Return a streaming iterator which basically delays decompression of the record stream until the records
      * are actually asked for using {@link Iterator#next()}. If the message format does not support streaming
      * iteration, then the normal iterator is returned. Either way, callers should ensure that the iterator is closed.
-	 *
-	 * @param decompressionBufferSupplier The supplier of ByteBuffer(s) used for decompression if supported.
-	 *                                    For small record batches, allocating a potentially large buffer (64 KB for LZ4)
-	 *                                    will dominate the cost of decompressing and iterating over the records in the
-	 *                                    batch. As such, a supplier that reuses buffers will have a significant
-	 *                                    performance impact.
-	 * @return The closeable iterator
-	 */
-	CloseableIterator<Record> streamingIterator(BufferSupplier decompressionBufferSupplier);
+     *
+     * @param decompressionBufferSupplier The supplier of ByteBuffer(s) used for decompression if supported.
+     *                                    For small record batches, allocating a potentially large buffer (64 KB for LZ4)
+     *                                    will dominate the cost of decompressing and iterating over the records in the
+     *                                    batch. As such, a supplier that reuses buffers will have a significant
+     *                                    performance impact.
+     * @return The closeable iterator
+     */
+    CloseableIterator<Record> streamingIterator(BufferSupplier decompressionBufferSupplier);
 
-	/**
-	 * For magic versions prior to 2, this is always false.
-	 * 校验是否是一个control batch，control bit设置在batch attributes中
-	 * 对于2之前的
-	 * @return Whether this is a batch containing control records
-	 */
-	boolean isControlBatch();
+    /**
+     * Check whether this is a control batch (i.e. whether the control bit is set in the batch attributes).
+     * For magic versions prior to 2, this is always false.
+     *
+     * @return Whether this is a batch containing control records
+     */
+    boolean isControlBatch();
+
+    /**
+     * iterate all records to find the offset of max timestamp.
+     * noted:
+     * 1) that the earliest offset will return if there are multi records having same (max) timestamp
+     * 2) it always returns None if the {@link RecordBatch#magic()} is equal to {@link RecordBatch#MAGIC_VALUE_V0}
+     * @return offset of max timestamp
+     */
+    default Optional<Long> offsetOfMaxTimestamp() {
+        if (magic() == RecordBatch.MAGIC_VALUE_V0) return Optional.empty();
+        long maxTimestamp = maxTimestamp();
+        try (CloseableIterator<Record> iter = streamingIterator(BufferSupplier.create())) {
+            while (iter.hasNext()) {
+                Record record = iter.next();
+                if (maxTimestamp == record.timestamp()) return Optional.of(record.offset());
+            }
+        }
+        return Optional.empty();
+    }
 }

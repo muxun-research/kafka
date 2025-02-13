@@ -33,8 +33,14 @@ import org.apache.kafka.common.resource.ResourcePattern;
 import org.apache.kafka.common.resource.ResourceType;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -79,7 +85,7 @@ public class DescribeAclsResponse extends AbstractResponse {
         return errorCounts(Errors.forCode(data.errorCode()));
     }
 
-    public List<DescribeAclsResource> acls() {
+    public final List<DescribeAclsResource> acls() {
         return data.resources();
     }
 
@@ -94,7 +100,8 @@ public class DescribeAclsResponse extends AbstractResponse {
 
     private void validate(Optional<Short> version) {
         if (version.isPresent() && version.get() == 0) {
-            final boolean unsupported = acls().stream().anyMatch(acl -> acl.patternType() != PatternType.LITERAL.code());
+            final boolean unsupported = acls().stream()
+                .anyMatch(acl -> acl.patternType() != PatternType.LITERAL.code());
             if (unsupported) {
                 throw new UnsupportedVersionException("Version 0 only supports literal resource pattern types");
             }
@@ -113,8 +120,15 @@ public class DescribeAclsResponse extends AbstractResponse {
 
     private static Stream<AclBinding> aclBindings(DescribeAclsResource resource) {
         return resource.acls().stream().map(acl -> {
-            ResourcePattern pattern = new ResourcePattern(ResourceType.fromCode(resource.resourceType()), resource.resourceName(), PatternType.fromCode(resource.patternType()));
-            AccessControlEntry entry = new AccessControlEntry(acl.principal(), acl.host(), AclOperation.fromCode(acl.operation()), AclPermissionType.fromCode(acl.permissionType()));
+            ResourcePattern pattern = new ResourcePattern(
+                    ResourceType.fromCode(resource.resourceType()),
+                    resource.resourceName(),
+                    PatternType.fromCode(resource.patternType()));
+            AccessControlEntry entry = new AccessControlEntry(
+                    acl.principal(),
+                    acl.host(),
+                    AclOperation.fromCode(acl.operation()),
+                    AclPermissionType.fromCode(acl.permissionType()));
             return new AclBinding(pattern, entry);
         });
     }
@@ -123,20 +137,28 @@ public class DescribeAclsResponse extends AbstractResponse {
         return resources.stream().flatMap(DescribeAclsResponse::aclBindings).collect(Collectors.toList());
     }
 
-    public static List<DescribeAclsResource> aclsResources(Collection<AclBinding> acls) {
-        Map<ResourcePattern, List<AccessControlEntry>> patternToEntries = new HashMap<>();
+    public static List<DescribeAclsResource> aclsResources(Iterable<AclBinding> acls) {
+        Map<ResourcePattern, Set<AccessControlEntry>> patternToEntries = new HashMap<>();
         for (AclBinding acl : acls) {
-            patternToEntries.computeIfAbsent(acl.pattern(), v -> new ArrayList<>()).add(acl.entry());
+            patternToEntries.computeIfAbsent(acl.pattern(), v -> new HashSet<>()).add(acl.entry());
         }
         List<DescribeAclsResource> resources = new ArrayList<>(patternToEntries.size());
-        for (Entry<ResourcePattern, List<AccessControlEntry>> entry : patternToEntries.entrySet()) {
+        for (Entry<ResourcePattern, Set<AccessControlEntry>> entry : patternToEntries.entrySet()) {
             ResourcePattern key = entry.getKey();
-            List<AclDescription> aclDescriptions = new ArrayList<>();
+            List<AclDescription> aclDescriptions = new ArrayList<>(entry.getValue().size());
             for (AccessControlEntry ace : entry.getValue()) {
-                AclDescription ad = new AclDescription().setHost(ace.host()).setOperation(ace.operation().code()).setPermissionType(ace.permissionType().code()).setPrincipal(ace.principal());
+                AclDescription ad = new AclDescription()
+                    .setHost(ace.host())
+                    .setOperation(ace.operation().code())
+                    .setPermissionType(ace.permissionType().code())
+                    .setPrincipal(ace.principal());
                 aclDescriptions.add(ad);
             }
-            DescribeAclsResource dar = new DescribeAclsResource().setResourceName(key.name()).setPatternType(key.patternType().code()).setResourceType(key.resourceType().code()).setAcls(aclDescriptions);
+            DescribeAclsResource dar = new DescribeAclsResource()
+                .setResourceName(key.name())
+                .setPatternType(key.patternType().code())
+                .setResourceType(key.resourceType().code())
+                .setAcls(aclDescriptions);
             resources.add(dar);
         }
         return resources;

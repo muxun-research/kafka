@@ -17,33 +17,47 @@
 package org.apache.kafka.streams.processor.internals.assignment;
 
 import org.apache.kafka.streams.processor.TaskId;
+import org.apache.kafka.streams.processor.assignment.AssignmentConfigs;
+import org.apache.kafka.streams.processor.assignment.ProcessId;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
-import static org.apache.kafka.streams.processor.internals.assignment.StandbyTaskAssignmentUtils.*;
+import static org.apache.kafka.streams.processor.internals.assignment.StandbyTaskAssignmentUtils.computeTasksToRemainingStandbys;
+import static org.apache.kafka.streams.processor.internals.assignment.StandbyTaskAssignmentUtils.createLeastLoadedPrioritySetConstrainedByAssignedTask;
+import static org.apache.kafka.streams.processor.internals.assignment.StandbyTaskAssignmentUtils.pollClientAndMaybeAssignAndUpdateRemainingStandbyTasks;
 
 /**
  * Default standby task assignor that distributes standby tasks to the least loaded clients.
+ *
  * @see ClientTagAwareStandbyTaskAssignor
  */
 class DefaultStandbyTaskAssignor implements StandbyTaskAssignor {
     private static final Logger log = LoggerFactory.getLogger(DefaultStandbyTaskAssignor.class);
 
     @Override
-    public boolean assign(final Map<UUID, ClientState> clients, final Set<TaskId> allTaskIds, final Set<TaskId> statefulTaskIds, final AssignorConfiguration.AssignmentConfigs configs) {
-        final int numStandbyReplicas = configs.numStandbyReplicas;
-        final Map<TaskId, Integer> tasksToRemainingStandbys = computeTasksToRemainingStandbys(numStandbyReplicas, statefulTaskIds);
+    public boolean assign(final Map<ProcessId, ClientState> clients,
+                          final Set<TaskId> allTaskIds,
+                          final Set<TaskId> statefulTaskIds,
+                          final AssignmentConfigs configs) {
+        final int numStandbyReplicas = configs.numStandbyReplicas();
+        final Map<TaskId, Integer> tasksToRemainingStandbys = computeTasksToRemainingStandbys(numStandbyReplicas,
+                                                                                              statefulTaskIds);
 
         final ConstrainedPrioritySet standbyTaskClientsByTaskLoad = createLeastLoadedPrioritySetConstrainedByAssignedTask(clients);
 
         standbyTaskClientsByTaskLoad.offerAll(clients.keySet());
 
         for (final TaskId task : statefulTaskIds) {
-            pollClientAndMaybeAssignAndUpdateRemainingStandbyTasks(numStandbyReplicas, clients, tasksToRemainingStandbys, standbyTaskClientsByTaskLoad, task, log);
+            pollClientAndMaybeAssignAndUpdateRemainingStandbyTasks(numStandbyReplicas,
+                                                                   clients,
+                                                                   tasksToRemainingStandbys,
+                                                                   standbyTaskClientsByTaskLoad,
+                                                                   task,
+                                                                   log);
         }
 
         // returning false, because standby task assignment will never require a follow-up probing rebalance.

@@ -17,12 +17,13 @@
 
 package org.apache.kafka.controller.metrics;
 
+import org.apache.kafka.common.utils.Time;
+import org.apache.kafka.server.metrics.KafkaYammerMetrics;
+
 import com.yammer.metrics.core.Gauge;
 import com.yammer.metrics.core.Histogram;
 import com.yammer.metrics.core.MetricName;
 import com.yammer.metrics.core.MetricsRegistry;
-import org.apache.kafka.common.utils.Time;
-import org.apache.kafka.server.metrics.KafkaYammerMetrics;
 
 import java.util.Arrays;
 import java.util.Optional;
@@ -33,18 +34,33 @@ import java.util.function.Consumer;
  * These are the metrics which are managed by the QuorumController class. They generally pertain to
  * aspects of the internal operation of the controller, such as the time events spend on the
  * controller queue.
- * <p>
+ *
  * IMPORTANT: Metrics which relate to the metadata itself (like number of topics, etc.) should go in
- * @link{org.apache.kafka.controller.metrics.ControllerMetadataMetrics}, not here.
+ * {@link org.apache.kafka.controller.metrics.ControllerMetadataMetrics}, not here.
  */
 public class QuorumControllerMetrics implements AutoCloseable {
-    private final static MetricName ACTIVE_CONTROLLER_COUNT = getMetricName("KafkaController", "ActiveControllerCount");
-    private final static MetricName EVENT_QUEUE_TIME_MS = getMetricName("ControllerEventManager", "EventQueueTimeMs");
-    private final static MetricName EVENT_QUEUE_PROCESSING_TIME_MS = getMetricName("ControllerEventManager", "EventQueueProcessingTimeMs");
-    private final static MetricName LAST_APPLIED_RECORD_OFFSET = getMetricName("KafkaController", "LastAppliedRecordOffset");
-    private final static MetricName LAST_COMMITTED_RECORD_OFFSET = getMetricName("KafkaController", "LastCommittedRecordOffset");
-    private final static MetricName LAST_APPLIED_RECORD_TIMESTAMP = getMetricName("KafkaController", "LastAppliedRecordTimestamp");
-    private final static MetricName LAST_APPLIED_RECORD_LAG_MS = getMetricName("KafkaController", "LastAppliedRecordLagMs");
+    private static final MetricName ACTIVE_CONTROLLER_COUNT = getMetricName(
+        "KafkaController", "ActiveControllerCount");
+    private static final MetricName EVENT_QUEUE_TIME_MS = getMetricName(
+        "ControllerEventManager", "EventQueueTimeMs");
+    private static final MetricName EVENT_QUEUE_PROCESSING_TIME_MS = getMetricName(
+        "ControllerEventManager", "EventQueueProcessingTimeMs");
+    private static final MetricName LAST_APPLIED_RECORD_OFFSET = getMetricName(
+        "KafkaController", "LastAppliedRecordOffset");
+    private static final MetricName LAST_COMMITTED_RECORD_OFFSET = getMetricName(
+        "KafkaController", "LastCommittedRecordOffset");
+    private static final MetricName LAST_APPLIED_RECORD_TIMESTAMP = getMetricName(
+        "KafkaController", "LastAppliedRecordTimestamp");
+    private static final MetricName LAST_APPLIED_RECORD_LAG_MS = getMetricName(
+        "KafkaController", "LastAppliedRecordLagMs");
+    private static final MetricName TIMED_OUT_BROKER_HEARTBEAT_COUNT = getMetricName(
+        "KafkaController", "TimedOutBrokerHeartbeatCount");
+    private static final MetricName EVENT_QUEUE_OPERATIONS_STARTED_COUNT = getMetricName(
+        "KafkaController", "EventQueueOperationsStartedCount");
+    private static final MetricName EVENT_QUEUE_OPERATIONS_TIMED_OUT_COUNT = getMetricName(
+        "KafkaController", "EventQueueOperationsTimedOutCount");
+    private static final MetricName NEW_ACTIVE_CONTROLLERS_COUNT = getMetricName(
+        "KafkaController", "NewActiveControllersCount");
 
     private final Optional<MetricsRegistry> registry;
     private volatile boolean active;
@@ -53,19 +69,25 @@ public class QuorumControllerMetrics implements AutoCloseable {
     private final AtomicLong lastAppliedRecordTimestamp = new AtomicLong(0);
     private final Consumer<Long> eventQueueTimeUpdater;
     private final Consumer<Long> eventQueueProcessingTimeUpdater;
+
     private final AtomicLong timedOutHeartbeats = new AtomicLong(0);
+    private final AtomicLong operationsStarted = new AtomicLong(0);
+    private final AtomicLong operationsTimedOut = new AtomicLong(0);
+    private final AtomicLong newActiveControllers = new AtomicLong(0);
 
     private Consumer<Long> newHistogram(MetricName name, boolean biased) {
         if (registry.isPresent()) {
             Histogram histogram = registry.get().newHistogram(name, biased);
-            return e -> histogram.update(e);
+            return histogram::update;
         } else {
-            return __ -> {
-            };
+            return __ -> { };
         }
     }
 
-    public QuorumControllerMetrics(Optional<MetricsRegistry> registry, Time time) {
+    public QuorumControllerMetrics(
+        Optional<MetricsRegistry> registry,
+        Time time
+    ) {
         this.registry = registry;
         this.active = false;
         registry.ifPresent(r -> r.newGauge(ACTIVE_CONTROLLER_COUNT, new Gauge<Integer>() {
@@ -98,6 +120,30 @@ public class QuorumControllerMetrics implements AutoCloseable {
             @Override
             public Long value() {
                 return time.milliseconds() - lastAppliedRecordTimestamp();
+            }
+        }));
+        registry.ifPresent(r -> r.newGauge(TIMED_OUT_BROKER_HEARTBEAT_COUNT, new Gauge<Long>() {
+            @Override
+            public Long value() {
+                return timedOutHeartbeats();
+            }
+        }));
+        registry.ifPresent(r -> r.newGauge(EVENT_QUEUE_OPERATIONS_STARTED_COUNT, new Gauge<Long>() {
+            @Override
+            public Long value() {
+                return operationsStarted();
+            }
+        }));
+        registry.ifPresent(r -> r.newGauge(EVENT_QUEUE_OPERATIONS_TIMED_OUT_COUNT, new Gauge<Long>() {
+            @Override
+            public Long value() {
+                return operationsTimedOut();
+            }
+        }));
+        registry.ifPresent(r -> r.newGauge(NEW_ACTIVE_CONTROLLERS_COUNT, new Gauge<Long>() {
+            @Override
+            public Long value() {
+                return newActiveControllers();
             }
         }));
     }
@@ -143,20 +189,52 @@ public class QuorumControllerMetrics implements AutoCloseable {
     }
 
     public void incrementTimedOutHeartbeats() {
-        timedOutHeartbeats.addAndGet(1);
-    }
-
-    public void setTimedOutHeartbeats(long heartbeats) {
-        timedOutHeartbeats.set(heartbeats);
+        timedOutHeartbeats.incrementAndGet();
     }
 
     public long timedOutHeartbeats() {
         return timedOutHeartbeats.get();
     }
 
+    public void incrementOperationsStarted() {
+        operationsStarted.incrementAndGet();
+    }
+
+    public long operationsStarted() {
+        return operationsStarted.get();
+    }
+
+    public void incrementOperationsTimedOut() {
+        operationsTimedOut.incrementAndGet();
+    }
+
+    public long operationsTimedOut() {
+        return operationsTimedOut.get();
+    }
+
+    public void incrementNewActiveControllers() {
+        newActiveControllers.incrementAndGet();
+    }
+
+    public long newActiveControllers() {
+        return newActiveControllers.get();
+    }
+
     @Override
     public void close() {
-        registry.ifPresent(r -> Arrays.asList(ACTIVE_CONTROLLER_COUNT, EVENT_QUEUE_TIME_MS, EVENT_QUEUE_PROCESSING_TIME_MS, LAST_APPLIED_RECORD_OFFSET, LAST_COMMITTED_RECORD_OFFSET, LAST_APPLIED_RECORD_TIMESTAMP, LAST_APPLIED_RECORD_LAG_MS).forEach(r::removeMetric));
+        registry.ifPresent(r -> Arrays.asList(
+            ACTIVE_CONTROLLER_COUNT,
+            EVENT_QUEUE_TIME_MS,
+            EVENT_QUEUE_PROCESSING_TIME_MS,
+            LAST_APPLIED_RECORD_OFFSET,
+            LAST_COMMITTED_RECORD_OFFSET,
+            LAST_APPLIED_RECORD_TIMESTAMP,
+            LAST_APPLIED_RECORD_LAG_MS,
+            TIMED_OUT_BROKER_HEARTBEAT_COUNT,
+            EVENT_QUEUE_OPERATIONS_STARTED_COUNT,
+            EVENT_QUEUE_OPERATIONS_TIMED_OUT_COUNT,
+            NEW_ACTIVE_CONTROLLERS_COUNT
+        ).forEach(r::removeMetric));
     }
 
     private static MetricName getMetricName(String type, String name) {

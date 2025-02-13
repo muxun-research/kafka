@@ -17,6 +17,7 @@
 package org.apache.kafka.clients.consumer;
 
 import org.apache.kafka.common.requests.JoinGroupRequest;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
@@ -28,60 +29,60 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class ConsumerGroupMetadataTest {
 
-	private String groupId = "group";
+    private final String groupId = "group";
 
-	@Test
-	public void testAssignmentConstructor() {
-		String memberId = "member";
-		int generationId = 2;
-		String groupInstanceId = "instance";
+    @Test
+    public void testAssignmentConstructor() {
+        String memberId = "member";
+        int generationId = 2;
+        String groupInstanceId = "instance";
 
-		ConsumerGroupMetadata groupMetadata = new ConsumerGroupMetadata(groupId,
-				generationId, memberId, Optional.of(groupInstanceId));
+        ConsumerGroupMetadata groupMetadata = new ConsumerGroupMetadata(groupId,
+            generationId, memberId, Optional.of(groupInstanceId));
 
-		assertEquals(groupId, groupMetadata.groupId());
-		assertEquals(generationId, groupMetadata.generationId());
-		assertEquals(memberId, groupMetadata.memberId());
-		assertTrue(groupMetadata.groupInstanceId().isPresent());
-		assertEquals(groupInstanceId, groupMetadata.groupInstanceId().get());
-	}
+        assertEquals(groupId, groupMetadata.groupId());
+        assertEquals(generationId, groupMetadata.generationId());
+        assertEquals(memberId, groupMetadata.memberId());
+        assertTrue(groupMetadata.groupInstanceId().isPresent());
+        assertEquals(groupInstanceId, groupMetadata.groupInstanceId().get());
+    }
 
-	@Test
-	public void testGroupIdConstructor() {
-		ConsumerGroupMetadata groupMetadata = new ConsumerGroupMetadata(groupId);
+    @Test
+    public void testGroupIdConstructor() {
+        ConsumerGroupMetadata groupMetadata = new ConsumerGroupMetadata(groupId);
 
-		assertEquals(groupId, groupMetadata.groupId());
-		assertEquals(JoinGroupRequest.UNKNOWN_GENERATION_ID, groupMetadata.generationId());
-		assertEquals(JoinGroupRequest.UNKNOWN_MEMBER_ID, groupMetadata.memberId());
-		assertFalse(groupMetadata.groupInstanceId().isPresent());
-	}
+        assertEquals(groupId, groupMetadata.groupId());
+        assertEquals(JoinGroupRequest.UNKNOWN_GENERATION_ID, groupMetadata.generationId());
+        assertEquals(JoinGroupRequest.UNKNOWN_MEMBER_ID, groupMetadata.memberId());
+        assertFalse(groupMetadata.groupInstanceId().isPresent());
+    }
 
-	@Test
-	public void testInvalidGroupId() {
-		String memberId = "member";
-		int generationId = 2;
+    @Test
+    public void testInvalidGroupId() {
+        String memberId = "member";
+        int generationId = 2;
 
-		assertThrows(NullPointerException.class, () -> new ConsumerGroupMetadata(
-				null, generationId, memberId, Optional.empty())
-		);
-	}
+        assertThrows(NullPointerException.class, () -> new ConsumerGroupMetadata(
+            null, generationId, memberId, Optional.empty())
+        );
+    }
 
-	@Test
-	public void testInvalidMemberId() {
-		int generationId = 2;
+    @Test
+    public void testInvalidMemberId() {
+        int generationId = 2;
 
-		assertThrows(NullPointerException.class, () -> new ConsumerGroupMetadata(
-				groupId, generationId, null, Optional.empty())
-		);
-	}
+        assertThrows(NullPointerException.class, () -> new ConsumerGroupMetadata(
+            groupId, generationId, null, Optional.empty())
+        );
+    }
 
-	@Test
-	public void testInvalidInstanceId() {
-		String memberId = "member";
-		int generationId = 2;
+    @Test
+    public void testInvalidInstanceId() {
+        String memberId = "member";
+        int generationId = 2;
 
-		assertThrows(NullPointerException.class, () -> new ConsumerGroupMetadata(
-				groupId, generationId, memberId, null)
-		);
-	}
+        assertThrows(NullPointerException.class, () -> new ConsumerGroupMetadata(
+            groupId, generationId, memberId, null)
+        );
+    }
 }

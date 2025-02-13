@@ -25,23 +25,34 @@ import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.TestInputTopic;
 import org.apache.kafka.streams.TestOutputTopic;
 import org.apache.kafka.streams.TopologyTestDriver;
-import org.apache.kafka.streams.kstream.*;
+import org.apache.kafka.streams.kstream.CogroupedKStream;
+import org.apache.kafka.streams.kstream.Consumed;
+import org.apache.kafka.streams.kstream.Grouped;
+import org.apache.kafka.streams.kstream.KGroupedStream;
+import org.apache.kafka.streams.kstream.KStream;
+import org.apache.kafka.streams.kstream.KTable;
+import org.apache.kafka.streams.kstream.Materialized;
+import org.apache.kafka.streams.kstream.Named;
+import org.apache.kafka.streams.kstream.TimeWindowedCogroupedKStream;
+import org.apache.kafka.streams.kstream.TimeWindowedDeserializer;
+import org.apache.kafka.streams.kstream.TimeWindows;
+import org.apache.kafka.streams.kstream.Windowed;
 import org.apache.kafka.streams.state.WindowStore;
 import org.apache.kafka.streams.test.TestRecord;
 import org.apache.kafka.test.MockAggregator;
 import org.apache.kafka.test.MockInitializer;
 import org.apache.kafka.test.StreamsTestUtils;
-import org.junit.Before;
-import org.junit.Test;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Properties;
 
 import static java.time.Duration.ofMillis;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-@SuppressWarnings("deprecation")
 public class TimeWindowedCogroupedKStreamImplTest {
 
     private static final Long WINDOW_SIZE = 500L;
@@ -58,15 +69,18 @@ public class TimeWindowedCogroupedKStreamImplTest {
 
     private final Properties props = StreamsTestUtils.getStreamsConfig(Serdes.String(), Serdes.String());
 
-    @Before
+    @BeforeEach
     public void setup() {
-        final KStream<String, String> stream = builder.stream(TOPIC, Consumed.with(Serdes.String(), Serdes.String()));
-        final KStream<String, String> stream2 = builder.stream(TOPIC2, Consumed.with(Serdes.String(), Serdes.String()));
+        final KStream<String, String> stream = builder.stream(TOPIC, Consumed
+            .with(Serdes.String(), Serdes.String()));
+        final KStream<String, String> stream2 = builder.stream(TOPIC2, Consumed
+            .with(Serdes.String(), Serdes.String()));
 
         groupedStream = stream.groupByKey(Grouped.with(Serdes.String(), Serdes.String()));
         groupedStream2 = stream2.groupByKey(Grouped.with(Serdes.String(), Serdes.String()));
-        cogroupedStream = groupedStream.cogroup(MockAggregator.TOSTRING_ADDER).cogroup(groupedStream2, MockAggregator.TOSTRING_REMOVER);
-        windowedCogroupedStream = cogroupedStream.windowedBy(TimeWindows.of(ofMillis(WINDOW_SIZE)));
+        cogroupedStream = groupedStream.cogroup(MockAggregator.TOSTRING_ADDER)
+                .cogroup(groupedStream2, MockAggregator.TOSTRING_REMOVER);
+        windowedCogroupedStream = cogroupedStream.windowedBy(TimeWindows.ofSizeWithNoGrace(ofMillis(WINDOW_SIZE)));
     }
 
     @Test
@@ -76,7 +90,8 @@ public class TimeWindowedCogroupedKStreamImplTest {
 
     @Test
     public void shouldNotHaveNullMaterializedOnTwoOptionAggregate() {
-        assertThrows(NullPointerException.class, () -> windowedCogroupedStream.aggregate(MockInitializer.STRING_INIT, (Materialized<String, String, WindowStore<Bytes, byte[]>>) null));
+        assertThrows(NullPointerException.class, () -> windowedCogroupedStream.aggregate(MockInitializer.STRING_INIT,
+            (Materialized<String, String, WindowStore<Bytes, byte[]>>) null));
     }
 
     @Test
@@ -112,22 +127,38 @@ public class TimeWindowedCogroupedKStreamImplTest {
     @Test
     public void namedParamShouldSetName() {
         final StreamsBuilder builder = new StreamsBuilder();
-        final KStream<String, String> stream = builder.stream(TOPIC, Consumed.with(Serdes.String(), Serdes.String()));
+        final KStream<String, String> stream = builder.stream(TOPIC, Consumed
+                .with(Serdes.String(), Serdes.String()));
         groupedStream = stream.groupByKey(Grouped.with(Serdes.String(), Serdes.String()));
-        groupedStream.cogroup(MockAggregator.TOSTRING_ADDER).windowedBy(TimeWindows.of(ofMillis(WINDOW_SIZE))).aggregate(MockInitializer.STRING_INIT, Named.as("foo"));
+        groupedStream.cogroup(MockAggregator.TOSTRING_ADDER)
+                .windowedBy(TimeWindows.ofSizeWithNoGrace(ofMillis(WINDOW_SIZE)))
+                .aggregate(MockInitializer.STRING_INIT, Named.as("foo"));
 
-        assertThat(builder.build().describe().toString(), equalTo("Topologies:\n" + "   Sub-topology: 0\n" + "    Source: KSTREAM-SOURCE-0000000000 (topics: [topic])\n" + "      --> foo-cogroup-agg-0\n" + "    Processor: foo-cogroup-agg-0 (stores: [COGROUPKSTREAM-AGGREGATE-STATE-STORE-0000000001])\n" + "      --> foo-cogroup-merge\n" + "      <-- KSTREAM-SOURCE-0000000000\n" + "    Processor: foo-cogroup-merge (stores: [])\n" + "      --> none\n" + "      <-- foo-cogroup-agg-0\n\n"));
+        assertThat(builder.build().describe().toString(), equalTo(
+                "Topologies:\n" +
+                "   Sub-topology: 0\n" +
+                "    Source: KSTREAM-SOURCE-0000000000 (topics: [topic])\n" +
+                "      --> foo-cogroup-agg-0\n" +
+                "    Processor: foo-cogroup-agg-0 (stores: [COGROUPKSTREAM-AGGREGATE-STATE-STORE-0000000001])\n" +
+                "      --> foo-cogroup-merge\n" +
+                "      <-- KSTREAM-SOURCE-0000000000\n" +
+                "    Processor: foo-cogroup-merge (stores: [])\n" +
+                "      --> none\n" +
+                "      <-- foo-cogroup-agg-0\n\n"));
     }
 
     @Test
     public void timeWindowAggregateTestStreamsTest() {
 
-        final KTable<Windowed<String>, String> customers = windowedCogroupedStream.aggregate(MockInitializer.STRING_INIT, Materialized.with(Serdes.String(), Serdes.String()));
+        final KTable<Windowed<String>, String> customers = windowedCogroupedStream.aggregate(
+                MockInitializer.STRING_INIT, Materialized.with(Serdes.String(), Serdes.String()));
         customers.toStream().to(OUTPUT);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            final TestInputTopic<String, String> testInputTopic = driver.createInputTopic(TOPIC, new StringSerializer(), new StringSerializer());
-            final TestOutputTopic<Windowed<String>, String> testOutputTopic = driver.createOutputTopic(OUTPUT, new TimeWindowedDeserializer<>(new StringDeserializer(), WINDOW_SIZE), new StringDeserializer());
+            final TestInputTopic<String, String> testInputTopic = driver.createInputTopic(
+                    TOPIC, new StringSerializer(), new StringSerializer());
+            final TestOutputTopic<Windowed<String>, String> testOutputTopic = driver.createOutputTopic(
+                    OUTPUT, new TimeWindowedDeserializer<>(new StringDeserializer(), WINDOW_SIZE), new StringDeserializer());
 
             testInputTopic.pipeInput("k1", "A", 0);
             testInputTopic.pipeInput("k2", "A", 0);
@@ -153,13 +184,17 @@ public class TimeWindowedCogroupedKStreamImplTest {
     @Test
     public void timeWindowMixAggregatorsTest() {
 
-        final KTable<Windowed<String>, String> customers = windowedCogroupedStream.aggregate(MockInitializer.STRING_INIT, Materialized.with(Serdes.String(), Serdes.String()));
+        final KTable<Windowed<String>, String> customers = windowedCogroupedStream.aggregate(
+                MockInitializer.STRING_INIT, Materialized.with(Serdes.String(), Serdes.String()));
         customers.toStream().to(OUTPUT);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            final TestInputTopic<String, String> testInputTopic = driver.createInputTopic(TOPIC, new StringSerializer(), new StringSerializer());
-            final TestInputTopic<String, String> testInputTopic2 = driver.createInputTopic(TOPIC2, new StringSerializer(), new StringSerializer());
-            final TestOutputTopic<Windowed<String>, String> testOutputTopic = driver.createOutputTopic(OUTPUT, new TimeWindowedDeserializer<>(new StringDeserializer(), WINDOW_SIZE), new StringDeserializer());
+            final TestInputTopic<String, String> testInputTopic = driver.createInputTopic(
+                    TOPIC, new StringSerializer(), new StringSerializer());
+            final TestInputTopic<String, String> testInputTopic2 = driver.createInputTopic(
+                    TOPIC2, new StringSerializer(), new StringSerializer());
+            final TestOutputTopic<Windowed<String>, String> testOutputTopic = driver.createOutputTopic(
+                    OUTPUT, new TimeWindowedDeserializer<>(new StringDeserializer(), WINDOW_SIZE), new StringDeserializer());
 
             testInputTopic.pipeInput("k1", "A", 0);
             testInputTopic.pipeInput("k2", "A", 0);
@@ -185,12 +220,16 @@ public class TimeWindowedCogroupedKStreamImplTest {
     @Test
     public void timeWindowAggregateManyWindowsTest() {
 
-        final KTable<Windowed<String>, String> customers = groupedStream.cogroup(MockAggregator.TOSTRING_ADDER).windowedBy(TimeWindows.of(ofMillis(500L))).aggregate(MockInitializer.STRING_INIT, Materialized.with(Serdes.String(), Serdes.String()));
+        final KTable<Windowed<String>, String> customers = groupedStream.cogroup(MockAggregator.TOSTRING_ADDER)
+                .windowedBy(TimeWindows.ofSizeWithNoGrace(ofMillis(500L))).aggregate(
+                        MockInitializer.STRING_INIT, Materialized.with(Serdes.String(), Serdes.String()));
         customers.toStream().to(OUTPUT);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            final TestInputTopic<String, String> testInputTopic = driver.createInputTopic(TOPIC, new StringSerializer(), new StringSerializer());
-            final TestOutputTopic<Windowed<String>, String> testOutputTopic = driver.createOutputTopic(OUTPUT, new TimeWindowedDeserializer<>(new StringDeserializer(), WINDOW_SIZE), new StringDeserializer());
+            final TestInputTopic<String, String> testInputTopic = driver.createInputTopic(
+                    TOPIC, new StringSerializer(), new StringSerializer());
+            final TestOutputTopic<Windowed<String>, String> testOutputTopic = driver.createOutputTopic(
+                    OUTPUT, new TimeWindowedDeserializer<>(new StringDeserializer(), WINDOW_SIZE), new StringDeserializer());
 
             testInputTopic.pipeInput("k1", "A", 0);
             testInputTopic.pipeInput("k2", "A", 499);
@@ -207,12 +246,16 @@ public class TimeWindowedCogroupedKStreamImplTest {
     @Test
     public void timeWindowAggregateOverlappingWindowsTest() {
 
-        final KTable<Windowed<String>, String> customers = groupedStream.cogroup(MockAggregator.TOSTRING_ADDER).windowedBy(TimeWindows.of(ofMillis(500L)).advanceBy(ofMillis(200L))).aggregate(MockInitializer.STRING_INIT, Materialized.with(Serdes.String(), Serdes.String()));
+        final KTable<Windowed<String>, String> customers = groupedStream.cogroup(MockAggregator.TOSTRING_ADDER)
+                .windowedBy(TimeWindows.ofSizeWithNoGrace(ofMillis(500L)).advanceBy(ofMillis(200L))).aggregate(
+                        MockInitializer.STRING_INIT, Materialized.with(Serdes.String(), Serdes.String()));
         customers.toStream().to(OUTPUT);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            final TestInputTopic<String, String> testInputTopic = driver.createInputTopic(TOPIC, new StringSerializer(), new StringSerializer());
-            final TestOutputTopic<Windowed<String>, String> testOutputTopic = driver.createOutputTopic(OUTPUT, new TimeWindowedDeserializer<>(new StringDeserializer(), WINDOW_SIZE), new StringDeserializer());
+            final TestInputTopic<String, String> testInputTopic = driver.createInputTopic(
+                    TOPIC, new StringSerializer(), new StringSerializer());
+            final TestOutputTopic<Windowed<String>, String> testOutputTopic = driver.createOutputTopic(
+                    OUTPUT, new TimeWindowedDeserializer<>(new StringDeserializer(), WINDOW_SIZE), new StringDeserializer());
 
             testInputTopic.pipeInput("k1", "A", 0);
             testInputTopic.pipeInput("k2", "A", 0);
@@ -237,13 +280,17 @@ public class TimeWindowedCogroupedKStreamImplTest {
     @Test
     public void timeWindowMixAggregatorsManyWindowsTest() {
 
-        final KTable<Windowed<String>, String> customers = windowedCogroupedStream.aggregate(MockInitializer.STRING_INIT, Materialized.with(Serdes.String(), Serdes.String()));
+        final KTable<Windowed<String>, String> customers = windowedCogroupedStream.aggregate(
+                MockInitializer.STRING_INIT, Materialized.with(Serdes.String(), Serdes.String()));
         customers.toStream().to(OUTPUT);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            final TestInputTopic<String, String> testInputTopic = driver.createInputTopic(TOPIC, new StringSerializer(), new StringSerializer());
-            final TestInputTopic<String, String> testInputTopic2 = driver.createInputTopic(TOPIC2, new StringSerializer(), new StringSerializer());
-            final TestOutputTopic<Windowed<String>, String> testOutputTopic = driver.createOutputTopic(OUTPUT, new TimeWindowedDeserializer<>(new StringDeserializer(), WINDOW_SIZE), new StringDeserializer());
+            final TestInputTopic<String, String> testInputTopic = driver.createInputTopic(
+                    TOPIC, new StringSerializer(), new StringSerializer());
+            final TestInputTopic<String, String> testInputTopic2 = driver.createInputTopic(
+                    TOPIC2, new StringSerializer(), new StringSerializer());
+            final TestOutputTopic<Windowed<String>, String> testOutputTopic = driver.createOutputTopic(
+                    OUTPUT, new TimeWindowedDeserializer<>(new StringDeserializer(), WINDOW_SIZE), new StringDeserializer());
 
             testInputTopic.pipeInput("k1", "A", 0);
             testInputTopic.pipeInput("k2", "A", 0);
@@ -265,9 +312,13 @@ public class TimeWindowedCogroupedKStreamImplTest {
         }
     }
 
-    private void assertOutputKeyValueTimestamp(final TestOutputTopic<Windowed<String>, String> outputTopic, final String expectedKey, final String expectedValue, final long expectedTimestamp) {
+    private void assertOutputKeyValueTimestamp(final TestOutputTopic<Windowed<String>, String> outputTopic,
+                                               final String expectedKey,
+                                               final String expectedValue,
+                                               final long expectedTimestamp) {
         final TestRecord<Windowed<String>, String> realRecord = outputTopic.readRecord();
-        final TestRecord<String, String> nonWindowedRecord = new TestRecord<>(realRecord.getKey().key(), realRecord.getValue(), null, realRecord.timestamp());
+        final TestRecord<String, String> nonWindowedRecord = new TestRecord<>(
+                realRecord.getKey().key(), realRecord.getValue(), null, realRecord.timestamp());
         final TestRecord<String, String> testRecord = new TestRecord<>(expectedKey, expectedValue, null, expectedTimestamp);
         assertThat(nonWindowedRecord, equalTo(testRecord));
     }

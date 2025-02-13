@@ -18,6 +18,7 @@
 package org.apache.kafka.common.security.oauthbearer.internals.secured;
 
 import org.apache.kafka.common.utils.Time;
+
 import org.jose4j.jwk.HttpsJwks;
 import org.jose4j.jwk.JsonWebKey;
 import org.jose4j.lang.JoseException;
@@ -50,6 +51,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * an HTTP-/HTTPS-based {@link org.jose4j.keys.resolvers.VerificationKeyResolver}, which is then
  * provided to the {@link ValidatorAccessTokenValidator} to use in validating the signature of
  * a JWT.
+ *
  * @see org.jose4j.keys.resolvers.HttpsJwksVerificationKeyResolver
  * @see org.jose4j.keys.resolvers.VerificationKeyResolver
  * @see ValidatorAccessTokenValidator
@@ -120,8 +122,38 @@ public final class RefreshingHttpsJwks implements Initable, Closeable {
     private boolean isInitialized;
 
     /**
+     * Creates a <code>RefreshingHttpsJwks</code>. It should only be used for testing to pass in a mock executor
+     * service. Otherwise the constructor below should be used.
+     */
+
+    // VisibleForTesting
+    RefreshingHttpsJwks(Time time,
+                        HttpsJwks httpsJwks,
+                        long refreshMs,
+                        long refreshRetryBackoffMs,
+                        long refreshRetryBackoffMaxMs,
+                        ScheduledExecutorService executorService) {
+        if (refreshMs <= 0)
+            throw new IllegalArgumentException("JWKS validation key refresh configuration value retryWaitMs value must be positive");
+
+        this.httpsJwks = httpsJwks;
+        this.time = time;
+        this.refreshMs = refreshMs;
+        this.refreshRetryBackoffMs = refreshRetryBackoffMs;
+        this.refreshRetryBackoffMaxMs = refreshRetryBackoffMaxMs;
+        this.executorService = executorService;
+        this.missingKeyIds = new LinkedHashMap<>(MISSING_KEY_ID_CACHE_MAX_ENTRIES, .75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, Long> eldest) {
+                return this.size() > MISSING_KEY_ID_CACHE_MAX_ENTRIES;
+            }
+        };
+    }
+
+    /**
      * Creates a <code>RefreshingHttpsJwks</code> that will be used by the
      * {@link RefreshingHttpsJwksVerificationKeyResolver} to resolve new key IDs in JWTs.
+     *
      * @param time                     {@link Time} instance
      * @param httpsJwks                {@link HttpsJwks} instance from which to retrieve the JWKS
      *                                 based on the OAuth/OIDC standard
@@ -131,22 +163,12 @@ public final class RefreshingHttpsJwks implements Initable, Closeable {
      * @param refreshRetryBackoffMaxMs Maximum time to retrieve JWKS
      */
 
-    public RefreshingHttpsJwks(Time time, HttpsJwks httpsJwks, long refreshMs, long refreshRetryBackoffMs, long refreshRetryBackoffMaxMs) {
-        if (refreshMs <= 0)
-            throw new IllegalArgumentException("JWKS validation key refresh configuration value retryWaitMs value must be positive");
-
-        this.httpsJwks = httpsJwks;
-        this.time = time;
-        this.refreshMs = refreshMs;
-        this.refreshRetryBackoffMs = refreshRetryBackoffMs;
-        this.refreshRetryBackoffMaxMs = refreshRetryBackoffMaxMs;
-        this.executorService = Executors.newSingleThreadScheduledExecutor();
-        this.missingKeyIds = new LinkedHashMap<String, Long>(MISSING_KEY_ID_CACHE_MAX_ENTRIES, .75f, true) {
-            @Override
-            protected boolean removeEldestEntry(Map.Entry<String, Long> eldest) {
-                return this.size() > MISSING_KEY_ID_CACHE_MAX_ENTRIES;
-            }
-        };
+    public RefreshingHttpsJwks(Time time,
+                               HttpsJwks httpsJwks,
+                               long refreshMs,
+                               long refreshRetryBackoffMs,
+                               long refreshRetryBackoffMaxMs) {
+        this(time, httpsJwks, refreshMs, refreshRetryBackoffMs, refreshRetryBackoffMaxMs, Executors.newSingleThreadScheduledExecutor());
     }
 
     @Override
@@ -173,7 +195,10 @@ public final class RefreshingHttpsJwks implements Initable, Closeable {
             // internally), we can delay our first invocation by refreshMs.
             //
             // Note: we refer to this as a _scheduled_ refresh.
-            executorService.scheduleAtFixedRate(this::refresh, refreshMs, refreshMs, TimeUnit.MILLISECONDS);
+            executorService.scheduleAtFixedRate(this::refresh,
+                    refreshMs,
+                    refreshMs,
+                    TimeUnit.MILLISECONDS);
 
             log.info("JWKS validation key refresh thread started with a refresh interval of {} ms", refreshMs);
         } finally {
@@ -193,7 +218,8 @@ public final class RefreshingHttpsJwks implements Initable, Closeable {
                 executorService.shutdown();
 
                 if (!executorService.awaitTermination(SHUTDOWN_TIMEOUT, SHUTDOWN_TIME_UNIT)) {
-                    log.warn("JWKS validation key refresh thread termination did not end after {} {}", SHUTDOWN_TIMEOUT, SHUTDOWN_TIME_UNIT);
+                    log.warn("JWKS validation key refresh thread termination did not end after {} {}",
+                            SHUTDOWN_TIMEOUT, SHUTDOWN_TIME_UNIT);
                 }
             } catch (InterruptedException e) {
                 log.warn("JWKS validation key refresh thread error during close", e);
@@ -209,6 +235,7 @@ public final class RefreshingHttpsJwks implements Initable, Closeable {
      * blocking I/O as this code is running in the authentication path on the Kafka network thread.
      * <p>
      * The list may be stale up to {@link #refreshMs}.
+     *
      * @return {@link List} of {@link JsonWebKey} instances
      * @throws JoseException Thrown if a problem is encountered parsing the JSON content into JWKs
      * @throws IOException   Thrown f a problem is encountered making the HTTP request
@@ -305,6 +332,7 @@ public final class RefreshingHttpsJwks implements Initable, Closeable {
      * <p>
      * This <i>expedited</i> refresh is scheduled immediately.
      * </p>
+     *
      * @param keyId JWT key ID
      * @return <code>true</code> if an expedited refresh was scheduled, <code>false</code> otherwise
      */
@@ -320,8 +348,8 @@ public final class RefreshingHttpsJwks implements Initable, Closeable {
             //     1. Don't try to resolve the key as the large ID will sit in our cache
             //     2. Report the issue in the logs but include only the first N characters
             int actualLength = keyId.length();
-            String s = keyId.substring(0, MISSING_KEY_ID_MAX_KEY_LENGTH);
-            String snippet = String.format("%s (trimmed to first %s characters out of %s total)", s, MISSING_KEY_ID_MAX_KEY_LENGTH, actualLength);
+            String trimmedKeyId = keyId.substring(0, MISSING_KEY_ID_MAX_KEY_LENGTH);
+            String snippet = String.format("%s (trimmed to first %d characters out of %d total)", trimmedKeyId, MISSING_KEY_ID_MAX_KEY_LENGTH, actualLength);
             log.warn("Key ID {} was too long to cache", snippet);
             return false;
         } else {

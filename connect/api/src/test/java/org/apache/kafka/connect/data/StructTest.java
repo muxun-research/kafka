@@ -17,6 +17,7 @@
 package org.apache.kafka.connect.data;
 
 import org.apache.kafka.connect.errors.DataException;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
@@ -25,7 +26,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 
 public class StructTest {
@@ -111,43 +115,43 @@ public class StructTest {
     // tests in SchemaTest. These are meant to ensure that we are invoking the same code path and that we do deeper
     // inspection than just checking the class of the object
 
-	@Test
+    @Test
     public void testInvalidFieldType() {
-		assertThrows(DataException.class,
-				() -> new Struct(FLAT_STRUCT_SCHEMA).put("int8", "should fail because this is a string, not int8"));
-	}
+        assertThrows(DataException.class,
+            () -> new Struct(FLAT_STRUCT_SCHEMA).put("int8", "should fail because this is a string, not int8"));
+    }
 
-	@Test
+    @Test
     public void testInvalidArrayFieldElements() {
-		assertThrows(DataException.class,
-				() -> new Struct(NESTED_SCHEMA).put("array", Collections.singletonList("should fail since elements should be int8s")));
-	}
+        assertThrows(DataException.class,
+            () -> new Struct(NESTED_SCHEMA).put("array", Collections.singletonList("should fail since elements should be int8s")));
+    }
 
-	@Test
+    @Test
     public void testInvalidMapKeyElements() {
-		assertThrows(DataException.class,
-				() -> new Struct(NESTED_SCHEMA).put("map", Collections.singletonMap("should fail because keys should be int8s", (byte) 12)));
-	}
+        assertThrows(DataException.class,
+            () -> new Struct(NESTED_SCHEMA).put("map", Collections.singletonMap("should fail because keys should be int8s", (byte) 12)));
+    }
 
-	@Test
+    @Test
     public void testInvalidStructFieldSchema() {
-		assertThrows(DataException.class,
-				() -> new Struct(NESTED_SCHEMA).put("nested", new Struct(MAP_SCHEMA)));
-	}
+        assertThrows(DataException.class,
+            () -> new Struct(NESTED_SCHEMA).put("nested", new Struct(MAP_SCHEMA)));
+    }
 
-	@Test
+    @Test
     public void testInvalidStructFieldValue() {
-		assertThrows(DataException.class,
-				() -> new Struct(NESTED_SCHEMA).put("nested", new Struct(NESTED_CHILD_SCHEMA)));
-	}
+        assertThrows(DataException.class,
+            () -> new Struct(NESTED_SCHEMA).put("nested", new Struct(NESTED_CHILD_SCHEMA)));
+    }
 
 
-	@Test
+    @Test
     public void testMissingFieldValidation() {
         // Required int8 field
         Schema schema = SchemaBuilder.struct().field("field", REQUIRED_FIELD_SCHEMA).build();
         Struct struct = new Struct(schema);
-		assertThrows(DataException.class, struct::validate);
+        assertThrows(DataException.class, struct::validate);
     }
 
     @Test
@@ -301,36 +305,10 @@ public class StructTest {
     }
 
     @Test
-    public void testValidateFieldWithInvalidValueType() {
-        String fieldName = "field";
-        FakeSchema fakeSchema = new FakeSchema();
-
-        Exception e = assertThrows(DataException.class, () -> ConnectSchema.validateValue(fieldName, fakeSchema, new Object()));
-        assertEquals("Invalid Java object for schema \"fake\" with type null: class java.lang.Object for field: \"field\"", e.getMessage());
-
-        e = assertThrows(DataException.class, () -> ConnectSchema.validateValue(fieldName, Schema.INT8_SCHEMA, new Object()));
-        assertEquals("Invalid Java object for schema with type INT8: class java.lang.Object for field: \"field\"", e.getMessage());
-
-        e = assertThrows(DataException.class, () -> ConnectSchema.validateValue(Schema.INT8_SCHEMA, new Object()));
-        assertEquals("Invalid Java object for schema with type INT8: class java.lang.Object", e.getMessage());
-    }
-
-    @Test
-    public void testValidateFieldWithInvalidValueMismatchTimestamp() {
-        String fieldName = "field";
-        long longValue = 1000L;
-
-        // Does not throw
-        ConnectSchema.validateValue(fieldName, Schema.INT64_SCHEMA, longValue);
-
-        Exception e = assertThrows(DataException.class, () -> ConnectSchema.validateValue(fieldName, Timestamp.SCHEMA, longValue));
-        assertEquals("Invalid Java object for schema \"org.apache.kafka.connect.data.Timestamp\" " + "with type INT64: class java.lang.Long for field: \"field\"", e.getMessage());
-    }
-
-    @Test
     public void testPutNullField() {
         final String fieldName = "fieldName";
-        Schema testSchema = SchemaBuilder.struct().field(fieldName, Schema.STRING_SCHEMA);
+        Schema testSchema = SchemaBuilder.struct()
+            .field(fieldName, Schema.STRING_SCHEMA);
         Struct struct = new Struct(testSchema);
 
         assertThrows(DataException.class, () -> struct.put((Field) null, "valid"));

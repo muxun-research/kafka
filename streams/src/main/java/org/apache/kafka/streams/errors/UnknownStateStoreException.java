@@ -22,14 +22,15 @@ package org.apache.kafka.streams.errors;
  */
 public class UnknownStateStoreException extends InvalidStateStoreException {
 
-	private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 1L;
 
-	public UnknownStateStoreException(final String message) {
-		super(message);
-	}
+    public UnknownStateStoreException(final String message) {
+        super(message);
+    }
 
-	public UnknownStateStoreException(final String message, final Throwable throwable) {
-		super(message, throwable);
-	}
+    @SuppressWarnings("unused")
+    public UnknownStateStoreException(final String message, final Throwable throwable) {
+        super(message, throwable);
+    }
 
 }

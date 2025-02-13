@@ -19,9 +19,12 @@ package org.apache.kafka.trogdor.workload;
 
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.common.utils.Time;
+
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class ThrottleTest {
     /**
@@ -42,7 +45,7 @@ public class ThrottleTest {
         }
 
         @Override
-        protected synchronized void delay(long amount) throws InterruptedException {
+        protected synchronized void delay(long amount) {
             time.sleep(amount);
         }
     }
@@ -68,4 +71,3 @@ public class ThrottleTest {
         assertEquals(200, time.milliseconds());
     }
 }
-

@@ -17,6 +17,8 @@
 package org.apache.kafka.connect.transforms;
 
 import org.apache.kafka.common.config.ConfigDef;
+import org.apache.kafka.common.utils.AppInfoParser;
+import org.apache.kafka.connect.components.Versioned;
 import org.apache.kafka.connect.connector.ConnectRecord;
 import org.apache.kafka.connect.header.ConnectHeaders;
 import org.apache.kafka.connect.header.Header;
@@ -30,45 +32,50 @@ import java.util.Set;
 
 import static org.apache.kafka.common.config.ConfigDef.NO_DEFAULT_VALUE;
 
-public class DropHeaders<R extends ConnectRecord<R>> implements Transformation<R> {
+public class DropHeaders<R extends ConnectRecord<R>> implements Transformation<R>, Versioned {
 
-	public static final String OVERVIEW_DOC =
-			"Removes one or more headers from each record.";
+    public static final String OVERVIEW_DOC =
+            "Removes one or more headers from each record.";
 
-	public static final String HEADERS_FIELD = "headers";
+    public static final String HEADERS_FIELD = "headers";
 
-	public static final ConfigDef CONFIG_DEF = new ConfigDef()
-			.define(HEADERS_FIELD, ConfigDef.Type.LIST,
-					NO_DEFAULT_VALUE, new NonEmptyListValidator(),
-					ConfigDef.Importance.HIGH,
-					"The name of the headers to be removed.");
+    public static final ConfigDef CONFIG_DEF = new ConfigDef()
+            .define(HEADERS_FIELD, ConfigDef.Type.LIST,
+                    NO_DEFAULT_VALUE, new NonEmptyListValidator(),
+                    ConfigDef.Importance.HIGH,
+                    "The name of the headers to be removed.");
 
-	private Set<String> headers;
+    private Set<String> headers;
 
-	@Override
-	public R apply(R record) {
-		Headers updatedHeaders = new ConnectHeaders();
-		for (Header header : record.headers()) {
-			if (!headers.contains(header.key())) {
-				updatedHeaders.add(header);
-			}
-		}
-		return record.newRecord(record.topic(), record.kafkaPartition(), record.keySchema(), record.key(),
-				record.valueSchema(), record.value(), record.timestamp(), updatedHeaders);
-	}
+    @Override
+    public R apply(R record) {
+        Headers updatedHeaders = new ConnectHeaders();
+        for (Header header : record.headers()) {
+            if (!headers.contains(header.key())) {
+                updatedHeaders.add(header);
+            }
+        }
+        return record.newRecord(record.topic(), record.kafkaPartition(), record.keySchema(), record.key(),
+                record.valueSchema(), record.value(), record.timestamp(), updatedHeaders);
+    }
 
-	@Override
-	public ConfigDef config() {
-		return CONFIG_DEF;
-	}
+    @Override
+    public String version() {
+        return AppInfoParser.getVersion();
+    }
 
-	@Override
-	public void close() {
-	}
+    @Override
+    public ConfigDef config() {
+        return CONFIG_DEF;
+    }
 
-	@Override
-	public void configure(Map<String, ?> props) {
-		final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
-		headers = new HashSet<>(config.getList(HEADERS_FIELD));
-	}
+    @Override
+    public void close() {
+    }
+
+    @Override
+    public void configure(Map<String, ?> props) {
+        final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
+        headers = new HashSet<>(config.getList(HEADERS_FIELD));
+    }
 }

@@ -16,13 +16,15 @@
  */
 package org.apache.kafka.connect.json;
 
+import org.apache.kafka.common.errors.SerializationException;
+import org.apache.kafka.common.serialization.Deserializer;
+
 import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import org.apache.kafka.common.errors.SerializationException;
-import org.apache.kafka.common.serialization.Deserializer;
+import com.fasterxml.jackson.module.blackbird.BlackbirdModule;
 
 import java.util.Collections;
 import java.util.Set;
@@ -38,19 +40,27 @@ public class JsonDeserializer implements Deserializer<JsonNode> {
      * Default constructor needed by Kafka
      */
     public JsonDeserializer() {
-        this(Collections.emptySet(), JsonNodeFactory.withExactBigDecimals(true));
+        this(Collections.emptySet(), new JsonNodeFactory(true), true);
     }
 
     /**
      * A constructor that additionally specifies some {@link DeserializationFeature}s
      * for the deserializer
+     *
      * @param deserializationFeatures the specified deserialization features
-     * @param jsonNodeFactory         the json node factory to use.
+     * @param jsonNodeFactory the json node factory to use.
      */
-    JsonDeserializer(final Set<DeserializationFeature> deserializationFeatures, final JsonNodeFactory jsonNodeFactory) {
+    JsonDeserializer(
+        final Set<DeserializationFeature> deserializationFeatures,
+        final JsonNodeFactory jsonNodeFactory,
+        final boolean enableBlackbird
+    ) {
         objectMapper.enable(JsonReadFeature.ALLOW_LEADING_ZEROS_FOR_NUMBERS.mappedFeature());
         deserializationFeatures.forEach(objectMapper::enable);
         objectMapper.setNodeFactory(jsonNodeFactory);
+        if (enableBlackbird) {
+            objectMapper.registerModule(new BlackbirdModule());
+        }
     }
 
     @Override

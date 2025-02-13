@@ -17,27 +17,33 @@
 package org.apache.kafka.streams.processor.internals.assignment;
 
 import org.apache.kafka.streams.processor.TaskId;
+import org.apache.kafka.streams.processor.assignment.ProcessId;
+
 import org.slf4j.Logger;
 
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.function.Function;
 
 import static java.util.stream.Collectors.toMap;
 
 final class StandbyTaskAssignmentUtils {
-    private StandbyTaskAssignmentUtils() {
+    private StandbyTaskAssignmentUtils() {}
+
+    static ConstrainedPrioritySet createLeastLoadedPrioritySetConstrainedByAssignedTask(final Map<ProcessId, ClientState> clients) {
+        return new ConstrainedPrioritySet((client, t) -> !clients.get(client).hasAssignedTask(t),
+                                          client -> clients.get(client).assignedTaskLoad());
     }
 
-    static ConstrainedPrioritySet createLeastLoadedPrioritySetConstrainedByAssignedTask(final Map<UUID, ClientState> clients) {
-        return new ConstrainedPrioritySet((client, t) -> !clients.get(client).hasAssignedTask(t), client -> clients.get(client).assignedTaskLoad());
-    }
-
-    static void pollClientAndMaybeAssignAndUpdateRemainingStandbyTasks(final int numStandbyReplicas, final Map<UUID, ClientState> clients, final Map<TaskId, Integer> tasksToRemainingStandbys, final ConstrainedPrioritySet standbyTaskClientsByTaskLoad, final TaskId activeTaskId, final Logger log) {
+    static void pollClientAndMaybeAssignAndUpdateRemainingStandbyTasks(final int numStandbyReplicas,
+                                                                       final Map<ProcessId, ClientState> clients,
+                                                                       final Map<TaskId, Integer> tasksToRemainingStandbys,
+                                                                       final ConstrainedPrioritySet standbyTaskClientsByTaskLoad,
+                                                                       final TaskId activeTaskId,
+                                                                       final Logger log) {
         int numRemainingStandbys = tasksToRemainingStandbys.get(activeTaskId);
         while (numRemainingStandbys > 0) {
-            final UUID client = standbyTaskClientsByTaskLoad.poll(activeTaskId);
+            final ProcessId client = standbyTaskClientsByTaskLoad.poll(activeTaskId);
             if (client == null) {
                 break;
             }
@@ -48,11 +54,16 @@ final class StandbyTaskAssignmentUtils {
         }
 
         if (numRemainingStandbys > 0) {
-            log.warn("Unable to assign {} of {} standby tasks for task [{}]. " + "There is not enough available capacity. You should " + "increase the number of application instances " + "to maintain the requested number of standby replicas.", numRemainingStandbys, numStandbyReplicas, activeTaskId);
+            log.warn("Unable to assign {} of {} standby tasks for task [{}]. " +
+                     "There is not enough available capacity. You should " +
+                     "increase the number of application instances " +
+                     "to maintain the requested number of standby replicas.",
+                     numRemainingStandbys, numStandbyReplicas, activeTaskId);
         }
     }
 
-    static Map<TaskId, Integer> computeTasksToRemainingStandbys(final int numStandbyReplicas, final Set<TaskId> statefulTaskIds) {
+    static Map<TaskId, Integer> computeTasksToRemainingStandbys(final int numStandbyReplicas,
+                                                                final Set<TaskId> statefulTaskIds) {
         return statefulTaskIds.stream().collect(toMap(Function.identity(), t -> numStandbyReplicas));
     }
 }

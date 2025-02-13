@@ -25,32 +25,31 @@ import java.util.stream.Collectors;
 
 @InterfaceStability.Evolving
 public enum TransactionState {
-	ONGOING("Ongoing"),
-	PREPARE_ABORT("PrepareAbort"),
-	PREPARE_COMMIT("PrepareCommit"),
-	COMPLETE_ABORT("CompleteAbort"),
-	COMPLETE_COMMIT("CompleteCommit"),
-	EMPTY("Empty"),
-	PREPARE_EPOCH_FENCE("PrepareEpochFence"),
-	UNKNOWN("Unknown");
+    ONGOING("Ongoing"),
+    PREPARE_ABORT("PrepareAbort"),
+    PREPARE_COMMIT("PrepareCommit"),
+    COMPLETE_ABORT("CompleteAbort"),
+    COMPLETE_COMMIT("CompleteCommit"),
+    EMPTY("Empty"),
+    PREPARE_EPOCH_FENCE("PrepareEpochFence"),
+    UNKNOWN("Unknown");
 
-	private final static Map<String, TransactionState> NAME_TO_ENUM = Arrays.stream(values())
-			.collect(Collectors.toMap(state -> state.name, Function.identity()));
+    private static final Map<String, TransactionState> NAME_TO_ENUM = Arrays.stream(values())
+        .collect(Collectors.toMap(state -> state.name, Function.identity()));
 
-	private final String name;
+    private final String name;
 
-	TransactionState(String name) {
-		this.name = name;
-	}
+    TransactionState(String name) {
+        this.name = name;
+    }
 
-	@Override
-	public String toString() {
-		return name;
-	}
+    @Override
+    public String toString() {
+        return name;
+    }
 
-	public static TransactionState parse(String name) {
-		TransactionState state = NAME_TO_ENUM.get(name);
-		return state == null ? UNKNOWN : state;
-	}
+    public static TransactionState parse(String name) {
+        return NAME_TO_ENUM.getOrDefault(name, UNKNOWN);
+    }
 
 }

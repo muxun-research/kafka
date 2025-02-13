@@ -22,13 +22,18 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.CorruptRecordException;
 import org.apache.kafka.common.record.RecordBatch;
 import org.apache.kafka.common.utils.Time;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class RecordSendTest {
 
@@ -42,7 +47,8 @@ public class RecordSendTest {
     @Test
     public void testTimeout() throws Exception {
         ProduceRequestResult request = new ProduceRequestResult(topicPartition);
-        FutureRecordMetadata future = new FutureRecordMetadata(request, relOffset, RecordBatch.NO_TIMESTAMP, 0, 0, Time.SYSTEM);
+        FutureRecordMetadata future = new FutureRecordMetadata(request, relOffset,
+                RecordBatch.NO_TIMESTAMP, 0, 0, Time.SYSTEM);
         assertFalse(future.isDone(), "Request is not completed");
         try {
             future.get(5, TimeUnit.MILLISECONDS);
@@ -61,7 +67,8 @@ public class RecordSendTest {
      */
     @Test
     public void testError() {
-        FutureRecordMetadata future = new FutureRecordMetadata(asyncRequest(baseOffset, new CorruptRecordException(), 50L), relOffset, RecordBatch.NO_TIMESTAMP, 0, 0, Time.SYSTEM);
+        FutureRecordMetadata future = new FutureRecordMetadata(asyncRequest(baseOffset, new CorruptRecordException(), 50L),
+                relOffset, RecordBatch.NO_TIMESTAMP, 0, 0, Time.SYSTEM);
         assertThrows(ExecutionException.class, future::get);
     }
 
@@ -70,7 +77,8 @@ public class RecordSendTest {
      */
     @Test
     public void testBlocking() throws Exception {
-        FutureRecordMetadata future = new FutureRecordMetadata(asyncRequest(baseOffset, null, 50L), relOffset, RecordBatch.NO_TIMESTAMP, 0, 0, Time.SYSTEM);
+        FutureRecordMetadata future = new FutureRecordMetadata(asyncRequest(baseOffset, null, 50L),
+                relOffset, RecordBatch.NO_TIMESTAMP, 0, 0, Time.SYSTEM);
         assertEquals(baseOffset + relOffset, future.get().offset());
     }
 
@@ -87,8 +95,7 @@ public class RecordSendTest {
                 }
 
                 request.done();
-            } catch (InterruptedException e) {
-            }
+            } catch (InterruptedException e) { }
         });
         thread.start();
         return request;

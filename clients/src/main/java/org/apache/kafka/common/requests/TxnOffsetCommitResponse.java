@@ -33,20 +33,20 @@ import java.util.function.Function;
 
 /**
  * Possible error codes:
- * <p>
- * - {@link Errors#INVALID_PRODUCER_EPOCH}
- * - {@link Errors#NOT_COORDINATOR}
- * - {@link Errors#COORDINATOR_NOT_AVAILABLE}
- * - {@link Errors#COORDINATOR_LOAD_IN_PROGRESS}
- * - {@link Errors#OFFSET_METADATA_TOO_LARGE}
- * - {@link Errors#GROUP_AUTHORIZATION_FAILED}
- * - {@link Errors#INVALID_COMMIT_OFFSET_SIZE}
- * - {@link Errors#TRANSACTIONAL_ID_AUTHORIZATION_FAILED}
- * - {@link Errors#UNSUPPORTED_FOR_MESSAGE_FORMAT}
- * - {@link Errors#REQUEST_TIMED_OUT}
- * - {@link Errors#UNKNOWN_MEMBER_ID}
- * - {@link Errors#FENCED_INSTANCE_ID}
- * - {@link Errors#ILLEGAL_GENERATION}
+ *
+ *   - {@link Errors#INVALID_PRODUCER_EPOCH}
+ *   - {@link Errors#NOT_COORDINATOR}
+ *   - {@link Errors#COORDINATOR_NOT_AVAILABLE}
+ *   - {@link Errors#COORDINATOR_LOAD_IN_PROGRESS}
+ *   - {@link Errors#OFFSET_METADATA_TOO_LARGE}
+ *   - {@link Errors#GROUP_AUTHORIZATION_FAILED}
+ *   - {@link Errors#INVALID_COMMIT_OFFSET_SIZE}
+ *   - {@link Errors#TRANSACTIONAL_ID_AUTHORIZATION_FAILED}
+ *   - {@link Errors#UNSUPPORTED_FOR_MESSAGE_FORMAT}
+ *   - {@link Errors#REQUEST_TIMED_OUT}
+ *   - {@link Errors#UNKNOWN_MEMBER_ID}
+ *   - {@link Errors#FENCED_INSTANCE_ID}
+ *   - {@link Errors#ILLEGAL_GENERATION}
  */
 public class TxnOffsetCommitResponse extends AbstractResponse {
 
@@ -54,7 +54,9 @@ public class TxnOffsetCommitResponse extends AbstractResponse {
         TxnOffsetCommitResponseData data = new TxnOffsetCommitResponseData();
         HashMap<String, TxnOffsetCommitResponseTopic> byTopicName = new HashMap<>();
 
-        private TxnOffsetCommitResponseTopic getOrCreateTopic(String topicName) {
+        private TxnOffsetCommitResponseTopic getOrCreateTopic(
+            String topicName
+        ) {
             TxnOffsetCommitResponseTopic topic = byTopicName.get(topicName);
             if (topic == null) {
                 topic = new TxnOffsetCommitResponseTopic().setName(topicName);
@@ -64,25 +66,40 @@ public class TxnOffsetCommitResponse extends AbstractResponse {
             return topic;
         }
 
-        public Builder addPartition(String topicName, int partitionIndex, Errors error) {
+        public Builder addPartition(
+            String topicName,
+            int partitionIndex,
+            Errors error
+        ) {
             final TxnOffsetCommitResponseTopic topicResponse = getOrCreateTopic(topicName);
 
-            topicResponse.partitions().add(new TxnOffsetCommitResponsePartition().setPartitionIndex(partitionIndex).setErrorCode(error.code()));
+            topicResponse.partitions().add(new TxnOffsetCommitResponsePartition()
+                .setPartitionIndex(partitionIndex)
+                .setErrorCode(error.code()));
 
             return this;
         }
 
-        public <P> Builder addPartitions(String topicName, List<P> partitions, Function<P, Integer> partitionIndex, Errors error) {
+        public <P> Builder addPartitions(
+            String topicName,
+            List<P> partitions,
+            Function<P, Integer> partitionIndex,
+            Errors error
+        ) {
             final TxnOffsetCommitResponseTopic topicResponse = getOrCreateTopic(topicName);
 
-            partitions.forEach(partition -> {
-                topicResponse.partitions().add(new TxnOffsetCommitResponsePartition().setPartitionIndex(partitionIndex.apply(partition)).setErrorCode(error.code()));
-            });
+            partitions.forEach(partition ->
+                topicResponse.partitions().add(new TxnOffsetCommitResponsePartition()
+                    .setPartitionIndex(partitionIndex.apply(partition))
+                    .setErrorCode(error.code()))
+            );
 
             return this;
         }
 
-        public Builder merge(TxnOffsetCommitResponseData newData) {
+        public Builder merge(
+            TxnOffsetCommitResponseData newData
+        ) {
             if (data.topics().isEmpty()) {
                 // If the current data is empty, we can discard it and use the new data.
                 data = newData;
@@ -126,13 +143,19 @@ public class TxnOffsetCommitResponse extends AbstractResponse {
             TopicPartition topicPartition = entry.getKey();
             String topicName = topicPartition.topic();
 
-            TxnOffsetCommitResponseTopic topic = responseTopicDataMap.getOrDefault(topicName, new TxnOffsetCommitResponseTopic().setName(topicName));
+            TxnOffsetCommitResponseTopic topic = responseTopicDataMap.getOrDefault(
+                topicName, new TxnOffsetCommitResponseTopic().setName(topicName));
 
-            topic.partitions().add(new TxnOffsetCommitResponsePartition().setErrorCode(entry.getValue().code()).setPartitionIndex(topicPartition.partition()));
+            topic.partitions().add(new TxnOffsetCommitResponsePartition()
+                                       .setErrorCode(entry.getValue().code())
+                                       .setPartitionIndex(topicPartition.partition())
+            );
             responseTopicDataMap.put(topicName, topic);
         }
 
-        data = new TxnOffsetCommitResponseData().setTopics(new ArrayList<>(responseTopicDataMap.values())).setThrottleTimeMs(requestThrottleMs);
+        data = new TxnOffsetCommitResponseData()
+                   .setTopics(new ArrayList<>(responseTopicDataMap.values()))
+                   .setThrottleTimeMs(requestThrottleMs);
     }
 
     @Override
@@ -152,14 +175,17 @@ public class TxnOffsetCommitResponse extends AbstractResponse {
 
     @Override
     public Map<Errors, Integer> errorCounts() {
-        return errorCounts(data.topics().stream().flatMap(topic -> topic.partitions().stream().map(partition -> Errors.forCode(partition.errorCode()))));
+        return errorCounts(data.topics().stream().flatMap(topic ->
+                topic.partitions().stream().map(partition ->
+                        Errors.forCode(partition.errorCode()))));
     }
 
     public Map<TopicPartition, Errors> errors() {
         Map<TopicPartition, Errors> errorMap = new HashMap<>();
         for (TxnOffsetCommitResponseTopic topic : data.topics()) {
             for (TxnOffsetCommitResponsePartition partition : topic.partitions()) {
-                errorMap.put(new TopicPartition(topic.name(), partition.partitionIndex()), Errors.forCode(partition.errorCode()));
+                errorMap.put(new TopicPartition(topic.name(), partition.partitionIndex()),
+                             Errors.forCode(partition.errorCode()));
             }
         }
         return errorMap;

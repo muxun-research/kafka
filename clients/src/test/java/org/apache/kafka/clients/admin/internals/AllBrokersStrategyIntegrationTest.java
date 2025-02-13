@@ -29,13 +29,20 @@ import org.apache.kafka.common.requests.MetadataRequest;
 import org.apache.kafka.common.requests.MetadataResponse;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.MockTime;
-import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.test.TestUtils;
+
 import org.junit.jupiter.api.Test;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.OptionalInt;
+import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class AllBrokersStrategyIntegrationTest {
     private static final long TIMEOUT_MS = 5000;
@@ -44,8 +51,17 @@ public class AllBrokersStrategyIntegrationTest {
     private final LogContext logContext = new LogContext();
     private final MockTime time = new MockTime();
 
-    private AdminApiDriver<AllBrokersStrategy.BrokerKey, Integer> buildDriver(AllBrokersStrategy.AllBrokersFuture<Integer> result) {
-        return new AdminApiDriver<>(new MockApiHandler(), result, time.milliseconds() + TIMEOUT_MS, RETRY_BACKOFF_MS, logContext);
+    private AdminApiDriver<AllBrokersStrategy.BrokerKey, Integer> buildDriver(
+        AllBrokersStrategy.AllBrokersFuture<Integer> result
+    ) {
+        return new AdminApiDriver<>(
+            new MockApiHandler(),
+            result,
+            time.milliseconds() + TIMEOUT_MS,
+            RETRY_BACKOFF_MS,
+            RETRY_BACKOFF_MS,
+            logContext
+        );
     }
 
     @Test
@@ -95,7 +111,7 @@ public class AllBrokersStrategyIntegrationTest {
         assertEquals(1, lookupSpecs.size());
         AdminApiDriver.RequestSpec<AllBrokersStrategy.BrokerKey> lookupSpec = lookupSpecs.get(0);
 
-        Set<Integer> brokerIds = Utils.mkSet(1, 2);
+        Set<Integer> brokerIds = Set.of(1, 2);
         driver.onResponse(time.milliseconds(), lookupSpec, responseWithBrokers(brokerIds), Node.noNode());
         assertTrue(result.all().isDone());
 
@@ -191,7 +207,11 @@ public class AllBrokersStrategyIntegrationTest {
     private MetadataResponse responseWithBrokers(Set<Integer> brokerIds) {
         MetadataResponseData response = new MetadataResponseData();
         for (Integer brokerId : brokerIds) {
-            response.brokers().add(new MetadataResponseData.MetadataResponseBroker().setNodeId(brokerId).setHost("host" + brokerId).setPort(9092));
+            response.brokers().add(new MetadataResponseData.MetadataResponseBroker()
+                .setNodeId(brokerId)
+                .setHost("host" + brokerId)
+                .setPort(9092)
+            );
         }
         return new MetadataResponse(response, ApiKeys.METADATA.latestVersion());
     }
@@ -205,12 +225,19 @@ public class AllBrokersStrategyIntegrationTest {
         }
 
         @Override
-        public AbstractRequest.Builder<?> buildBatchedRequest(int brokerId, Set<AllBrokersStrategy.BrokerKey> keys) {
+        public AbstractRequest.Builder<?> buildBatchedRequest(
+            int brokerId,
+            Set<AllBrokersStrategy.BrokerKey> keys
+        ) {
             return new MetadataRequest.Builder(new MetadataRequestData());
         }
 
         @Override
-        public ApiResult<AllBrokersStrategy.BrokerKey, Integer> handleResponse(Node broker, Set<AllBrokersStrategy.BrokerKey> keys, AbstractResponse response) {
+        public ApiResult<AllBrokersStrategy.BrokerKey, Integer> handleResponse(
+            Node broker,
+            Set<AllBrokersStrategy.BrokerKey> keys,
+            AbstractResponse response
+        ) {
             return ApiResult.completed(keys.iterator().next(), broker.id());
         }
 

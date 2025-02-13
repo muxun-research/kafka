@@ -29,7 +29,15 @@ import org.apache.kafka.connect.transforms.predicates.Predicate;
 import java.util.Locale;
 
 public enum PluginType {
-    SOURCE(SourceConnector.class), SINK(SinkConnector.class), CONVERTER(Converter.class), HEADER_CONVERTER(HeaderConverter.class), TRANSFORMATION(Transformation.class), PREDICATE(Predicate.class), CONFIGPROVIDER(ConfigProvider.class), REST_EXTENSION(ConnectRestExtension.class), CONNECTOR_CLIENT_CONFIG_OVERRIDE_POLICY(ConnectorClientConfigOverridePolicy.class), UNKNOWN(Object.class);
+    SOURCE(SourceConnector.class),
+    SINK(SinkConnector.class),
+    CONVERTER(Converter.class),
+    HEADER_CONVERTER(HeaderConverter.class),
+    TRANSFORMATION(Transformation.class),
+    PREDICATE(Predicate.class),
+    CONFIGPROVIDER(ConfigProvider.class),
+    REST_EXTENSION(ConnectRestExtension.class),
+    CONNECTOR_CLIENT_CONFIG_OVERRIDE_POLICY(ConnectorClientConfigOverridePolicy.class);
 
     private final Class<?> klass;
 
@@ -37,17 +45,12 @@ public enum PluginType {
         this.klass = klass;
     }
 
-    public static PluginType from(Class<?> klass) {
-        for (PluginType type : PluginType.values()) {
-            if (type.klass.isAssignableFrom(klass)) {
-                return type;
-            }
-        }
-        return UNKNOWN;
-    }
-
     public String simpleName() {
         return klass.getSimpleName();
+    }
+
+    public Class<?> superClass() {
+        return klass;
     }
 
     @Override

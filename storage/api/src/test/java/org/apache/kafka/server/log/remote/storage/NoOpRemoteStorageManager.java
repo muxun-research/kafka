@@ -16,27 +16,36 @@
  */
 package org.apache.kafka.server.log.remote.storage;
 
+import org.apache.kafka.server.log.remote.storage.RemoteLogSegmentMetadata.CustomMetadata;
+
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.Map;
+import java.util.Optional;
 
 public class NoOpRemoteStorageManager implements RemoteStorageManager {
     @Override
-    public void copyLogSegmentData(RemoteLogSegmentMetadata remoteLogSegmentMetadata, LogSegmentData logSegmentData) {
+    public Optional<CustomMetadata> copyLogSegmentData(RemoteLogSegmentMetadata remoteLogSegmentMetadata,
+                                                       LogSegmentData logSegmentData) {
+        return Optional.empty();
     }
 
     @Override
-    public InputStream fetchLogSegment(RemoteLogSegmentMetadata remoteLogSegmentMetadata, int startPosition) {
+    public InputStream fetchLogSegment(RemoteLogSegmentMetadata remoteLogSegmentMetadata,
+                                       int startPosition) {
         return new ByteArrayInputStream(new byte[0]);
     }
 
     @Override
-    public InputStream fetchLogSegment(RemoteLogSegmentMetadata remoteLogSegmentMetadata, int startPosition, int endPosition) {
+    public InputStream fetchLogSegment(RemoteLogSegmentMetadata remoteLogSegmentMetadata,
+                                       int startPosition,
+                                       int endPosition) {
         return new ByteArrayInputStream(new byte[0]);
     }
 
     @Override
-    public InputStream fetchIndex(RemoteLogSegmentMetadata remoteLogSegmentMetadata, IndexType indexType) {
+    public InputStream fetchIndex(RemoteLogSegmentMetadata remoteLogSegmentMetadata,
+                                  IndexType indexType) {
         return new ByteArrayInputStream(new byte[0]);
     }
 

@@ -17,11 +17,13 @@
 
 package org.apache.kafka.common.security.oauthbearer.internals.secured;
 
+import org.apache.kafka.common.utils.MockTime;
+import org.apache.kafka.common.utils.Time;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.apache.kafka.common.utils.MockTime;
-import org.apache.kafka.common.utils.Time;
+
 import org.jose4j.jwk.PublicJsonWebKey;
 import org.jose4j.jws.JsonWebSignature;
 import org.jose4j.jwt.ReservedClaimNames;
@@ -109,7 +111,11 @@ public class AccessTokenBuilder {
         } else if (scope instanceof Collection) {
             return this;
         } else {
-            throw new IllegalArgumentException(String.format("%s parameter must be a %s or a %s containing %s", scopeClaimName, String.class.getName(), Collection.class.getName(), String.class.getName()));
+            throw new IllegalArgumentException(String.format("%s parameter must be a %s or a %s containing %s",
+                scopeClaimName,
+                String.class.getName(),
+                Collection.class.getName(),
+                String.class.getName()));
         }
     }
 
@@ -163,7 +169,11 @@ public class AccessTokenBuilder {
             ArrayNode child = node.putArray(scopeClaimName);
             ((Collection<String>) scope).forEach(child::add);
         } else {
-            throw new IllegalArgumentException(String.format("%s claim must be a %s or a %s containing %s", scopeClaimName, String.class.getName(), Collection.class.getName(), String.class.getName()));
+            throw new IllegalArgumentException(String.format("%s claim must be a %s or a %s containing %s",
+                scopeClaimName,
+                String.class.getName(),
+                Collection.class.getName(),
+                String.class.getName()));
         }
 
         if (issuedAtSeconds != null)

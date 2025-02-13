@@ -31,16 +31,18 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Common utility functions used by transport layer and authenticator tests.
  */
 public class NetworkTestUtils {
-	public static NioEchoServer createEchoServer(ListenerName listenerName, SecurityProtocol securityProtocol,
-												 AbstractConfig serverConfig, CredentialCache credentialCache, Time time) throws Exception {
-		return createEchoServer(listenerName, securityProtocol, serverConfig, credentialCache, 100, time);
-	}
+    public static NioEchoServer createEchoServer(ListenerName listenerName, SecurityProtocol securityProtocol,
+                                                 AbstractConfig serverConfig, CredentialCache credentialCache, Time time) throws Exception {
+        return createEchoServer(listenerName, securityProtocol, serverConfig, credentialCache, 100, time);
+    }
 
     public static NioEchoServer createEchoServer(ListenerName listenerName, SecurityProtocol securityProtocol,
                                                  AbstractConfig serverConfig, CredentialCache credentialCache,
@@ -69,11 +71,11 @@ public class NetworkTestUtils {
         String prefix = TestUtils.randomString(minMessageSize);
         int requests = 0;
         int responses = 0;
-		selector.send(new NetworkSend(node, ByteBufferSend.sizePrefixed(ByteBuffer.wrap((prefix + "-0").getBytes(StandardCharsets.UTF_8)))));
-		requests++;
+        selector.send(new NetworkSend(node, ByteBufferSend.sizePrefixed(ByteBuffer.wrap((prefix + "-0").getBytes(StandardCharsets.UTF_8)))));
+        requests++;
         while (responses < messageCount) {
-			selector.poll(0L);
-			assertEquals(0, selector.disconnected().size(), "No disconnects should have occurred ." + selector.disconnected());
+            selector.poll(0L);
+            assertEquals(0, selector.disconnected().size(), "No disconnects should have occurred ." + selector.disconnected());
 
             for (NetworkReceive receive : selector.completedReceives()) {
                 assertEquals(prefix + "-" + responses, new String(Utils.toArray(receive.payload()), StandardCharsets.UTF_8));
@@ -88,7 +90,8 @@ public class NetworkTestUtils {
 
     public static void waitForChannelConnected(Selector selector, String node) throws IOException {
         int secondsLeft = 30;
-        while (selector.channel(node) != null && !selector.channel(node).isConnected() && secondsLeft-- > 0) {
+        while (selector.channel(node) != null
+                && !selector.channel(node).isConnected() && secondsLeft-- > 0) {
             selector.poll(1000L);
         }
         assertNotNull(selector.channel(node));
@@ -108,7 +111,8 @@ public class NetworkTestUtils {
         return waitForChannelClose(selector, node, channelState, 0);
     }
 
-    public static ChannelState waitForChannelClose(Selector selector, String node, ChannelState.State channelState, int delayBetweenPollMs) throws IOException {
+    public static ChannelState waitForChannelClose(Selector selector, String node, ChannelState.State channelState, int delayBetweenPollMs)
+            throws IOException {
         boolean closed = false;
         for (int i = 0; i < 300; i++) {
             if (delayBetweenPollMs > 0)
@@ -119,7 +123,7 @@ public class NetworkTestUtils {
                 break;
             }
         }
-		assertTrue(closed, "Channel was not closed by timeout");
+        assertTrue(closed, "Channel was not closed by timeout");
         ChannelState finalState = selector.disconnected().get(node);
         assertEquals(channelState, finalState.state());
         return finalState;

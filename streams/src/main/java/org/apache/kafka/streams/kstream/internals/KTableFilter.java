@@ -20,8 +20,13 @@ import org.apache.kafka.streams.kstream.Predicate;
 import org.apache.kafka.streams.processor.api.Processor;
 import org.apache.kafka.streams.processor.api.ProcessorContext;
 import org.apache.kafka.streams.processor.api.Record;
+import org.apache.kafka.streams.processor.internals.StoreFactory;
+import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
 import org.apache.kafka.streams.state.internals.KeyValueStoreWrapper;
+
+import java.util.Collections;
+import java.util.Set;
 
 import static org.apache.kafka.streams.state.ValueAndTimestamp.getValueOrNull;
 import static org.apache.kafka.streams.state.VersionedKeyValueStore.PUT_RETURN_CODE_NOT_PUT;
@@ -34,14 +39,20 @@ public class KTableFilter<KIn, VIn> implements KTableProcessorSupplier<KIn, VIn,
     private final String queryableName;
     private boolean sendOldValues;
     private boolean useVersionedSemantics = false;
+    private final StoreFactory storeFactory;
 
-    KTableFilter(final KTableImpl<KIn, ?, VIn> parent, final Predicate<? super KIn, ? super VIn> predicate, final boolean filterNot, final String queryableName) {
+    KTableFilter(final KTableImpl<KIn, ?, VIn> parent,
+                 final Predicate<? super KIn, ? super VIn> predicate,
+                 final boolean filterNot,
+                 final String queryableName,
+                 final StoreFactory storeFactory) {
         this.parent = parent;
         this.predicate = predicate;
         this.filterNot = filterNot;
         this.queryableName = queryableName;
         // If upstream is already materialized, enable sending old values to avoid sending unnecessary tombstones:
         this.sendOldValues = parent.enableSendingOldValues(false);
+        this.storeFactory = storeFactory;
     }
 
     public void setUseVersionedSemantics(final boolean useVersionedSemantics) {
@@ -56,6 +67,14 @@ public class KTableFilter<KIn, VIn> implements KTableProcessorSupplier<KIn, VIn,
     @Override
     public Processor<KIn, Change<VIn>, KIn, Change<VIn>> get() {
         return new KTableFilterProcessor();
+    }
+
+    @Override
+    public Set<StoreBuilder<?>> stores() {
+        if (storeFactory == null) {
+            return null;
+        }
+        return Collections.singleton(new StoreFactory.FactoryWrappingStoreBuilder<>(storeFactory));
     }
 
     @Override
@@ -105,7 +124,11 @@ public class KTableFilter<KIn, VIn> implements KTableProcessorSupplier<KIn, VIn,
             this.context = context;
             if (queryableName != null) {
                 store = new KeyValueStoreWrapper<>(context, queryableName);
-                tupleForwarder = new TimestampedTupleForwarder<>(store.getStore(), context, new TimestampedCacheFlushListener<>(context), sendOldValues);
+                tupleForwarder = new TimestampedTupleForwarder<>(
+                    store.store(),
+                    context,
+                    new TimestampedCacheFlushListener<>(context),
+                    sendOldValues);
             }
         }
 
@@ -139,7 +162,9 @@ public class KTableFilter<KIn, VIn> implements KTableProcessorSupplier<KIn, VIn,
                 return null;
             }
 
-            return queryableName != null ? getValueOrNull(store.get(key)) : computeValue(key, change.oldValue);
+            return queryableName != null
+                ? getValueOrNull(store.get(key))
+                : computeValue(key, change.oldValue);
         }
     }
 
@@ -150,7 +175,7 @@ public class KTableFilter<KIn, VIn> implements KTableProcessorSupplier<KIn, VIn,
         if (queryableName != null) {
             return new KTableMaterializedValueGetterSupplier<>(queryableName);
         } else {
-            return new KTableValueGetterSupplier<KIn, VIn>() {
+            return new KTableValueGetterSupplier<>() {
                 final KTableValueGetterSupplier<KIn, VIn> parentValueGetterSupplier = parent.valueGetterSupplier();
 
                 public KTableValueGetter<KIn, VIn> get() {
@@ -176,7 +201,7 @@ public class KTableFilter<KIn, VIn> implements KTableProcessorSupplier<KIn, VIn,
         @Override
         public void init(final ProcessorContext<?, ?> context) {
             // This is the old processor context for compatibility with the other KTable processors.
-            // Once we migrte them all, we can swap this out.
+            // Once we migrate them all, we can swap this out.
             parentGetter.init(context);
         }
 

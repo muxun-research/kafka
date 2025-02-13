@@ -18,16 +18,21 @@
 package org.apache.kafka.common.security.oauthbearer.internals.secured;
 
 import org.apache.kafka.common.utils.Time;
+
 import org.jose4j.http.Get;
 import org.jose4j.jwk.HttpsJwks;
 
-import javax.net.ssl.SSLSocketFactory;
 import java.net.URL;
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Map;
 
-import static org.apache.kafka.common.config.SaslConfigs.*;
+import javax.net.ssl.SSLSocketFactory;
+
+import static org.apache.kafka.common.config.SaslConfigs.SASL_OAUTHBEARER_JWKS_ENDPOINT_REFRESH_MS;
+import static org.apache.kafka.common.config.SaslConfigs.SASL_OAUTHBEARER_JWKS_ENDPOINT_RETRY_BACKOFF_MAX_MS;
+import static org.apache.kafka.common.config.SaslConfigs.SASL_OAUTHBEARER_JWKS_ENDPOINT_RETRY_BACKOFF_MS;
+import static org.apache.kafka.common.config.SaslConfigs.SASL_OAUTHBEARER_JWKS_ENDPOINT_URL;
 
 public class VerificationKeyResolverFactory {
 
@@ -37,16 +42,21 @@ public class VerificationKeyResolverFactory {
      *
      * <b>Note</b>: the returned <code>CloseableVerificationKeyResolver</code> is not
      * initialized here and must be done by the caller.
-     * <p>
+     *
      * Primarily exposed here for unit testing.
+     *
      * @param configs SASL configuration
+     *
      * @return Non-<code>null</code> {@link CloseableVerificationKeyResolver}
      */
-    public static CloseableVerificationKeyResolver create(Map<String, ?> configs, Map<String, Object> jaasConfig) {
+    public static CloseableVerificationKeyResolver create(Map<String, ?> configs,
+        Map<String, Object> jaasConfig) {
         return create(configs, null, jaasConfig);
     }
 
-    public static CloseableVerificationKeyResolver create(Map<String, ?> configs, String saslMechanism, Map<String, Object> jaasConfig) {
+    public static CloseableVerificationKeyResolver create(Map<String, ?> configs,
+        String saslMechanism,
+        Map<String, Object> jaasConfig) {
         ConfigurationUtils cu = new ConfigurationUtils(configs, saslMechanism);
         URL jwksEndpointUrl = cu.validateUrl(SASL_OAUTHBEARER_JWKS_ENDPOINT_URL);
 
@@ -70,7 +80,11 @@ public class VerificationKeyResolverFactory {
                 httpsJwks.setSimpleHttpGet(get);
             }
 
-            RefreshingHttpsJwks refreshingHttpsJwks = new RefreshingHttpsJwks(Time.SYSTEM, httpsJwks, refreshIntervalMs, cu.validateLong(SASL_OAUTHBEARER_JWKS_ENDPOINT_RETRY_BACKOFF_MS), cu.validateLong(SASL_OAUTHBEARER_JWKS_ENDPOINT_RETRY_BACKOFF_MAX_MS));
+            RefreshingHttpsJwks refreshingHttpsJwks = new RefreshingHttpsJwks(Time.SYSTEM,
+                httpsJwks,
+                refreshIntervalMs,
+                cu.validateLong(SASL_OAUTHBEARER_JWKS_ENDPOINT_RETRY_BACKOFF_MS),
+                cu.validateLong(SASL_OAUTHBEARER_JWKS_ENDPOINT_RETRY_BACKOFF_MAX_MS));
             return new RefreshingHttpsJwksVerificationKeyResolver(refreshingHttpsJwks);
         }
     }

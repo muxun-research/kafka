@@ -26,11 +26,10 @@ import org.apache.kafka.server.common.ApiMessageAndVersion;
 /**
  * This is an implementation of {@code RecordSerde} with {@link ApiMessageAndVersion} but implementors need to implement
  * {@link #apiMessageFor(short)} to return a {@code ApiMessage} instance for the given {@code apiKey}.
- * <p>
+ * <br>
  * This can be used as the underlying serialization mechanism for records defined with {@link ApiMessage}s.
- * <p></p>
+ * <br><br>
  * Serialization format for the given {@code ApiMessageAndVersion} is below:
- * <p></p>
  * <pre>
  *     [data_frame_version header message]
  *     header =&gt; [api_key version]
@@ -59,7 +58,8 @@ public abstract class AbstractApiMessageSerde implements RecordSerde<ApiMessageA
     }
 
     @Override
-    public int recordSize(ApiMessageAndVersion data, ObjectSerializationCache serializationCache) {
+    public int recordSize(ApiMessageAndVersion data,
+                          ObjectSerializationCache serializationCache) {
         int size = DEFAULT_FRAME_VERSION_SIZE;
         size += ByteUtils.sizeOfUnsignedVarint(data.message().apiKey());
         size += ByteUtils.sizeOfUnsignedVarint(data.version());
@@ -68,7 +68,9 @@ public abstract class AbstractApiMessageSerde implements RecordSerde<ApiMessageA
     }
 
     @Override
-    public void write(ApiMessageAndVersion data, ObjectSerializationCache serializationCache, Writable out) {
+    public void write(ApiMessageAndVersion data,
+                      ObjectSerializationCache serializationCache,
+                      Writable out) {
         out.writeUnsignedVarint(DEFAULT_FRAME_VERSION);
         out.writeUnsignedVarint(data.message().apiKey());
         out.writeUnsignedVarint(data.version());
@@ -76,13 +78,16 @@ public abstract class AbstractApiMessageSerde implements RecordSerde<ApiMessageA
     }
 
     @Override
-    public ApiMessageAndVersion read(Readable input, int size) {
+    public ApiMessageAndVersion read(Readable input,
+                                     int size) {
         short frameVersion = unsignedIntToShort(input, "frame version");
 
         if (frameVersion == 0) {
-            throw new MetadataParseException("Could not deserialize metadata record with frame version 0. " + "Note that upgrades from the preview release of KRaft in 2.8 to newer versions are not supported.");
+            throw new MetadataParseException("Could not deserialize metadata record with frame version 0. " +
+                "Note that upgrades from the preview release of KRaft in 2.8 to newer versions are not supported.");
         } else if (frameVersion != DEFAULT_FRAME_VERSION) {
-            throw new MetadataParseException("Could not deserialize metadata record due to unknown frame version " + frameVersion + "(only frame version " + DEFAULT_FRAME_VERSION + " is supported)");
+            throw new MetadataParseException("Could not deserialize metadata record due to unknown frame version "
+                    + frameVersion + "(only frame version " + DEFAULT_FRAME_VERSION + " is supported)");
         }
         short apiKey = unsignedIntToShort(input, "type");
         short version = unsignedIntToShort(input, "version");
@@ -99,7 +104,8 @@ public abstract class AbstractApiMessageSerde implements RecordSerde<ApiMessageA
             throw new MetadataParseException("Failed to deserialize record with type " + apiKey, e);
         }
         if (input.remaining() > 0) {
-            throw new MetadataParseException("Found " + input.remaining() + " byte(s) of garbage after " + apiKey);
+            throw new MetadataParseException("Found " + input.remaining() +
+                    " byte(s) of garbage after " + apiKey);
         }
         return new ApiMessageAndVersion(record, version);
     }
@@ -107,6 +113,7 @@ public abstract class AbstractApiMessageSerde implements RecordSerde<ApiMessageA
     /**
      * Return {@code ApiMessage} instance for the given {@code apiKey}. This is used while deserializing the bytes
      * payload into the respective {@code ApiMessage} in {@link #read(Readable, int)} method.
+     *
      * @param apiKey apiKey for which a {@code ApiMessage} to be created.
      */
     public abstract ApiMessage apiMessageFor(short apiKey);

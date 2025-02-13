@@ -19,25 +19,32 @@ package org.apache.kafka.connect.runtime;
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.MetricNameTemplate;
 import org.apache.kafka.common.metrics.Gauge;
+import org.apache.kafka.common.metrics.PluginMetrics;
 import org.apache.kafka.common.metrics.Sensor;
+import org.apache.kafka.common.metrics.internals.PluginMetricsImpl;
 import org.apache.kafka.common.metrics.stats.Avg;
 import org.apache.kafka.common.metrics.stats.Frequencies;
 import org.apache.kafka.common.metrics.stats.Max;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
+import org.apache.kafka.connect.connector.ConnectRecord;
 import org.apache.kafka.connect.runtime.AbstractStatus.State;
 import org.apache.kafka.connect.runtime.ConnectMetrics.MetricGroup;
 import org.apache.kafka.connect.runtime.errors.ErrorHandlingMetrics;
+import org.apache.kafka.connect.runtime.errors.ErrorReporter;
 import org.apache.kafka.connect.runtime.errors.RetryWithToleranceOperator;
 import org.apache.kafka.connect.storage.StatusBackingStore;
 import org.apache.kafka.connect.util.ConnectorTaskId;
 import org.apache.kafka.connect.util.LoggingContext;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * Handles processing for an individual task. This interface only provides the basic methods
@@ -49,8 +56,10 @@ import java.util.concurrent.TimeUnit;
  * asynchronous (e.g. pause/resume). For example, changing the state to paused could cause a race
  * if the task fails at the same time. To protect from these cases, we synchronize status updates
  * using the WorkerTask's monitor.
+ * @param <T> The type of record initially entering the processing pipeline from the source or consumer
+ * @param <R> The type of record during transformations (must be an implementation of {@link ConnectRecord})
  */
-abstract class WorkerTask implements Runnable {
+abstract class WorkerTask<T, R extends ConnectRecord<R>> implements Runnable {
     private static final Logger log = LoggerFactory.getLogger(WorkerTask.class);
     private static final String THREAD_NAME_PREFIX = "task-thread-";
 
@@ -66,10 +75,22 @@ abstract class WorkerTask implements Runnable {
     private volatile boolean stopping;   // indicates whether the Worker has asked the task to stop
     private volatile boolean cancelled;  // indicates whether the Worker has cancelled the task (e.g. because of slow shutdown)
     private final ErrorHandlingMetrics errorMetrics;
+    protected final RetryWithToleranceOperator<T> retryWithToleranceOperator;
+    protected final TransformationChain<T, R> transformationChain;
+    private final Supplier<List<ErrorReporter<T>>> errorReportersSupplier;
+    protected final PluginMetricsImpl pluginMetrics;
 
-    protected final RetryWithToleranceOperator retryWithToleranceOperator;
-
-    public WorkerTask(ConnectorTaskId id, TaskStatus.Listener statusListener, TargetState initialState, ClassLoader loader, ConnectMetrics connectMetrics, ErrorHandlingMetrics errorMetrics, RetryWithToleranceOperator retryWithToleranceOperator, Time time, StatusBackingStore statusBackingStore) {
+    public WorkerTask(ConnectorTaskId id,
+                      TaskStatus.Listener statusListener,
+                      TargetState initialState,
+                      ClassLoader loader,
+                      ConnectMetrics connectMetrics,
+                      ErrorHandlingMetrics errorMetrics,
+                      RetryWithToleranceOperator<T> retryWithToleranceOperator,
+                      TransformationChain<T, R> transformationChain,
+                      Supplier<List<ErrorReporter<T>>> errorReportersSupplier,
+                      Time time,
+                      StatusBackingStore statusBackingStore) {
         this.id = id;
         this.taskMetricsGroup = new TaskMetricsGroup(this.id, connectMetrics, statusListener);
         this.errorMetrics = errorMetrics;
@@ -81,8 +102,11 @@ abstract class WorkerTask implements Runnable {
         this.cancelled = false;
         this.taskMetricsGroup.recordState(this.targetState);
         this.retryWithToleranceOperator = retryWithToleranceOperator;
+        this.transformationChain = transformationChain;
+        this.errorReportersSupplier = errorReportersSupplier;
         this.time = time;
         this.statusBackingStore = statusBackingStore;
+        this.pluginMetrics = connectMetrics.taskPluginMetrics(id);
     }
 
     public ConnectorTaskId id() {
@@ -91,6 +115,10 @@ abstract class WorkerTask implements Runnable {
 
     public ClassLoader loader() {
         return loader;
+    }
+
+    public PluginMetrics pluginMetrics() {
+        return pluginMetrics;
     }
 
     /**
@@ -129,6 +157,7 @@ abstract class WorkerTask implements Runnable {
 
     /**
      * Wait for this task to finish stopping.
+     *
      * @param timeoutMs time in milliseconds to await stop
      * @return true if successful, false if the timeout was reached
      */
@@ -147,6 +176,13 @@ abstract class WorkerTask implements Runnable {
         // Close quietly here so that we can be sure to close everything even if one attempt fails
         Utils.closeQuietly(taskMetricsGroup::close, "Task metrics group");
         Utils.closeQuietly(errorMetrics, "Error handling metrics");
+    }
+
+    // Visible for testing
+    void doStart() {
+        retryWithToleranceOperator.reporters(errorReportersSupplier.get());
+        initializeAndStart();
+        statusListener.onStartup(id);
     }
 
     protected abstract void initializeAndStart();
@@ -169,12 +205,16 @@ abstract class WorkerTask implements Runnable {
         return cancelled;
     }
 
-    private void doClose() {
+    // Visible for testing
+    void doClose() {
         try {
             close();
         } catch (Throwable t) {
             log.error("{} Task threw an uncaught and unrecoverable exception during shutdown", this, t);
             throw t;
+        } finally {
+            Utils.closeQuietly(transformationChain, "transformation chain");
+            Utils.closeQuietly(retryWithToleranceOperator, "retry operator");
         }
     }
 
@@ -186,13 +226,11 @@ abstract class WorkerTask implements Runnable {
 
                 if (targetState == TargetState.PAUSED) {
                     onPause();
-                    if (!awaitUnpause())
-                        return;
+                    if (!awaitUnpause()) return;
                 }
             }
 
-            initializeAndStart();
-            statusListener.onStartup(id);
+            doStart();
             execute();
         } catch (Throwable t) {
             failed = true;
@@ -309,6 +347,7 @@ abstract class WorkerTask implements Runnable {
     /**
      * Include this topic to the set of active topics for the connector that this worker task
      * is running. This information is persisted in the status backing store used by this worker.
+     *
      * @param topic the topic to mark as active for this connector
      */
     protected void recordActiveTopic(String topic) {
@@ -321,19 +360,20 @@ abstract class WorkerTask implements Runnable {
 
     /**
      * Record that offsets have been committed.
+     *
      * @param duration the length of time in milliseconds for the commit attempt to complete
      */
     protected void recordCommitSuccess(long duration) {
-        taskMetricsGroup.recordCommit(duration, true, null);
+        taskMetricsGroup.recordCommit(duration, true);
     }
 
     /**
      * Record that offsets have been committed.
+     *
      * @param duration the length of time in milliseconds for the commit attempt to complete
-     * @param error    the unexpected error that occurred; may be null in the case of timeouts or interruptions
      */
-    protected void recordCommitFailure(long duration, Throwable error) {
-        taskMetricsGroup.recordCommit(duration, false, error);
+    protected void recordCommitFailure(long duration) {
+        taskMetricsGroup.recordCommit(duration, false);
     }
 
     /**
@@ -363,11 +403,15 @@ abstract class WorkerTask implements Runnable {
             time = connectMetrics.time();
             taskStateTimer = new StateTracker();
             ConnectMetricsRegistry registry = connectMetrics.registry();
-            metricGroup = connectMetrics.group(registry.taskGroupName(), registry.connectorTagName(), id.connector(), registry.taskTagName(), Integer.toString(id.task()));
+            metricGroup = connectMetrics.group(registry.taskGroupName(),
+                    registry.connectorTagName(), id.connector(),
+                    registry.taskTagName(), Integer.toString(id.task()));
             // prevent collisions by removing any previously created metrics in this group.
             metricGroup.close();
 
-            metricGroup.addValueMetric(registry.taskStatus, now -> taskStateTimer.currentState().toString().toLowerCase(Locale.getDefault()));
+            metricGroup.addValueMetric(registry.taskStatus, now ->
+                taskStateTimer.currentState().toString().toLowerCase(Locale.getDefault())
+            );
 
             addRatioMetric(State.RUNNING, registry.taskRunningRatio);
             addRatioMetric(State.PAUSED, registry.taskPauseRatio);
@@ -389,14 +433,15 @@ abstract class WorkerTask implements Runnable {
 
         private void addRatioMetric(final State matchingState, MetricNameTemplate template) {
             MetricName metricName = metricGroup.metricName(template);
-            metricGroup.metrics().addMetricIfAbsent(metricName, null, (Gauge<Double>) (config, now) -> taskStateTimer.durationRatio(matchingState, now));
+            metricGroup.metrics().addMetricIfAbsent(metricName, null, (Gauge<Double>) (config, now) ->
+                    taskStateTimer.durationRatio(matchingState, now));
         }
 
         void close() {
             metricGroup.close();
         }
 
-        void recordCommit(long duration, boolean success, Throwable error) {
+        void recordCommit(long duration, boolean success) {
             if (success) {
                 commitTime.record(duration);
                 commitAttempts.record(1.0d);

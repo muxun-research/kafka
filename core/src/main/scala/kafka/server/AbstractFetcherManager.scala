@@ -6,7 +6,7 @@
  * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,12 +17,11 @@
 
 package kafka.server
 
-import kafka.cluster.BrokerEndPoint
-import kafka.utils.Implicits._
 import kafka.utils.Logging
-import org.apache.kafka.common.utils.Utils
 import org.apache.kafka.common.{TopicPartition, Uuid}
+import org.apache.kafka.common.utils.Utils
 import org.apache.kafka.server.metrics.KafkaMetricsGroup
+import org.apache.kafka.server.network.BrokerEndPoint
 
 import scala.collection.{Map, Set, mutable}
 import scala.jdk.CollectionConverters._
@@ -61,22 +60,20 @@ abstract class AbstractFetcherManager[T <: AbstractFetcherThread](val name: Stri
 
   metricsGroup.newGauge("DeadThreadCount", () => deadThreadCount, tags)
 
-  private[server] def deadThreadCount: Int = lock synchronized {
-    fetcherThreadMap.values.count(_.isThreadFailed)
-  }
+  private[server] def deadThreadCount: Int = lock synchronized { fetcherThreadMap.values.count(_.isThreadFailed) }
 
   def resizeThreadPool(newSize: Int): Unit = {
     def migratePartitions(newSize: Int): Unit = {
       val allRemovedPartitionsMap = mutable.Map[TopicPartition, InitialFetchState]()
-      fetcherThreadMap.forKeyValue { (id, thread) =>
+      fetcherThreadMap.foreachEntry { (id, thread) =>
         val partitionStates = thread.removeAllPartitions()
         if (id.fetcherId >= newSize)
           thread.shutdown()
-        partitionStates.forKeyValue { (topicPartition, currentFetchState) =>
-          val initialFetchState = InitialFetchState(currentFetchState.topicId, thread.leader.brokerEndPoint(),
-            currentLeaderEpoch = currentFetchState.currentLeaderEpoch,
-            initOffset = currentFetchState.fetchOffset)
-          allRemovedPartitionsMap += topicPartition -> initialFetchState
+        partitionStates.foreachEntry { (topicPartition, currentFetchState) =>
+            val initialFetchState = InitialFetchState(currentFetchState.topicId, thread.leader.brokerEndPoint(),
+              currentLeaderEpoch = currentFetchState.currentLeaderEpoch,
+              initOffset = currentFetchState.fetchOffset)
+            allRemovedPartitionsMap += topicPartition -> initialFetchState
         }
       }
       // failed partitions are removed when adding partitions to fetcher
@@ -231,16 +228,16 @@ abstract class AbstractFetcherManager[T <: AbstractFetcherThread](val name: Stri
 }
 
 /**
- * The class FailedPartitions would keep a track of partitions marked as failed either during truncation or appending
- * resulting from one of the following errors -
- * <ol>
- * <li> Storage exception
- * <li> Fenced epoch
- * <li> Unexpected errors
- * </ol>
- * The partitions which fail due to storage error are eventually removed from this set after the log directory is
- * taken offline.
- */
+  * The class FailedPartitions would keep a track of partitions marked as failed either during truncation or appending
+  * resulting from one of the following errors -
+  * <ol>
+  *   <li> Storage exception
+  *   <li> Fenced epoch
+  *   <li> Unexpected errors
+  * </ol>
+  * The partitions which fail due to storage error are eventually removed from this set after the log directory is
+  * taken offline.
+  */
 class FailedPartitions {
   private val failedPartitionsSet = new mutable.HashSet[TopicPartition]
 

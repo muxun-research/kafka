@@ -24,14 +24,18 @@ import java.util.Set;
 
 /**
  * This is a hash set which can be snapshotted.
- * <p>
- * See {@SnapshottableHashTable} for more details about the implementation.
- * <p>
+ * <br>
+ * See {@link SnapshottableHashTable} for more details about the implementation.
+ * <br>
  * This class requires external synchronization.  Null values are not supported.
- * @param <T> The value type of the set.
+ *
+ * @param <T>   The value type of the set.
  */
-public class TimelineHashSet<T> extends SnapshottableHashTable<TimelineHashSet.TimelineHashSetEntry<T>> implements Set<T> {
-    static class TimelineHashSetEntry<T> implements SnapshottableHashTable.ElementWithStartEpoch {
+public class TimelineHashSet<T>
+        extends SnapshottableHashTable<TimelineHashSet.TimelineHashSetEntry<T>>
+        implements Set<T> {
+    static class TimelineHashSetEntry<T>
+            implements SnapshottableHashTable.ElementWithStartEpoch {
         private final T value;
         private long startEpoch;
 
@@ -57,8 +61,7 @@ public class TimelineHashSet<T> extends SnapshottableHashTable<TimelineHashSet.T
         @SuppressWarnings("unchecked")
         @Override
         public boolean equals(Object o) {
-            if (!(o instanceof TimelineHashSetEntry))
-                return false;
+            if (!(o instanceof TimelineHashSetEntry)) return false;
             TimelineHashSetEntry<T> other = (TimelineHashSetEntry<T>) o;
             return value.equals(other.value);
         }
@@ -176,8 +179,7 @@ public class TimelineHashSet<T> extends SnapshottableHashTable<TimelineHashSet.T
     @Override
     public boolean containsAll(Collection<?> collection) {
         for (Object value : collection) {
-            if (!contains(value))
-                return false;
+            if (!contains(value)) return false;
         }
         return true;
     }
@@ -229,9 +231,8 @@ public class TimelineHashSet<T> extends SnapshottableHashTable<TimelineHashSet.T
     @Override
     public int hashCode() {
         int hash = 0;
-        Iterator<T> iter = iterator();
-        while (iter.hasNext()) {
-            hash += iter.next().hashCode();
+        for (T t : this) {
+            hash += t.hashCode();
         }
         return hash;
     }
@@ -240,14 +241,13 @@ public class TimelineHashSet<T> extends SnapshottableHashTable<TimelineHashSet.T
     public boolean equals(Object o) {
         if (o == this)
             return true;
-        if (!(o instanceof Set))
+        if (!(o instanceof Collection<?> c))
             return false;
-        Collection<?> c = (Collection<?>) o;
         if (c.size() != size())
             return false;
         try {
             return containsAll(c);
-        } catch (ClassCastException unused) {
+        } catch (ClassCastException unused)   {
             return false;
         }
     }

@@ -16,9 +16,22 @@
  */
 package org.apache.kafka.jmh.record;
 
-import org.apache.kafka.common.record.*;
+import org.apache.kafka.common.compress.Compression;
+import org.apache.kafka.common.record.CompressionType;
+import org.apache.kafka.common.record.MemoryRecords;
+import org.apache.kafka.common.record.MutableRecordBatch;
+import org.apache.kafka.common.record.Record;
+import org.apache.kafka.common.record.RecordBatch;
 import org.apache.kafka.common.utils.CloseableIterator;
-import org.openjdk.jmh.annotations.*;
+
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.OperationsPerInvocation;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
 @State(Scope.Benchmark)
@@ -31,8 +44,8 @@ public class RecordBatchIterationBenchmark extends BaseRecordBatchBenchmark {
     private CompressionType compressionType = CompressionType.NONE;
 
     @Override
-    CompressionType compressionType() {
-        return compressionType;
+    Compression compression() {
+        return Compression.of(compressionType).build();
     }
 
     @Benchmark

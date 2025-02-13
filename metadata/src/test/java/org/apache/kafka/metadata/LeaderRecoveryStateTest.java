@@ -23,16 +23,22 @@ import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-final public class LeaderRecoveryStateTest {
+public final class LeaderRecoveryStateTest {
     private static final byte NO_CHANGE = (byte) -1;
 
     @Test
     void testUniqueValues() {
         Set<Byte> set = new HashSet<>();
         for (LeaderRecoveryState recovery : LeaderRecoveryState.values()) {
-            assertTrue(set.add(recovery.value()), String.format("Value %s for election state %s has already been used", recovery.value(), recovery));
+            assertTrue(
+                set.add(recovery.value()),
+                String.format("Value %s for election state %s has already been used", recovery.value(), recovery)
+            );
         }
     }
 
@@ -57,7 +63,10 @@ final public class LeaderRecoveryStateTest {
 
     @Test
     void testInvalidValue() {
-        assertThrows(IllegalArgumentException.class, () -> LeaderRecoveryState.of(NO_CHANGE));
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> LeaderRecoveryState.of(NO_CHANGE)
+        );
         assertThrows(IllegalArgumentException.class, () -> LeaderRecoveryState.of((byte) 2));
     }
 

@@ -17,6 +17,7 @@
 package org.apache.kafka.common.protocol;
 
 import org.apache.kafka.common.utils.ByteBufferOutputStream;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.DataOutputStream;
@@ -36,7 +37,8 @@ public class DataOutputStreamWritableTest {
         sourceBuffer.position(2);
         ByteBuffer slicedBuffer = sourceBuffer.slice();
 
-        Writable writable = new DataOutputStreamWritable(new DataOutputStream(new ByteBufferOutputStream(resultBuffer)));
+        Writable writable = new DataOutputStreamWritable(
+                new DataOutputStream(new ByteBufferOutputStream(resultBuffer)));
 
         writable.writeByteBuffer(slicedBuffer);
 
@@ -56,7 +58,8 @@ public class DataOutputStreamWritableTest {
         // Move the slice's position forward to ensure the writer starts reading at that position
         slicedBuffer.position(1);
 
-        Writable writable = new DataOutputStreamWritable(new DataOutputStream(new ByteBufferOutputStream(resultBuffer)));
+        Writable writable = new DataOutputStreamWritable(
+                new DataOutputStream(new ByteBufferOutputStream(resultBuffer)));
 
         writable.writeByteBuffer(slicedBuffer);
 

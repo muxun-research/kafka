@@ -19,6 +19,7 @@ package org.apache.kafka.streams.state.internals;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.state.KeyValueIterator;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -108,7 +109,7 @@ public abstract class AbstractRocksDBTimeOrderedSegmentedBytesStore extends Abst
             return KeyValue.pair(getBaseKey(ret.key), value);
         }
 
-        abstract protected Bytes getBaseKey(final Bytes indexKey);
+        protected abstract Bytes getBaseKey(final Bytes indexKey);
     }
 
     AbstractRocksDBTimeOrderedSegmentedBytesStore(final String name, final String metricsScope, final long retention, final long segmentInterval, final KeySchema baseKeySchema, final Optional<KeySchema> indexKeySchema) {
@@ -125,7 +126,7 @@ public abstract class AbstractRocksDBTimeOrderedSegmentedBytesStore extends Abst
         return fetch(key, from, to, false);
     }
 
-    abstract protected IndexToBaseStoreIterator getIndexToBaseStoreIterator(final SegmentIterator<KeyValueSegment> segmentIterator);
+    protected abstract IndexToBaseStoreIterator getIndexToBaseStoreIterator(final SegmentIterator<KeyValueSegment> segmentIterator);
 
     KeyValueIterator<Bytes, byte[]> fetch(final Bytes key, final long from, final long to, final boolean forward) {
 

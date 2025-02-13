@@ -269,7 +269,7 @@ public abstract class AbstractProcessorContext<KOut, VOut> implements InternalPr
     }
 
     @Override
-    public ProcessorMetadata getProcessorMetadata() {
+    public ProcessorMetadata processorMetadata() {
         return processorMetadata;
     }
 }

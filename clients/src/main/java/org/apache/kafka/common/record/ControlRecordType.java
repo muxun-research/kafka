@@ -21,6 +21,7 @@ import org.apache.kafka.common.protocol.types.Field;
 import org.apache.kafka.common.protocol.types.Schema;
 import org.apache.kafka.common.protocol.types.Struct;
 import org.apache.kafka.common.protocol.types.Type;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,10 +42,17 @@ import java.nio.ByteBuffer;
  * The schema for the value field is left to the control record type to specify.
  */
 public enum ControlRecordType {
-    ABORT((short) 0), COMMIT((short) 1),
+    ABORT((short) 0),
+    COMMIT((short) 1),
 
-    // Raft quorum related control messages.
-    LEADER_CHANGE((short) 2), SNAPSHOT_HEADER((short) 3), SNAPSHOT_FOOTER((short) 4),
+    // KRaft quorum related control messages
+    LEADER_CHANGE((short) 2),
+    SNAPSHOT_HEADER((short) 3),
+    SNAPSHOT_FOOTER((short) 4),
+
+    // KRaft membership changes messages
+    KRAFT_VERSION((short) 5),
+    KRAFT_VOTERS((short) 6),
 
     // UNKNOWN is used to indicate a control type which the client is not aware of and should be ignored
     UNKNOWN((short) -1);
@@ -53,7 +61,9 @@ public enum ControlRecordType {
 
     static final short CURRENT_CONTROL_RECORD_KEY_VERSION = 0;
     static final int CURRENT_CONTROL_RECORD_KEY_SIZE = 4;
-    private static final Schema CONTROL_RECORD_KEY_SCHEMA_VERSION_V0 = new Schema(new Field("version", Type.INT16), new Field("type", Type.INT16));
+    private static final Schema CONTROL_RECORD_KEY_SCHEMA_VERSION_V0 = new Schema(
+            new Field("version", Type.INT16),
+            new Field("type", Type.INT16));
 
     private final short type;
 
@@ -103,6 +113,10 @@ public enum ControlRecordType {
                 return SNAPSHOT_HEADER;
             case 4:
                 return SNAPSHOT_FOOTER;
+            case 5:
+                return KRAFT_VERSION;
+            case 6:
+                return KRAFT_VOTERS;
 
             default:
                 return UNKNOWN;

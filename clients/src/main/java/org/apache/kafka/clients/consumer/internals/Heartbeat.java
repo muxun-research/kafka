@@ -16,119 +16,129 @@
  */
 package org.apache.kafka.clients.consumer.internals;
 
+import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.GroupRebalanceConfig;
+import org.apache.kafka.common.utils.ExponentialBackoff;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Timer;
+
 import org.slf4j.Logger;
 
 /**
  * A helper class for managing the heartbeat to the coordinator
  */
 public final class Heartbeat {
-	private final int maxPollIntervalMs;
-	private final GroupRebalanceConfig rebalanceConfig;
-	private final Time time;
-	private final Timer heartbeatTimer;
-	private final Timer sessionTimer;
-	private final Timer pollTimer;
-	private final Logger log;
+    private final int maxPollIntervalMs;
+    private final GroupRebalanceConfig rebalanceConfig;
+    private final Time time;
+    private final Timer heartbeatTimer;
+    private final Timer sessionTimer;
+    private final Timer pollTimer;
+    private final Logger log;
+    private final ExponentialBackoff retryBackoff;
 
-	private volatile long lastHeartbeatSend = 0L;
-	private volatile boolean heartbeatInFlight = false;
+    private volatile long lastHeartbeatSend = 0L;
+    private volatile boolean heartbeatInFlight = false;
+    private volatile long heartbeatAttempts = 0L;
 
-	public Heartbeat(GroupRebalanceConfig config,
-					 Time time) {
-		if (config.heartbeatIntervalMs >= config.sessionTimeoutMs)
-			throw new IllegalArgumentException("Heartbeat must be set lower than the session timeout");
-		this.rebalanceConfig = config;
-		this.time = time;
-		this.heartbeatTimer = time.timer(config.heartbeatIntervalMs);
-		this.sessionTimer = time.timer(config.sessionTimeoutMs);
-		this.maxPollIntervalMs = config.rebalanceTimeoutMs;
-		this.pollTimer = time.timer(maxPollIntervalMs);
+    public Heartbeat(GroupRebalanceConfig config,
+                     Time time) {
+        if (config.heartbeatIntervalMs >= config.sessionTimeoutMs)
+            throw new IllegalArgumentException("Heartbeat must be set lower than the session timeout");
+        this.rebalanceConfig = config;
+        this.time = time;
+        this.heartbeatTimer = time.timer(config.heartbeatIntervalMs);
+        this.sessionTimer = time.timer(config.sessionTimeoutMs);
+        this.maxPollIntervalMs = config.rebalanceTimeoutMs;
+        this.pollTimer = time.timer(maxPollIntervalMs);
+        this.retryBackoff = new ExponentialBackoff(rebalanceConfig.retryBackoffMs,
+                CommonClientConfigs.RETRY_BACKOFF_EXP_BASE,
+                rebalanceConfig.retryBackoffMaxMs,
+                CommonClientConfigs.RETRY_BACKOFF_JITTER);
 
-		final LogContext logContext = new LogContext("[Heartbeat groupID=" + config.groupId + "] ");
-		this.log = logContext.logger(getClass());
-	}
+        final LogContext logContext = new LogContext("[Heartbeat groupID=" + config.groupId + "] ");
+        this.log = logContext.logger(getClass());
+    }
 
     private void update(long now) {
-		heartbeatTimer.update(now);
-		sessionTimer.update(now);
-		pollTimer.update(now);
-	}
+        heartbeatTimer.update(now);
+        sessionTimer.update(now);
+        pollTimer.update(now);
+    }
 
-	public void poll(long now) {
-		update(now);
-		pollTimer.reset(maxPollIntervalMs);
-	}
+    public void poll(long now) {
+        update(now);
+        pollTimer.reset(maxPollIntervalMs);
+    }
 
-	boolean hasInflight() {
-		return heartbeatInFlight;
-	}
+    boolean hasInflight() {
+        return heartbeatInFlight;
+    }
 
-	void sentHeartbeat(long now) {
-		lastHeartbeatSend = now;
-		heartbeatInFlight = true;
-		update(now);
-		heartbeatTimer.reset(rebalanceConfig.heartbeatIntervalMs);
+    void sentHeartbeat(long now) {
+        lastHeartbeatSend = now;
+        heartbeatInFlight = true;
+        update(now);
+        heartbeatTimer.reset(rebalanceConfig.heartbeatIntervalMs);
 
-		if (log.isTraceEnabled()) {
-			log.trace("Sending heartbeat request with {}ms remaining on timer", heartbeatTimer.remainingMs());
-		}
-	}
+        if (log.isTraceEnabled()) {
+            log.trace("Sending heartbeat request with {}ms remaining on timer", heartbeatTimer.remainingMs());
+        }
+    }
 
-	void failHeartbeat() {
-		update(time.milliseconds());
-		heartbeatInFlight = false;
-		heartbeatTimer.reset(rebalanceConfig.retryBackoffMs);
+    void failHeartbeat() {
+        update(time.milliseconds());
+        heartbeatInFlight = false;
+        heartbeatTimer.reset(retryBackoff.backoff(heartbeatAttempts++));
 
-		log.trace("Heartbeat failed, reset the timer to {}ms remaining", heartbeatTimer.remainingMs());
-	}
+        log.trace("Heartbeat failed, reset the timer to {}ms remaining", heartbeatTimer.remainingMs());
+    }
 
-	void receiveHeartbeat() {
-		update(time.milliseconds());
-		heartbeatInFlight = false;
-		sessionTimer.reset(rebalanceConfig.sessionTimeoutMs);
-	}
+    void receiveHeartbeat() {
+        update(time.milliseconds());
+        heartbeatInFlight = false;
+        heartbeatAttempts = 0L;
+        sessionTimer.reset(rebalanceConfig.sessionTimeoutMs);
+    }
 
-	boolean shouldHeartbeat(long now) {
-		update(now);
-		return heartbeatTimer.isExpired();
-	}
+    boolean shouldHeartbeat(long now) {
+        update(now);
+        return heartbeatTimer.isExpired();
+    }
+    
+    long lastHeartbeatSend() {
+        return this.lastHeartbeatSend;
+    }
 
-	long lastHeartbeatSend() {
-		return this.lastHeartbeatSend;
-	}
+    long timeToNextHeartbeat(long now) {
+        update(now);
+        return heartbeatTimer.remainingMs();
+    }
 
-	long timeToNextHeartbeat(long now) {
-		update(now);
-		return heartbeatTimer.remainingMs();
-	}
+    boolean sessionTimeoutExpired(long now) {
+        update(now);
+        return sessionTimer.isExpired();
+    }
 
-	boolean sessionTimeoutExpired(long now) {
-		update(now);
-		return sessionTimer.isExpired();
-	}
+    void resetTimeouts() {
+        update(time.milliseconds());
+        sessionTimer.reset(rebalanceConfig.sessionTimeoutMs);
+        pollTimer.reset(maxPollIntervalMs);
+        heartbeatTimer.reset(rebalanceConfig.heartbeatIntervalMs);
+    }
 
-	void resetTimeouts() {
-		update(time.milliseconds());
-		sessionTimer.reset(rebalanceConfig.sessionTimeoutMs);
-		pollTimer.reset(maxPollIntervalMs);
-		heartbeatTimer.reset(rebalanceConfig.heartbeatIntervalMs);
-	}
+    void resetSessionTimeout() {
+        update(time.milliseconds());
+        sessionTimer.reset(rebalanceConfig.sessionTimeoutMs);
+    }
 
-	void resetSessionTimeout() {
-		update(time.milliseconds());
-		sessionTimer.reset(rebalanceConfig.sessionTimeoutMs);
-	}
+    boolean pollTimeoutExpired(long now) {
+        update(now);
+        return pollTimer.isExpired();
+    }
 
-	boolean pollTimeoutExpired(long now) {
-		update(now);
-		return pollTimer.isExpired();
-	}
-
-	long lastPollTime() {
-		return pollTimer.currentTimeMs();
-	}
+    long lastPollTime() {
+        return pollTimer.currentTimeMs();
+    }
 }

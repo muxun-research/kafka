@@ -23,11 +23,15 @@ import org.apache.kafka.common.message.AlterPartitionRequestData.PartitionData;
 import org.apache.kafka.common.message.AlterPartitionRequestData.TopicData;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.utils.annotation.ApiKeyVersionsSource;
+
 import org.junit.jupiter.params.ParameterizedTest;
 
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AlterPartitionRequestTest {
     String topic = "test-topic";
@@ -36,24 +40,45 @@ class AlterPartitionRequestTest {
     @ParameterizedTest
     @ApiKeyVersionsSource(apiKey = ApiKeys.ALTER_PARTITION)
     public void testBuildAlterPartitionRequest(short version) {
-        AlterPartitionRequestData request = new AlterPartitionRequestData().setBrokerId(1).setBrokerEpoch(1);
+        AlterPartitionRequestData request = new AlterPartitionRequestData()
+            .setBrokerId(1)
+            .setBrokerEpoch(1);
 
-        TopicData topicData = new TopicData().setTopicId(topicId).setTopicName(topic);
+        TopicData topicData = new TopicData()
+            .setTopicId(topicId)
+            .setTopicName(topic);
 
         List<BrokerState> newIsrWithBrokerEpoch = new LinkedList<>();
         newIsrWithBrokerEpoch.add(new BrokerState().setBrokerId(1).setBrokerEpoch(1001));
         newIsrWithBrokerEpoch.add(new BrokerState().setBrokerId(2).setBrokerEpoch(1002));
         newIsrWithBrokerEpoch.add(new BrokerState().setBrokerId(3).setBrokerEpoch(1003));
 
-        topicData.partitions().add(new PartitionData().setPartitionIndex(0).setLeaderEpoch(1).setPartitionEpoch(10).setNewIsrWithEpochs(newIsrWithBrokerEpoch));
+        topicData.partitions().add(new PartitionData()
+            .setPartitionIndex(0)
+            .setLeaderEpoch(1)
+            .setPartitionEpoch(10)
+            .setNewIsrWithEpochs(newIsrWithBrokerEpoch));
 
         request.topics().add(topicData);
 
-        AlterPartitionRequest.Builder builder = new AlterPartitionRequest.Builder(request, version > 1);
+        AlterPartitionRequest.Builder builder = new AlterPartitionRequest.Builder(request);
         AlterPartitionRequest alterPartitionRequest = builder.build(version);
         assertEquals(1, alterPartitionRequest.data().topics().size());
         assertEquals(1, alterPartitionRequest.data().topics().get(0).partitions().size());
         PartitionData partitionData = alterPartitionRequest.data().topics().get(0).partitions().get(0);
+        if (version < 3) {
+            assertEquals(Arrays.asList(1, 2, 3), partitionData.newIsr());
+            assertTrue(partitionData.newIsrWithEpochs().isEmpty());
+        } else {
+            assertEquals(newIsrWithBrokerEpoch, partitionData.newIsrWithEpochs());
+            assertTrue(partitionData.newIsr().isEmpty());
+        }
+
+        // Build the request again to make sure build() is idempotent.
+        alterPartitionRequest = builder.build(version);
+        assertEquals(1, alterPartitionRequest.data().topics().size());
+        assertEquals(1, alterPartitionRequest.data().topics().get(0).partitions().size());
+        alterPartitionRequest.data().topics().get(0).partitions().get(0);
         if (version < 3) {
             assertEquals(Arrays.asList(1, 2, 3), partitionData.newIsr());
             assertTrue(partitionData.newIsrWithEpochs().isEmpty());

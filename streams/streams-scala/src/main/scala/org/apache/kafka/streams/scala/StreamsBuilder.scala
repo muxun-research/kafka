@@ -16,14 +16,15 @@
  */
 package org.apache.kafka.streams.scala
 
-import org.apache.kafka.streams.kstream.GlobalKTable
-import org.apache.kafka.streams.processor.{ProcessorSupplier, StateStore}
-import org.apache.kafka.streams.scala.kstream.{Consumed, KStream, KTable, Materialized}
-import org.apache.kafka.streams.state.StoreBuilder
-import org.apache.kafka.streams.{Topology, StreamsBuilder => StreamsBuilderJ}
-
 import java.util.Properties
 import java.util.regex.Pattern
+
+import org.apache.kafka.streams.kstream.GlobalKTable
+import org.apache.kafka.streams.processor.StateStore
+import org.apache.kafka.streams.state.StoreBuilder
+import org.apache.kafka.streams.{StreamsBuilder => StreamsBuilderJ, Topology}
+import org.apache.kafka.streams.scala.kstream.{Consumed, KStream, KTable, Materialized}
+
 import scala.jdk.CollectionConverters._
 
 /**
@@ -52,6 +53,7 @@ class StreamsBuilder(inner: StreamsBuilderJ = new StreamsBuilderJ) {
    * // from the serdes through the implicits in ImplicitConversions#consumedFromSerde
    * val userClicksStream: KStream[String, Long] = builder.stream(userClicksTopic)
    * }}}
+   *
    * @param topic the topic name
    * @return a [[kstream.KStream]] for the specified topic
    */
@@ -60,6 +62,7 @@ class StreamsBuilder(inner: StreamsBuilderJ = new StreamsBuilderJ) {
 
   /**
    * Create a [[kstream.KStream]] from the specified topics.
+   *
    * @param topics the topic names
    * @return a [[kstream.KStream]] for the specified topics
    * @see #stream(String)
@@ -70,6 +73,7 @@ class StreamsBuilder(inner: StreamsBuilderJ = new StreamsBuilderJ) {
 
   /**
    * Create a [[kstream.KStream]] from the specified topic pattern.
+   *
    * @param topicPattern the topic name pattern
    * @return a [[kstream.KStream]] for the specified topics
    * @see #stream(String)
@@ -99,6 +103,7 @@ class StreamsBuilder(inner: StreamsBuilderJ = new StreamsBuilderJ) {
    * // from the serdes through the implicits in ImplicitConversions#consumedFromSerde
    * val userClicksStream: KTable[String, Long] = builder.table(userClicksTopic)
    * }}}
+   *
    * @param topic the topic name
    * @return a [[kstream.KTable]] for the specified topic
    * @see `org.apache.kafka.streams.StreamsBuilder#table`
@@ -109,20 +114,21 @@ class StreamsBuilder(inner: StreamsBuilderJ = new StreamsBuilderJ) {
   /**
    * Create a [[kstream.KTable]] from the specified topic.
    *
-   * @param topic        the topic name
-   * @param materialized the instance of `Materialized` used to materialize a state store
+   * @param topic the topic name
+   * @param materialized  the instance of `Materialized` used to materialize a state store
    * @return a [[kstream.KTable]] for the specified topic
    * @see #table(String)
    * @see `org.apache.kafka.streams.StreamsBuilder#table`
    */
   def table[K, V](topic: String, materialized: Materialized[K, V, ByteArrayKeyValueStore])(implicit
-                                                                                           consumed: Consumed[K, V]
+    consumed: Consumed[K, V]
   ): KTable[K, V] =
     new KTable(inner.table[K, V](topic, consumed, materialized))
 
   /**
    * Create a `GlobalKTable` from the specified topic. The serializers from the implicit `Consumed`
    * instance will be used. Input records with `null` key will be dropped.
+   *
    * @param topic the topic name
    * @return a `GlobalKTable` for the specified topic
    * @see `org.apache.kafka.streams.StreamsBuilder#globalTable`
@@ -135,13 +141,13 @@ class StreamsBuilder(inner: StreamsBuilderJ = new StreamsBuilderJ) {
    * in a local `KeyValueStore` configured with the provided instance of `Materialized`. The serializers
    * from the implicit `Consumed` instance will be used.
    *
-   * @param topic        the topic name
-   * @param materialized the instance of `Materialized` used to materialize a state store
+   * @param topic the topic name
+   * @param materialized  the instance of `Materialized` used to materialize a state store
    * @return a `GlobalKTable` for the specified topic
    * @see `org.apache.kafka.streams.StreamsBuilder#globalTable`
    */
   def globalTable[K, V](topic: String, materialized: Materialized[K, V, ByteArrayKeyValueStore])(implicit
-                                                                                                 consumed: Consumed[K, V]
+    consumed: Consumed[K, V]
   ): GlobalKTable[K, V] =
     inner.globalTable(topic, consumed, materialized)
 
@@ -167,32 +173,12 @@ class StreamsBuilder(inner: StreamsBuilderJ = new StreamsBuilderJ) {
    *
    * @see `org.apache.kafka.streams.StreamsBuilder#addGlobalStore`
    */
-  @deprecated(
-    "Use #addGlobalStore(StoreBuilder, String, Consumed, org.apache.kafka.streams.processor.api.ProcessorSupplier) instead.",
-    "2.7.0"
-  )
   def addGlobalStore[K, V](
-                            storeBuilder: StoreBuilder[_ <: StateStore],
-                            topic: String,
-                            consumed: Consumed[K, V],
-                            stateUpdateSupplier: ProcessorSupplier[K, V]
-                          ): StreamsBuilderJ =
-    inner.addGlobalStore(storeBuilder, topic, consumed, stateUpdateSupplier)
-
-  /**
-   * Adds a global `StateStore` to the topology. Global stores should not be added to `Processor`, `Transformer`,
-   * or `ValueTransformer` (in contrast to regular stores).
-   * <p>
-   * It is not required to connect a global store to `Processor`, `Transformer`, or `ValueTransformer`;
-   * those have read-only access to all global stores by default.
-   * @see `org.apache.kafka.streams.StreamsBuilder#addGlobalStore`
-   */
-  def addGlobalStore[K, V](
-                            storeBuilder: StoreBuilder[_ <: StateStore],
-                            topic: String,
-                            consumed: Consumed[K, V],
-                            stateUpdateSupplier: org.apache.kafka.streams.processor.api.ProcessorSupplier[K, V, Void, Void]
-                          ): StreamsBuilderJ =
+    storeBuilder: StoreBuilder[_ <: StateStore],
+    topic: String,
+    consumed: Consumed[K, V],
+    stateUpdateSupplier: org.apache.kafka.streams.processor.api.ProcessorSupplier[K, V, Void, Void]
+  ): StreamsBuilderJ =
     inner.addGlobalStore(storeBuilder, topic, consumed, stateUpdateSupplier)
 
   def build(): Topology = inner.build()
@@ -200,6 +186,7 @@ class StreamsBuilder(inner: StreamsBuilderJ = new StreamsBuilderJ) {
   /**
    * Returns the `Topology` that represents the specified processing logic and accepts
    * a `Properties` instance used to indicate whether to optimize topology or not.
+   *
    * @param props the `Properties` used for building possibly optimized topology
    * @return the `Topology` that represents the specified processing logic
    * @see `org.apache.kafka.streams.StreamsBuilder#build`

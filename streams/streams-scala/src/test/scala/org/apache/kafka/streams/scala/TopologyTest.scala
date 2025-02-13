@@ -16,23 +16,35 @@
  */
 package org.apache.kafka.streams.scala
 
+import java.time.Duration
+import java.util
+import java.util.{Locale, Properties}
+import java.util.regex.Pattern
 import org.apache.kafka.common.serialization.{Serdes => SerdesJ}
-import org.apache.kafka.streams.kstream.{Aggregator, Initializer, JoinWindows, KeyValueMapper, Reducer, Transformer, ValueJoiner, ValueMapper, KGroupedStream => KGroupedStreamJ, KStream => KStreamJ, KTable => KTableJ, Materialized => MaterializedJ, StreamJoined => StreamJoinedJ}
+import org.apache.kafka.streams.kstream.{
+  Aggregator,
+  Initializer,
+  JoinWindows,
+  KGroupedStream => KGroupedStreamJ,
+  KStream => KStreamJ,
+  KTable => KTableJ,
+  KeyValueMapper,
+  Materialized => MaterializedJ,
+  Reducer,
+  StreamJoined => StreamJoinedJ,
+  ValueJoiner,
+  ValueMapper
+}
+import org.apache.kafka.streams.processor.api
 import org.apache.kafka.streams.processor.api.{Processor, ProcessorSupplier}
-import org.apache.kafka.streams.processor.{ProcessorContext, api}
 import org.apache.kafka.streams.scala.ImplicitConversions._
-import org.apache.kafka.streams.scala.kstream._
-import org.apache.kafka.streams.scala.serialization.Serdes._
 import org.apache.kafka.streams.scala.serialization.{Serdes => NewSerdes}
-import org.apache.kafka.streams.{KeyValue, StreamsConfig, TopologyDescription, StreamsBuilder => StreamsBuilderJ}
+import org.apache.kafka.streams.scala.serialization.Serdes._
+import org.apache.kafka.streams.scala.kstream._
+import org.apache.kafka.streams.{KeyValue, StreamsBuilder => StreamsBuilderJ, StreamsConfig, TopologyDescription}
 import org.junit.jupiter.api.Assertions._
 import org.junit.jupiter.api._
 
-import java.time.Duration
-import java.util
-import java.util.regex.Pattern
-import java.util.{Locale, Properties}
-import scala.annotation.nowarn
 import scala.jdk.CollectionConverters._
 
 /**
@@ -262,9 +274,14 @@ class TopologyTest {
     assertEquals(getTopologyScala, getTopologyJava)
   }
 
-  @nowarn
   @Test
-  def shouldBuildIdenticalTopologyInJavaNScalaTransform(): Unit = {
+  def shouldBuildIdenticalTopologyInJavaNScalaProcess(): Unit = {
+    val processorSupplier = new ProcessorSupplier[String, String, String, String] {
+      override def get(): Processor[String, String, String, String] =
+        new api.Processor[String, String, String, String] {
+          override def process(record: api.Record[String, String]): Unit = {}
+        }
+    }
 
     // build the Scala topology
     def getTopologyScala: TopologyDescription = {
@@ -275,39 +292,20 @@ class TopologyTest {
       val textLines = streamBuilder.stream[String, String](inputTopic)
 
       val _: KTable[String, Long] = textLines
-        .transform(() =>
-          new Transformer[String, String, KeyValue[String, String]] {
-            override def init(context: ProcessorContext): Unit = ()
-
-            override def transform(key: String, value: String): KeyValue[String, String] =
-              new KeyValue(key, value.toLowerCase)
-
-            override def close(): Unit = ()
-          }
-        )
+        .process(processorSupplier)
         .groupBy((_, v) => v)
         .count()
 
       streamBuilder.build().describe()
     }
 
-    @nowarn
     // build the Java topology
     def getTopologyJava: TopologyDescription = {
 
       val streamBuilder = new StreamsBuilderJ
       val textLines: KStreamJ[String, String] = streamBuilder.stream[String, String](inputTopic)
 
-      val lowered: KStreamJ[String, String] = textLines.transform(() =>
-        new Transformer[String, String, KeyValue[String, String]] {
-          override def init(context: ProcessorContext): Unit = ()
-
-          override def transform(key: String, value: String): KeyValue[String, String] =
-            new KeyValue(key, value.toLowerCase)
-
-          override def close(): Unit = ()
-        }
-      )
+      val lowered: KStreamJ[String, String] = textLines.process(processorSupplier)
 
       val grouped: KGroupedStreamJ[String, String] = lowered.groupBy((_, v) => v)
 
@@ -463,8 +461,8 @@ class TopologyTest {
     assertEquals(getTopologyScala.build(props).describe.toString, getTopologyJava.build(props).describe.toString)
   }
 
-  private class SimpleProcessorSupplier private[TopologyTest](val valueList: util.List[String])
-    extends ProcessorSupplier[String, String, Void, Void] {
+  private class SimpleProcessorSupplier private[TopologyTest] (val valueList: util.List[String])
+      extends ProcessorSupplier[String, String, Void, Void] {
 
     override def get(): Processor[String, String, Void, Void] =
       (record: api.Record[String, String]) => valueList.add(record.value())

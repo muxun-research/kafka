@@ -19,7 +19,19 @@ package org.apache.kafka.jmh.connect;
 
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.transforms.ReplaceField;
-import org.openjdk.jmh.annotations.*;
+
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Warmup;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -52,8 +64,10 @@ public class ReplaceFieldBenchmark {
     public void setup() {
         this.replaceFieldSmt = new ReplaceField.Value<>();
         Map<String, String> replaceFieldConfigs = new HashMap<>();
-        replaceFieldConfigs.put("exclude", IntStream.range(0, 2 * includeExcludeFieldCount).filter(x -> (x & 1) == 0).mapToObj(x -> "Field-" + x).collect(Collectors.joining(",")));
-        replaceFieldConfigs.put("include", IntStream.range(0, 2 * includeExcludeFieldCount).filter(x -> (x & 1) == 1).mapToObj(x -> "Field-" + x).collect(Collectors.joining(",")));
+        replaceFieldConfigs.put("exclude",
+                IntStream.range(0, 2 * includeExcludeFieldCount).filter(x -> (x & 1) == 0).mapToObj(x -> "Field-" + x).collect(Collectors.joining(",")));
+        replaceFieldConfigs.put("include",
+                IntStream.range(0, 2 * includeExcludeFieldCount).filter(x -> (x & 1) == 1).mapToObj(x -> "Field-" + x).collect(Collectors.joining(",")));
         replaceFieldSmt.configure(replaceFieldConfigs);
 
         Map<String, Object> value = new HashMap<>();

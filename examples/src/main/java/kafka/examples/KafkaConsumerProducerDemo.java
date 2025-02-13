@@ -32,14 +32,15 @@ import java.util.concurrent.TimeUnit;
  * record all the log output together.
  */
 public class KafkaConsumerProducerDemo {
-    public static final String BOOTSTRAP_SERVERS = "localhost:9092";
     public static final String TOPIC_NAME = "my-topic";
     public static final String GROUP_NAME = "my-group";
 
     public static void main(String[] args) {
         try {
             if (args.length == 0) {
-                Utils.printHelp("This example takes 2 parameters (i.e. 10000 sync):%n" + "- records: total number of records to send (required)%n" + "- mode: pass 'sync' to send records synchronously (optional)");
+                Utils.printHelp("This example takes 2 parameters (i.e. 10000 sync):%n" +
+                    "- records: total number of records to send (required)%n" +
+                    "- mode: pass 'sync' to send records synchronously (optional)");
                 return;
             }
 
@@ -47,15 +48,17 @@ public class KafkaConsumerProducerDemo {
             boolean isAsync = args.length == 1 || !args[1].trim().equalsIgnoreCase("sync");
 
             // stage 1: clean any topics left from previous runs
-            Utils.recreateTopics(BOOTSTRAP_SERVERS, -1, TOPIC_NAME);
+            Utils.recreateTopics(KafkaProperties.BOOTSTRAP_SERVERS, -1, TOPIC_NAME);
             CountDownLatch latch = new CountDownLatch(2);
 
             // stage 2: produce records to topic1
-            Producer producerThread = new Producer("producer", BOOTSTRAP_SERVERS, TOPIC_NAME, isAsync, null, false, numRecords, -1, latch);
+            Producer producerThread = new Producer(
+                "producer", KafkaProperties.BOOTSTRAP_SERVERS, TOPIC_NAME, isAsync, null, false, numRecords, -1, latch);
             producerThread.start();
 
             // stage 3: consume records from topic1
-            Consumer consumerThread = new Consumer("consumer", BOOTSTRAP_SERVERS, TOPIC_NAME, GROUP_NAME, Optional.empty(), false, numRecords, latch);
+            Consumer consumerThread = new Consumer(
+                "consumer", KafkaProperties.BOOTSTRAP_SERVERS, TOPIC_NAME, GROUP_NAME, Optional.empty(), false, numRecords, latch);
             consumerThread.start();
 
             if (!latch.await(5, TimeUnit.MINUTES)) {

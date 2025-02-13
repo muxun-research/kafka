@@ -27,10 +27,16 @@ import org.apache.kafka.metadata.ScramCredentialData;
 import org.apache.kafka.server.common.ApiMessageAndVersion;
 import org.apache.kafka.server.common.MetadataVersion;
 import org.apache.kafka.server.util.MockRandom;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Random;
 
 import static org.apache.kafka.clients.admin.ScramMechanism.SCRAM_SHA_256;
 import static org.apache.kafka.clients.admin.ScramMechanism.SCRAM_SHA_512;
@@ -40,13 +46,13 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 @Timeout(value = 40)
 public class ScramImageTest {
-    public final static ScramImage IMAGE1;
+    public static final ScramImage IMAGE1;
 
-    public final static List<ApiMessageAndVersion> DELTA1_RECORDS;
+    public static final List<ApiMessageAndVersion> DELTA1_RECORDS;
 
-    final static ScramDelta DELTA1;
+    static final ScramDelta DELTA1;
 
-    final static ScramImage IMAGE2;
+    static final ScramImage IMAGE2;
 
     static byte[] randomBuffer(Random random, int length) {
         byte[] buf = new byte[length];
@@ -55,7 +61,11 @@ public class ScramImageTest {
     }
 
     static ScramCredentialData randomScramCredentialData(Random random) {
-        return new ScramCredentialData(randomBuffer(random, 1024), randomBuffer(random, 1024), randomBuffer(random, 1024), 1024 + random.nextInt(1024));
+        return new ScramCredentialData(
+            randomBuffer(random, 1024),
+            randomBuffer(random, 1024),
+            randomBuffer(random, 1024),
+            1024 + random.nextInt(1024));
     }
 
     static {
@@ -76,9 +86,31 @@ public class ScramImageTest {
         IMAGE1 = new ScramImage(image1mechanisms);
 
         DELTA1_RECORDS = new ArrayList<>();
-        DELTA1_RECORDS.add(new ApiMessageAndVersion(new RemoveUserScramCredentialRecord().setName("gamma").setMechanism(SCRAM_SHA_512.type()), (short) 0));
+        // remove all sha512 credentials
+        DELTA1_RECORDS.add(new ApiMessageAndVersion(new RemoveUserScramCredentialRecord().
+            setName("alpha").
+            setMechanism(SCRAM_SHA_512.type()), (short) 0));
+        DELTA1_RECORDS.add(new ApiMessageAndVersion(new RemoveUserScramCredentialRecord().
+            setName("gamma").
+            setMechanism(SCRAM_SHA_512.type()), (short) 0));
         ScramCredentialData secondAlpha256Credential = randomScramCredentialData(random);
-        DELTA1_RECORDS.add(new ApiMessageAndVersion(new UserScramCredentialRecord().setName("alpha").setMechanism(SCRAM_SHA_256.type()).setSalt(secondAlpha256Credential.salt()).setStoredKey(secondAlpha256Credential.storedKey()).setServerKey(secondAlpha256Credential.serverKey()).setIterations(secondAlpha256Credential.iterations()), (short) 0));
+        // add sha256 credential
+        DELTA1_RECORDS.add(new ApiMessageAndVersion(new UserScramCredentialRecord().
+                setName("alpha").
+                setMechanism(SCRAM_SHA_256.type()).
+                setSalt(secondAlpha256Credential.salt()).
+                setStoredKey(secondAlpha256Credential.storedKey()).
+                setServerKey(secondAlpha256Credential.serverKey()).
+                setIterations(secondAlpha256Credential.iterations()), (short) 0));
+        // add sha512 credential re-using name
+        ScramCredentialData secondAlpha512Credential = randomScramCredentialData(random);
+        DELTA1_RECORDS.add(new ApiMessageAndVersion(new UserScramCredentialRecord().
+            setName("alpha").
+            setMechanism(SCRAM_SHA_512.type()).
+            setSalt(secondAlpha512Credential.salt()).
+            setStoredKey(secondAlpha512Credential.storedKey()).
+            setServerKey(secondAlpha512Credential.serverKey()).
+            setIterations(secondAlpha512Credential.iterations()), (short) 0));
         DELTA1 = new ScramDelta(IMAGE1);
         RecordTestUtils.replayAll(DELTA1, DELTA1_RECORDS);
 
@@ -90,7 +122,7 @@ public class ScramImageTest {
         image2mechanisms.put(SCRAM_SHA_256, image2sha256);
 
         Map<String, ScramCredentialData> image2sha512 = new HashMap<>();
-        image2sha512.put("alpha", image1sha512.get("alpha"));
+        image2sha512.put("alpha", secondAlpha512Credential);
         image2mechanisms.put(SCRAM_SHA_512, image2sha512);
 
         IMAGE2 = new ScramImage(image2mechanisms);
@@ -130,7 +162,10 @@ public class ScramImageTest {
 
     private static void testToImage(ScramImage image, List<ApiMessageAndVersion> fromRecords) {
         // test from empty image stopping each of the various intermediate images along the way
-        new RecordTestUtils.TestThroughAllIntermediateImagesLeadingToFinalImageHelper<>(() -> ScramImage.EMPTY, ScramDelta::new).test(image, fromRecords);
+        new RecordTestUtils.TestThroughAllIntermediateImagesLeadingToFinalImageHelper<>(
+            () -> ScramImage.EMPTY,
+            ScramDelta::new
+        ).test(image, fromRecords);
     }
 
     private static List<ApiMessageAndVersion> getImageRecords(ScramImage image) {
@@ -141,14 +176,16 @@ public class ScramImageTest {
 
     @Test
     public void testEmptyWithInvalidIBP() {
-        ImageWriterOptions imageWriterOptions = new ImageWriterOptions.Builder().setMetadataVersion(MetadataVersion.IBP_3_4_IV0).build();
+        ImageWriterOptions imageWriterOptions = new ImageWriterOptions.Builder().
+                setMetadataVersion(MetadataVersion.IBP_3_4_IV0).build();
         RecordListWriter writer = new RecordListWriter();
         ScramImage.EMPTY.write(writer, imageWriterOptions);
     }
 
     @Test
     public void testImage1withInvalidIBP() {
-        ImageWriterOptions imageWriterOptions = new ImageWriterOptions.Builder().setMetadataVersion(MetadataVersion.IBP_3_4_IV0).build();
+        ImageWriterOptions imageWriterOptions = new ImageWriterOptions.Builder().
+                setMetadataVersion(MetadataVersion.IBP_3_4_IV0).build();
         RecordListWriter writer = new RecordListWriter();
         try {
             IMAGE1.write(writer, imageWriterOptions);

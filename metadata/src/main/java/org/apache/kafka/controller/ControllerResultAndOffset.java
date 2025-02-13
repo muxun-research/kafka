@@ -24,46 +24,46 @@ import java.util.stream.Collectors;
 
 
 final class ControllerResultAndOffset<T> extends ControllerResult<T> {
-	private final long offset;
+    private final long offset;
 
-	private ControllerResultAndOffset(long offset, ControllerResult<T> result) {
-		super(result.records(), result.response(), result.isAtomic());
-		this.offset = offset;
-	}
+    private ControllerResultAndOffset(long offset, ControllerResult<T> result) {
+        super(result.records(), result.response(), result.isAtomic());
+        this.offset = offset;
+    }
 
-	public long offset() {
-		return offset;
-	}
+    public long offset() {
+        return offset;
+    }
 
-	@Override
-	public boolean equals(Object o) {
-		if (o == null || (!o.getClass().equals(getClass()))) {
-			return false;
-		}
-		ControllerResultAndOffset other = (ControllerResultAndOffset) o;
-		return records().equals(other.records()) &&
-				response().equals(other.response()) &&
-				isAtomic() == other.isAtomic() &&
-				offset == other.offset;
-	}
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || (!o.getClass().equals(getClass()))) {
+            return false;
+        }
+        ControllerResultAndOffset other = (ControllerResultAndOffset) o;
+        return records().equals(other.records()) &&
+            response().equals(other.response()) &&
+            isAtomic() == other.isAtomic() &&
+            offset == other.offset;
+    }
 
-	@Override
-	public int hashCode() {
-		return Objects.hash(records(), response(), isAtomic(), offset);
-	}
+    @Override
+    public int hashCode() {
+        return Objects.hash(records(), response(), isAtomic(), offset);
+    }
 
-	@Override
-	public String toString() {
-		return String.format(
-				"ControllerResultAndOffset(records=%s, response=%s, isAtomic=%s, offset=%s)",
-				String.join(",", records().stream().map(ApiMessageAndVersion::toString).collect(Collectors.toList())),
-				response(),
-				isAtomic(),
-				offset
-		);
-	}
+    @Override
+    public String toString() {
+        return String.format(
+            "ControllerResultAndOffset(records=%s, response=%s, isAtomic=%s, offset=%d)",
+            records().stream().map(ApiMessageAndVersion::toString).collect(Collectors.joining(",")),
+            response(),
+            isAtomic(),
+            offset
+        );
+    }
 
-	public static <T> ControllerResultAndOffset<T> of(long offset, ControllerResult<T> result) {
-		return new ControllerResultAndOffset<>(offset, result);
-	}
+    public static <T> ControllerResultAndOffset<T> of(long offset, ControllerResult<T> result) {
+        return new ControllerResultAndOffset<>(offset, result);
+    }
 }

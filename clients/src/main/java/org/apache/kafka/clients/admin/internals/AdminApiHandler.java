@@ -21,7 +21,11 @@ import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.requests.AbstractRequest;
 import org.apache.kafka.common.requests.AbstractResponse;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public interface AdminApiHandler<K, V> {
@@ -35,10 +39,12 @@ public interface AdminApiHandler<K, V> {
      * Build the requests necessary for the given keys. The set of keys is derived by
      * {@link AdminApiDriver} during the lookup stage as the set of keys which all map
      * to the same destination broker. Handlers can choose to issue a single request for
-     * all of the provided keys (see {@link Batched}, issue one request per key (see
-     * {@link Unbatched}, or implement their own custom grouping logic if necessary.
+     * all of the provided keys (see {@link Batched}), issue one request per key (see
+     * {@link Unbatched}), or implement their own custom grouping logic if necessary.
+     *
      * @param brokerId the target brokerId for the request
-     * @param keys     the set of keys that should be handled by this request
+     * @param keys the set of keys that should be handled by this request
+     *
      * @return a collection of {@link RequestAndKeys} for the requests containing the given keys
      */
     Collection<RequestAndKeys<K>> buildRequest(int brokerId, Set<K> keys);
@@ -48,17 +54,19 @@ public interface AdminApiHandler<K, V> {
      * The handler should parse the response, check for errors, and return a
      * result which indicates which keys (if any) have either been completed or
      * failed with an unrecoverable error.
-     * <p>
+     *
      * It is also possible that the response indicates an incorrect target brokerId
      * (e.g. in the case of a NotLeader error when the request is bound for a partition
      * leader). In this case the key will be "unmapped" from the target brokerId
      * and lookup will be retried.
-     * <p>
+     *
      * Note that keys which received a retriable error should be left out of the
      * result. They will be retried automatically.
-     * @param broker   the broker that the associated request was sent to
-     * @param keys     the set of keys from the associated request
+     *
+     * @param broker the broker that the associated request was sent to
+     * @param keys the set of keys from the associated request
      * @param response the response received from the broker
+     *
      * @return result indicating key completion, failure, and unmapping
      */
     ApiResult<K, V> handleResponse(Node broker, Set<K> keys, AbstractResponse response);
@@ -67,17 +75,23 @@ public interface AdminApiHandler<K, V> {
      * Callback that is invoked when a fulfillment request hits an UnsupportedVersionException.
      * Keys for which the exception cannot be handled and the request shouldn't be retried must be mapped
      * to an error and returned. The request will then be retried for the remainder of the keys.
+     *
      * @return The failure mappings for the keys for which the exception cannot be handled and the
      * request shouldn't be retried. If the exception cannot be handled all initial keys will be in
      * the returned map.
      */
-    default Map<K, Throwable> handleUnsupportedVersionException(int brokerId, UnsupportedVersionException exception, Set<K> keys) {
+    default Map<K, Throwable> handleUnsupportedVersionException(
+        int brokerId,
+        UnsupportedVersionException exception,
+        Set<K> keys
+    ) {
         return keys.stream().collect(Collectors.toMap(k -> k, k -> exception));
     }
 
     /**
      * Get the lookup strategy that is responsible for finding the brokerId
      * which will handle each respective key.
+     *
      * @return non-null lookup strategy
      */
     AdminApiLookupStrategy<K> lookupStrategy();
@@ -87,26 +101,46 @@ public interface AdminApiHandler<K, V> {
         public final Map<K, Throwable> failedKeys;
         public final List<K> unmappedKeys;
 
-        public ApiResult(Map<K, V> completedKeys, Map<K, Throwable> failedKeys, List<K> unmappedKeys) {
+        public ApiResult(
+            Map<K, V> completedKeys,
+            Map<K, Throwable> failedKeys,
+            List<K> unmappedKeys
+        ) {
             this.completedKeys = Collections.unmodifiableMap(completedKeys);
             this.failedKeys = Collections.unmodifiableMap(failedKeys);
             this.unmappedKeys = Collections.unmodifiableList(unmappedKeys);
         }
 
         public static <K, V> ApiResult<K, V> completed(K key, V value) {
-            return new ApiResult<>(Collections.singletonMap(key, value), Collections.emptyMap(), Collections.emptyList());
+            return new ApiResult<>(
+                Collections.singletonMap(key, value),
+                Collections.emptyMap(),
+                Collections.emptyList()
+            );
         }
 
         public static <K, V> ApiResult<K, V> failed(K key, Throwable t) {
-            return new ApiResult<>(Collections.emptyMap(), Collections.singletonMap(key, t), Collections.emptyList());
+            return new ApiResult<>(
+                Collections.emptyMap(),
+                Collections.singletonMap(key, t),
+                Collections.emptyList()
+            );
         }
 
         public static <K, V> ApiResult<K, V> unmapped(List<K> keys) {
-            return new ApiResult<>(Collections.emptyMap(), Collections.emptyMap(), keys);
+            return new ApiResult<>(
+                Collections.emptyMap(),
+                Collections.emptyMap(),
+                keys
+            );
         }
 
         public static <K, V> ApiResult<K, V> empty() {
-            return new ApiResult<>(Collections.emptyMap(), Collections.emptyMap(), Collections.emptyList());
+            return new ApiResult<>(
+                Collections.emptyMap(),
+                Collections.emptyMap(),
+                Collections.emptyList()
+            );
         }
     }
 
@@ -142,12 +176,13 @@ public interface AdminApiHandler<K, V> {
      */
     abstract class Unbatched<K, V> implements AdminApiHandler<K, V> {
         abstract AbstractRequest.Builder<?> buildSingleRequest(int brokerId, K key);
-
         abstract ApiResult<K, V> handleSingleResponse(Node broker, K key, AbstractResponse response);
 
         @Override
         public final Collection<RequestAndKeys<K>> buildRequest(int brokerId, Set<K> keys) {
-            return keys.stream().map(key -> new RequestAndKeys<>(buildSingleRequest(brokerId, key), Collections.singleton(key))).collect(Collectors.toSet());
+            return keys.stream()
+                .map(key -> new RequestAndKeys<>(buildSingleRequest(brokerId, key), Collections.singleton(key)))
+                .collect(Collectors.toSet());
         }
 
         @Override

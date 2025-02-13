@@ -16,13 +16,15 @@
  */
 package org.apache.kafka.common.message;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.protocol.ByteBufferAccessor;
 import org.apache.kafka.common.protocol.MessageUtil;
 import org.apache.kafka.common.protocol.ObjectSerializationCache;
 import org.apache.kafka.common.utils.ByteUtils;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
@@ -300,6 +302,8 @@ public class SimpleExampleMessageTest {
 
     private SimpleExampleMessageData roundTripSerde(SimpleExampleMessageData message, short version) {
         ByteBuffer buf = MessageUtil.toByteBuffer(message, version);
+        // Check size calculation
+        assertEquals(buf.remaining(), message.size(new ObjectSerializationCache(), version));
         return deserialize(buf.duplicate(), version);
     }
 

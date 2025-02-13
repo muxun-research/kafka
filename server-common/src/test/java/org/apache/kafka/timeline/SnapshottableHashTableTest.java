@@ -18,20 +18,31 @@
 package org.apache.kafka.timeline;
 
 import org.apache.kafka.common.utils.LogContext;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
+import java.util.List;
 import java.util.stream.Collectors;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Timeout(value = 40)
 public class SnapshottableHashTableTest {
 
     /**
      * The class of test elements.
-     * <p>
+     *
      * This class is intended to help test how the table handles distinct objects which
      * are equal to each other.  Therefore, for the purpose of hashing and equality, we
      * only check i here, and ignore j.
@@ -63,10 +74,9 @@ public class SnapshottableHashTableTest {
 
         @Override
         public boolean equals(Object o) {
-            if (!(o instanceof TestElement)) {
+            if (!(o instanceof TestElement other)) {
                 return false;
             }
-            TestElement other = (TestElement) o;
             return other.i == i;
         }
 
@@ -85,10 +95,10 @@ public class SnapshottableHashTableTest {
     @Test
     public void testEmptyTable() {
         SnapshotRegistry registry = new SnapshotRegistry(new LogContext());
-        SnapshottableHashTable<TestElement> table = new SnapshottableHashTable<>(registry, 1);
+        SnapshottableHashTable<TestElement> table =
+            new SnapshottableHashTable<>(registry, 1);
         assertEquals(0, table.snapshottableSize(Long.MAX_VALUE));
     }
-
     @Test
     public void testDeleteOnEmptyDeltaTable() {
         // A simple test case to validate the behavior of the TimelineHashSet
@@ -138,7 +148,8 @@ public class SnapshottableHashTableTest {
     @Test
     public void testAddAndRemove() {
         SnapshotRegistry registry = new SnapshotRegistry(new LogContext());
-        SnapshottableHashTable<TestElement> table = new SnapshottableHashTable<>(registry, 1);
+        SnapshottableHashTable<TestElement> table =
+            new SnapshottableHashTable<>(registry, 1);
         assertNull(table.snapshottableAddOrReplace(E_1B));
         assertEquals(1, table.snapshottableSize(Long.MAX_VALUE));
         registry.getOrCreateSnapshot(0);
@@ -157,7 +168,9 @@ public class SnapshottableHashTableTest {
         assertEquals(1, table.snapshottableSize(0));
         assertEquals(3, table.snapshottableSize(1));
         registry.deleteSnapshot(0);
-        assertEquals("No in-memory snapshot for epoch 0. Snapshot epochs are: 1", assertThrows(RuntimeException.class, () -> table.snapshottableSize(0)).getMessage());
+        assertEquals("No in-memory snapshot for epoch 0. Snapshot epochs are: 1",
+            assertThrows(RuntimeException.class, () ->
+                table.snapshottableSize(0)).getMessage());
         registry.deleteSnapshot(1);
         assertEquals(0, table.snapshottableSize(Long.MAX_VALUE));
     }
@@ -165,7 +178,8 @@ public class SnapshottableHashTableTest {
     @Test
     public void testIterateOverSnapshot() {
         SnapshotRegistry registry = new SnapshotRegistry(new LogContext());
-        SnapshottableHashTable<TestElement> table = new SnapshottableHashTable<>(registry, 1);
+        SnapshottableHashTable<TestElement> table =
+            new SnapshottableHashTable<>(registry, 1);
         assertTrue(table.snapshottableAddUnlessPresent(E_1B));
         assertFalse(table.snapshottableAddUnlessPresent(E_1A));
         assertTrue(table.snapshottableAddUnlessPresent(E_2A));
@@ -184,7 +198,8 @@ public class SnapshottableHashTableTest {
     @Test
     public void testIterateOverSnapshotWhileExpandingTable() {
         SnapshotRegistry registry = new SnapshotRegistry(new LogContext());
-        SnapshottableHashTable<TestElement> table = new SnapshottableHashTable<>(registry, 1);
+        SnapshottableHashTable<TestElement> table =
+            new SnapshottableHashTable<>(registry, 1);
         assertNull(table.snapshottableAddOrReplace(E_1A));
         registry.getOrCreateSnapshot(0);
         Iterator<TestElement> iter = table.snapshottableIterator(0);
@@ -196,7 +211,8 @@ public class SnapshottableHashTableTest {
     @Test
     public void testIterateOverSnapshotWhileDeletingAndReplacing() {
         SnapshotRegistry registry = new SnapshotRegistry(new LogContext());
-        SnapshottableHashTable<TestElement> table = new SnapshottableHashTable<>(registry, 1);
+        SnapshottableHashTable<TestElement> table =
+            new SnapshottableHashTable<>(registry, 1);
         assertNull(table.snapshottableAddOrReplace(E_1A));
         assertNull(table.snapshottableAddOrReplace(E_2A));
         assertNull(table.snapshottableAddOrReplace(E_3A));
@@ -218,7 +234,8 @@ public class SnapshottableHashTableTest {
     @Test
     public void testRevert() {
         SnapshotRegistry registry = new SnapshotRegistry(new LogContext());
-        SnapshottableHashTable<TestElement> table = new SnapshottableHashTable<>(registry, 1);
+        SnapshottableHashTable<TestElement> table =
+            new SnapshottableHashTable<>(registry, 1);
         assertNull(table.snapshottableAddOrReplace(E_1A));
         assertNull(table.snapshottableAddOrReplace(E_2A));
         assertNull(table.snapshottableAddOrReplace(E_3A));
@@ -241,7 +258,8 @@ public class SnapshottableHashTableTest {
     @Test
     public void testReset() {
         SnapshotRegistry registry = new SnapshotRegistry(new LogContext());
-        SnapshottableHashTable<TestElement> table = new SnapshottableHashTable<>(registry, 1);
+        SnapshottableHashTable<TestElement> table =
+            new SnapshottableHashTable<>(registry, 1);
         assertNull(table.snapshottableAddOrReplace(E_1A));
         assertNull(table.snapshottableAddOrReplace(E_2A));
         assertNull(table.snapshottableAddOrReplace(E_3A));
@@ -257,17 +275,32 @@ public class SnapshottableHashTableTest {
         assertIteratorYields(table.snapshottableIterator(Long.MAX_VALUE));
     }
 
+    @Test
+    public void testIteratorAtOlderEpoch() {
+        SnapshotRegistry registry = new SnapshotRegistry(new LogContext());
+        SnapshottableHashTable<TestElement> table =
+                new SnapshottableHashTable<>(registry, 4);
+        assertNull(table.snapshottableAddOrReplace(E_3B));
+        registry.getOrCreateSnapshot(0);
+        assertNull(table.snapshottableAddOrReplace(E_1A));
+        registry.getOrCreateSnapshot(1);
+        assertEquals(E_1A, table.snapshottableAddOrReplace(E_1B));
+        registry.getOrCreateSnapshot(2);
+        assertEquals(E_1B, table.snapshottableRemove(E_1B));
+        assertIteratorYields(table.snapshottableIterator(1), E_3B, E_1A);
+    }
+
     /**
      * Assert that the given iterator contains the given elements, in any order.
      * We compare using reference equality here, rather than object equality.
      */
-    private static void assertIteratorYields(Iterator<?> iter, Object... expected) {
+    private static void assertIteratorYields(Iterator<?> iter,
+                                             Object... expected) {
         IdentityHashMap<Object, Boolean> remaining = new IdentityHashMap<>();
         for (Object object : expected) {
             remaining.put(object, true);
         }
         List<Object> extraObjects = new ArrayList<>();
-        int i = 0;
         while (iter.hasNext()) {
             Object object = iter.next();
             assertNotNull(object);
@@ -276,7 +309,8 @@ public class SnapshottableHashTableTest {
             }
         }
         if (!extraObjects.isEmpty() || !remaining.isEmpty()) {
-            throw new RuntimeException("Found extra object(s): [" + String.join(", ", extraObjects.stream().map(e -> e.toString()).collect(Collectors.toList())) + "] and didn't find object(s): [" + String.join(", ", remaining.keySet().stream().map(e -> e.toString()).collect(Collectors.toList())) + "]");
+            throw new RuntimeException("Found extra object(s): [" + extraObjects.stream().map(Object::toString).collect(Collectors.joining(", ")) +
+                "] and didn't find object(s): [" + remaining.keySet().stream().map(Object::toString).collect(Collectors.joining(", ")) + "]");
         }
     }
 }

@@ -25,6 +25,7 @@ import org.apache.kafka.common.metrics.JmxReporter;
 import org.apache.kafka.common.metrics.MetricsReporter;
 import org.apache.kafka.common.security.auth.SecurityProtocol;
 import org.apache.kafka.common.utils.Utils;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -34,15 +35,46 @@ import java.util.Map;
 
 import static org.apache.kafka.common.config.ConfigDef.Range.atLeast;
 import static org.apache.kafka.common.config.ConfigDef.ValidString.in;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class CommonClientConfigsTest {
-    @SuppressWarnings("deprecation")
+
     private static class TestConfig extends AbstractConfig {
         private static final ConfigDef CONFIG;
-
         static {
-            CONFIG = new ConfigDef().define(CommonClientConfigs.RECONNECT_BACKOFF_MS_CONFIG, ConfigDef.Type.LONG, 50L, atLeast(0L), ConfigDef.Importance.LOW, "").define(CommonClientConfigs.RECONNECT_BACKOFF_MAX_MS_CONFIG, ConfigDef.Type.LONG, 1000L, atLeast(0L), ConfigDef.Importance.LOW, "").define(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, ConfigDef.Type.STRING, CommonClientConfigs.DEFAULT_SECURITY_PROTOCOL, in(Utils.enumOptions(SecurityProtocol.class)), ConfigDef.Importance.MEDIUM, CommonClientConfigs.SECURITY_PROTOCOL_DOC).define(SaslConfigs.SASL_MECHANISM, ConfigDef.Type.STRING, SaslConfigs.DEFAULT_SASL_MECHANISM, ConfigDef.Importance.MEDIUM, SaslConfigs.SASL_MECHANISM_DOC).define(CommonClientConfigs.METRIC_REPORTER_CLASSES_CONFIG, ConfigDef.Type.LIST, Collections.emptyList(), new ConfigDef.NonNullValidator(), ConfigDef.Importance.LOW, CommonClientConfigs.METRIC_REPORTER_CLASSES_DOC).define(CommonClientConfigs.AUTO_INCLUDE_JMX_REPORTER_CONFIG, ConfigDef.Type.BOOLEAN, true, ConfigDef.Importance.LOW, CommonClientConfigs.AUTO_INCLUDE_JMX_REPORTER_DOC);
+            CONFIG = new ConfigDef()
+                .define(CommonClientConfigs.RECONNECT_BACKOFF_MS_CONFIG,
+                    ConfigDef.Type.LONG,
+                    50L,
+                    atLeast(0L),
+                    ConfigDef.Importance.LOW,
+                    "")
+                .define(CommonClientConfigs.RECONNECT_BACKOFF_MAX_MS_CONFIG,
+                    ConfigDef.Type.LONG,
+                    1000L,
+                    atLeast(0L),
+                    ConfigDef.Importance.LOW,
+                    "")
+                .define(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG,
+                    ConfigDef.Type.STRING,
+                    CommonClientConfigs.DEFAULT_SECURITY_PROTOCOL,
+                    in(Utils.enumOptions(SecurityProtocol.class)),
+                    ConfigDef.Importance.MEDIUM,
+                    CommonClientConfigs.SECURITY_PROTOCOL_DOC)
+                .define(SaslConfigs.SASL_MECHANISM,
+                    ConfigDef.Type.STRING,
+                    SaslConfigs.DEFAULT_SASL_MECHANISM,
+                    ConfigDef.Importance.MEDIUM,
+                    SaslConfigs.SASL_MECHANISM_DOC)
+                .define(CommonClientConfigs.METRIC_REPORTER_CLASSES_CONFIG,
+                    ConfigDef.Type.LIST,
+                    JmxReporter.class.getName(),
+                    new ConfigDef.NonNullValidator(),
+                    ConfigDef.Importance.LOW,
+                    CommonClientConfigs.METRIC_REPORTER_CLASSES_DOC);
         }
 
         @Override
@@ -70,13 +102,16 @@ public class CommonClientConfigsTest {
             }});
         assertEquals(Long.valueOf(123L),
                 bothSetConfig.getLong(CommonClientConfigs.RECONNECT_BACKOFF_MS_CONFIG));
-        assertEquals(Long.valueOf(12345L), bothSetConfig.getLong(CommonClientConfigs.RECONNECT_BACKOFF_MAX_MS_CONFIG));
+        assertEquals(Long.valueOf(12345L),
+                bothSetConfig.getLong(CommonClientConfigs.RECONNECT_BACKOFF_MAX_MS_CONFIG));
 
         TestConfig reconnectBackoffSetConf = new TestConfig(new HashMap<String, Object>() {{
-            put(CommonClientConfigs.RECONNECT_BACKOFF_MS_CONFIG, "123");
-        }});
-        assertEquals(Long.valueOf(123L), reconnectBackoffSetConf.getLong(CommonClientConfigs.RECONNECT_BACKOFF_MS_CONFIG));
-        assertEquals(Long.valueOf(123L), reconnectBackoffSetConf.getLong(CommonClientConfigs.RECONNECT_BACKOFF_MAX_MS_CONFIG));
+                put(CommonClientConfigs.RECONNECT_BACKOFF_MS_CONFIG, "123");
+            }});
+        assertEquals(Long.valueOf(123L),
+                reconnectBackoffSetConf.getLong(CommonClientConfigs.RECONNECT_BACKOFF_MS_CONFIG));
+        assertEquals(Long.valueOf(123L),
+                reconnectBackoffSetConf.getLong(CommonClientConfigs.RECONNECT_BACKOFF_MAX_MS_CONFIG));
     }
 
     @Test
@@ -93,21 +128,20 @@ public class CommonClientConfigsTest {
     }
 
     @Test
-    @SuppressWarnings("deprecation")
     public void testMetricsReporters() {
         TestConfig config = new TestConfig(Collections.emptyMap());
         List<MetricsReporter> reporters = CommonClientConfigs.metricsReporters("clientId", config);
         assertEquals(1, reporters.size());
-        assertTrue(reporters.get(0) instanceof JmxReporter);
+        assertInstanceOf(JmxReporter.class, reporters.get(0));
 
-        config = new TestConfig(Collections.singletonMap(CommonClientConfigs.AUTO_INCLUDE_JMX_REPORTER_CONFIG, "false"));
+        config = new TestConfig(Collections.singletonMap(CommonClientConfigs.METRIC_REPORTER_CLASSES_CONFIG, ""));
         reporters = CommonClientConfigs.metricsReporters("clientId", config);
         assertTrue(reporters.isEmpty());
 
         config = new TestConfig(Collections.singletonMap(CommonClientConfigs.METRIC_REPORTER_CLASSES_CONFIG, JmxReporter.class.getName()));
         reporters = CommonClientConfigs.metricsReporters("clientId", config);
         assertEquals(1, reporters.size());
-        assertTrue(reporters.get(0) instanceof JmxReporter);
+        assertInstanceOf(JmxReporter.class, reporters.get(0));
 
         Map<String, String> props = new HashMap<>();
         props.put(CommonClientConfigs.METRIC_REPORTER_CLASSES_CONFIG, JmxReporter.class.getName() + "," + MyJmxReporter.class.getName());
@@ -117,7 +151,6 @@ public class CommonClientConfigsTest {
     }
 
     public static class MyJmxReporter extends JmxReporter {
-        public MyJmxReporter() {
-        }
+        public MyJmxReporter() {}
     }
 }

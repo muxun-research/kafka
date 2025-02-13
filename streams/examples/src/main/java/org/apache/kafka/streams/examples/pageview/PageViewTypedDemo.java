@@ -16,9 +16,6 @@
  */
 package org.apache.kafka.streams.examples.pageview;
 
-import com.fasterxml.jackson.annotation.JsonSubTypes;
-import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.serialization.Deserializer;
@@ -29,7 +26,16 @@ import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
-import org.apache.kafka.streams.kstream.*;
+import org.apache.kafka.streams.kstream.Consumed;
+import org.apache.kafka.streams.kstream.Grouped;
+import org.apache.kafka.streams.kstream.KStream;
+import org.apache.kafka.streams.kstream.KTable;
+import org.apache.kafka.streams.kstream.Produced;
+import org.apache.kafka.streams.kstream.TimeWindows;
+
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -42,32 +48,31 @@ import java.util.concurrent.CountDownLatch;
  * using specific data types (here: JSON POJO; but can also be Avro specific bindings, etc.) for serdes
  * in Kafka Streams.
  *
- * In this example, we join a stream of pageviews (aka clickstreams) that reads from a topic named "streams-pageview-input"
+ * <p>In this example, we join a stream of pageviews (aka clickstreams) that reads from a topic named "streams-pageview-input"
  * with a user profile table that reads from a topic named "streams-userprofile-input", where the data format
  * is JSON string representing a record in the stream or table, to compute the number of pageviews per user region.
  *
- * Before running this example you must create the input topics and the output topic (e.g. via
+ * <p>Before running this example you must create the input topics and the output topic (e.g. via
  * bin/kafka-topics --create ...), and write some data to the input topics (e.g. via
  * bin/kafka-console-producer). Otherwise you won't see any data arriving in the output topic.
  *
- * The inputs for this example are:
+ * <p>The inputs for this example are:
  * - Topic: streams-pageview-input
  *   Key Format: (String) USER_ID
  *   Value Format: (JSON) {"_t": "pv", "user": (String USER_ID), "page": (String PAGE_ID), "timestamp": (long ms TIMESTAMP)}
- *
+ * <p>
  * - Topic: streams-userprofile-input
  *   Key Format: (String) USER_ID
  *   Value Format: (JSON) {"_t": "up", "region": (String REGION), "timestamp": (long ms TIMESTAMP)}
  *
- * To observe the results, read the output topic (e.g., via bin/kafka-console-consumer)
+ * <p>To observe the results, read the output topic (e.g., via bin/kafka-console-consumer)
  * - Topic: streams-pageviewstats-typed-output
  *   Key Format: (JSON) {"_t": "wpvbr", "windowStart": (long ms WINDOW_TIMESTAMP), "region": (String REGION)}
  *   Value Format: (JSON) {"_t": "rc", "count": (long REGION_COUNT), "region": (String REGION)}
  *
- * Note, the "_t" field is necessary to help Jackson identify the correct class for deserialization in the
+ * <p>Note, the "_t" field is necessary to help Jackson identify the correct class for deserialization in the
  * generic {@link JSONSerde}. If you instead specify a specific serde per class, you won't need the extra "_t" field.
  */
-@SuppressWarnings({"WeakerAccess", "unused"})
 public class PageViewTypedDemo {
 
     /**
@@ -129,40 +134,40 @@ public class PageViewTypedDemo {
     @SuppressWarnings("DefaultAnnotationParam") // being explicit for the example
     @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "_t")
     @JsonSubTypes({
-                      @JsonSubTypes.Type(value = PageView.class, name = "pv"),
-                      @JsonSubTypes.Type(value = UserProfile.class, name = "up"),
-                      @JsonSubTypes.Type(value = PageViewByRegion.class, name = "pvbr"),
-                      @JsonSubTypes.Type(value = WindowedPageViewByRegion.class, name = "wpvbr"),
-                      @JsonSubTypes.Type(value = RegionCount.class, name = "rc")
-                  })
+        @JsonSubTypes.Type(value = PageView.class, name = "pv"),
+        @JsonSubTypes.Type(value = UserProfile.class, name = "up"),
+        @JsonSubTypes.Type(value = PageViewByRegion.class, name = "pvbr"),
+        @JsonSubTypes.Type(value = WindowedPageViewByRegion.class, name = "wpvbr"),
+        @JsonSubTypes.Type(value = RegionCount.class, name = "rc")
+    })
     public interface JSONSerdeCompatible {
 
     }
 
     // POJO classes
-    static public class PageView implements JSONSerdeCompatible {
+    public static class PageView implements JSONSerdeCompatible {
         public String user;
         public String page;
         public Long timestamp;
     }
 
-    static public class UserProfile implements JSONSerdeCompatible {
+    public static class UserProfile implements JSONSerdeCompatible {
         public String region;
         public Long timestamp;
     }
 
-    static public class PageViewByRegion implements JSONSerdeCompatible {
+    public static class PageViewByRegion implements JSONSerdeCompatible {
         public String user;
         public String page;
         public String region;
     }
 
-    static public class WindowedPageViewByRegion implements JSONSerdeCompatible {
+    public static class WindowedPageViewByRegion implements JSONSerdeCompatible {
         public long windowStart;
         public String region;
     }
 
-    static public class RegionCount implements JSONSerdeCompatible {
+    public static class RegionCount implements JSONSerdeCompatible {
         public long count;
         public String region;
     }
@@ -188,18 +193,22 @@ public class PageViewTypedDemo {
 
         final Duration duration24Hours = Duration.ofHours(24);
 
-        final KStream<WindowedPageViewByRegion, RegionCount> regionCount = views.leftJoin(users, (view, profile) -> {
-                    final PageViewByRegion viewByRegion = new PageViewByRegion();
-                    viewByRegion.user = view.user;
-                    viewByRegion.page = view.page;
+        final KStream<WindowedPageViewByRegion, RegionCount> regionCount = views
+            .leftJoin(users, (view, profile) -> {
+                final PageViewByRegion viewByRegion = new PageViewByRegion();
+                viewByRegion.user = view.user;
+                viewByRegion.page = view.page;
 
-                    if (profile != null) {
-                        viewByRegion.region = profile.region;
-                    } else {
-                        viewByRegion.region = "UNKNOWN";
-                    }
-                    return viewByRegion;
-                }).map((user, viewRegion) -> new KeyValue<>(viewRegion.region, viewRegion)).groupByKey(Grouped.with(Serdes.String(), new JSONSerde<>())).windowedBy(TimeWindows.ofSizeAndGrace(Duration.ofDays(7), duration24Hours).advanceBy(Duration.ofSeconds(1)))
+                if (profile != null) {
+                    viewByRegion.region = profile.region;
+                } else {
+                    viewByRegion.region = "UNKNOWN";
+                }
+                return viewByRegion;
+            })
+            .map((user, viewRegion) -> new KeyValue<>(viewRegion.region, viewRegion))
+            .groupByKey(Grouped.with(Serdes.String(), new JSONSerde<>()))
+            .windowedBy(TimeWindows.ofSizeAndGrace(Duration.ofDays(7), duration24Hours).advanceBy(Duration.ofSeconds(1)))
             .count()
             .toStream()
             .map((key, value) -> {

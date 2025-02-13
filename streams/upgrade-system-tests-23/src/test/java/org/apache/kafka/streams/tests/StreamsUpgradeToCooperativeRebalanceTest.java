@@ -61,17 +61,19 @@ public class StreamsUpgradeToCooperativeRebalanceTest {
 
         final StreamsBuilder builder = new StreamsBuilder();
 
-        builder.<String, String>stream(sourceTopic).peek(new ForeachAction<String, String>() {
-            int recordCounter = 0;
+        builder.<String, String>stream(sourceTopic)
+            .peek(new ForeachAction<String, String>() {
+                int recordCounter = 0;
 
-            @Override
-            public void apply(final String key, final String value) {
-                if (recordCounter++ % reportInterval == 0) {
-                    System.out.println(String.format("Processed %d records so far", recordCounter));
-                    System.out.flush();
+                @Override
+                public void apply(final String key, final String value) {
+                    if (recordCounter++ % reportInterval == 0) {
+                        System.out.printf("Processed %d records so far%n", recordCounter);
+                        System.out.flush();
+                    }
                 }
             }
-        }).to(sinkTopic);
+            ).to(sinkTopic);
 
         final KafkaStreams streams = new KafkaStreams(builder.build(), config);
 
@@ -107,7 +109,9 @@ public class StreamsUpgradeToCooperativeRebalanceTest {
         }));
     }
 
-    private static void buildTaskAssignmentReport(final StringBuilder taskReportBuilder, final Set<TaskMetadata> taskMetadata, final String taskType) {
+    private static void buildTaskAssignmentReport(final StringBuilder taskReportBuilder,
+                                                  final Set<TaskMetadata> taskMetadata,
+                                                  final String taskType) {
         taskReportBuilder.append(taskType);
         for (final TaskMetadata task : taskMetadata) {
             final Set<TopicPartition> topicPartitions = task.topicPartitions();

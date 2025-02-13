@@ -119,4 +119,8 @@ public class ChangelogTopics {
     public Set<TaskId> statefulTaskIds() {
         return Collections.unmodifiableSet(changelogPartitionsForStatefulTask.keySet());
     }
+
+    public Map<TaskId, Set<TopicPartition>> changelogPartionsForTask() {
+        return Collections.unmodifiableMap(changelogPartitionsForStatefulTask);
+    }
 }

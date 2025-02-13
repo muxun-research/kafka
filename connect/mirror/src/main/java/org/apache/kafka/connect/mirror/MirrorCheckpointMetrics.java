@@ -26,21 +26,32 @@ import org.apache.kafka.common.metrics.stats.Max;
 import org.apache.kafka.common.metrics.stats.Min;
 import org.apache.kafka.common.metrics.stats.Value;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
 
-/**
- * Metrics for replicated topic-partitions
- */
+/** Metrics for replicated topic-partitions */
 class MirrorCheckpointMetrics implements AutoCloseable {
 
     private static final String CHECKPOINT_CONNECTOR_GROUP = MirrorCheckpointConnector.class.getSimpleName();
 
     private static final Set<String> GROUP_TAGS = new HashSet<>(Arrays.asList("source", "target", "group", "topic", "partition"));
 
-    private static final MetricNameTemplate CHECKPOINT_LATENCY = new MetricNameTemplate("checkpoint-latency-ms", CHECKPOINT_CONNECTOR_GROUP, "Time it takes consumer group offsets to replicate from source to target cluster.", GROUP_TAGS);
-    private static final MetricNameTemplate CHECKPOINT_LATENCY_MAX = new MetricNameTemplate("checkpoint-latency-ms-max", CHECKPOINT_CONNECTOR_GROUP, "Max time it takes consumer group offsets to replicate from source to target cluster.", GROUP_TAGS);
-    private static final MetricNameTemplate CHECKPOINT_LATENCY_MIN = new MetricNameTemplate("checkpoint-latency-ms-min", CHECKPOINT_CONNECTOR_GROUP, "Min time it takes consumer group offsets to replicate from source to target cluster.", GROUP_TAGS);
-    private static final MetricNameTemplate CHECKPOINT_LATENCY_AVG = new MetricNameTemplate("checkpoint-latency-ms-avg", CHECKPOINT_CONNECTOR_GROUP, "Average time it takes consumer group offsets to replicate from source to target cluster.", GROUP_TAGS);
+    private static final MetricNameTemplate CHECKPOINT_LATENCY = new MetricNameTemplate(
+            "checkpoint-latency-ms", CHECKPOINT_CONNECTOR_GROUP,
+            "Time it takes consumer group offsets to replicate from source to target cluster.", GROUP_TAGS);
+    private static final MetricNameTemplate CHECKPOINT_LATENCY_MAX = new MetricNameTemplate(
+            "checkpoint-latency-ms-max", CHECKPOINT_CONNECTOR_GROUP,
+            "Max time it takes consumer group offsets to replicate from source to target cluster.", GROUP_TAGS);
+    private static final MetricNameTemplate CHECKPOINT_LATENCY_MIN = new MetricNameTemplate(
+            "checkpoint-latency-ms-min", CHECKPOINT_CONNECTOR_GROUP,
+            "Min time it takes consumer group offsets to replicate from source to target cluster.", GROUP_TAGS);
+    private static final MetricNameTemplate CHECKPOINT_LATENCY_AVG = new MetricNameTemplate(
+            "checkpoint-latency-ms-avg", CHECKPOINT_CONNECTOR_GROUP,
+            "Average time it takes consumer group offsets to replicate from source to target cluster.", GROUP_TAGS);
 
 
     private final Metrics metrics;
@@ -70,7 +81,8 @@ class MirrorCheckpointMetrics implements AutoCloseable {
     }
 
     GroupMetrics group(TopicPartition topicPartition, String group) {
-        return groupMetrics.computeIfAbsent(String.join("-", topicPartition.toString(), group), x -> new GroupMetrics(topicPartition, group));
+        return groupMetrics.computeIfAbsent(String.join("-", topicPartition.toString(), group),
+            x -> new GroupMetrics(topicPartition, group));
     }
 
     void addReporter(MetricsReporter reporter) {
@@ -82,12 +94,12 @@ class MirrorCheckpointMetrics implements AutoCloseable {
 
         GroupMetrics(TopicPartition topicPartition, String group) {
             Map<String, String> tags = new LinkedHashMap<>();
-            tags.put("source", source);
-            tags.put("target", target);
+            tags.put("source", source); 
+            tags.put("target", target); 
             tags.put("group", group);
             tags.put("topic", topicPartition.topic());
             tags.put("partition", Integer.toString(topicPartition.partition()));
-
+ 
             checkpointLatencySensor = metrics.sensor("checkpoint-latency");
             checkpointLatencySensor.add(metrics.metricInstance(CHECKPOINT_LATENCY, tags), new Value());
             checkpointLatencySensor.add(metrics.metricInstance(CHECKPOINT_LATENCY_MAX, tags), new Max());

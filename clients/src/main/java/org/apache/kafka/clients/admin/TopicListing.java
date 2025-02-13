@@ -29,21 +29,9 @@ public class TopicListing {
 
     /**
      * Create an instance with the specified parameters.
-     * @param name     The topic name
-     * @param internal Whether the topic is internal to Kafka
-     * @deprecated Since 3.0 use {@link #TopicListing(String, Uuid, boolean)} instead
-     */
-    @Deprecated
-    public TopicListing(String name, boolean internal) {
-        this.name = name;
-        this.internal = internal;
-        this.topicId = Uuid.ZERO_UUID;
-    }
-
-    /**
-     * Create an instance with the specified parameters.
-     * @param name     The topic name
-     * @param topicId  The topic id.
+     *
+     * @param name The topic name
+     * @param topicId The topic id.
      * @param internal Whether the topic is internal to Kafka
      */
     public TopicListing(String name, Uuid topicId, boolean internal) {
@@ -76,6 +64,6 @@ public class TopicListing {
 
     @Override
     public String toString() {
-        return "(name=" + name + ", topicId=" + topicId + ", internal=" + internal + ")";
+        return "(name=" + name + ", topicId=" + topicId +  ", internal=" + internal + ")";
     }
 }

@@ -19,6 +19,7 @@ package org.apache.kafka.common.security.oauthbearer.internals.secured;
 
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginCallbackHandler;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;

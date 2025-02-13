@@ -33,7 +33,7 @@ import java.util.Objects;
 /**
  * A Kafka ACLs which is identified by a UUID and stored in the metadata log.
  */
-final public class StandardAcl implements Comparable<StandardAcl> {
+public final class StandardAcl implements Comparable<StandardAcl> {
     public static StandardAcl fromRecord(AccessControlEntryRecord record) {
         return new StandardAcl(ResourceType.fromCode(record.resourceType()), record.resourceName(), PatternType.fromCode(record.patternType()), record.principal(), record.host(), AclOperation.fromCode(record.operation()), AclPermissionType.fromCode(record.permissionType()));
     }

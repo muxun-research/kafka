@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Holds a range of Producer IDs used for Transactional and EOS producers.
- * <p>
+ * <br>
  * The start and end of the ID block are inclusive.
  */
 public class ProducerIdsBlock {
@@ -92,15 +92,17 @@ public class ProducerIdsBlock {
 
     @Override
     public String toString() {
-        return "ProducerIdsBlock(" + "assignedBrokerId=" + assignedBrokerId + ", firstProducerId=" + firstProducerId + ", size=" + blockSize + ')';
+        return "ProducerIdsBlock(" +
+                "assignedBrokerId=" + assignedBrokerId +
+                ", firstProducerId=" + firstProducerId +
+                ", size=" + blockSize +
+                ')';
     }
 
     @Override
     public boolean equals(Object o) {
-        if (this == o)
-            return true;
-        if (o == null || getClass() != o.getClass())
-            return false;
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
         ProducerIdsBlock that = (ProducerIdsBlock) o;
         return assignedBrokerId == that.assignedBrokerId && firstProducerId == that.firstProducerId && blockSize == that.blockSize;
     }

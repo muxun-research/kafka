@@ -17,6 +17,8 @@
 package org.apache.kafka.common.record;
 
 
+import org.apache.kafka.common.compress.Compression;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,49 +33,49 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class UnalignedFileRecordsTest {
 
-	private byte[][] values = new byte[][]{
-			"foo".getBytes(),
-			"bar".getBytes()
-	};
-	private FileRecords fileRecords;
+    private final byte[][] values = new byte[][] {
+            "foo".getBytes(),
+            "bar".getBytes()
+    };
+    private FileRecords fileRecords;
 
-	@BeforeEach
-	public void setup() throws IOException {
-		this.fileRecords = createFileRecords(values);
-	}
+    @BeforeEach
+    public void setup() throws IOException {
+        this.fileRecords = createFileRecords(values);
+    }
 
-	@AfterEach
-	public void cleanup() throws IOException {
-		this.fileRecords.close();
-	}
+    @AfterEach
+    public void cleanup() throws IOException {
+        this.fileRecords.close();
+    }
 
-	@Test
-	public void testWriteTo() throws IOException {
+    @Test
+    public void testWriteTo() throws IOException {
 
-		org.apache.kafka.common.requests.ByteBufferChannel channel = new org.apache.kafka.common.requests.ByteBufferChannel(fileRecords.sizeInBytes());
-		int size = fileRecords.sizeInBytes();
+        org.apache.kafka.common.requests.ByteBufferChannel channel = new org.apache.kafka.common.requests.ByteBufferChannel(fileRecords.sizeInBytes());
+        int size = fileRecords.sizeInBytes();
 
-		UnalignedFileRecords records1 = fileRecords.sliceUnaligned(0, size / 2);
-		UnalignedFileRecords records2 = fileRecords.sliceUnaligned(size / 2, size - size / 2);
+        UnalignedFileRecords records1 = fileRecords.sliceUnaligned(0, size / 2);
+        UnalignedFileRecords records2 = fileRecords.sliceUnaligned(size / 2, size - size / 2);
 
-		records1.writeTo(channel, 0, records1.sizeInBytes());
-		records2.writeTo(channel, 0, records2.sizeInBytes());
+        records1.writeTo(channel, 0, records1.sizeInBytes());
+        records2.writeTo(channel, 0, records2.sizeInBytes());
 
-		channel.close();
-		Iterator<Record> records = MemoryRecords.readableRecords(channel.buffer()).records().iterator();
-		for (byte[] value : values) {
-			assertTrue(records.hasNext());
-			assertEquals(records.next().value(), ByteBuffer.wrap(value));
-		}
-	}
+        channel.close();
+        Iterator<Record> records = MemoryRecords.readableRecords(channel.buffer()).records().iterator();
+        for (byte[] value : values) {
+            assertTrue(records.hasNext());
+            assertEquals(records.next().value(), ByteBuffer.wrap(value));
+        }
+    }
 
-	private FileRecords createFileRecords(byte[][] values) throws IOException {
-		FileRecords fileRecords = FileRecords.open(tempFile());
+    private FileRecords createFileRecords(byte[][] values) throws IOException {
+        FileRecords fileRecords = FileRecords.open(tempFile());
 
-		for (byte[] value : values) {
-			fileRecords.append(MemoryRecords.withRecords(CompressionType.NONE, new SimpleRecord(value)));
-		}
+        for (byte[] value : values) {
+            fileRecords.append(MemoryRecords.withRecords(Compression.NONE, new SimpleRecord(value)));
+        }
 
-		return fileRecords;
-	}
+        return fileRecords;
+    }
 }

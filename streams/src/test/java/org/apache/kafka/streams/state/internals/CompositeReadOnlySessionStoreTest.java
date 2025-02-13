@@ -28,17 +28,21 @@ import org.apache.kafka.streams.state.ReadOnlySessionStore;
 import org.apache.kafka.test.ReadOnlySessionStoreStub;
 import org.apache.kafka.test.StateStoreProviderStub;
 import org.apache.kafka.test.StreamsTestUtils;
-import org.junit.Before;
-import org.junit.Test;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.List;
 
 import static java.util.Collections.singletonList;
-import static org.apache.kafka.test.StreamsTestUtils.toList;
+import static org.apache.kafka.test.StreamsTestUtils.toListAndCloseIterator;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.core.IsEqual.equalTo;
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class CompositeReadOnlySessionStoreTest {
 
@@ -49,13 +53,15 @@ public class CompositeReadOnlySessionStoreTest {
     private final ReadOnlySessionStoreStub<String, Long> otherUnderlyingStore = new ReadOnlySessionStoreStub<>();
     private CompositeReadOnlySessionStore<String, Long> sessionStore;
 
-    @Before
+    @BeforeEach
     public void before() {
         stubProviderOne.addStore(storeName, underlyingSessionStore);
         stubProviderOne.addStore("other-session-store", otherUnderlyingStore);
         final QueryableStoreType<ReadOnlySessionStore<Object, Object>> queryableStoreType = QueryableStoreTypes.sessionStore();
 
-        sessionStore = new CompositeReadOnlySessionStore<>(new WrappingStoreProvider(Arrays.asList(stubProviderOne, stubProviderTwo), StoreQueryParameters.fromNameAndType(storeName, queryableStoreType)), QueryableStoreTypes.sessionStore(), storeName);
+        sessionStore = new CompositeReadOnlySessionStore<>(
+            new WrappingStoreProvider(Arrays.asList(stubProviderOne, stubProviderTwo), StoreQueryParameters.fromNameAndType(storeName, queryableStoreType)),
+            QueryableStoreTypes.sessionStore(), storeName);
     }
 
     @Test
@@ -63,8 +69,10 @@ public class CompositeReadOnlySessionStoreTest {
         underlyingSessionStore.put(new Windowed<>("a", new SessionWindow(0, 0)), 1L);
         underlyingSessionStore.put(new Windowed<>("a", new SessionWindow(10, 10)), 2L);
 
-        final List<KeyValue<Windowed<String>, Long>> results = toList(sessionStore.fetch("a"));
-        assertEquals(Arrays.asList(KeyValue.pair(new Windowed<>("a", new SessionWindow(0, 0)), 1L), KeyValue.pair(new Windowed<>("a", new SessionWindow(10, 10)), 2L)), results);
+        final List<KeyValue<Windowed<String>, Long>> results = toListAndCloseIterator(sessionStore.fetch("a"));
+        assertEquals(Arrays.asList(KeyValue.pair(new Windowed<>("a", new SessionWindow(0, 0)), 1L),
+                                   KeyValue.pair(new Windowed<>("a", new SessionWindow(10, 10)), 2L)),
+                     results);
     }
 
     @Test
@@ -76,7 +84,8 @@ public class CompositeReadOnlySessionStoreTest {
 
     @Test
     public void shouldFindValueForKeyWhenMultiStores() {
-        final ReadOnlySessionStoreStub<String, Long> secondUnderlying = new ReadOnlySessionStoreStub<>();
+        final ReadOnlySessionStoreStub<String, Long> secondUnderlying = new
+                ReadOnlySessionStoreStub<>();
         stubProviderTwo.addStore(storeName, secondUnderlying);
 
         final Windowed<String> keyOne = new Windowed<>("key-one", new SessionWindow(0, 0));
@@ -84,8 +93,8 @@ public class CompositeReadOnlySessionStoreTest {
         underlyingSessionStore.put(keyOne, 0L);
         secondUnderlying.put(keyTwo, 10L);
 
-        final List<KeyValue<Windowed<String>, Long>> keyOneResults = toList(sessionStore.fetch("key-one"));
-        final List<KeyValue<Windowed<String>, Long>> keyTwoResults = toList(sessionStore.fetch("key-two"));
+        final List<KeyValue<Windowed<String>, Long>> keyOneResults = toListAndCloseIterator(sessionStore.fetch("key-one"));
+        final List<KeyValue<Windowed<String>, Long>> keyTwoResults = toListAndCloseIterator(sessionStore.fetch("key-two"));
 
         assertEquals(singletonList(KeyValue.pair(keyOne, 0L)), keyOneResults);
         assertEquals(singletonList(KeyValue.pair(keyTwo, 10L)), keyTwoResults);
@@ -106,7 +115,12 @@ public class CompositeReadOnlySessionStoreTest {
     @Test
     public void shouldThrowInvalidStateStoreExceptionOnRebalance() {
         final QueryableStoreType<ReadOnlySessionStore<Object, Object>> queryableStoreType = QueryableStoreTypes.sessionStore();
-        final CompositeReadOnlySessionStore<String, String> store = new CompositeReadOnlySessionStore<>(new WrappingStoreProvider(singletonList(new StateStoreProviderStub(true)), StoreQueryParameters.fromNameAndType("whateva", queryableStoreType)), QueryableStoreTypes.sessionStore(), "whateva");
+        final CompositeReadOnlySessionStore<String, String> store =
+            new CompositeReadOnlySessionStore<>(
+                new WrappingStoreProvider(singletonList(new StateStoreProviderStub(true)), StoreQueryParameters.fromNameAndType("whateva", queryableStoreType)),
+                QueryableStoreTypes.sessionStore(),
+                "whateva"
+            );
 
         assertThrows(InvalidStateStoreException.class, () -> store.fetch("a"));
     }
@@ -127,42 +141,54 @@ public class CompositeReadOnlySessionStoreTest {
 
     @Test
     public void shouldFetchKeyRangeAcrossStores() {
-        final ReadOnlySessionStoreStub<String, Long> secondUnderlying = new ReadOnlySessionStoreStub<>();
+        final ReadOnlySessionStoreStub<String, Long> secondUnderlying = new
+                ReadOnlySessionStoreStub<>();
         stubProviderTwo.addStore(storeName, secondUnderlying);
         underlyingSessionStore.put(new Windowed<>("a", new SessionWindow(0, 0)), 0L);
         secondUnderlying.put(new Windowed<>("b", new SessionWindow(0, 0)), 10L);
-        final List<KeyValue<Windowed<String>, Long>> results = StreamsTestUtils.toList(sessionStore.fetch("a", "b"));
-        assertThat(results, equalTo(Arrays.asList(KeyValue.pair(new Windowed<>("a", new SessionWindow(0, 0)), 0L), KeyValue.pair(new Windowed<>("b", new SessionWindow(0, 0)), 10L))));
+        final List<KeyValue<Windowed<String>, Long>> results = StreamsTestUtils.toListAndCloseIterator(sessionStore.fetch("a", "b"));
+        assertThat(results, equalTo(Arrays.asList(
+            KeyValue.pair(new Windowed<>("a", new SessionWindow(0, 0)), 0L),
+            KeyValue.pair(new Windowed<>("b", new SessionWindow(0, 0)), 10L))));
     }
 
     @Test
     public void shouldFetchKeyRangeAcrossStoresWithNullKeyFrom() {
-        final ReadOnlySessionStoreStub<String, Long> secondUnderlying = new ReadOnlySessionStoreStub<>();
+        final ReadOnlySessionStoreStub<String, Long> secondUnderlying = new
+            ReadOnlySessionStoreStub<>();
         stubProviderTwo.addStore(storeName, secondUnderlying);
         underlyingSessionStore.put(new Windowed<>("a", new SessionWindow(0, 0)), 0L);
         secondUnderlying.put(new Windowed<>("b", new SessionWindow(0, 0)), 10L);
-        final List<KeyValue<Windowed<String>, Long>> results = StreamsTestUtils.toList(sessionStore.fetch(null, "b"));
-        assertThat(results, equalTo(Arrays.asList(KeyValue.pair(new Windowed<>("a", new SessionWindow(0, 0)), 0L), KeyValue.pair(new Windowed<>("b", new SessionWindow(0, 0)), 10L))));
+        final List<KeyValue<Windowed<String>, Long>> results = StreamsTestUtils.toListAndCloseIterator(sessionStore.fetch(null, "b"));
+        assertThat(results, equalTo(Arrays.asList(
+            KeyValue.pair(new Windowed<>("a", new SessionWindow(0, 0)), 0L),
+            KeyValue.pair(new Windowed<>("b", new SessionWindow(0, 0)), 10L))));
     }
 
     @Test
     public void shouldFetchKeyRangeAcrossStoresWithNullKeyTo() {
-        final ReadOnlySessionStoreStub<String, Long> secondUnderlying = new ReadOnlySessionStoreStub<>();
+        final ReadOnlySessionStoreStub<String, Long> secondUnderlying = new
+            ReadOnlySessionStoreStub<>();
         stubProviderTwo.addStore(storeName, secondUnderlying);
         underlyingSessionStore.put(new Windowed<>("a", new SessionWindow(0, 0)), 0L);
         secondUnderlying.put(new Windowed<>("b", new SessionWindow(0, 0)), 10L);
-        final List<KeyValue<Windowed<String>, Long>> results = StreamsTestUtils.toList(sessionStore.fetch("a", null));
-        assertThat(results, equalTo(Arrays.asList(KeyValue.pair(new Windowed<>("a", new SessionWindow(0, 0)), 0L), KeyValue.pair(new Windowed<>("b", new SessionWindow(0, 0)), 10L))));
+        final List<KeyValue<Windowed<String>, Long>> results = StreamsTestUtils.toListAndCloseIterator(sessionStore.fetch("a", null));
+        assertThat(results, equalTo(Arrays.asList(
+            KeyValue.pair(new Windowed<>("a", new SessionWindow(0, 0)), 0L),
+            KeyValue.pair(new Windowed<>("b", new SessionWindow(0, 0)), 10L))));
     }
 
     @Test
     public void shouldFetchKeyRangeAcrossStoresWithNullKeyFromKeyTo() {
-        final ReadOnlySessionStoreStub<String, Long> secondUnderlying = new ReadOnlySessionStoreStub<>();
+        final ReadOnlySessionStoreStub<String, Long> secondUnderlying = new
+            ReadOnlySessionStoreStub<>();
         stubProviderTwo.addStore(storeName, secondUnderlying);
         underlyingSessionStore.put(new Windowed<>("a", new SessionWindow(0, 0)), 0L);
         secondUnderlying.put(new Windowed<>("b", new SessionWindow(0, 0)), 10L);
-        final List<KeyValue<Windowed<String>, Long>> results = StreamsTestUtils.toList(sessionStore.fetch(null, null));
-        assertThat(results, equalTo(Arrays.asList(KeyValue.pair(new Windowed<>("a", new SessionWindow(0, 0)), 0L), KeyValue.pair(new Windowed<>("b", new SessionWindow(0, 0)), 10L))));
+        final List<KeyValue<Windowed<String>, Long>> results = StreamsTestUtils.toListAndCloseIterator(sessionStore.fetch(null, null));
+        assertThat(results, equalTo(Arrays.asList(
+            KeyValue.pair(new Windowed<>("a", new SessionWindow(0, 0)), 0L),
+            KeyValue.pair(new Windowed<>("b", new SessionWindow(0, 0)), 10L))));
     }
 
     @Test

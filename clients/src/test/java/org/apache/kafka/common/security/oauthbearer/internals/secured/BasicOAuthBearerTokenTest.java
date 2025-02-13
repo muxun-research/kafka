@@ -18,6 +18,7 @@
 package org.apache.kafka.common.security.oauthbearer.internals.secured;
 
 import org.apache.kafka.common.security.oauthbearer.OAuthBearerToken;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -25,13 +26,20 @@ import java.util.Collections;
 import java.util.SortedSet;
 import java.util.TreeSet;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class BasicOAuthBearerTokenTest {
 
     @Test
     public void basic() {
-        OAuthBearerToken token = new BasicOAuthBearerToken("not.valid.token", Collections.emptySet(), 0L, "jdoe", 0L);
+        OAuthBearerToken token = new BasicOAuthBearerToken("not.valid.token",
+            Collections.emptySet(),
+            0L,
+            "jdoe",
+            0L);
         assertEquals("not.valid.token", token.value());
         assertTrue(token.scope().isEmpty());
         assertEquals(0L, token.lifetimeMs());
@@ -41,7 +49,11 @@ public class BasicOAuthBearerTokenTest {
 
     @Test
     public void negativeLifetime() {
-        OAuthBearerToken token = new BasicOAuthBearerToken("not.valid.token", Collections.emptySet(), -1L, "jdoe", 0L);
+        OAuthBearerToken token = new BasicOAuthBearerToken("not.valid.token",
+            Collections.emptySet(),
+            -1L,
+            "jdoe",
+            0L);
         assertEquals("not.valid.token", token.value());
         assertTrue(token.scope().isEmpty());
         assertEquals(-1L, token.lifetimeMs());
@@ -53,7 +65,11 @@ public class BasicOAuthBearerTokenTest {
     public void noErrorIfModifyScope() {
         // Start with a basic set created by the caller.
         SortedSet<String> callerSet = new TreeSet<>(Arrays.asList("a", "b", "c"));
-        OAuthBearerToken token = new BasicOAuthBearerToken("not.valid.token", callerSet, 0L, "jdoe", 0L);
+        OAuthBearerToken token = new BasicOAuthBearerToken("not.valid.token",
+            callerSet,
+            0L,
+            "jdoe",
+            0L);
 
         // Make sure it all looks good
         assertNotNull(token.scope());

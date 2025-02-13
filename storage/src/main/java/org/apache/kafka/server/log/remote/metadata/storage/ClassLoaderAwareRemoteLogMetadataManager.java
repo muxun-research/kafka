@@ -17,7 +17,11 @@
 package org.apache.kafka.server.log.remote.metadata.storage;
 
 import org.apache.kafka.common.TopicIdPartition;
-import org.apache.kafka.server.log.remote.storage.*;
+import org.apache.kafka.server.log.remote.storage.RemoteLogMetadataManager;
+import org.apache.kafka.server.log.remote.storage.RemoteLogSegmentMetadata;
+import org.apache.kafka.server.log.remote.storage.RemoteLogSegmentMetadataUpdate;
+import org.apache.kafka.server.log.remote.storage.RemotePartitionDeleteMetadata;
+import org.apache.kafka.server.log.remote.storage.RemoteStorageException;
 import org.apache.kafka.storage.internals.log.StorageAction;
 
 import java.io.IOException;
@@ -35,7 +39,8 @@ public class ClassLoaderAwareRemoteLogMetadataManager implements RemoteLogMetada
     private final RemoteLogMetadataManager delegate;
     private final ClassLoader loader;
 
-    public ClassLoaderAwareRemoteLogMetadataManager(RemoteLogMetadataManager delegate, ClassLoader loader) {
+    public ClassLoaderAwareRemoteLogMetadataManager(RemoteLogMetadataManager delegate,
+                                                    ClassLoader loader) {
         this.delegate = delegate;
         this.loader = loader;
     }
@@ -51,12 +56,15 @@ public class ClassLoaderAwareRemoteLogMetadataManager implements RemoteLogMetada
     }
 
     @Override
-    public Optional<RemoteLogSegmentMetadata> remoteLogSegmentMetadata(TopicIdPartition topicIdPartition, int epochForOffset, long offset) throws RemoteStorageException {
+    public Optional<RemoteLogSegmentMetadata> remoteLogSegmentMetadata(TopicIdPartition topicIdPartition,
+                                                                       int epochForOffset,
+                                                                       long offset) throws RemoteStorageException {
         return withClassLoader(() -> delegate.remoteLogSegmentMetadata(topicIdPartition, epochForOffset, offset));
     }
 
     @Override
-    public Optional<Long> highestOffsetForEpoch(TopicIdPartition topicIdPartition, int leaderEpoch) throws RemoteStorageException {
+    public Optional<Long> highestOffsetForEpoch(TopicIdPartition topicIdPartition,
+                                                int leaderEpoch) throws RemoteStorageException {
         return withClassLoader(() -> delegate.highestOffsetForEpoch(topicIdPartition, leaderEpoch));
     }
 
@@ -71,12 +79,14 @@ public class ClassLoaderAwareRemoteLogMetadataManager implements RemoteLogMetada
     }
 
     @Override
-    public Iterator<RemoteLogSegmentMetadata> listRemoteLogSegments(TopicIdPartition topicIdPartition, int leaderEpoch) throws RemoteStorageException {
+    public Iterator<RemoteLogSegmentMetadata> listRemoteLogSegments(TopicIdPartition topicIdPartition,
+                                                                    int leaderEpoch) throws RemoteStorageException {
         return withClassLoader(() -> delegate.listRemoteLogSegments(topicIdPartition, leaderEpoch));
     }
 
     @Override
-    public void onPartitionLeadershipChanges(Set<TopicIdPartition> leaderPartitions, Set<TopicIdPartition> followerPartitions) {
+    public void onPartitionLeadershipChanges(Set<TopicIdPartition> leaderPartitions,
+                                             Set<TopicIdPartition> followerPartitions) {
         withClassLoader(() -> {
             delegate.onPartitionLeadershipChanges(leaderPartitions, followerPartitions);
             return null;
@@ -89,6 +99,21 @@ public class ClassLoaderAwareRemoteLogMetadataManager implements RemoteLogMetada
             delegate.onStopPartitions(partitions);
             return null;
         });
+    }
+
+    @Override
+    public long remoteLogSize(TopicIdPartition topicIdPartition, int leaderEpoch) throws RemoteStorageException {
+        return withClassLoader(() -> delegate.remoteLogSize(topicIdPartition, leaderEpoch));
+    }
+
+    @Override
+    public Optional<RemoteLogSegmentMetadata> nextSegmentWithTxnIndex(TopicIdPartition topicIdPartition, int epoch, long offset) throws RemoteStorageException {
+        return withClassLoader(() -> delegate.nextSegmentWithTxnIndex(topicIdPartition, epoch, offset));
+    }
+
+    @Override
+    public boolean isReady(TopicIdPartition topicIdPartition) {
+        return withClassLoader(() -> delegate.isReady(topicIdPartition));
     }
 
     @Override

@@ -18,25 +18,35 @@ package org.apache.kafka.server.common;
 
 import org.apache.kafka.common.utils.Utils;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
 
 /**
  * This class represents a utility to capture a checkpoint in a file. It writes down to the file in the below format.
- * <p>
+ * <pre>
  * ========= File beginning =========
  * version: int
  * entries-count: int
  * entry-as-string-on-each-line
  * ========= File end ===============
- * <p>
+ * </pre>
  * Each entry is represented as a string on each line in the checkpoint file. {@link EntryFormatter} is used
  * to convert the entry into a string and vice versa.
+ *
  * @param <T> entry type.
  */
 public class CheckpointFile<T> {
@@ -47,7 +57,9 @@ public class CheckpointFile<T> {
     private final Path absolutePath;
     private final Path tempPath;
 
-    public CheckpointFile(File file, int version, EntryFormatter<T> formatter) throws IOException {
+    public CheckpointFile(File file,
+                          int version,
+                          EntryFormatter<T> formatter) throws IOException {
         this.version = version;
         this.formatter = formatter;
         try {
@@ -63,7 +75,8 @@ public class CheckpointFile<T> {
     public void write(Collection<T> entries) throws IOException {
         synchronized (lock) {
             // write to temp file and then swap with the existing file
-            try (FileOutputStream fileOutputStream = new FileOutputStream(tempPath.toFile()); BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(fileOutputStream, StandardCharsets.UTF_8))) {
+            try (FileOutputStream fileOutputStream = new FileOutputStream(tempPath.toFile());
+                 BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(fileOutputStream, StandardCharsets.UTF_8))) {
                 CheckpointWriteBuffer<T> checkpointWriteBuffer = new CheckpointWriteBuffer<>(writer, version, formatter);
                 checkpointWriteBuffer.write(entries);
                 writer.flush();
@@ -76,7 +89,7 @@ public class CheckpointFile<T> {
 
     public List<T> read() throws IOException {
         synchronized (lock) {
-            try (BufferedReader reader = Files.newBufferedReader(absolutePath)) {
+            try (BufferedReader reader = Files.newBufferedReader(absolutePath, StandardCharsets.UTF_8)) {
                 CheckpointReadBuffer<T> checkpointBuffer = new CheckpointReadBuffer<>(absolutePath.toString(), reader, version, formatter);
                 return checkpointBuffer.read();
             }
@@ -88,7 +101,9 @@ public class CheckpointFile<T> {
         private final int version;
         private final EntryFormatter<T> formatter;
 
-        public CheckpointWriteBuffer(BufferedWriter writer, int version, EntryFormatter<T> formatter) {
+        public CheckpointWriteBuffer(BufferedWriter writer,
+                                     int version,
+                                     EntryFormatter<T> formatter) {
             this.writer = writer;
             this.version = version;
             this.formatter = formatter;
@@ -118,7 +133,10 @@ public class CheckpointFile<T> {
         private final int version;
         private final EntryFormatter<T> formatter;
 
-        public CheckpointReadBuffer(String location, BufferedReader reader, int version, EntryFormatter<T> formatter) {
+        public CheckpointReadBuffer(String location,
+                             BufferedReader reader,
+                             int version,
+                             EntryFormatter<T> formatter) {
             this.location = location;
             this.reader = reader;
             this.version = version;
@@ -132,7 +150,8 @@ public class CheckpointFile<T> {
 
             int readVersion = toInt(line);
             if (readVersion != version) {
-                throw new IOException("Unrecognised version:" + readVersion + ", expected version: " + version + " in checkpoint file at: " + location);
+                throw new IOException("Unrecognised version:" + readVersion + ", expected version: " + version
+                                              + " in checkpoint file at: " + location);
             }
 
             line = reader.readLine();
@@ -144,7 +163,7 @@ public class CheckpointFile<T> {
             line = reader.readLine();
             while (line != null) {
                 Optional<T> maybeEntry = formatter.fromString(line);
-                if (!maybeEntry.isPresent()) {
+                if (maybeEntry.isEmpty()) {
                     throw buildMalformedLineException(line);
                 }
                 entries.add(maybeEntry.get());
@@ -152,7 +171,8 @@ public class CheckpointFile<T> {
             }
 
             if (entries.size() != expectedSize) {
-                throw new IOException("Expected [" + expectedSize + "] entries in checkpoint file [" + location + "], but found only [" + entries.size() + "]");
+                throw new IOException("Expected [" + expectedSize + "] entries in checkpoint file ["
+                                              + location + "], but found only [" + entries.size() + "]");
             }
 
             return entries;
@@ -173,6 +193,7 @@ public class CheckpointFile<T> {
 
     /**
      * This is used to convert the given entry of type {@code T} into a string and vice versa.
+     *
      * @param <T> entry type
      */
     public interface EntryFormatter<T> {

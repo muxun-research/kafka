@@ -19,7 +19,8 @@ package org.apache.kafka.streams.state.internals.metrics;
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.metrics.Sensor.RecordingLevel;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
-import org.junit.Test;
+
+import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
 import java.util.Collections;
@@ -28,7 +29,9 @@ import java.util.function.Supplier;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 public class StateStoreMetricsTest {
 
@@ -50,7 +53,13 @@ public class StateStoreMetricsTest {
         final String descriptionOfMax = "The maximum latency of calls to put";
         setupStreamsMetrics(metricName);
 
-        getAndVerifySensor(() -> StateStoreMetrics.putSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics), metricName, descriptionOfAvg, descriptionOfMax, descriptionOfRate);
+        getAndVerifySensor(
+            () -> StateStoreMetrics.putSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics),
+            metricName,
+            descriptionOfAvg,
+            descriptionOfMax,
+            descriptionOfRate
+        );
     }
 
     @Test
@@ -61,7 +70,13 @@ public class StateStoreMetricsTest {
         final String descriptionOfMax = "The maximum latency of calls to put-if-absent";
         setupStreamsMetrics(metricName);
 
-        getAndVerifySensor(() -> StateStoreMetrics.putIfAbsentSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics), metricName, descriptionOfAvg, descriptionOfMax, descriptionOfRate);
+        getAndVerifySensor(
+            () -> StateStoreMetrics.putIfAbsentSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics),
+            metricName,
+            descriptionOfAvg,
+            descriptionOfMax,
+            descriptionOfRate
+        );
     }
 
     @Test
@@ -72,7 +87,13 @@ public class StateStoreMetricsTest {
         final String descriptionOfMax = "The maximum latency of calls to put-all";
         setupStreamsMetrics(metricName);
 
-        getAndVerifySensor(() -> StateStoreMetrics.putAllSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics), metricName, descriptionOfAvg, descriptionOfMax, descriptionOfRate);
+        getAndVerifySensor(
+            () -> StateStoreMetrics.putAllSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics),
+            metricName,
+            descriptionOfAvg,
+            descriptionOfMax,
+            descriptionOfRate
+        );
     }
 
     @Test
@@ -83,7 +104,13 @@ public class StateStoreMetricsTest {
         final String descriptionOfMax = "The maximum latency of calls to fetch";
         setupStreamsMetrics(metricName);
 
-        getAndVerifySensor(() -> StateStoreMetrics.fetchSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics), metricName, descriptionOfAvg, descriptionOfMax, descriptionOfRate);
+        getAndVerifySensor(
+            () -> StateStoreMetrics.fetchSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics),
+            metricName,
+            descriptionOfAvg,
+            descriptionOfMax,
+            descriptionOfRate
+        );
     }
 
     @Test
@@ -94,7 +121,13 @@ public class StateStoreMetricsTest {
         final String descriptionOfMax = "The maximum latency of calls to get";
         setupStreamsMetrics(metricName);
 
-        getAndVerifySensor(() -> StateStoreMetrics.getSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics), metricName, descriptionOfAvg, descriptionOfMax, descriptionOfRate);
+        getAndVerifySensor(
+            () -> StateStoreMetrics.getSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics),
+            metricName,
+            descriptionOfAvg,
+            descriptionOfMax,
+            descriptionOfRate
+        );
     }
 
     @Test
@@ -105,7 +138,13 @@ public class StateStoreMetricsTest {
         final String descriptionOfMax = "The maximum latency of calls to all";
         setupStreamsMetrics(metricName);
 
-        getAndVerifySensor(() -> StateStoreMetrics.allSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics), metricName, descriptionOfAvg, descriptionOfMax, descriptionOfRate);
+        getAndVerifySensor(
+            () -> StateStoreMetrics.allSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics),
+            metricName,
+            descriptionOfAvg,
+            descriptionOfMax,
+            descriptionOfRate
+        );
     }
 
     @Test
@@ -114,9 +153,17 @@ public class StateStoreMetricsTest {
         final String descriptionOfRate = "The average number of calls to range per second";
         final String descriptionOfAvg = "The average latency of calls to range";
         final String descriptionOfMax = "The maximum latency of calls to range";
-        setupStreamsMetrics(metricName);
+        setupStreamsMetrics(
+            metricName
+        );
 
-        getAndVerifySensor(() -> StateStoreMetrics.rangeSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics), metricName, descriptionOfAvg, descriptionOfMax, descriptionOfRate);
+        getAndVerifySensor(
+            () -> StateStoreMetrics.rangeSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics),
+            metricName,
+            descriptionOfAvg,
+            descriptionOfMax,
+            descriptionOfRate
+        );
     }
 
     @Test
@@ -127,7 +174,13 @@ public class StateStoreMetricsTest {
         final String descriptionOfMax = "The maximum latency of calls to flush";
         setupStreamsMetrics(metricName);
 
-        getAndVerifySensor(() -> StateStoreMetrics.flushSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics), metricName, descriptionOfAvg, descriptionOfMax, descriptionOfRate);
+        getAndVerifySensor(
+            () -> StateStoreMetrics.flushSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics),
+            metricName,
+            descriptionOfAvg,
+            descriptionOfMax,
+            descriptionOfRate
+        );
     }
 
     @Test
@@ -138,7 +191,13 @@ public class StateStoreMetricsTest {
         final String descriptionOfMax = "The maximum latency of calls to remove";
         setupStreamsMetrics(metricName);
 
-        getAndVerifySensor(() -> StateStoreMetrics.removeSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics), metricName, descriptionOfAvg, descriptionOfMax, descriptionOfRate);
+        getAndVerifySensor(
+            () -> StateStoreMetrics.removeSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics),
+            metricName,
+            descriptionOfAvg,
+            descriptionOfMax,
+            descriptionOfRate
+        );
     }
 
     @Test
@@ -149,7 +208,13 @@ public class StateStoreMetricsTest {
         final String descriptionOfMax = "The maximum latency of calls to delete";
         setupStreamsMetrics(metricName);
 
-        getAndVerifySensor(() -> StateStoreMetrics.deleteSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics), metricName, descriptionOfAvg, descriptionOfMax, descriptionOfRate);
+        getAndVerifySensor(
+            () -> StateStoreMetrics.deleteSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics),
+            metricName,
+            descriptionOfAvg,
+            descriptionOfMax,
+            descriptionOfRate
+        );
     }
 
     @Test
@@ -160,7 +225,13 @@ public class StateStoreMetricsTest {
         final String descriptionOfMax = "The maximum latency of restorations";
         setupStreamsMetrics(metricName);
 
-        getAndVerifySensor(() -> StateStoreMetrics.restoreSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics), metricName, descriptionOfAvg, descriptionOfMax, descriptionOfRate);
+        getAndVerifySensor(
+            () -> StateStoreMetrics.restoreSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics),
+            metricName,
+            descriptionOfAvg,
+            descriptionOfMax,
+            descriptionOfRate
+        );
     }
 
     @Test
@@ -169,14 +240,32 @@ public class StateStoreMetricsTest {
         final String descriptionOfRate = "The average number of calls to prefix-scan per second";
         final String descriptionOfAvg = "The average latency of calls to prefix-scan";
         final String descriptionOfMax = "The maximum latency of calls to prefix-scan";
-        when(streamsMetrics.storeLevelSensor(TASK_ID, STORE_NAME, metricName, RecordingLevel.DEBUG)).thenReturn(expectedSensor);
+        when(streamsMetrics.storeLevelSensor(TASK_ID, STORE_NAME, metricName, RecordingLevel.DEBUG))
+            .thenReturn(expectedSensor);
         when(streamsMetrics.storeLevelTagMap(TASK_ID, STORE_TYPE, STORE_NAME)).thenReturn(storeTagMap);
 
         try (final MockedStatic<StreamsMetricsImpl> streamsMetricsStaticMock = mockStatic(StreamsMetricsImpl.class)) {
             final Sensor sensor = StateStoreMetrics.prefixScanSensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics);
 
-            streamsMetricsStaticMock.verify(() -> StreamsMetricsImpl.addInvocationRateToSensor(expectedSensor, STORE_LEVEL_GROUP, storeTagMap, metricName, descriptionOfRate));
-            streamsMetricsStaticMock.verify(() -> StreamsMetricsImpl.addAvgAndMaxToSensor(expectedSensor, STORE_LEVEL_GROUP, storeTagMap, latencyMetricName(metricName), descriptionOfAvg, descriptionOfMax));
+            streamsMetricsStaticMock.verify(
+                () -> StreamsMetricsImpl.addInvocationRateToSensor(
+                    expectedSensor,
+                    STORE_LEVEL_GROUP,
+                    storeTagMap,
+                    metricName,
+                    descriptionOfRate
+                )
+            );
+            streamsMetricsStaticMock.verify(
+                () -> StreamsMetricsImpl.addAvgAndMaxToSensor(
+                    expectedSensor,
+                    STORE_LEVEL_GROUP,
+                    storeTagMap,
+                    latencyMetricName(metricName),
+                    descriptionOfAvg,
+                    descriptionOfMax
+                )
+            );
             assertThat(sensor, is(expectedSensor));
         }
     }
@@ -188,7 +277,12 @@ public class StateStoreMetricsTest {
         final String descriptionOfMax = "The maximum count of buffered records";
         setupStreamsMetricsForSuppressionBufferSensor(metricName);
 
-        verifySensorSuppressionBufferSensor(() -> StateStoreMetrics.suppressionBufferCountSensor(TASK_ID, STORE_TYPE, BUFFER_NAME, streamsMetrics), metricName, descriptionOfAvg, descriptionOfMax);
+        verifySensorSuppressionBufferSensor(
+            () -> StateStoreMetrics.suppressionBufferCountSensor(TASK_ID, STORE_TYPE, BUFFER_NAME, streamsMetrics),
+            metricName,
+            descriptionOfAvg,
+            descriptionOfMax
+        );
     }
 
     @Test
@@ -198,36 +292,77 @@ public class StateStoreMetricsTest {
         final String descriptionOfMax = "The maximum size of buffered records";
         setupStreamsMetricsForSuppressionBufferSensor(metricName);
 
-        verifySensorSuppressionBufferSensor(() -> StateStoreMetrics.suppressionBufferSizeSensor(TASK_ID, STORE_TYPE, BUFFER_NAME, streamsMetrics), metricName, descriptionOfAvg, descriptionOfMax);
+        verifySensorSuppressionBufferSensor(
+            () -> StateStoreMetrics.suppressionBufferSizeSensor(TASK_ID, STORE_TYPE, BUFFER_NAME, streamsMetrics),
+            metricName,
+            descriptionOfAvg,
+            descriptionOfMax
+        );
     }
 
     @Test
     public void shouldGetRecordE2ELatencySensor() {
         final String metricName = "record-e2e-latency";
-        final String e2eLatencyDescription = "end-to-end latency of a record, measuring by comparing the record timestamp with the " + "system time when it has been fully processed by the node";
+        final String e2eLatencyDescription =
+            "end-to-end latency of a record, measuring by comparing the record timestamp with the "
+                + "system time when it has been fully processed by the node";
         final String descriptionOfAvg = "The average " + e2eLatencyDescription;
         final String descriptionOfMin = "The minimum " + e2eLatencyDescription;
         final String descriptionOfMax = "The maximum " + e2eLatencyDescription;
-        when(streamsMetrics.storeLevelSensor(TASK_ID, STORE_NAME, metricName, RecordingLevel.TRACE)).thenReturn(expectedSensor);
+        when(streamsMetrics.storeLevelSensor(TASK_ID, STORE_NAME, metricName, RecordingLevel.TRACE))
+            .thenReturn(expectedSensor);
         when(streamsMetrics.storeLevelTagMap(TASK_ID, STORE_TYPE, STORE_NAME)).thenReturn(storeTagMap);
 
         try (final MockedStatic<StreamsMetricsImpl> streamsMetricsStaticMock = mockStatic(StreamsMetricsImpl.class)) {
-            final Sensor sensor = StateStoreMetrics.e2ELatencySensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics);
-            streamsMetricsStaticMock.verify(() -> StreamsMetricsImpl.addAvgAndMinAndMaxToSensor(expectedSensor, STORE_LEVEL_GROUP, storeTagMap, metricName, descriptionOfAvg, descriptionOfMin, descriptionOfMax));
+            final Sensor sensor =
+                StateStoreMetrics.e2ELatencySensor(TASK_ID, STORE_TYPE, STORE_NAME, streamsMetrics);
+            streamsMetricsStaticMock.verify(
+                () -> StreamsMetricsImpl.addAvgAndMinAndMaxToSensor(
+                    expectedSensor,
+                    STORE_LEVEL_GROUP,
+                    storeTagMap,
+                    metricName,
+                    descriptionOfAvg,
+                    descriptionOfMin,
+                    descriptionOfMax
+                )
+            );
             assertThat(sensor, is(expectedSensor));
         }
     }
 
     private void setupStreamsMetrics(final String metricName) {
-        when(streamsMetrics.storeLevelSensor(TASK_ID, STORE_NAME, metricName, RecordingLevel.DEBUG)).thenReturn(expectedSensor);
+        when(streamsMetrics.storeLevelSensor(TASK_ID, STORE_NAME, metricName, RecordingLevel.DEBUG))
+            .thenReturn(expectedSensor);
         when(streamsMetrics.storeLevelTagMap(TASK_ID, STORE_TYPE, STORE_NAME)).thenReturn(storeTagMap);
     }
 
-    private void getAndVerifySensor(final Supplier<Sensor> sensorSupplier, final String metricName, final String descriptionOfAvg, final String descriptionOfMax, final String descriptionOfRate) {
+    private void getAndVerifySensor(final Supplier<Sensor> sensorSupplier,
+                                    final String metricName,
+                                    final String descriptionOfAvg,
+                                    final String descriptionOfMax,
+                                    final String descriptionOfRate) {
         try (final MockedStatic<StreamsMetricsImpl> streamsMetricsStaticMock = mockStatic(StreamsMetricsImpl.class)) {
             final Sensor sensor = sensorSupplier.get();
-            streamsMetricsStaticMock.verify(() -> StreamsMetricsImpl.addInvocationRateToSensor(expectedSensor, STORE_LEVEL_GROUP, storeTagMap, metricName, descriptionOfRate));
-            streamsMetricsStaticMock.verify(() -> StreamsMetricsImpl.addAvgAndMaxToSensor(expectedSensor, STORE_LEVEL_GROUP, storeTagMap, latencyMetricName(metricName), descriptionOfAvg, descriptionOfMax));
+            streamsMetricsStaticMock.verify(
+                () -> StreamsMetricsImpl.addInvocationRateToSensor(
+                    expectedSensor,
+                    STORE_LEVEL_GROUP,
+                    storeTagMap,
+                    metricName,
+                    descriptionOfRate
+                )
+            );
+            streamsMetricsStaticMock.verify(
+                () -> StreamsMetricsImpl.addAvgAndMaxToSensor(
+                    expectedSensor,
+                    STORE_LEVEL_GROUP,
+                    storeTagMap,
+                    latencyMetricName(metricName),
+                    descriptionOfAvg,
+                    descriptionOfMax
+                )
+            );
             assertThat(sensor, is(expectedSensor));
         }
     }
@@ -237,14 +372,31 @@ public class StateStoreMetricsTest {
     }
 
     private void setupStreamsMetricsForSuppressionBufferSensor(final String metricName) {
-        when(streamsMetrics.storeLevelSensor(TASK_ID, BUFFER_NAME, metricName, RecordingLevel.DEBUG)).thenReturn(expectedSensor);
+        when(streamsMetrics.storeLevelSensor(
+            TASK_ID,
+            BUFFER_NAME,
+            metricName,
+            RecordingLevel.DEBUG
+        )).thenReturn(expectedSensor);
         when(streamsMetrics.storeLevelTagMap(TASK_ID, STORE_TYPE, BUFFER_NAME)).thenReturn(storeTagMap);
     }
 
-    private void verifySensorSuppressionBufferSensor(final Supplier<Sensor> sensorSupplier, final String metricName, final String descriptionOfAvg, final String descriptionOfMax) {
+    private void verifySensorSuppressionBufferSensor(final Supplier<Sensor> sensorSupplier,
+                                                     final String metricName,
+                                                     final String descriptionOfAvg,
+                                                     final String descriptionOfMax) {
         try (final MockedStatic<StreamsMetricsImpl> streamsMetricsStaticMock = mockStatic(StreamsMetricsImpl.class)) {
             final Sensor sensor = sensorSupplier.get();
-            streamsMetricsStaticMock.verify(() -> StreamsMetricsImpl.addAvgAndMaxToSensor(expectedSensor, STORE_LEVEL_GROUP, storeTagMap, metricName, descriptionOfAvg, descriptionOfMax));
+            streamsMetricsStaticMock.verify(
+                () -> StreamsMetricsImpl.addAvgAndMaxToSensor(
+                    expectedSensor,
+                    STORE_LEVEL_GROUP,
+                    storeTagMap,
+                    metricName,
+                    descriptionOfAvg,
+                    descriptionOfMax
+                )
+            );
             assertThat(sensor, is(expectedSensor));
         }
     }

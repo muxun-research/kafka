@@ -25,24 +25,25 @@ import java.util.Map;
 public interface ConfigurationValidator {
     ConfigurationValidator NO_OP = new ConfigurationValidator() {
         @Override
-        public void validate(ConfigResource resource) {
-        }
+        public void validate(ConfigResource resource) { }
 
         @Override
-        public void validate(ConfigResource resource, Map<String, String> config) {
-        }
+        public void validate(ConfigResource resource, Map<String, String> newConfigs, Map<String, String> existingConfigs) { }
     };
 
     /**
      * Throws an ApiException if the given resource is invalid to describe.
-     * @param resource The configuration resource.
+     *
+     * @param resource      The configuration resource.
      */
     void validate(ConfigResource resource);
 
     /**
      * Throws an ApiException if a configuration is invalid for the given resource.
-     * @param resource The configuration resource.
-     * @param config   The new configuration.
+     *
+     * @param resource               The configuration resource.
+     * @param newConfigs             The new configuration.
+     * @param existingConfigs        The existing configuration.
      */
-    void validate(ConfigResource resource, Map<String, String> config);
+    void validate(ConfigResource resource, Map<String, String> newConfigs, Map<String, String> existingConfigs);
 }

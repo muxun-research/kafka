@@ -24,13 +24,13 @@ package org.apache.kafka.streams.errors;
  */
 public class TaskMigratedException extends StreamsException {
 
-	private final static long serialVersionUID = 1L;
+    private static final long serialVersionUID = 1L;
 
-	public TaskMigratedException(final String message) {
-		super(message + "; it means all tasks belonging to this thread should be migrated.");
-	}
+    public TaskMigratedException(final String message) {
+        super(message + "; it means all tasks belonging to this thread should be migrated.");
+    }
 
-	public TaskMigratedException(final String message, final Throwable throwable) {
-		super(message + "; it means all tasks belonging to this thread should be migrated.", throwable);
-	}
+    public TaskMigratedException(final String message, final Throwable throwable) {
+        super(message + "; it means all tasks belonging to this thread should be migrated.", throwable);
+    }
 }

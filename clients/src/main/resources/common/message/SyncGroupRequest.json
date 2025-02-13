@@ -16,10 +16,7 @@
 {
   "apiKey": 14,
   "type": "request",
-  "listeners": [
-    "zkBroker",
-    "broker"
-  ],
+  "listeners": ["broker"],
   "name": "SyncGroupRequest",
   // Versions 1 and 2 are the same as version 0.
   //
@@ -33,70 +30,27 @@
   "validVersions": "0-5",
   "flexibleVersions": "4+",
   "fields": [
-    {
-      "name": "GroupId",
-      "type": "string",
-      "versions": "0+",
-      "entityType": "groupId",
-      "about": "The unique group identifier."
-    },
-    {
-      "name": "GenerationId",
-      "type": "int32",
-      "versions": "0+",
-      "about": "The generation of the group."
-    },
-    {
-      "name": "MemberId",
-      "type": "string",
-      "versions": "0+",
-      "about": "The member ID assigned by the group."
-    },
-    {
-      "name": "GroupInstanceId",
-      "type": "string",
-      "versions": "3+",
-      "nullableVersions": "3+",
-      "default": "null",
-      "about": "The unique identifier of the consumer instance provided by end user."
-    },
-    {
-      "name": "ProtocolType",
-      "type": "string",
-      "versions": "5+",
-      "nullableVersions": "5+",
-      "default": "null",
-      "ignorable": true,
-      "about": "The group protocol type."
-    },
-    {
-      "name": "ProtocolName",
-      "type": "string",
-      "versions": "5+",
-      "nullableVersions": "5+",
-      "default": "null",
-      "ignorable": true,
-      "about": "The group protocol name."
-    },
-    {
-      "name": "Assignments",
-      "type": "[]SyncGroupRequestAssignment",
-      "versions": "0+",
-      "about": "Each assignment.",
-      "fields": [
-        {
-          "name": "MemberId",
-          "type": "string",
-          "versions": "0+",
-          "about": "The ID of the member to assign."
-        },
-        {
-          "name": "Assignment",
-          "type": "bytes",
-          "versions": "0+",
-          "about": "The member assignment."
-        }
-      ]
-    }
+    { "name": "GroupId", "type": "string", "versions": "0+", "entityType": "groupId",
+      "about": "The unique group identifier." },
+    { "name": "GenerationId", "type": "int32", "versions": "0+",
+      "about": "The generation of the group." },
+    { "name": "MemberId", "type": "string", "versions": "0+",
+      "about": "The member ID assigned by the group." },
+    { "name": "GroupInstanceId", "type": "string", "versions": "3+", 
+      "nullableVersions": "3+", "default": "null",
+      "about": "The unique identifier of the consumer instance provided by end user." },
+    { "name": "ProtocolType", "type": "string", "versions": "5+",
+      "nullableVersions": "5+", "default": "null", "ignorable": true,
+      "about": "The group protocol type." },
+    { "name": "ProtocolName", "type": "string", "versions": "5+",
+      "nullableVersions": "5+", "default": "null", "ignorable": true,
+      "about": "The group protocol name." },
+    { "name": "Assignments", "type": "[]SyncGroupRequestAssignment", "versions": "0+",
+      "about": "Each assignment.", "fields": [
+      { "name": "MemberId", "type": "string", "versions": "0+",
+        "about": "The ID of the member to assign." },
+      { "name": "Assignment", "type": "bytes", "versions": "0+",
+        "about": "The member assignment." }
+    ]}
   ]
 }

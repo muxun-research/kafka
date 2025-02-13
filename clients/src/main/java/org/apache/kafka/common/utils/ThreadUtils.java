@@ -25,6 +25,8 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static java.lang.Thread.UncaughtExceptionHandler;
+
 /**
  * Utilities for working with threads.
  */
@@ -34,13 +36,31 @@ public class ThreadUtils {
 
     /**
      * Create a new ThreadFactory.
-     * @param pattern The pattern to use.  If this contains %d, it will be
-     *                replaced with a thread number.  It should not contain more
-     *                than one %d.
-     * @param daemon  True if we want daemon threads.
-     * @return The new ThreadFactory.
+     *
+     * @param pattern       The pattern to use.  If this contains %d, it will be
+     *                      replaced with a thread number.  It should not contain more
+     *                      than one %d.
+     * @param daemon        True if we want daemon threads.
+     * @return              The new ThreadFactory.
      */
-    public static ThreadFactory createThreadFactory(final String pattern, final boolean daemon) {
+    public static ThreadFactory createThreadFactory(final String pattern,
+                                                    final boolean daemon) {
+        return createThreadFactory(pattern, daemon, null);
+    }
+
+    /**
+     * Create a new ThreadFactory.
+     *
+     * @param pattern       The pattern to use.  If this contains %d, it will be
+     *                      replaced with a thread number.  It should not contain more
+     *                      than one %d.
+     * @param daemon        True if we want daemon threads.
+     * @param ueh           thread's uncaught exception handler.
+     * @return              The new ThreadFactory.
+     */
+    public static ThreadFactory createThreadFactory(final String pattern,
+                                                    final boolean daemon,
+                                                    final UncaughtExceptionHandler ueh) {
         return new ThreadFactory() {
             private final AtomicLong threadEpoch = new AtomicLong(0);
 
@@ -54,6 +74,9 @@ public class ThreadUtils {
                 }
                 Thread thread = new Thread(r, threadName);
                 thread.setDaemon(daemon);
+                if (ueh != null) {
+                    thread.setUncaughtExceptionHandler(ueh);
+                }
                 return thread;
             }
         };
@@ -63,11 +86,18 @@ public class ThreadUtils {
      * Shuts down an executor service in two phases, first by calling shutdown to reject incoming tasks,
      * and then calling shutdownNow, if necessary, to cancel any lingering tasks.
      * After the timeout/on interrupt, the service is forcefully closed.
+     * This pattern of shutting down thread pool is adopted from here:
+     * <a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/ExecutorService.html">ExecutorService</a>
      * @param executorService The service to shut down.
      * @param timeout         The timeout of the shutdown.
      * @param timeUnit        The time unit of the shutdown timeout.
      */
-    public static void shutdownExecutorServiceQuietly(ExecutorService executorService, long timeout, TimeUnit timeUnit) {
+    public static void shutdownExecutorServiceQuietly(ExecutorService executorService,
+                                                      long timeout,
+                                                      TimeUnit timeUnit) {
+        if (executorService == null) {
+            return;
+        }
         executorService.shutdown(); // Disable new tasks from being submitted
         try {
             // Wait a while for existing tasks to terminate

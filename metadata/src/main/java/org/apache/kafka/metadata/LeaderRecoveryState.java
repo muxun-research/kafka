@@ -55,7 +55,7 @@ public enum LeaderRecoveryState {
 
     private final byte value;
 
-    private LeaderRecoveryState(byte value) {
+    LeaderRecoveryState(byte value) {
         this.value = value;
     }
 

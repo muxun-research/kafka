@@ -16,7 +16,11 @@
  */
 package org.apache.kafka.test;
 
-import org.apache.kafka.clients.consumer.*;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerInterceptor;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.ClusterResource;
 import org.apache.kafka.common.ClusterResourceListener;
@@ -24,7 +28,12 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -64,19 +73,28 @@ public class MockConsumerInterceptor implements ClusterResourceListener, Consume
         CLUSTER_ID_BEFORE_ON_CONSUME.compareAndSet(NO_CLUSTER_ID, CLUSTER_META.get());
 
         Map<TopicPartition, List<ConsumerRecord<String, String>>> recordMap = new HashMap<>();
+        Map<TopicPartition, OffsetAndMetadata> nextOffsets = new HashMap<>();
+
         for (TopicPartition tp : records.partitions()) {
             List<ConsumerRecord<String, String>> lst = new ArrayList<>();
+            long nextOffset = 0;
             for (ConsumerRecord<String, String> record: records.records(tp)) {
-				lst.add(new ConsumerRecord<>(record.topic(), record.partition(), record.offset(),
-						record.timestamp(), record.timestampType(),
-						record.serializedKeySize(),
-						record.serializedValueSize(),
-						record.key(), record.value().toUpperCase(Locale.ROOT),
-						new RecordHeaders(), Optional.empty()));
+                lst.add(new ConsumerRecord<>(record.topic(), record.partition(), record.offset(),
+                                             record.timestamp(), record.timestampType(),
+                                             record.serializedKeySize(),
+                                             record.serializedValueSize(),
+                                             record.key(), record.value().toUpperCase(Locale.ROOT),
+                                             new RecordHeaders(), Optional.empty()));
+                nextOffset = record.offset() + 1;
             }
-            recordMap.put(tp, lst);
+            if (lst.isEmpty()) {
+                recordMap.put(tp, List.of());
+            } else {
+                recordMap.put(tp, lst);
+                nextOffsets.put(tp, new OffsetAndMetadata(nextOffset, Optional.empty(), ""));
+            }
         }
-		return new ConsumerRecords<>(recordMap);
+        return new ConsumerRecords<>(recordMap, nextOffsets);
     }
 
     @Override

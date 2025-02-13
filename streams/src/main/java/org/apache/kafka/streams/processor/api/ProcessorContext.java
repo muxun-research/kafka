@@ -18,6 +18,7 @@ package org.apache.kafka.streams.processor.api;
 
 /**
  * Processor context interface for {@link Record}.
+ *
  * @param <KForward> a bound on the types of keys that may be forwarded
  * @param <VForward> a bound on the types of values that may be forwarded
  */
@@ -48,34 +49,34 @@ public interface ProcessorContext<KForward, VForward> extends ProcessingContext 
      * <p>
      * In other words, this would be considered unsafe:
      * <code>
-     * process(Record inputRecord) {
-     * inputRecord.headers().add(...);
-     * context.forward(inputRecord);
-     * }
+     *     process(Record inputRecord) {
+     *         inputRecord.headers().add(...);
+     *         context.forward(inputRecord);
+     *     }
      * </code>
      * This is unsafe because the parent, and potentially siblings, grandparents, etc.,
      * all will see this modification to their shared Headers reference. This is a violation
      * of causality and could lead to undefined behavior.
      * <p>
      * A safe usage would look like this:
-     * <code>
-     * process(Record inputRecord) {
-     * // makes a copy of the headers
-     * Record toForward = inputRecord.withHeaders(inputRecord.headers());
-     * // Other options to create a safe copy are:
-     * // * use any copy-on-write method, which makes a copy of all fields:
-     * //   toForward = inputRecord.withValue();
-     * // * explicitly copy all fields:
-     * //   toForward = new Record(inputRecord.key(), inputRecord.value(), inputRecord.timestamp(), inputRecord.headers());
-     * // * create a fresh, empty Headers:
-     * //   toForward = new Record(inputRecord.key(), inputRecord.value(), inputRecord.timestamp());
-     * // * etc.
-     * <p>
-     * // now, we are modifying our own independent copy of the headers.
-     * toForward.headers().add(...);
-     * context.forward(toForward);
-     * }
-     * </code>
+     * <pre>{@code
+     *     process(Record inputRecord) {
+     *         // makes a copy of the headers
+     *         Record toForward = inputRecord.withHeaders(inputRecord.headers());
+     *         // Other options to create a safe copy are:
+     *         // * use any copy-on-write method, which makes a copy of all fields:
+     *         //   toForward = inputRecord.withValue();
+     *         // * explicitly copy all fields:
+     *         //   toForward = new Record(inputRecord.key(), inputRecord.value(), inputRecord.timestamp(), inputRecord.headers());
+     *         // * create a fresh, empty Headers:
+     *         //   toForward = new Record(inputRecord.key(), inputRecord.value(), inputRecord.timestamp());
+     *         // * etc.
+     *
+     *         // now, we are modifying our own independent copy of the headers.
+     *         toForward.headers().add(...);
+     *         context.forward(toForward);
+     *     }
+     * }</pre>
      * @param record The record to forward to all children
      */
     <K extends KForward, V extends VForward> void forward(Record<K, V> record);
@@ -83,7 +84,8 @@ public interface ProcessorContext<KForward, VForward> extends ProcessingContext 
     /**
      * Forward a record to the specified child processor.
      * See {@link ProcessorContext#forward(Record)} for considerations.
-     * @param record    The record to forward
+     *
+     * @param record The record to forward
      * @param childName The name of the child processor to receive the record
      * @see ProcessorContext#forward(Record)
      */

@@ -37,9 +37,9 @@ public class RocksDBSessionStore extends WrappedStateStore<SegmentedBytesStore, 
     }
 
     @Override
-    public void init(final StateStoreContext context, final StateStore root) {
-        wrapped().init(context, root);
-        this.stateStoreContext = context;
+    public void init(final StateStoreContext stateStoreContext, final StateStore root) {
+        wrapped().init(stateStoreContext, root);
+        this.stateStoreContext = stateStoreContext;
     }
 
     @Override

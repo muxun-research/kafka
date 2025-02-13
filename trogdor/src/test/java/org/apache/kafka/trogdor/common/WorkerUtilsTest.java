@@ -26,13 +26,22 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.errors.TopicExistsException;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
-import org.apache.kafka.common.utils.Utils;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -50,7 +59,8 @@ public class WorkerUtilsTest {
     private static final String TEST_TOPIC = "test-topic-1";
     private static final short TEST_REPLICATION_FACTOR = 1;
     private static final int TEST_PARTITIONS = 1;
-    private static final NewTopic NEW_TEST_TOPIC = new NewTopic(TEST_TOPIC, TEST_PARTITIONS, TEST_REPLICATION_FACTOR);
+    private static final NewTopic NEW_TEST_TOPIC =
+        new NewTopic(TEST_TOPIC, TEST_PARTITIONS, TEST_REPLICATION_FACTOR);
 
     private MockAdminClient adminClient;
 
@@ -66,56 +76,90 @@ public class WorkerUtilsTest {
 
         WorkerUtils.createTopics(log, adminClient, newTopics, true);
         assertEquals(Collections.singleton(TEST_TOPIC), adminClient.listTopics().names().get());
-        assertEquals(new TopicDescription(TEST_TOPIC, false, Collections.singletonList(new TopicPartitionInfo(0, broker1, singleReplica, Collections.<Node>emptyList()))), adminClient.describeTopics(Collections.singleton(TEST_TOPIC)).topicNameValues().get(TEST_TOPIC).get());
+        assertEquals(
+            new TopicDescription(
+                TEST_TOPIC, false,
+                Collections.singletonList(
+                    new TopicPartitionInfo(0, broker1, singleReplica, Collections.emptyList(), Collections.emptyList(), Collections.emptyList()))),
+            adminClient.describeTopics(
+                Collections.singleton(TEST_TOPIC)).topicNameValues().get(TEST_TOPIC).get()
+        );
     }
 
     @Test
     public void testCreateRetriesOnTimeout() throws Throwable {
         adminClient.timeoutNextRequest(1);
 
-        WorkerUtils.createTopics(log, adminClient, Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC), true);
+        WorkerUtils.createTopics(
+            log, adminClient, Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC), true);
 
-        assertEquals(new TopicDescription(TEST_TOPIC, false, Collections.singletonList(new TopicPartitionInfo(0, broker1, singleReplica, Collections.<Node>emptyList()))), adminClient.describeTopics(Collections.singleton(TEST_TOPIC)).topicNameValues().get(TEST_TOPIC).get());
+        assertEquals(
+            new TopicDescription(
+                TEST_TOPIC, false,
+                Collections.singletonList(
+                    new TopicPartitionInfo(0, broker1, singleReplica, Collections.emptyList(), Collections.emptyList(), Collections.emptyList()))),
+            adminClient.describeTopics(
+                Collections.singleton(TEST_TOPIC)).topicNameValues().get(TEST_TOPIC).get()
+        );
     }
 
     @Test
     public void testCreateZeroTopicsDoesNothing() throws Throwable {
-        WorkerUtils.createTopics(log, adminClient, Collections.<String, NewTopic>emptyMap(), true);
+        WorkerUtils.createTopics(log, adminClient, Collections.emptyMap(), true);
         assertEquals(0, adminClient.listTopics().names().get().size());
     }
 
     @Test
-    public void testCreateTopicsFailsIfAtLeastOneTopicExists() throws Throwable {
-        adminClient.addTopic(false, TEST_TOPIC, Collections.singletonList(new TopicPartitionInfo(0, broker1, singleReplica, Collections.<Node>emptyList())), null);
+    public void testCreateTopicsFailsIfAtLeastOneTopicExists() {
+        adminClient.addTopic(
+            false,
+            TEST_TOPIC,
+            Collections.singletonList(new TopicPartitionInfo(0, broker1, singleReplica, Collections.emptyList())),
+            null);
 
         Map<String, NewTopic> newTopics = new HashMap<>();
         newTopics.put(TEST_TOPIC, NEW_TEST_TOPIC);
-        newTopics.put("another-topic", new NewTopic("another-topic", TEST_PARTITIONS, TEST_REPLICATION_FACTOR));
-        newTopics.put("one-more-topic", new NewTopic("one-more-topic", TEST_PARTITIONS, TEST_REPLICATION_FACTOR));
+        newTopics.put("another-topic",
+                      new NewTopic("another-topic", TEST_PARTITIONS, TEST_REPLICATION_FACTOR));
+        newTopics.put("one-more-topic",
+                      new NewTopic("one-more-topic", TEST_PARTITIONS, TEST_REPLICATION_FACTOR));
 
         assertThrows(TopicExistsException.class, () -> WorkerUtils.createTopics(log, adminClient, newTopics, true));
     }
 
     @Test
-    public void testExistingTopicsMustHaveRequestedNumberOfPartitions() throws Throwable {
+    public void testExistingTopicsMustHaveRequestedNumberOfPartitions() {
         List<TopicPartitionInfo> tpInfo = new ArrayList<>();
-        tpInfo.add(new TopicPartitionInfo(0, broker1, singleReplica, Collections.<Node>emptyList()));
-        tpInfo.add(new TopicPartitionInfo(1, broker2, singleReplica, Collections.<Node>emptyList()));
-        adminClient.addTopic(false, TEST_TOPIC, tpInfo, null);
+        tpInfo.add(new TopicPartitionInfo(0, broker1, singleReplica, Collections.emptyList()));
+        tpInfo.add(new TopicPartitionInfo(1, broker2, singleReplica, Collections.emptyList()));
+        adminClient.addTopic(
+            false,
+            TEST_TOPIC,
+            tpInfo,
+            null);
 
-        assertThrows(RuntimeException.class, () -> WorkerUtils.createTopics(log, adminClient, Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC), false));
+        assertThrows(RuntimeException.class, () -> WorkerUtils.createTopics(
+            log, adminClient, Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC), false));
     }
 
     @Test
     public void testExistingTopicsNotCreated() throws Throwable {
         final String existingTopic = "existing-topic";
         List<TopicPartitionInfo> tpInfo = new ArrayList<>();
-        tpInfo.add(new TopicPartitionInfo(0, broker1, singleReplica, Collections.<Node>emptyList()));
-        tpInfo.add(new TopicPartitionInfo(1, broker2, singleReplica, Collections.<Node>emptyList()));
-        tpInfo.add(new TopicPartitionInfo(2, broker3, singleReplica, Collections.<Node>emptyList()));
-        adminClient.addTopic(false, existingTopic, tpInfo, null);
+        tpInfo.add(new TopicPartitionInfo(0, broker1, singleReplica, Collections.emptyList()));
+        tpInfo.add(new TopicPartitionInfo(1, broker2, singleReplica, Collections.emptyList()));
+        tpInfo.add(new TopicPartitionInfo(2, broker3, singleReplica, Collections.emptyList()));
+        adminClient.addTopic(
+            false,
+            existingTopic,
+            tpInfo,
+            null);
 
-        WorkerUtils.createTopics(log, adminClient, Collections.singletonMap(existingTopic, new NewTopic(existingTopic, tpInfo.size(), TEST_REPLICATION_FACTOR)), false);
+        WorkerUtils.createTopics(
+            log, adminClient,
+            Collections.singletonMap(
+                existingTopic,
+                new NewTopic(existingTopic, tpInfo.size(), TEST_REPLICATION_FACTOR)), false);
 
         assertEquals(Collections.singleton(existingTopic), adminClient.listTopics().names().get());
     }
@@ -125,32 +169,45 @@ public class WorkerUtilsTest {
         // should be no topics before the call
         assertEquals(0, adminClient.listTopics().names().get().size());
 
-        WorkerUtils.createTopics(log, adminClient, Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC), false);
+        WorkerUtils.createTopics(
+            log, adminClient, Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC), false);
 
         assertEquals(Collections.singleton(TEST_TOPIC), adminClient.listTopics().names().get());
-        assertEquals(new TopicDescription(TEST_TOPIC, false, Collections.singletonList(new TopicPartitionInfo(0, broker1, singleReplica, Collections.<Node>emptyList()))), adminClient.describeTopics(Collections.singleton(TEST_TOPIC)).topicNameValues().get(TEST_TOPIC).get());
+        assertEquals(
+            new TopicDescription(
+                TEST_TOPIC, false,
+                Collections.singletonList(
+                    new TopicPartitionInfo(0, broker1, singleReplica, Collections.emptyList(), Collections.emptyList(), Collections.emptyList()))),
+            adminClient.describeTopics(Collections.singleton(TEST_TOPIC)).topicNameValues().get(TEST_TOPIC).get()
+        );
     }
 
     @Test
     public void testCreatesOneTopicVerifiesOneTopic() throws Throwable {
         final String existingTopic = "existing-topic";
         List<TopicPartitionInfo> tpInfo = new ArrayList<>();
-        tpInfo.add(new TopicPartitionInfo(0, broker1, singleReplica, Collections.<Node>emptyList()));
-        tpInfo.add(new TopicPartitionInfo(1, broker2, singleReplica, Collections.<Node>emptyList()));
-        adminClient.addTopic(false, existingTopic, tpInfo, null);
+        tpInfo.add(new TopicPartitionInfo(0, broker1, singleReplica, Collections.emptyList()));
+        tpInfo.add(new TopicPartitionInfo(1, broker2, singleReplica, Collections.emptyList()));
+        adminClient.addTopic(
+            false,
+            existingTopic,
+            tpInfo,
+            null);
 
         Map<String, NewTopic> topics = new HashMap<>();
-        topics.put(existingTopic, new NewTopic(existingTopic, tpInfo.size(), TEST_REPLICATION_FACTOR));
+        topics.put(existingTopic,
+                   new NewTopic(existingTopic, tpInfo.size(), TEST_REPLICATION_FACTOR));
         topics.put(TEST_TOPIC, NEW_TEST_TOPIC);
 
         WorkerUtils.createTopics(log, adminClient, topics, false);
 
-        assertEquals(Utils.mkSet(existingTopic, TEST_TOPIC), adminClient.listTopics().names().get());
+        assertEquals(Set.of(existingTopic, TEST_TOPIC), adminClient.listTopics().names().get());
     }
 
     @Test
     public void testCreateNonExistingTopicsWithZeroTopicsDoesNothing() throws Throwable {
-        WorkerUtils.createTopics(log, adminClient, Collections.<String, NewTopic>emptyMap(), false);
+        WorkerUtils.createTopics(
+            log, adminClient, Collections.emptyMap(), false);
         assertEquals(0, adminClient.listTopics().names().get().size());
     }
 
@@ -165,7 +222,10 @@ public class WorkerUtilsTest {
         resultProps.put(ProducerConfig.CLIENT_ID_CONFIG, "test-client");
         resultProps.put(ProducerConfig.LINGER_MS_CONFIG, "1000");
 
-        WorkerUtils.addConfigsToProperties(props, Collections.singletonMap(ProducerConfig.CLIENT_ID_CONFIG, "test-client"), Collections.singletonMap(ProducerConfig.LINGER_MS_CONFIG, "1000"));
+        WorkerUtils.addConfigsToProperties(
+            props,
+            Collections.singletonMap(ProducerConfig.CLIENT_ID_CONFIG, "test-client"),
+            Collections.singletonMap(ProducerConfig.LINGER_MS_CONFIG, "1000"));
         assertEquals(resultProps, props);
     }
 
@@ -180,7 +240,10 @@ public class WorkerUtilsTest {
         resultProps.put(ProducerConfig.ACKS_CONFIG, "1");
         resultProps.put(ProducerConfig.LINGER_MS_CONFIG, "1000");
 
-        WorkerUtils.addConfigsToProperties(props, Collections.singletonMap(ProducerConfig.ACKS_CONFIG, "1"), Collections.singletonMap(ProducerConfig.LINGER_MS_CONFIG, "1000"));
+        WorkerUtils.addConfigsToProperties(
+            props,
+            Collections.singletonMap(ProducerConfig.ACKS_CONFIG, "1"),
+            Collections.singletonMap(ProducerConfig.LINGER_MS_CONFIG, "1000"));
         assertEquals(resultProps, props);
     }
 
@@ -194,7 +257,10 @@ public class WorkerUtilsTest {
         resultProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
         resultProps.put(ProducerConfig.ACKS_CONFIG, "0");
 
-        WorkerUtils.addConfigsToProperties(props, Collections.singletonMap(ProducerConfig.ACKS_CONFIG, "1"), Collections.singletonMap(ProducerConfig.ACKS_CONFIG, "0"));
+        WorkerUtils.addConfigsToProperties(
+            props,
+            Collections.singletonMap(ProducerConfig.ACKS_CONFIG, "1"),
+            Collections.singletonMap(ProducerConfig.ACKS_CONFIG, "0"));
         assertEquals(resultProps, props);
     }
 
@@ -205,8 +271,15 @@ public class WorkerUtilsTest {
         makeExistingTopicWithOneReplica(topic1, 10);
         makeExistingTopicWithOneReplica(topic2, 20);
 
-        Collection<TopicPartition> topicPartitions = WorkerUtils.getMatchingTopicPartitions(adminClient, topic2, 0, 2);
-        assertEquals(Utils.mkSet(new TopicPartition(topic2, 0), new TopicPartition(topic2, 1), new TopicPartition(topic2, 2)), new HashSet<>(topicPartitions));
+        Collection<TopicPartition> topicPartitions =
+            WorkerUtils.getMatchingTopicPartitions(adminClient, topic2, 0, 2);
+        assertEquals(
+            Set.of(
+                new TopicPartition(topic2, 0), new TopicPartition(topic2, 1),
+                new TopicPartition(topic2, 2)
+            ),
+            new HashSet<>(topicPartitions)
+        );
     }
 
     @Test
@@ -218,8 +291,15 @@ public class WorkerUtilsTest {
         makeExistingTopicWithOneReplica(topic2, 20);
         makeExistingTopicWithOneReplica(topic3, 30);
 
-        Collection<TopicPartition> topicPartitions = WorkerUtils.getMatchingTopicPartitions(adminClient, ".*-topic$", 0, 1);
-        assertEquals(Utils.mkSet(new TopicPartition(topic1, 0), new TopicPartition(topic1, 1), new TopicPartition(topic2, 0), new TopicPartition(topic2, 1)), new HashSet<>(topicPartitions));
+        Collection<TopicPartition> topicPartitions =
+            WorkerUtils.getMatchingTopicPartitions(adminClient, ".*-topic$", 0, 1);
+        assertEquals(
+            Set.of(
+                new TopicPartition(topic1, 0), new TopicPartition(topic1, 1),
+                new TopicPartition(topic2, 0), new TopicPartition(topic2, 1)
+            ),
+            new HashSet<>(topicPartitions)
+        );
     }
 
     private void makeExistingTopicWithOneReplica(String topicName, int numPartitions) {
@@ -227,10 +307,15 @@ public class WorkerUtilsTest {
         int brokerIndex = 0;
         for (int i = 0; i < numPartitions; ++i) {
             Node broker = cluster.get(brokerIndex);
-            tpInfo.add(new TopicPartitionInfo(i, broker, singleReplica, Collections.<Node>emptyList()));
+            tpInfo.add(new TopicPartitionInfo(
+                i, broker, singleReplica, Collections.emptyList()));
             brokerIndex = (brokerIndex + 1) % cluster.size();
         }
-        adminClient.addTopic(false, topicName, tpInfo, null);
+        adminClient.addTopic(
+            false,
+            topicName,
+            tpInfo,
+            null);
     }
 
     @Test
@@ -238,8 +323,11 @@ public class WorkerUtilsTest {
         Map<String, NewTopic> newTopics = Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC);
         WorkerUtils.createTopics(log, adminClient, newTopics, true);
         adminClient.setFetchesRemainingUntilVisible(TEST_TOPIC, 2);
-        WorkerUtils.verifyTopics(log, adminClient, Collections.singleton(TEST_TOPIC), Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC), 3, 1);
+        WorkerUtils.verifyTopics(log, adminClient, Collections.singleton(TEST_TOPIC),
+            Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC), 3, 1);
         adminClient.setFetchesRemainingUntilVisible(TEST_TOPIC, 100);
-        assertThrows(UnknownTopicOrPartitionException.class, () -> WorkerUtils.verifyTopics(log, adminClient, Collections.singleton(TEST_TOPIC), Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC), 2, 1));
+        assertThrows(UnknownTopicOrPartitionException.class, () ->
+            WorkerUtils.verifyTopics(log, adminClient, Collections.singleton(TEST_TOPIC),
+                Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC), 2, 1));
     }
 }

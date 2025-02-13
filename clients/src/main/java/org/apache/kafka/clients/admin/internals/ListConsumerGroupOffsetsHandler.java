@@ -26,9 +26,17 @@ import org.apache.kafka.common.requests.FindCoordinatorRequest.CoordinatorType;
 import org.apache.kafka.common.requests.OffsetFetchRequest;
 import org.apache.kafka.common.requests.OffsetFetchResponse;
 import org.apache.kafka.common.utils.LogContext;
+
 import org.slf4j.Logger;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class ListConsumerGroupOffsetsHandler implements AdminApiHandler<CoordinatorKey, Map<TopicPartition, OffsetAndMetadata>> {
@@ -38,7 +46,11 @@ public class ListConsumerGroupOffsetsHandler implements AdminApiHandler<Coordina
     private final Logger log;
     private final CoordinatorStrategy lookupStrategy;
 
-    public ListConsumerGroupOffsetsHandler(Map<String, ListConsumerGroupOffsetsSpec> groupSpecs, boolean requireStable, LogContext logContext) {
+    public ListConsumerGroupOffsetsHandler(
+        Map<String, ListConsumerGroupOffsetsSpec> groupSpecs,
+        boolean requireStable,
+        LogContext logContext
+    ) {
         this.log = logContext.logger(ListConsumerGroupOffsetsHandler.class);
         this.lookupStrategy = new CoordinatorStrategy(CoordinatorType.GROUP, logContext);
         this.groupSpecs = groupSpecs;
@@ -62,12 +74,15 @@ public class ListConsumerGroupOffsetsHandler implements AdminApiHandler<Coordina
     private void validateKeys(Set<CoordinatorKey> groupIds) {
         Set<CoordinatorKey> keys = coordinatorKeys(groupSpecs.keySet());
         if (!keys.containsAll(groupIds)) {
-            throw new IllegalArgumentException("Received unexpected group ids " + groupIds + " (expected one of " + keys + ")");
+            throw new IllegalArgumentException("Received unexpected group ids " + groupIds +
+                    " (expected one of " + keys + ")");
         }
     }
 
     private static Set<CoordinatorKey> coordinatorKeys(Collection<String> groupIds) {
-        return groupIds.stream().map(CoordinatorKey::byGroupId).collect(Collectors.toSet());
+        return groupIds.stream()
+           .map(CoordinatorKey::byGroupId)
+           .collect(Collectors.toSet());
     }
 
     public OffsetFetchRequest.Builder buildBatchedRequest(Set<CoordinatorKey> groupIds) {
@@ -99,7 +114,11 @@ public class ListConsumerGroupOffsetsHandler implements AdminApiHandler<Coordina
     }
 
     @Override
-    public ApiResult<CoordinatorKey, Map<TopicPartition, OffsetAndMetadata>> handleResponse(Node coordinator, Set<CoordinatorKey> groupIds, AbstractResponse abstractResponse) {
+    public ApiResult<CoordinatorKey, Map<TopicPartition, OffsetAndMetadata>> handleResponse(
+        Node coordinator,
+        Set<CoordinatorKey> groupIds,
+        AbstractResponse abstractResponse
+    ) {
         validateKeys(groupIds);
 
         final OffsetFetchResponse response = (OffsetFetchResponse) abstractResponse;
@@ -139,22 +158,31 @@ public class ListConsumerGroupOffsetsHandler implements AdminApiHandler<Coordina
         return new ApiResult<>(completed, failed, unmapped);
     }
 
-    private void handleGroupError(CoordinatorKey groupId, Errors error, Map<CoordinatorKey, Throwable> failed, List<CoordinatorKey> groupsToUnmap) {
+    private void handleGroupError(
+        CoordinatorKey groupId,
+        Errors error,
+        Map<CoordinatorKey, Throwable> failed,
+        List<CoordinatorKey> groupsToUnmap
+    ) {
         switch (error) {
             case GROUP_AUTHORIZATION_FAILED:
+            case UNKNOWN_MEMBER_ID:
+            case STALE_MEMBER_EPOCH:
                 log.debug("`OffsetFetch` request for group id {} failed due to error {}", groupId.idValue, error);
                 failed.put(groupId, error.exception());
                 break;
             case COORDINATOR_LOAD_IN_PROGRESS:
                 // If the coordinator is in the middle of loading, then we just need to retry
-                log.debug("`OffsetFetch` request for group id {} failed because the coordinator " + "is still in the process of loading state. Will retry", groupId.idValue);
+                log.debug("`OffsetFetch` request for group id {} failed because the coordinator " +
+                    "is still in the process of loading state. Will retry", groupId.idValue);
                 break;
 
             case COORDINATOR_NOT_AVAILABLE:
             case NOT_COORDINATOR:
                 // If the coordinator is unavailable or there was a coordinator change, then we unmap
                 // the key so that we retry the `FindCoordinator` request
-                log.debug("`OffsetFetch` request for group id {} returned error {}. " + "Will attempt to find the coordinator again and retry", groupId.idValue, error);
+                log.debug("`OffsetFetch` request for group id {} returned error {}. " +
+                    "Will attempt to find the coordinator again and retry", groupId.idValue, error);
                 groupsToUnmap.add(groupId);
                 break;
 

@@ -22,6 +22,7 @@ import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.serialization.Serdes.ListSerde;
 import org.apache.kafka.common.utils.Utils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,14 +43,20 @@ public class ListDeserializer<Inner> implements Deserializer<List<Inner>> {
 
     final Logger log = LoggerFactory.getLogger(ListDeserializer.class);
 
-    private static final Map<Class<? extends Deserializer<?>>, Integer> FIXED_LENGTH_DESERIALIZERS = mkMap(mkEntry(ShortDeserializer.class, Short.BYTES), mkEntry(IntegerDeserializer.class, Integer.BYTES), mkEntry(FloatDeserializer.class, Float.BYTES), mkEntry(LongDeserializer.class, Long.BYTES), mkEntry(DoubleDeserializer.class, Double.BYTES), mkEntry(UUIDDeserializer.class, 36));
+    private static final Map<Class<? extends Deserializer<?>>, Integer> FIXED_LENGTH_DESERIALIZERS = mkMap(
+        mkEntry(ShortDeserializer.class, Short.BYTES),
+        mkEntry(IntegerDeserializer.class, Integer.BYTES),
+        mkEntry(FloatDeserializer.class, Float.BYTES),
+        mkEntry(LongDeserializer.class, Long.BYTES),
+        mkEntry(DoubleDeserializer.class, Double.BYTES),
+        mkEntry(UUIDDeserializer.class, 36)
+    );
 
     private Deserializer<Inner> inner;
     private Class<?> listClass;
     private Integer primitiveSize;
 
-    public ListDeserializer() {
-    }
+    public ListDeserializer() {}
 
     public <L extends List<Inner>> ListDeserializer(Class<L> listClass, Deserializer<Inner> inner) {
         if (listClass == null || inner == null) {
@@ -127,7 +134,8 @@ public class ListDeserializer<Inner> implements Deserializer<List<Inner>> {
                 listConstructor = (Constructor<List<Inner>>) listClass.getConstructor();
                 return listConstructor.newInstance();
             }
-        } catch (InstantiationException | IllegalAccessException | NoSuchMethodException | IllegalArgumentException | InvocationTargetException e) {
+        } catch (InstantiationException | IllegalAccessException | NoSuchMethodException |
+                IllegalArgumentException | InvocationTargetException e) {
             log.error("Failed to construct list due to ", e);
             throw new KafkaException("Could not construct a list instance of \"" + listClass.getCanonicalName() + "\"", e);
         }

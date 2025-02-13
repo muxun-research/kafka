@@ -24,18 +24,27 @@ import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.common.*;
+import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.KafkaFuture;
+import org.apache.kafka.common.Metric;
+import org.apache.kafka.common.MetricName;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.errors.StreamsException;
-import org.apache.kafka.streams.processor.TaskId;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -55,29 +64,24 @@ public class ClientUtils {
         }
     }
 
-
-    // currently admin client is shared among all threads
-    public static String getSharedAdminClientId(final String clientId) {
+    public static String adminClientId(final String clientId) {
         return clientId + "-admin";
     }
 
-    public static String getConsumerClientId(final String threadClientId) {
+    public static String consumerClientId(final String threadClientId) {
         return threadClientId + "-consumer";
     }
 
-    public static String getRestoreConsumerClientId(final String threadClientId) {
+    public static String restoreConsumerClientId(final String threadClientId) {
         return threadClientId + "-restore-consumer";
     }
 
-    public static String getThreadProducerClientId(final String threadClientId) {
+    public static String producerClientId(final String threadClientId) {
         return threadClientId + "-producer";
     }
 
-    public static String getTaskProducerClientId(final String threadClientId, final TaskId taskId) {
-        return threadClientId + "-" + taskId + "-producer";
-    }
-
-    public static Map<MetricName, Metric> consumerMetrics(final Consumer<byte[], byte[]> mainConsumer, final Consumer<byte[], byte[]> restoreConsumer) {
+    public static Map<MetricName, Metric> consumerMetrics(final Consumer<byte[], byte[]> mainConsumer,
+                                                          final Consumer<byte[], byte[]> restoreConsumer) {
         final Map<MetricName, ? extends Metric> consumerMetrics = mainConsumer.metrics();
         final Map<MetricName, ? extends Metric> restoreConsumerMetrics = restoreConsumer.metrics();
         final LinkedHashMap<MetricName, Metric> result = new LinkedHashMap<>();
@@ -103,10 +107,11 @@ public class ClientUtils {
     }
 
     /**
-     * @throws StreamsException                                if the consumer throws an exception
+     * @throws StreamsException if the consumer throws an exception
      * @throws org.apache.kafka.common.errors.TimeoutException if the request times out
      */
-    public static Map<TopicPartition, Long> fetchCommittedOffsets(final Set<TopicPartition> partitions, final Consumer<byte[], byte[]> consumer) {
+    public static Map<TopicPartition, Long> fetchCommittedOffsets(final Set<TopicPartition> partitions,
+                                                                  final Consumer<byte[], byte[]> consumer) {
         if (partitions.isEmpty()) {
             return Collections.emptyMap();
         }
@@ -114,7 +119,8 @@ public class ClientUtils {
         final Map<TopicPartition, Long> committedOffsets;
         try {
             // those which do not have a committed offset would default to 0
-            committedOffsets = consumer.committed(partitions).entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue() == null ? 0L : e.getValue().offset()));
+            committedOffsets = consumer.committed(partitions).entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue() == null ? 0L : e.getValue().offset()));
         } catch (final TimeoutException timeoutException) {
             LOG.warn("The committed offsets request timed out, try increasing the consumer client's default.api.timeout.ms", timeoutException);
             throw timeoutException;
@@ -126,15 +132,22 @@ public class ClientUtils {
         return committedOffsets;
     }
 
-    public static KafkaFuture<Map<TopicPartition, ListOffsetsResultInfo>> fetchEndOffsetsFuture(final Collection<TopicPartition> partitions, final Admin adminClient) {
-        return adminClient.listOffsets(partitions.stream().collect(Collectors.toMap(Function.identity(), tp -> OffsetSpec.latest()))).all();
+    public static KafkaFuture<Map<TopicPartition, ListOffsetsResultInfo>> fetchEndOffsetsFuture(final Collection<TopicPartition> partitions,
+                                                                                                final Admin adminClient) {
+        return adminClient.listOffsets(
+            partitions.stream().collect(Collectors.toMap(Function.identity(), tp -> OffsetSpec.latest()))
+        ).all();
     }
 
-    public static ListOffsetsResult fetchEndOffsetsResult(final Collection<TopicPartition> partitions, final Admin adminClient) {
-        return adminClient.listOffsets(partitions.stream().collect(Collectors.toMap(Function.identity(), tp -> OffsetSpec.latest())));
+    public static ListOffsetsResult fetchEndOffsetsResult(final Collection<TopicPartition> partitions,
+                                                          final Admin adminClient) {
+        return adminClient.listOffsets(
+            partitions.stream().collect(Collectors.toMap(Function.identity(), tp -> OffsetSpec.latest()))
+        );
     }
 
-    public static Map<TopicPartition, ListOffsetsResultInfo> getEndOffsets(final ListOffsetsResult resultFuture, final Collection<TopicPartition> partitions) {
+    public static Map<TopicPartition, ListOffsetsResultInfo> getEndOffsets(final ListOffsetsResult resultFuture,
+                                                                           final Collection<TopicPartition> partitions) {
         final Map<TopicPartition, ListOffsetsResultInfo> result = new HashMap<>();
         for (final TopicPartition partition : partitions) {
             try {
@@ -176,27 +189,36 @@ public class ClientUtils {
     /**
      * @throws StreamsException if the admin client request throws an exception
      */
-    public static Map<TopicPartition, ListOffsetsResultInfo> fetchEndOffsets(final Collection<TopicPartition> partitions, final Admin adminClient) {
+    public static Map<TopicPartition, ListOffsetsResultInfo> fetchEndOffsets(final Collection<TopicPartition> partitions,
+                                                                             final Admin adminClient) {
         if (partitions.isEmpty()) {
             return Collections.emptyMap();
         }
         return getEndOffsets(fetchEndOffsetsFuture(partitions, adminClient));
     }
 
-    public static String extractThreadId(final String fullThreadName) {
-        final int index = fullThreadName.indexOf("StreamThread-");
-        return fullThreadName.substring(index);
-    }
-
     public static long producerRecordSizeInBytes(final ProducerRecord<byte[], byte[]> record) {
-        return recordSizeInBytes(record.key() == null ? 0 : record.key().length, record.value() == null ? 0 : record.value().length, record.topic(), record.headers());
+        return recordSizeInBytes(
+            record.key() == null ? 0 : record.key().length,
+            record.value() == null ? 0 : record.value().length,
+            record.topic(),
+            record.headers()
+        );
     }
 
     public static long consumerRecordSizeInBytes(final ConsumerRecord<byte[], byte[]> record) {
-        return recordSizeInBytes(record.serializedKeySize(), record.serializedValueSize(), record.topic(), record.headers());
+        return recordSizeInBytes(
+            record.serializedKeySize(),
+            record.serializedValueSize(),
+            record.topic(),
+            record.headers()
+        );
     }
 
-    private static long recordSizeInBytes(final long keyBytes, final long valueBytes, final String topic, final Headers headers) {
+    private static long recordSizeInBytes(final long keyBytes,
+                                          final long valueBytes,
+                                          final String topic,
+                                          final Headers headers) {
         long headerSizeInBytes = 0L;
 
         if (headers != null) {
@@ -208,9 +230,12 @@ public class ClientUtils {
             }
         }
 
-        return keyBytes + valueBytes + 8L + // timestamp
-                8L + // offset
-                Utils.utf8(topic).length + 4L + // partition
-                headerSizeInBytes;
+        return keyBytes +
+            valueBytes +
+            8L + // timestamp
+            8L + // offset
+            Utils.utf8(topic).length +
+            4L + // partition
+            headerSizeInBytes;
     }
 }

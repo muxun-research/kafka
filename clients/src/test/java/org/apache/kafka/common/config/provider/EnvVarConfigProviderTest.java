@@ -18,13 +18,21 @@ package org.apache.kafka.common.config.provider;
 
 import org.apache.kafka.common.config.ConfigData;
 import org.apache.kafka.common.config.ConfigException;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 import static org.apache.kafka.common.config.provider.EnvVarConfigProvider.ALLOWLIST_PATTERN_CONFIG;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class EnvVarConfigProviderTest {
 
@@ -32,7 +40,7 @@ class EnvVarConfigProviderTest {
 
     @BeforeEach
     public void setup() {
-        Map<String, String> testEnvVars = new HashMap<String, String>() {
+        Map<String, String> testEnvVars = new HashMap<>() {
             {
                 put("test_var1", "value1");
                 put("secret_var2", "value2");
@@ -90,8 +98,7 @@ class EnvVarConfigProviderTest {
         assertThrows(ConfigException.class, () -> envVarConfigProvider.get("test-path", Collections.singleton("test_var1")));
     }
 
-    @Test
-    void testRegExpEnvVarsSingleEntryKeyList() {
+    @Test void testRegExpEnvVarsSingleEntryKeyList() {
         Map<String, String> testConfigMap = Collections.singletonMap(ALLOWLIST_PATTERN_CONFIG, "secret_.*");
         envVarConfigProvider.configure(testConfigMap);
         Set<String> keyList = Collections.singleton("secret_var2");
@@ -100,8 +107,7 @@ class EnvVarConfigProviderTest {
         assertEquals(keyList, keys);
     }
 
-    @Test
-    void testRegExpEnvVarsNoKeyList() {
+    @Test void testRegExpEnvVarsNoKeyList() {
         Map<String, String> testConfigMap = Collections.singletonMap(ALLOWLIST_PATTERN_CONFIG, "secret_.*");
         envVarConfigProvider.configure(testConfigMap);
         Set<String> keys = envVarConfigProvider.get("").data().keySet();

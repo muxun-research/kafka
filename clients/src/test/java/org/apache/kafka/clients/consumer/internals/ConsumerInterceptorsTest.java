@@ -25,32 +25,39 @@ import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.record.TimestampType;
+
 import org.junit.jupiter.api.Test;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class ConsumerInterceptorsTest {
-	private final int filterPartition1 = 5;
-	private final int filterPartition2 = 6;
-	private final String topic = "test";
-	private final int partition = 1;
-	private final TopicPartition tp = new TopicPartition(topic, partition);
-	private final TopicPartition filterTopicPart1 = new TopicPartition("test5", filterPartition1);
-	private final TopicPartition filterTopicPart2 = new TopicPartition("test6", filterPartition2);
-	private final ConsumerRecord<Integer, Integer> consumerRecord = new ConsumerRecord<>(topic, partition, 0, 0L,
-			TimestampType.CREATE_TIME, 0, 0, 1, 1, new RecordHeaders(), Optional.empty());
-	private int onCommitCount = 0;
-	private int onConsumeCount = 0;
+    private final int filterPartition1 = 5;
+    private final int filterPartition2 = 6;
+    private final String topic = "test";
+    private final int partition = 1;
+    private final TopicPartition tp = new TopicPartition(topic, partition);
+    private final TopicPartition filterTopicPart1 = new TopicPartition("test5", filterPartition1);
+    private final TopicPartition filterTopicPart2 = new TopicPartition("test6", filterPartition2);
+    private final ConsumerRecord<Integer, Integer> consumerRecord = new ConsumerRecord<>(topic, partition, 0, 0L,
+        TimestampType.CREATE_TIME, 0, 0, 1, 1, new RecordHeaders(), Optional.empty());
+    private int onCommitCount = 0;
+    private int onConsumeCount = 0;
 
-	/**
-	 * Test consumer interceptor that filters records in onConsume() intercept
-	 */
-	private class FilterConsumerInterceptor<K, V> implements ConsumerInterceptor<K, V> {
-		private int filterPartition;
-		private boolean throwExceptionOnConsume = false;
-		private boolean throwExceptionOnCommit = false;
+    /**
+     * Test consumer interceptor that filters records in onConsume() intercept
+     */
+    private class FilterConsumerInterceptor<K, V> implements ConsumerInterceptor<K, V> {
+        private final int filterPartition;
+        private boolean throwExceptionOnConsume = false;
+        private boolean throwExceptionOnCommit = false;
 
         FilterConsumerInterceptor(int filterPartition) {
             this.filterPartition = filterPartition;
@@ -68,11 +75,14 @@ public class ConsumerInterceptorsTest {
 
             // filters out topic/partitions with partition == FILTER_PARTITION
             Map<TopicPartition, List<ConsumerRecord<K, V>>> recordMap = new HashMap<>();
+            Map<TopicPartition, OffsetAndMetadata> nextOffsetAndMetadata = new HashMap<>();
             for (TopicPartition tp : records.partitions()) {
-                if (tp.partition() != filterPartition)
+                if (tp.partition() != filterPartition) {
                     recordMap.put(tp, records.records(tp));
+                    nextOffsetAndMetadata.put(tp, records.nextOffsets().get(tp));
+                }
             }
-            return new ConsumerRecords<>(recordMap);
+            return new ConsumerRecords<>(recordMap, nextOffsetAndMetadata);
         }
 
         @Override
@@ -103,31 +113,40 @@ public class ConsumerInterceptorsTest {
         // we are testing two different interceptors by configuring the same interceptor differently, which is not
         // how it would be done in KafkaConsumer, but ok for testing interceptor callbacks
         FilterConsumerInterceptor<Integer, Integer> interceptor1 = new FilterConsumerInterceptor<>(filterPartition1);
-		FilterConsumerInterceptor<Integer, Integer> interceptor2 = new FilterConsumerInterceptor<>(filterPartition2);
-		interceptorList.add(interceptor1);
-		interceptorList.add(interceptor2);
-		ConsumerInterceptors<Integer, Integer> interceptors = new ConsumerInterceptors<>(interceptorList);
+        FilterConsumerInterceptor<Integer, Integer> interceptor2 = new FilterConsumerInterceptor<>(filterPartition2);
+        interceptorList.add(interceptor1);
+        interceptorList.add(interceptor2);
+        ConsumerInterceptors<Integer, Integer> interceptors = new ConsumerInterceptors<>(interceptorList, null);
 
-		// verify that onConsumer modifies ConsumerRecords
-		Map<TopicPartition, List<ConsumerRecord<Integer, Integer>>> records = new HashMap<>();
-		List<ConsumerRecord<Integer, Integer>> list1 = new ArrayList<>();
-		list1.add(consumerRecord);
-		List<ConsumerRecord<Integer, Integer>> list2 = new ArrayList<>();
-		list2.add(new ConsumerRecord<>(filterTopicPart1.topic(), filterTopicPart1.partition(), 0, 0L,
-				TimestampType.CREATE_TIME, 0, 0, 1, 1, new RecordHeaders(), Optional.empty()));
-		List<ConsumerRecord<Integer, Integer>> list3 = new ArrayList<>();
-		list3.add(new ConsumerRecord<>(filterTopicPart2.topic(), filterTopicPart2.partition(), 0, 0L, TimestampType.CREATE_TIME,
-				0, 0, 1, 1, new RecordHeaders(), Optional.empty()));
-		records.put(tp, list1);
-		records.put(filterTopicPart1, list2);
-		records.put(filterTopicPart2, list3);
-		ConsumerRecords<Integer, Integer> consumerRecords = new ConsumerRecords<>(records);
-		ConsumerRecords<Integer, Integer> interceptedRecords = interceptors.onConsume(consumerRecords);
-		assertEquals(1, interceptedRecords.count());
-		assertTrue(interceptedRecords.partitions().contains(tp));
-		assertFalse(interceptedRecords.partitions().contains(filterTopicPart1));
-		assertFalse(interceptedRecords.partitions().contains(filterTopicPart2));
-		assertEquals(2, onConsumeCount);
+        // verify that onConsumer modifies ConsumerRecords
+        Map<TopicPartition, List<ConsumerRecord<Integer, Integer>>> records = new HashMap<>();
+        Map<TopicPartition, OffsetAndMetadata> nextOffsets = new HashMap<>();
+
+        List<ConsumerRecord<Integer, Integer>> list1 = new ArrayList<>();
+        list1.add(consumerRecord);
+        List<ConsumerRecord<Integer, Integer>> list2 = new ArrayList<>();
+        list2.add(new ConsumerRecord<>(filterTopicPart1.topic(), filterTopicPart1.partition(), 0, 0L,
+            TimestampType.CREATE_TIME, 0, 0, 1, 1, new RecordHeaders(), Optional.empty()));
+        List<ConsumerRecord<Integer, Integer>> list3 = new ArrayList<>();
+        list3.add(new ConsumerRecord<>(filterTopicPart2.topic(), filterTopicPart2.partition(), 0, 0L, TimestampType.CREATE_TIME,
+            0, 0, 1, 1, new RecordHeaders(), Optional.empty()));
+        records.put(tp, list1);
+        nextOffsets.put(tp, new OffsetAndMetadata(1, Optional.empty(), ""));
+
+        records.put(filterTopicPart1, list2);
+        nextOffsets.put(filterTopicPart1, new OffsetAndMetadata(1, Optional.empty(), ""));
+
+        records.put(filterTopicPart2, list3);
+        nextOffsets.put(filterTopicPart2, new OffsetAndMetadata(1, Optional.empty(), ""));
+
+        ConsumerRecords<Integer, Integer> consumerRecords = new ConsumerRecords<>(records, nextOffsets);
+        ConsumerRecords<Integer, Integer> interceptedRecords = interceptors.onConsume(consumerRecords);
+        assertEquals(1, interceptedRecords.count());
+        assertTrue(interceptedRecords.partitions().contains(tp));
+        assertFalse(interceptedRecords.partitions().contains(filterTopicPart1));
+        assertFalse(interceptedRecords.partitions().contains(filterTopicPart2));
+        assertEquals(2, onConsumeCount);
+        validateNextOffsets(interceptedRecords.nextOffsets(), 1);
 
         // verify that even if one of the intermediate interceptors throws an exception, all interceptors' onConsume are called
         interceptor1.injectOnConsumeError(true);
@@ -136,6 +155,7 @@ public class ConsumerInterceptorsTest {
         assertTrue(partInterceptedRecs.partitions().contains(filterTopicPart1));  // since interceptor1 threw exception
         assertFalse(partInterceptedRecs.partitions().contains(filterTopicPart2)); // interceptor2 should still be called
         assertEquals(4, onConsumeCount);
+        validateNextOffsets(partInterceptedRecs.nextOffsets(), 2);
 
         // if all interceptors throw an exception, records should be unmodified
         interceptor2.injectOnConsumeError(true);
@@ -143,6 +163,7 @@ public class ConsumerInterceptorsTest {
         assertEquals(noneInterceptedRecs, consumerRecords);
         assertEquals(3, noneInterceptedRecs.count());
         assertEquals(6, onConsumeCount);
+        validateNextOffsets(noneInterceptedRecs.nextOffsets(), 3);
 
         interceptors.close();
     }
@@ -156,7 +177,7 @@ public class ConsumerInterceptorsTest {
         FilterConsumerInterceptor<Integer, Integer> interceptor2 = new FilterConsumerInterceptor<>(filterPartition2);
         interceptorList.add(interceptor1);
         interceptorList.add(interceptor2);
-        ConsumerInterceptors<Integer, Integer> interceptors = new ConsumerInterceptors<>(interceptorList);
+        ConsumerInterceptors<Integer, Integer> interceptors = new ConsumerInterceptors<>(interceptorList, null);
 
         // verify that onCommit is called for all interceptors in the chain
         Map<TopicPartition, OffsetAndMetadata> offsets = new HashMap<>();
@@ -170,5 +191,19 @@ public class ConsumerInterceptorsTest {
         assertEquals(4, onCommitCount);
 
         interceptors.close();
+    }
+
+    private void validateNextOffsets(Map<TopicPartition, OffsetAndMetadata> nextOffsetAndMetadataMap, int size) {
+        assertEquals(size, nextOffsetAndMetadataMap.size());
+        if (size == 1) {
+            assertEquals(new OffsetAndMetadata(1, Optional.empty(), ""), nextOffsetAndMetadataMap.get(tp));
+        } else if (size == 2) {
+            assertEquals(new OffsetAndMetadata(1, Optional.empty(), ""), nextOffsetAndMetadataMap.get(tp));
+            assertEquals(new OffsetAndMetadata(1, Optional.empty(), ""), nextOffsetAndMetadataMap.get(filterTopicPart1));
+        } else if (size == 3) {
+            assertEquals(new OffsetAndMetadata(1, Optional.empty(), ""), nextOffsetAndMetadataMap.get(tp));
+            assertEquals(new OffsetAndMetadata(1, Optional.empty(), ""), nextOffsetAndMetadataMap.get(filterTopicPart1));
+            assertEquals(new OffsetAndMetadata(1, Optional.empty(), ""), nextOffsetAndMetadataMap.get(filterTopicPart2));
+        }
     }
 }

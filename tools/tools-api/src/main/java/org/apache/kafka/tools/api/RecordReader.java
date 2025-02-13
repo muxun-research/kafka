@@ -27,19 +27,18 @@ import java.util.Map;
 /**
  * Typical implementations of this interface convert data from an `InputStream` received via `readRecords` into a
  * iterator of `ProducerRecord` instance. Note that implementations must have a public nullary constructor.
- * <p>
- * This is used by the `kafka.tools.ConsoleProducer`.
+ *
+ * This is used by the `org.apache.kafka.tools.ConsoleProducer`.
  */
 public interface RecordReader extends Closeable, Configurable {
 
-    default void configure(Map<String, ?> configs) {
-    }
+    default void configure(Map<String, ?> configs) {}
 
     /**
      * read byte array from input stream and then generate an iterator of producer record
-     * @param {@link InputStream} of messages. the implementation does not need to close the input stream.
+     * @param inputStream {@link InputStream} of messages. the implementation does not need to close the input stream.
      * @return an iterator of producer record. It should implement following rules. 1) the hasNext() method must be idempotent.
-     * 2) the convert error should be thrown by next() method.
+     *         2) the convert error should be thrown by next() method.
      */
     Iterator<ProducerRecord<byte[], byte[]>> readRecords(InputStream inputStream);
 
@@ -48,6 +47,5 @@ public interface RecordReader extends Closeable, Configurable {
      * Closes this reader.
      * This method is invoked if the iterator from readRecords either has no more records or throws exception.
      */
-    default void close() {
-    }
+    default void close() {}
 }

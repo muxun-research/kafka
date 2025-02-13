@@ -19,31 +19,31 @@ package org.apache.kafka.clients;
 import java.net.InetAddress;
 
 class AddressChangeHostResolver implements HostResolver {
-	private boolean useNewAddresses;
-	private InetAddress[] initialAddresses;
-	private InetAddress[] newAddresses;
-	private int resolutionCount = 0;
+    private final InetAddress[] initialAddresses;
+    private final InetAddress[] newAddresses;
+    private boolean useNewAddresses;
+    private int resolutionCount = 0;
 
-	public AddressChangeHostResolver(InetAddress[] initialAddresses, InetAddress[] newAddresses) {
-		this.initialAddresses = initialAddresses;
-		this.newAddresses = newAddresses;
-	}
+    public AddressChangeHostResolver(InetAddress[] initialAddresses, InetAddress[] newAddresses) {
+        this.initialAddresses = initialAddresses;
+        this.newAddresses = newAddresses;
+    }
 
-	@Override
-	public InetAddress[] resolve(String host) {
-		++resolutionCount;
-		return useNewAddresses ? newAddresses : initialAddresses;
-	}
+    @Override
+    public InetAddress[] resolve(String host) {
+        ++resolutionCount;
+        return useNewAddresses ? newAddresses : initialAddresses;
+    }
 
-	public void changeAddresses() {
-		useNewAddresses = true;
-	}
+    public void changeAddresses() {
+        useNewAddresses = true;
+    }
 
-	public boolean useNewAddresses() {
-		return useNewAddresses;
-	}
+    public boolean useNewAddresses() {
+        return useNewAddresses;
+    }
 
-	public int resolutionCount() {
-		return resolutionCount;
-	}
+    public int resolutionCount() {
+        return resolutionCount;
+    }
 }

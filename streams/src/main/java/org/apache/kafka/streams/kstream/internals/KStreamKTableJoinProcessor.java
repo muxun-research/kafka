@@ -30,63 +30,68 @@ import org.apache.kafka.streams.processor.internals.SerdeGetter;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
 import org.apache.kafka.streams.state.internals.TimeOrderedKeyValueBuffer;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.Optional;
 
+import static java.util.Objects.requireNonNull;
 import static org.apache.kafka.streams.processor.internals.ProcessorContextUtils.asInternalProcessorContext;
 import static org.apache.kafka.streams.processor.internals.metrics.TaskMetrics.droppedRecordsSensor;
 import static org.apache.kafka.streams.state.ValueAndTimestamp.getValueOrNull;
 
-class KStreamKTableJoinProcessor<K1, K2, V1, V2, VOut> extends ContextualProcessor<K1, V1, K1, VOut> {
+class KStreamKTableJoinProcessor<StreamKey, StreamValue, TableKey, TableValue, VOut>
+    extends ContextualProcessor<StreamKey, StreamValue, StreamKey, VOut> {
+
     private static final Logger LOG = LoggerFactory.getLogger(KStreamKTableJoin.class);
 
-    private final KTableValueGetter<K2, V2> valueGetter;
-    private final KeyValueMapper<? super K1, ? super V1, ? extends K2> keyMapper;
-    private final ValueJoinerWithKey<? super K1, ? super V1, ? super V2, ? extends VOut> joiner;
+    private final KTableValueGetter<TableKey, TableValue> valueGetter;
+    private final KeyValueMapper<? super StreamKey, ? super StreamValue, ? extends TableKey> keyMapper;
+    private final ValueJoinerWithKey<? super StreamKey, ? super StreamValue, ? super TableValue, ? extends VOut> joiner;
     private final boolean leftJoin;
     private Sensor droppedRecordsSensor;
     private final Optional<Duration> gracePeriod;
-    private final Optional<TimeOrderedKeyValueBuffer<K1, V1, V1>> buffer;
+    private TimeOrderedKeyValueBuffer<StreamKey, StreamValue, StreamValue> buffer;
     protected long observedStreamTime = ConsumerRecord.NO_TIMESTAMP;
-    private InternalProcessorContext internalProcessorContext;
+    private InternalProcessorContext<StreamKey, VOut> internalProcessorContext;
     private final boolean useBuffer;
+    private final String storeName;
 
-    KStreamKTableJoinProcessor(final KTableValueGetter<K2, V2> valueGetter, final KeyValueMapper<? super K1, ? super V1, ? extends K2> keyMapper, final ValueJoinerWithKey<? super K1, ? super V1, ? super V2, ? extends VOut> joiner, final boolean leftJoin, final Optional<Duration> gracePeriod, final Optional<TimeOrderedKeyValueBuffer<K1, V1, V1>> buffer) {
+    KStreamKTableJoinProcessor(final KTableValueGetter<TableKey, TableValue> valueGetter,
+                               final KeyValueMapper<? super StreamKey, ? super StreamValue, ? extends TableKey> keyMapper,
+                               final ValueJoinerWithKey<? super StreamKey, ? super StreamValue, ? super TableValue, ? extends VOut> joiner,
+                               final boolean leftJoin,
+                               final Optional<Duration> gracePeriod,
+                               final Optional<String> storeName) {
         this.valueGetter = valueGetter;
         this.keyMapper = keyMapper;
         this.joiner = joiner;
         this.leftJoin = leftJoin;
-        this.useBuffer = buffer.isPresent();
-        if (gracePeriod.isPresent() ^ buffer.isPresent()) {
-            throw new IllegalArgumentException("Grace Period requires a buffer");
-        }
+        this.useBuffer = gracePeriod.isPresent();
         this.gracePeriod = gracePeriod;
-        this.buffer = buffer;
+        this.storeName = storeName.orElse("");
     }
 
     @Override
-    public void init(final ProcessorContext<K1, VOut> context) {
+    public void init(final ProcessorContext<StreamKey, VOut> context) {
         super.init(context);
         final StreamsMetricsImpl metrics = (StreamsMetricsImpl) context.metrics();
         droppedRecordsSensor = droppedRecordsSensor(Thread.currentThread().getName(), context.taskId().toString(), metrics);
         valueGetter.init(context);
-        internalProcessorContext = asInternalProcessorContext((org.apache.kafka.streams.processor.ProcessorContext) context);
+        internalProcessorContext = asInternalProcessorContext(context);
         if (useBuffer) {
             if (!valueGetter.isVersioned() && gracePeriod.isPresent()) {
                 throw new IllegalArgumentException("KTable must be versioned to use a grace period in a stream table join.");
             }
-
-            buffer.get().setSerdesIfNull(new SerdeGetter(context));
-            buffer.get().init((org.apache.kafka.streams.processor.StateStoreContext) context(), null);
+            buffer = requireNonNull(context.getStateStore(storeName));
+            buffer.setSerdesIfNull(new SerdeGetter(context));
         }
     }
 
     @Override
-    public void process(final Record<K1, V1> record) {
-        internalProcessorContext = asInternalProcessorContext((org.apache.kafka.streams.processor.ProcessorContext) context());
+    public void process(final Record<StreamKey, StreamValue> record) {
         updateObservedStreamTime(record.timestamp());
         if (maybeDropRecord(record)) {
             return;
@@ -95,16 +100,17 @@ class KStreamKTableJoinProcessor<K1, K2, V1, V2, VOut> extends ContextualProcess
         if (!useBuffer) {
             doJoin(record);
         } else {
-            if (!buffer.get().put(observedStreamTime, record, internalProcessorContext.recordContext())) {
+            if (!buffer.put(observedStreamTime, record, internalProcessorContext.recordContext())) {
                 doJoin(record);
             } else {
-                buffer.get().evictWhile(() -> true, this::emit);
+                buffer.evictWhile(() -> true, this::emit);
             }
         }
     }
 
-    private void emit(final TimeOrderedKeyValueBuffer.Eviction<K1, V1> toEmit) {
-        final Record<K1, V1> record = new Record<>(toEmit.key(), toEmit.value(), toEmit.recordContext().timestamp()).withHeaders(toEmit.recordContext().headers());
+    private void emit(final TimeOrderedKeyValueBuffer.Eviction<StreamKey, StreamValue> toEmit) {
+        final Record<StreamKey, StreamValue> record = new Record<>(toEmit.key(), toEmit.value(), toEmit.recordContext().timestamp())
+            .withHeaders(toEmit.recordContext().headers());
         final ProcessorRecordContext prevRecordContext = internalProcessorContext.recordContext();
         try {
             internalProcessorContext.setRecordContext(toEmit.recordContext());
@@ -118,17 +124,23 @@ class KStreamKTableJoinProcessor<K1, K2, V1, V2, VOut> extends ContextualProcess
         observedStreamTime = Math.max(observedStreamTime, timestamp);
     }
 
-    @SuppressWarnings("unchecked")
-    private void doJoin(final Record<K1, V1> record) {
-        final K2 mappedKey = keyMapper.apply(record.key(), record.value());
-        final ValueAndTimestamp<V2> valueAndTimestamp2 = valueGetter.isVersioned() ? valueGetter.get(mappedKey, record.timestamp()) : valueGetter.get(mappedKey);
-        final V2 value2 = getValueOrNull(valueAndTimestamp2);
+    private void doJoin(final Record<StreamKey, StreamValue> record) {
+        final TableKey mappedKey = keyMapper.apply(record.key(), record.value());
+        final TableValue value2 = getValue2(record, mappedKey);
         if (leftJoin || value2 != null) {
             internalProcessorContext.forward(record.withValue(joiner.apply(record.key(), record.value(), value2)));
         }
     }
 
-    private boolean maybeDropRecord(final Record<K1, V1> record) {
+    private TableValue getValue2(final Record<StreamKey, StreamValue> record, final TableKey mappedKey) {
+        if (mappedKey == null) return null;
+        final ValueAndTimestamp<TableValue> valueAndTimestamp = valueGetter.isVersioned()
+            ? valueGetter.get(mappedKey, record.timestamp())
+            : valueGetter.get(mappedKey);
+        return getValueOrNull(valueAndTimestamp);
+    }
+
+    private boolean maybeDropRecord(final Record<StreamKey, StreamValue> record) {
         // we do join iff the join keys are equal, thus, if {@code keyMapper} returns {@code null} we
         // cannot join and just ignore the record. Note for KTables, this is the same as having a null key
         // since keyMapper just returns the key, but for GlobalKTables we can have other keyMappers
@@ -137,13 +149,22 @@ class KStreamKTableJoinProcessor<K1, K2, V1, V2, VOut> extends ContextualProcess
         // an empty message (ie, there is nothing to be joined) -- this contrast SQL NULL semantics
         // furthermore, on left/outer joins 'null' in ValueJoiner#apply() indicates a missing record --
         // thus, to be consistent and to avoid ambiguous null semantics, null values are ignored
-        final K2 mappedKey = keyMapper.apply(record.key(), record.value());
+        final TableKey mappedKey = keyMapper.apply(record.key(), record.value());
+        if (leftJoin && record.key() == null && record.value() != null) {
+            return false;
+        }
         if (mappedKey == null || record.value() == null) {
             if (context().recordMetadata().isPresent()) {
                 final RecordMetadata recordMetadata = context().recordMetadata().get();
-                LOG.warn("Skipping record due to null join key or value. " + "topic=[{}] partition=[{}] offset=[{}]", recordMetadata.topic(), recordMetadata.partition(), recordMetadata.offset());
+                LOG.warn(
+                    "Skipping record due to null join key or value. "
+                        + "topic=[{}] partition=[{}] offset=[{}]",
+                    recordMetadata.topic(), recordMetadata.partition(), recordMetadata.offset()
+                );
             } else {
-                LOG.warn("Skipping record due to null join key or value. Topic, partition, and offset not known.");
+                LOG.warn(
+                    "Skipping record due to null join key or value. Topic, partition, and offset not known."
+                );
             }
             droppedRecordsSensor.record();
             return true;

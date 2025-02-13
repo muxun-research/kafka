@@ -19,10 +19,12 @@ package org.apache.kafka.streams.processor.internals;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.utils.LogContext;
+import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.streams.errors.DeserializationExceptionHandler;
 import org.apache.kafka.streams.errors.StreamsException;
 import org.apache.kafka.streams.processor.api.Record;
+
 import org.slf4j.Logger;
 
 import java.io.IOException;
@@ -45,14 +47,26 @@ public class GlobalStateUpdateTask implements GlobalStateMaintainer {
     private final Map<String, RecordDeserializer> deserializers = new HashMap<>();
     private final GlobalStateManager stateMgr;
     private final DeserializationExceptionHandler deserializationExceptionHandler;
+    private final Time time;
+    private final long flushInterval;
+    private long lastFlush;
 
-    public GlobalStateUpdateTask(final LogContext logContext, final ProcessorTopology topology, final InternalProcessorContext processorContext, final GlobalStateManager stateMgr, final DeserializationExceptionHandler deserializationExceptionHandler) {
+    public GlobalStateUpdateTask(final LogContext logContext,
+                                 final ProcessorTopology topology,
+                                 final InternalProcessorContext processorContext,
+                                 final GlobalStateManager stateMgr,
+                                 final DeserializationExceptionHandler deserializationExceptionHandler,
+                                 final Time time,
+                                 final long flushInterval
+                                 ) {
         this.logContext = logContext;
         this.log = logContext.logger(getClass());
         this.topology = topology;
         this.stateMgr = stateMgr;
         this.processorContext = processorContext;
         this.deserializationExceptionHandler = deserializationExceptionHandler;
+        this.time = time;
+        this.flushInterval = flushInterval;
     }
 
     /**
@@ -66,11 +80,23 @@ public class GlobalStateUpdateTask implements GlobalStateMaintainer {
         for (final String storeName : storeNames) {
             final String sourceTopic = storeNameToTopic.get(storeName);
             final SourceNode<?, ?> source = topology.source(sourceTopic);
-            deserializers.put(sourceTopic, new RecordDeserializer(source, deserializationExceptionHandler, logContext, droppedRecordsSensor(Thread.currentThread().getName(), processorContext.taskId().toString(), processorContext.metrics()))
+            deserializers.put(
+                sourceTopic,
+                new RecordDeserializer(
+                    source,
+                    deserializationExceptionHandler,
+                    logContext,
+                    droppedRecordsSensor(
+                        Thread.currentThread().getName(),
+                        processorContext.taskId().toString(),
+                        processorContext.metrics()
+                    )
+                )
             );
         }
         initTopology();
         processorContext.initialize();
+        lastFlush = time.milliseconds();
         return stateMgr.changelogOffsets();
     }
 
@@ -81,10 +107,21 @@ public class GlobalStateUpdateTask implements GlobalStateMaintainer {
         final ConsumerRecord<Object, Object> deserialized = sourceNodeAndDeserializer.deserialize(processorContext, record);
 
         if (deserialized != null) {
-            final ProcessorRecordContext recordContext = new ProcessorRecordContext(deserialized.timestamp(), deserialized.offset(), deserialized.partition(), deserialized.topic(), deserialized.headers());
+            final ProcessorRecordContext recordContext =
+                new ProcessorRecordContext(
+                    deserialized.timestamp(),
+                    deserialized.offset(),
+                    deserialized.partition(),
+                    deserialized.topic(),
+                    deserialized.headers());
             processorContext.setRecordContext(recordContext);
             processorContext.setCurrentNode(sourceNodeAndDeserializer.sourceNode());
-            final Record<Object, Object> toProcess = new Record<>(deserialized.key(), deserialized.value(), processorContext.timestamp(), processorContext.headers());
+            final Record<Object, Object> toProcess = new Record<>(
+                deserialized.key(),
+                deserialized.value(),
+                processorContext.recordContext().timestamp(),
+                processorContext.recordContext().headers()
+            );
             ((SourceNode<Object, Object>) sourceNodeAndDeserializer.sourceNode()).process(toProcess);
         }
 
@@ -124,5 +161,13 @@ public class GlobalStateUpdateTask implements GlobalStateMaintainer {
         }
     }
 
+    @Override
+    public void maybeCheckpoint() {
+        final long now = time.milliseconds();
+        if (now - flushInterval >= lastFlush && StateManagerUtil.checkpointNeeded(false, stateMgr.changelogOffsets(), offsets)) {
+            flushState();
+            lastFlush = now;
+        }
+    }
 
 }

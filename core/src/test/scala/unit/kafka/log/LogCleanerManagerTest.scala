@@ -17,25 +17,30 @@
 
 package kafka.log
 
-import kafka.server.BrokerTopicStats
+import java.io.File
+import java.nio.file.Files
+import java.util.{Optional, Properties}
 import kafka.utils._
 import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.common.compress.Compression
 import org.apache.kafka.common.config.TopicConfig
 import org.apache.kafka.common.record._
 import org.apache.kafka.common.utils.Utils
+import org.apache.kafka.coordinator.transaction.TransactionLogConfig
 import org.apache.kafka.server.util.MockTime
-import org.apache.kafka.storage.internals.log._
+import org.apache.kafka.storage.internals.log.{AppendOrigin, LocalLog, LogConfig, LogDirFailureChannel, LogLoader, LogSegment, LogSegments, LogStartOffsetIncrementReason, ProducerStateManager, ProducerStateManagerConfig, UnifiedLog => JUnifiedLog}
+import org.apache.kafka.storage.log.metrics.BrokerTopicStats
 import org.junit.jupiter.api.Assertions._
 import org.junit.jupiter.api.{AfterEach, Test}
 
-import java.io.File
-import java.nio.file.Files
-import java.util.Properties
+import java.lang.{Long => JLong}
+import java.util
+import java.util.concurrent.ConcurrentHashMap
 import scala.collection.mutable
 
 /**
- * Unit tests for the log cleaning logic
- */
+  * Unit tests for the log cleaning logic
+  */
 class LogCleanerManagerTest extends Logging {
 
   val tmpDir: File = TestUtils.tempDir()
@@ -49,9 +54,9 @@ class LogCleanerManagerTest extends Logging {
   logProps.put(TopicConfig.SEGMENT_INDEX_BYTES_CONFIG, 1024: java.lang.Integer)
   logProps.put(TopicConfig.CLEANUP_POLICY_CONFIG, TopicConfig.CLEANUP_POLICY_COMPACT)
   val logConfig: LogConfig = new LogConfig(logProps)
-  val time = new MockTime(1400000000000L, 1000L) // Tue May 13 16:53:20 UTC 2014 for `currentTimeMs`
+  val time = new MockTime(1400000000000L, 1000L)  // Tue May 13 16:53:20 UTC 2014 for `currentTimeMs`
   val offset = 999
-  val producerStateManagerConfig = new ProducerStateManagerConfig(kafka.server.Defaults.ProducerIdExpirationMs, false)
+  val producerStateManagerConfig = new ProducerStateManagerConfig(TransactionLogConfig.PRODUCER_ID_EXPIRATION_MS_DEFAULT, false)
 
   val cleanerCheckpoints: mutable.Map[TopicPartition, Long] = mutable.Map[TopicPartition, Long]()
 
@@ -62,7 +67,7 @@ class LogCleanerManagerTest extends Logging {
       cleanerCheckpoints.toMap
     }
 
-    override def updateCheckpoints(dataDir: File, partitionToUpdateOrAdd: Option[(TopicPartition, Long)] = None,
+    override def updateCheckpoints(dataDir: File, partitionToUpdateOrAdd: Option[(TopicPartition, JLong)] = None,
                                    partitionToRemove: Option[TopicPartition] = None): Unit = {
       assert(partitionToRemove.isEmpty, "partitionToRemove argument with value not yet handled")
       val (tp, offset) = partitionToUpdateOrAdd.getOrElse(
@@ -102,9 +107,10 @@ class LogCleanerManagerTest extends Logging {
     val logDirFailureChannel = new LogDirFailureChannel(10)
     val config = createLowRetentionLogConfig(logSegmentSize, TopicConfig.CLEANUP_POLICY_COMPACT)
     val maxTransactionTimeoutMs = 5 * 60 * 1000
-    val producerIdExpirationCheckIntervalMs = kafka.server.Defaults.ProducerIdExpirationCheckIntervalMs
+    val producerIdExpirationCheckIntervalMs = TransactionLogConfig.PRODUCER_ID_EXPIRATION_CHECK_INTERVAL_MS_DEFAULT
     val segments = new LogSegments(tp)
-    val leaderEpochCache = UnifiedLog.maybeCreateLeaderEpochCache(tpDir, topicPartition, logDirFailureChannel, config.recordVersion, "")
+    val leaderEpochCache = JUnifiedLog.createLeaderEpochCache(
+      tpDir, topicPartition, logDirFailureChannel, Optional.empty, time.scheduler)
     val producerStateManager = new ProducerStateManager(topicPartition, tpDir, maxTransactionTimeoutMs, producerStateManagerConfig, time)
     val offsets = new LogLoader(
       tpDir,
@@ -113,21 +119,23 @@ class LogCleanerManagerTest extends Logging {
       time.scheduler,
       time,
       logDirFailureChannel,
-      hadCleanShutdown = true,
+      true,
       segments,
       0L,
       0L,
       leaderEpochCache,
-      producerStateManager
+      producerStateManager,
+      new ConcurrentHashMap[String, Integer],
+      false
     ).load()
     val localLog = new LocalLog(tpDir, config, segments, offsets.recoveryPoint,
       offsets.nextOffsetMetadata, time.scheduler, time, tp, logDirFailureChannel)
     // the exception should be caught and the partition that caused it marked as uncleanable
     class LogMock extends UnifiedLog(offsets.logStartOffset, localLog, new BrokerTopicStats,
-      producerIdExpirationCheckIntervalMs, leaderEpochCache,
-      producerStateManager, _topicId = None, keepPartitionMetadataFile = true) {
+        producerIdExpirationCheckIntervalMs, leaderEpochCache,
+        producerStateManager, _topicId = None) {
       // Throw an error in getFirstBatchTimestampForSegments since it is called in grabFilthiestLog()
-      override def getFirstBatchTimestampForSegments(segments: Iterable[LogSegment]): Iterable[Long] =
+      override def getFirstBatchTimestampForSegments(segments: util.Collection[LogSegment]): util.Collection[java.lang.Long] =
         throw new IllegalStateException("Error!")
     }
 
@@ -298,10 +306,10 @@ class LogCleanerManagerTest extends Logging {
   }
 
   /**
-   * When checking for logs with segments ready for deletion
-   * we shouldn't consider logs where cleanup.policy=delete
-   * as they are handled by the LogManager
-   */
+    * When checking for logs with segments ready for deletion
+    * we shouldn't consider logs where cleanup.policy=delete
+    * as they are handled by the LogManager
+    */
   @Test
   def testLogsWithSegmentsToDeleteShouldNotConsiderCleanupPolicyDeleteLogs(): Unit = {
     val records = TestUtils.singletonRecords("test".getBytes)
@@ -317,7 +325,7 @@ class LogCleanerManagerTest extends Logging {
     */
   @Test
   def testLogsWithSegmentsToDeleteShouldConsiderCleanupPolicyCompactDeleteLogs(): Unit = {
-    val records = TestUtils.singletonRecords("test".getBytes, key = "test".getBytes)
+    val records = TestUtils.singletonRecords("test".getBytes, key="test".getBytes)
     val log: UnifiedLog = createLog(records.sizeInBytes * 5, TopicConfig.CLEANUP_POLICY_COMPACT + "," + TopicConfig.CLEANUP_POLICY_DELETE)
     val cleanerManager: LogCleanerManager = createCleanerManager(log)
 
@@ -331,7 +339,7 @@ class LogCleanerManagerTest extends Logging {
     */
   @Test
   def testLogsWithSegmentsToDeleteShouldConsiderCleanupPolicyCompactLogs(): Unit = {
-    val records = TestUtils.singletonRecords("test".getBytes, key = "test".getBytes)
+    val records = TestUtils.singletonRecords("test".getBytes, key="test".getBytes)
     val log: UnifiedLog = createLog(records.sizeInBytes * 5, TopicConfig.CLEANUP_POLICY_COMPACT)
     val cleanerManager: LogCleanerManager = createCleanerManager(log)
 
@@ -344,13 +352,13 @@ class LogCleanerManagerTest extends Logging {
     */
   @Test
   def testLogsUnderCleanupIneligibleForCompaction(): Unit = {
-    val records = TestUtils.singletonRecords("test".getBytes, key = "test".getBytes)
+    val records = TestUtils.singletonRecords("test".getBytes, key="test".getBytes)
     val log: UnifiedLog = createLog(records.sizeInBytes * 5, TopicConfig.CLEANUP_POLICY_DELETE)
     val cleanerManager: LogCleanerManager = createCleanerManager(log)
 
     log.appendAsLeader(records, leaderEpoch = 0)
     log.roll()
-    log.appendAsLeader(records, leaderEpoch = 0)
+    log.appendAsLeader(TestUtils.singletonRecords("test2".getBytes, key="test2".getBytes), leaderEpoch = 0)
     log.updateHighWatermark(2L)
 
     // simulate cleanup thread working on the log partition
@@ -392,7 +400,7 @@ class LogCleanerManagerTest extends Logging {
 
   @Test
   def testUpdateCheckpointsShouldAddOffsetToPartition(): Unit = {
-    val records = TestUtils.singletonRecords("test".getBytes, key = "test".getBytes)
+    val records = TestUtils.singletonRecords("test".getBytes, key="test".getBytes)
     val log: UnifiedLog = createLog(records.sizeInBytes * 5, TopicConfig.CLEANUP_POLICY_COMPACT)
     val cleanerManager: LogCleanerManager = createCleanerManager(log)
 
@@ -406,7 +414,7 @@ class LogCleanerManagerTest extends Logging {
 
   @Test
   def testUpdateCheckpointsShouldRemovePartitionData(): Unit = {
-    val records = TestUtils.singletonRecords("test".getBytes, key = "test".getBytes)
+    val records = TestUtils.singletonRecords("test".getBytes, key="test".getBytes)
     val log: UnifiedLog = createLog(records.sizeInBytes * 5, TopicConfig.CLEANUP_POLICY_COMPACT)
     val cleanerManager: LogCleanerManager = createCleanerManager(log)
 
@@ -421,7 +429,7 @@ class LogCleanerManagerTest extends Logging {
 
   @Test
   def testHandleLogDirFailureShouldRemoveDirAndData(): Unit = {
-    val records = TestUtils.singletonRecords("test".getBytes, key = "test".getBytes)
+    val records = TestUtils.singletonRecords("test".getBytes, key="test".getBytes)
     val log: UnifiedLog = createLog(records.sizeInBytes * 5, TopicConfig.CLEANUP_POLICY_COMPACT)
     val cleanerManager: LogCleanerManager = createCleanerManager(log)
 
@@ -439,7 +447,7 @@ class LogCleanerManagerTest extends Logging {
 
   @Test
   def testMaybeTruncateCheckpointShouldTruncateData(): Unit = {
-    val records = TestUtils.singletonRecords("test".getBytes, key = "test".getBytes)
+    val records = TestUtils.singletonRecords("test".getBytes, key="test".getBytes)
     val log: UnifiedLog = createLog(records.sizeInBytes * 5, TopicConfig.CLEANUP_POLICY_COMPACT)
     val cleanerManager: LogCleanerManager = createCleanerManager(log)
     val lowerOffset = 1L
@@ -459,7 +467,7 @@ class LogCleanerManagerTest extends Logging {
 
   @Test
   def testAlterCheckpointDirShouldRemoveDataInSrcDirAndAddInNewDir(): Unit = {
-    val records = TestUtils.singletonRecords("test".getBytes, key = "test".getBytes)
+    val records = TestUtils.singletonRecords("test".getBytes, key="test".getBytes)
     val log: UnifiedLog = createLog(records.sizeInBytes * 5, TopicConfig.CLEANUP_POLICY_COMPACT)
     val cleanerManager: LogCleanerManager = createCleanerManager(log)
 
@@ -478,11 +486,11 @@ class LogCleanerManagerTest extends Logging {
   }
 
   /**
-   * log under cleanup should still be eligible for log truncation
-   */
+    * log under cleanup should still be eligible for log truncation
+    */
   @Test
   def testConcurrentLogCleanupAndLogTruncation(): Unit = {
-    val records = TestUtils.singletonRecords("test".getBytes, key = "test".getBytes)
+    val records = TestUtils.singletonRecords("test".getBytes, key="test".getBytes)
     val log: UnifiedLog = createLog(records.sizeInBytes * 5, TopicConfig.CLEANUP_POLICY_DELETE)
     val cleanerManager: LogCleanerManager = createCleanerManager(log)
 
@@ -522,7 +530,7 @@ class LogCleanerManagerTest extends Logging {
     */
   @Test
   def testLogsWithSegmentsToDeleteShouldNotConsiderUncleanablePartitions(): Unit = {
-    val records = TestUtils.singletonRecords("test".getBytes, key = "test".getBytes)
+    val records = TestUtils.singletonRecords("test".getBytes, key="test".getBytes)
     val log: UnifiedLog = createLog(records.sizeInBytes * 5, TopicConfig.CLEANUP_POLICY_COMPACT)
     val cleanerManager: LogCleanerManager = createCleanerManager(log)
     cleanerManager.markPartitionUncleanable(log.dir.getParent, topicPartition)
@@ -532,8 +540,8 @@ class LogCleanerManagerTest extends Logging {
   }
 
   /**
-   * Test computation of cleanable range with no minimum compaction lag settings active where bounded by LSO
-   */
+    * Test computation of cleanable range with no minimum compaction lag settings active where bounded by LSO
+    */
   @Test
   def testCleanableOffsetsForNone(): Unit = {
     val logProps = new Properties()
@@ -664,10 +672,10 @@ class LogCleanerManagerTest extends Logging {
     val producerId = 15L
     val producerEpoch = 0.toShort
     val sequence = 0
-    log.appendAsLeader(MemoryRecords.withTransactionalRecords(CompressionType.NONE, producerId, producerEpoch, sequence,
+    log.appendAsLeader(MemoryRecords.withTransactionalRecords(Compression.NONE, producerId, producerEpoch, sequence,
       new SimpleRecord(time.milliseconds(), "1".getBytes, "a".getBytes),
       new SimpleRecord(time.milliseconds(), "2".getBytes, "b".getBytes)), leaderEpoch = 0)
-    log.appendAsLeader(MemoryRecords.withTransactionalRecords(CompressionType.NONE, producerId, producerEpoch, sequence + 2,
+    log.appendAsLeader(MemoryRecords.withTransactionalRecords(Compression.NONE, producerId, producerEpoch, sequence + 2,
       new SimpleRecord(time.milliseconds(), "3".getBytes, "c".getBytes)), leaderEpoch = 0)
     log.roll()
     log.updateHighWatermark(3L)
@@ -702,7 +710,7 @@ class LogCleanerManagerTest extends Logging {
     val logProps = new Properties()
     logProps.put(TopicConfig.SEGMENT_BYTES_CONFIG, 1024: java.lang.Integer)
     val log = makeLog(config = LogConfig.fromProps(logConfig.originals, logProps))
-    while(log.numberOfSegments < 8)
+    while (log.numberOfSegments < 8)
       log.appendAsLeader(records(log.logEndOffset.toInt, log.logEndOffset.toInt, time.milliseconds()), leaderEpoch = 0)
 
     val cleanerManager: LogCleanerManager = createCleanerManager(log)
@@ -727,7 +735,7 @@ class LogCleanerManagerTest extends Logging {
 
   @Test
   def testDoneDeleting(): Unit = {
-    val records = TestUtils.singletonRecords("test".getBytes, key = "test".getBytes)
+    val records = TestUtils.singletonRecords("test".getBytes, key="test".getBytes)
     val log: UnifiedLog = createLog(records.sizeInBytes * 5, TopicConfig.CLEANUP_POLICY_COMPACT + "," + TopicConfig.CLEANUP_POLICY_DELETE)
     val cleanerManager: LogCleanerManager = createCleanerManager(log)
     val tp = new TopicPartition("log", 0)
@@ -799,7 +807,7 @@ class LogCleanerManagerTest extends Logging {
                         cleanupPolicy: String,
                         topicPartition: TopicPartition = new TopicPartition("log", 0)): UnifiedLog = {
     val config = createLowRetentionLogConfig(segmentSize, cleanupPolicy)
-    val partitionDir = new File(logDir, UnifiedLog.logDirName(topicPartition))
+    val partitionDir = new File(logDir, JUnifiedLog.logDirName(topicPartition))
 
     UnifiedLog(
       dir = partitionDir,
@@ -811,10 +819,9 @@ class LogCleanerManagerTest extends Logging {
       brokerTopicStats = new BrokerTopicStats,
       maxTransactionTimeoutMs = 5 * 60 * 1000,
       producerStateManagerConfig = producerStateManagerConfig,
-      producerIdExpirationCheckIntervalMs = kafka.server.Defaults.ProducerIdExpirationCheckIntervalMs,
+      producerIdExpirationCheckIntervalMs = TransactionLogConfig.PRODUCER_ID_EXPIRATION_CHECK_INTERVAL_MS_DEFAULT,
       logDirFailureChannel = new LogDirFailureChannel(10),
-      topicId = None,
-      keepPartitionMetadataFile = true)
+      topicId = None)
   }
 
   private def createLowRetentionLogConfig(segmentSize: Int, cleanupPolicy: String): LogConfig = {
@@ -850,7 +857,7 @@ class LogCleanerManagerTest extends Logging {
       new SimpleRecord(currentTimestamp, s"key-$offset".getBytes, s"value-$offset".getBytes)
     }
 
-    log.appendAsLeader(MemoryRecords.withRecords(CompressionType.NONE, records: _*), leaderEpoch = 1)
+    log.appendAsLeader(MemoryRecords.withRecords(Compression.NONE, records:_*), leaderEpoch = 1)
     log.maybeIncrementHighWatermark(log.logEndOffsetMetadata)
   }
 
@@ -865,14 +872,13 @@ class LogCleanerManagerTest extends Logging {
       brokerTopicStats = new BrokerTopicStats,
       maxTransactionTimeoutMs = 5 * 60 * 1000,
       producerStateManagerConfig = producerStateManagerConfig,
-      producerIdExpirationCheckIntervalMs = kafka.server.Defaults.ProducerIdExpirationCheckIntervalMs,
+      producerIdExpirationCheckIntervalMs = TransactionLogConfig.PRODUCER_ID_EXPIRATION_CHECK_INTERVAL_MS_DEFAULT,
       logDirFailureChannel = new LogDirFailureChannel(10),
-      topicId = None,
-      keepPartitionMetadataFile = true
+      topicId = None
     )
   }
 
   private def records(key: Int, value: Int, timestamp: Long) =
-    MemoryRecords.withRecords(CompressionType.NONE, new SimpleRecord(timestamp, key.toString.getBytes, value.toString.getBytes))
+    MemoryRecords.withRecords(Compression.NONE, new SimpleRecord(timestamp, key.toString.getBytes, value.toString.getBytes))
 
 }

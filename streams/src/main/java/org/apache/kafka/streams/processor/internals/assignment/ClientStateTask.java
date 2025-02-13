@@ -16,30 +16,30 @@
  */
 package org.apache.kafka.streams.processor.internals.assignment;
 
+import org.apache.kafka.streams.processor.TaskId;
+
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.kafka.streams.processor.TaskId;
-
 class ClientStateTask {
-	private final Map<String, Set<TaskId>> consumerToTaskIds;
-	private Set<TaskId> taskIds;
+    private final Map<String, Set<TaskId>> consumerToTaskIds;
+    private Set<TaskId> taskIds;
 
-	ClientStateTask(final Set<TaskId> taskIds,
-					final Map<String, Set<TaskId>> consumerToTaskIds) {
-		this.taskIds = taskIds;
-		this.consumerToTaskIds = consumerToTaskIds;
-	}
+    ClientStateTask(final Set<TaskId> taskIds,
+                    final Map<String, Set<TaskId>> consumerToTaskIds) {
+        this.taskIds = taskIds;
+        this.consumerToTaskIds = consumerToTaskIds;
+    }
 
-	void taskIds(final Set<TaskId> clientToTaskIds) {
-		taskIds = clientToTaskIds;
-	}
+    void setTaskIds(final Set<TaskId> clientToTaskIds) {
+        taskIds = clientToTaskIds;
+    }
 
-	Set<TaskId> taskIds() {
-		return taskIds;
-	}
+    Set<TaskId> taskIds() {
+        return taskIds;
+    }
 
-	Map<String, Set<TaskId>> consumerToTaskIds() {
-		return consumerToTaskIds;
-	}
+    Map<String, Set<TaskId>> consumerToTaskIds() {
+        return consumerToTaskIds;
+    }
 }

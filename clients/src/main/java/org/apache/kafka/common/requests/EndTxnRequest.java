@@ -25,54 +25,63 @@ import org.apache.kafka.common.protocol.Errors;
 import java.nio.ByteBuffer;
 
 public class EndTxnRequest extends AbstractRequest {
-
-	private final EndTxnRequestData data;
+    public static final short LAST_STABLE_VERSION_BEFORE_TRANSACTION_V2 = 4;
+    private final EndTxnRequestData data;
 
     public static class Builder extends AbstractRequest.Builder<EndTxnRequest> {
-		public final EndTxnRequestData data;
+        public final EndTxnRequestData data;
+        public final boolean isTransactionV2Enabled;
 
-		public Builder(EndTxnRequestData data) {
-			super(ApiKeys.END_TXN);
-			this.data = data;
-		}
+        public Builder(EndTxnRequestData data, boolean isTransactionV2Enabled) {
+            this(data, false, isTransactionV2Enabled);
+        }
 
-        @Override
-        public EndTxnRequest build(short version) {
-			return new EndTxnRequest(data, version);
+        public Builder(EndTxnRequestData data, boolean enableUnstableLastVersion, boolean isTransactionV2Enabled) {
+            super(ApiKeys.END_TXN, enableUnstableLastVersion);
+            this.data = data;
+            this.isTransactionV2Enabled = isTransactionV2Enabled;
         }
 
         @Override
-		public String toString() {
-			return data.toString();
-		}
-	}
+        public EndTxnRequest build(short version) {
+            if (!isTransactionV2Enabled) {
+                version = (short) Math.min(version, LAST_STABLE_VERSION_BEFORE_TRANSACTION_V2);
+            }
+            return new EndTxnRequest(data, version);
+        }
 
-	private EndTxnRequest(EndTxnRequestData data, short version) {
-		super(ApiKeys.END_TXN, version);
-		this.data = data;
-	}
+        @Override
+        public String toString() {
+            return data.toString();
+        }
+    }
 
-	public TransactionResult result() {
-		if (data.committed())
-			return TransactionResult.COMMIT;
-		else
-			return TransactionResult.ABORT;
-	}
+    private EndTxnRequest(EndTxnRequestData data, short version) {
+        super(ApiKeys.END_TXN, version);
+        this.data = data;
+    }
 
-	@Override
-	public EndTxnRequestData data() {
-		return data;
-	}
+    public TransactionResult result() {
+        if (data.committed())
+            return TransactionResult.COMMIT;
+        else
+            return TransactionResult.ABORT;
+    }
 
-	@Override
-	public EndTxnResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-		return new EndTxnResponse(new EndTxnResponseData()
-				.setErrorCode(Errors.forException(e).code())
-				.setThrottleTimeMs(throttleTimeMs)
-		);
-	}
+    @Override
+    public EndTxnRequestData data() {
+        return data;
+    }
+
+    @Override
+    public EndTxnResponse getErrorResponse(int throttleTimeMs, Throwable e) {
+        return new EndTxnResponse(new EndTxnResponseData()
+                                      .setErrorCode(Errors.forException(e).code())
+                                      .setThrottleTimeMs(throttleTimeMs)
+        );
+    }
 
     public static EndTxnRequest parse(ByteBuffer buffer, short version) {
-		return new EndTxnRequest(new EndTxnRequestData(new ByteBufferAccessor(buffer), version), version);
+        return new EndTxnRequest(new EndTxnRequestData(new ByteBufferAccessor(buffer), version), version);
     }
 }

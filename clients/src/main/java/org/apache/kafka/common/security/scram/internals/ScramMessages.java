@@ -32,7 +32,7 @@ import java.util.regex.Pattern;
  */
 public class ScramMessages {
 
-    static abstract class AbstractScramMessage {
+    abstract static class AbstractScramMessage {
 
         static final String ALPHA = "[A-Za-z]+";
         static final String VALUE_SAFE = "[\\x01-\\x7F&&[^=,]]+";

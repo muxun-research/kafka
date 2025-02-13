@@ -19,20 +19,22 @@ package org.apache.kafka.connect.integration;
 
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.common.utils.Time;
-import org.apache.kafka.test.IntegrationTest;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.experimental.categories.Category;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@Category(IntegrationTest.class)
+@Tag("integration")
 public class StartAndStopCounterTest {
 
     private StartAndStopCounter counter;
@@ -40,13 +42,13 @@ public class StartAndStopCounterTest {
     private ExecutorService waiters;
     private StartAndStopLatch latch;
 
-    @Before
+    @BeforeEach
     public void setup() {
         clock = new MockTime();
         counter = new StartAndStopCounter(clock);
     }
 
-    @After
+    @AfterEach
     public void teardown() {
         if (waiters != null) {
             try {
@@ -90,7 +92,6 @@ public class StartAndStopCounterTest {
         assertTrue(future.get(200, TimeUnit.MILLISECONDS));
         assertTrue(future.isDone());
     }
-
     @Test
     public void shouldFailToWaitForRestartThatNeverHappens() throws Exception {
         waiters = Executors.newSingleThreadExecutor();

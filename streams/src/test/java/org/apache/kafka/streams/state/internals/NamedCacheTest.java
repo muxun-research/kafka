@@ -25,21 +25,27 @@ import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.processor.internals.MockStreamsMetrics;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
-import org.junit.Before;
-import org.junit.Test;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class NamedCacheTest {
 
     private final Headers headers = new RecordHeaders(new Header[]{new RecordHeader("key", "value".getBytes())});
     private NamedCache cache;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         final Metrics innerMetrics = new Metrics();
         final StreamsMetricsImpl metrics = new MockStreamsMetrics(innerMetrics);
@@ -48,11 +54,17 @@ public class NamedCacheTest {
 
     @Test
     public void shouldKeepTrackOfMostRecentlyAndLeastRecentlyUsed() {
-        final List<KeyValue<String, String>> toInsert = Arrays.asList(new KeyValue<>("K1", "V1"), new KeyValue<>("K2", "V2"), new KeyValue<>("K3", "V3"), new KeyValue<>("K4", "V4"), new KeyValue<>("K5", "V5"));
+        final List<KeyValue<String, String>> toInsert = Arrays.asList(
+                new KeyValue<>("K1", "V1"),
+                new KeyValue<>("K2", "V2"),
+                new KeyValue<>("K3", "V3"),
+                new KeyValue<>("K4", "V4"),
+                new KeyValue<>("K5", "V5"));
         for (final KeyValue<String, String> stringStringKeyValue : toInsert) {
             final byte[] key = stringStringKeyValue.key.getBytes();
             final byte[] value = stringStringKeyValue.value.getBytes();
-            cache.put(Bytes.wrap(key), new LRUCacheEntry(value, new RecordHeaders(), true, 1, 1, 1, ""));
+            cache.put(Bytes.wrap(key),
+                new LRUCacheEntry(value, new RecordHeaders(), true, 1, 1, 1, ""));
             final LRUCacheEntry head = cache.first();
             final LRUCacheEntry tail = cache.last();
             assertEquals(new String(head.value()), stringStringKeyValue.value);
@@ -165,7 +177,8 @@ public class NamedCacheTest {
     @Test
     public void shouldThrowIllegalStateExceptionWhenTryingToOverwriteDirtyEntryWithCleanEntry() {
         cache.put(Bytes.wrap(new byte[]{0}), new LRUCacheEntry(new byte[]{10}, headers, true, 0, 0, 0, ""));
-        assertThrows(IllegalStateException.class, () -> cache.put(Bytes.wrap(new byte[]{0}), new LRUCacheEntry(new byte[]{10}, new RecordHeaders(), false, 0, 0, 0, "")));
+        assertThrows(IllegalStateException.class, () -> cache.put(Bytes.wrap(new byte[]{0}),
+            new LRUCacheEntry(new byte[]{10}, new RecordHeaders(), false, 0, 0, 0, "")));
     }
 
     @Test

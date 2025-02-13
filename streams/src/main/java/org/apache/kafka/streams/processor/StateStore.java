@@ -19,8 +19,12 @@ package org.apache.kafka.streams.processor;
 import org.apache.kafka.common.annotation.InterfaceStability.Evolving;
 import org.apache.kafka.streams.errors.StreamsException;
 import org.apache.kafka.streams.processor.api.ProcessorContext;
-import org.apache.kafka.streams.processor.internals.StoreToProcessorContextAdapter;
-import org.apache.kafka.streams.query.*;
+import org.apache.kafka.streams.query.FailureReason;
+import org.apache.kafka.streams.query.Position;
+import org.apache.kafka.streams.query.PositionBound;
+import org.apache.kafka.streams.query.Query;
+import org.apache.kafka.streams.query.QueryConfig;
+import org.apache.kafka.streams.query.QueryResult;
 
 /**
  * A storage engine for managing state maintained by a stream processor.
@@ -52,31 +56,7 @@ public interface StateStore {
     /**
      * Initializes this state store.
      * <p>
-     * The implementation of this function must register the root store in the context via the
-     * {@link org.apache.kafka.streams.processor.ProcessorContext#register(StateStore, StateRestoreCallback)} function,
-     * where the first {@link StateStore} parameter should always be the passed-in {@code root} object, and
-     * the second parameter should be an object of user's implementation
-     * of the {@link StateRestoreCallback} interface used for restoring the state store from the changelog.
-     * <p>
-     * Note that if the state store engine itself supports bulk writes, users can implement another
-     * interface {@link BatchingStateRestoreCallback} which extends {@link StateRestoreCallback} to
-     * let users implement bulk-load restoration logic instead of restoring one record at a time.
-     * <p>
-     * This method is not called if {@link StateStore#init(StateStoreContext, StateStore)}
-     * is implemented.
-     * @throws IllegalStateException If store gets registered after initialized is already finished
-     * @throws StreamsException      if the store's change log does not contain the partition
-     * @deprecated Since 2.7.0. Callers should invoke {@link #init(StateStoreContext, StateStore)} instead.
-     * Implementers may choose to implement this method for backward compatibility or to throw an
-     * informative exception instead.
-     */
-    @Deprecated
-    void init(org.apache.kafka.streams.processor.ProcessorContext context, StateStore root);
-
-    /**
-     * Initializes this state store.
-     * <p>
-     * The implementation of this function must register the root store in the context via the
+     * The implementation of this function must register the root store in the stateStoreContext via the
      * {@link StateStoreContext#register(StateStore, StateRestoreCallback, CommitCallback)} function, where the
      * first {@link StateStore} parameter should always be the passed-in {@code root} object, and
      * the second parameter should be an object of user's implementation
@@ -85,12 +65,11 @@ public interface StateStore {
      * Note that if the state store engine itself supports bulk writes, users can implement another
      * interface {@link BatchingStateRestoreCallback} which extends {@link StateRestoreCallback} to
      * let users implement bulk-load restoration logic instead of restoring one record at a time.
+     *
      * @throws IllegalStateException If store gets registered after initialized is already finished
-     * @throws StreamsException      if the store's change log does not contain the partition
+     * @throws StreamsException if the store's change log does not contain the partition
      */
-    default void init(final StateStoreContext context, final StateStore root) {
-        init(StoreToProcessorContextAdapter.adapt(context), root);
-    }
+    void init(final StateStoreContext stateStoreContext, final StateStore root);
 
     /**
      * Flush any cached data
@@ -134,14 +113,17 @@ public interface StateStore {
      * anything but {@link PositionBound#unbounded()}. Be sure to explain in the failure message
      * that bounded positions are not supported.
      * <p>
-     * @param query         The query to execute
+     * @param query The query to execute
      * @param positionBound The position the store must be at or past
-     * @param config        Per query configuration parameters, such as whether the store should collect detailed execution
-     *                      info for the query
-     * @param <R>           The result type
+     * @param config Per query configuration parameters, such as whether the store should collect detailed execution
+     * info for the query
+     * @param <R> The result type
      */
     @Evolving
-    default <R> QueryResult<R> query(final Query<R> query, final PositionBound positionBound, final QueryConfig config) {
+    default <R> QueryResult<R> query(
+        final Query<R> query,
+        final PositionBound positionBound,
+        final QueryConfig config) {
         // If a store doesn't implement a query handler, then all queries are unknown.
         return QueryResult.forUnknownQueryType(query, this);
     }
@@ -151,6 +133,8 @@ public interface StateStore {
      */
     @Evolving
     default Position getPosition() {
-        throw new UnsupportedOperationException("getPosition is not implemented by this StateStore (" + getClass() + ")");
+        throw new UnsupportedOperationException(
+            "getPosition is not implemented by this StateStore (" + getClass() + ")"
+        );
     }
 }

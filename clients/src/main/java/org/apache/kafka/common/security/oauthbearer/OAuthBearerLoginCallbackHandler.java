@@ -24,18 +24,25 @@ import org.apache.kafka.common.security.auth.AuthenticateCallbackHandler;
 import org.apache.kafka.common.security.auth.SaslExtensions;
 import org.apache.kafka.common.security.auth.SaslExtensionsCallback;
 import org.apache.kafka.common.security.oauthbearer.internals.OAuthBearerClientInitialResponse;
-import org.apache.kafka.common.security.oauthbearer.internals.secured.*;
+import org.apache.kafka.common.security.oauthbearer.internals.secured.AccessTokenRetriever;
+import org.apache.kafka.common.security.oauthbearer.internals.secured.AccessTokenRetrieverFactory;
+import org.apache.kafka.common.security.oauthbearer.internals.secured.AccessTokenValidator;
+import org.apache.kafka.common.security.oauthbearer.internals.secured.AccessTokenValidatorFactory;
+import org.apache.kafka.common.security.oauthbearer.internals.secured.JaasOptionsUtils;
+import org.apache.kafka.common.security.oauthbearer.internals.secured.ValidateException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import javax.security.auth.callback.Callback;
 import javax.security.auth.callback.UnsupportedCallbackException;
 import javax.security.auth.login.AppConfigurationEntry;
 import javax.security.sasl.SaslException;
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 import static org.apache.kafka.common.config.SaslConfigs.SASL_OAUTHBEARER_TOKEN_ENDPOINT_URL;
 
@@ -120,7 +127,7 @@ import static org.apache.kafka.common.config.SaslConfigs.SASL_OAUTHBEARER_TOKEN_
  * <code>
  * sasl.oauthbearer.token.endpoint.url=https://example.com/oauth2/v1/token
  * </code>
- * <p>
+ *
  * Please see the OAuth/OIDC providers documentation for the token endpoint URL.
  * </p>
  *
@@ -150,11 +157,23 @@ public class OAuthBearerLoginCallbackHandler implements AuthenticateCallbackHand
     public static final String CLIENT_SECRET_CONFIG = "clientSecret";
     public static final String SCOPE_CONFIG = "scope";
 
-    public static final String CLIENT_ID_DOC = "The OAuth/OIDC identity provider-issued " + "client ID to uniquely identify the service account to use for authentication for " + "this client. The value must be paired with a corresponding " + CLIENT_SECRET_CONFIG + " " + "value and is provided to the OAuth provider using the OAuth " + "clientcredentials grant type.";
+    public static final String CLIENT_ID_DOC = "The OAuth/OIDC identity provider-issued " +
+        "client ID to uniquely identify the service account to use for authentication for " +
+        "this client. The value must be paired with a corresponding " + CLIENT_SECRET_CONFIG + " " +
+        "value and is provided to the OAuth provider using the OAuth " +
+        "clientcredentials grant type.";
 
-    public static final String CLIENT_SECRET_DOC = "The OAuth/OIDC identity provider-issued " + "client secret serves a similar function as a password to the " + CLIENT_ID_CONFIG + " " + "account and identifies the service account to use for authentication for " + "this client. The value must be paired with a corresponding " + CLIENT_ID_CONFIG + " " + "value and is provided to the OAuth provider using the OAuth " + "clientcredentials grant type.";
+    public static final String CLIENT_SECRET_DOC = "The OAuth/OIDC identity provider-issued " +
+        "client secret serves a similar function as a password to the " + CLIENT_ID_CONFIG + " " +
+        "account and identifies the service account to use for authentication for " +
+        "this client. The value must be paired with a corresponding " + CLIENT_ID_CONFIG + " " +
+        "value and is provided to the OAuth provider using the OAuth " +
+        "clientcredentials grant type.";
 
-    public static final String SCOPE_DOC = "The (optional) HTTP/HTTPS login request to the " + "token endpoint (" + SASL_OAUTHBEARER_TOKEN_ENDPOINT_URL + ") may need to specify an " + "OAuth \"scope\". If so, the " + SCOPE_CONFIG + " is used to provide the value to " + "include with the login request.";
+    public static final String SCOPE_DOC = "The (optional) HTTP/HTTPS login request to the " +
+        "token endpoint (" + SASL_OAUTHBEARER_TOKEN_ENDPOINT_URL + ") may need to specify an " +
+        "OAuth \"scope\". If so, the " + SCOPE_CONFIG + " is used to provide the value to " +
+        "include with the login request.";
 
     private static final String EXTENSION_PREFIX = "extension_";
 

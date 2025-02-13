@@ -17,24 +17,36 @@
 
 package org.apache.kafka.common.security.oauthbearer.internals.secured;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginCallbackHandler;
 import org.apache.kafka.common.utils.Utils;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.SSLSocketFactory;
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLSocketFactory;
 
 /**
  * <code>HttpAccessTokenRetriever</code> is an {@link AccessTokenRetriever} that will
@@ -42,6 +54,7 @@ import java.util.concurrent.ExecutionException;
  * ({@link OAuthBearerLoginCallbackHandler#CLIENT_ID_CONFIG}/{@link OAuthBearerLoginCallbackHandler#CLIENT_SECRET_CONFIG})
  * to a publicized token endpoint URL
  * ({@link SaslConfigs#SASL_OAUTHBEARER_TOKEN_ENDPOINT_URL}).
+ *
  * @see AccessTokenRetriever
  * @see OAuthBearerLoginCallbackHandler#CLIENT_ID_CONFIG
  * @see OAuthBearerLoginCallbackHandler#CLIENT_SECRET_CONFIG
@@ -102,7 +115,18 @@ public class HttpAccessTokenRetriever implements AccessTokenRetriever {
 
     private final Integer loginReadTimeoutMs;
 
-    public HttpAccessTokenRetriever(String clientId, String clientSecret, String scope, SSLSocketFactory sslSocketFactory, String tokenEndpointUrl, long loginRetryBackoffMs, long loginRetryBackoffMaxMs, Integer loginConnectTimeoutMs, Integer loginReadTimeoutMs) {
+    private final boolean urlencodeHeader;
+
+    public HttpAccessTokenRetriever(String clientId,
+        String clientSecret,
+        String scope,
+        SSLSocketFactory sslSocketFactory,
+        String tokenEndpointUrl,
+        long loginRetryBackoffMs,
+        long loginRetryBackoffMaxMs,
+        Integer loginConnectTimeoutMs,
+        Integer loginReadTimeoutMs,
+        boolean urlencodeHeader) {
         this.clientId = Objects.requireNonNull(clientId);
         this.clientSecret = Objects.requireNonNull(clientSecret);
         this.scope = scope;
@@ -112,6 +136,7 @@ public class HttpAccessTokenRetriever implements AccessTokenRetriever {
         this.loginRetryBackoffMaxMs = loginRetryBackoffMaxMs;
         this.loginConnectTimeoutMs = loginConnectTimeoutMs;
         this.loginReadTimeoutMs = loginReadTimeoutMs;
+        this.urlencodeHeader = urlencodeHeader;
     }
 
     /**
@@ -123,13 +148,15 @@ public class HttpAccessTokenRetriever implements AccessTokenRetriever {
      * implementation communicates over a network. The facility in the
      * {@link javax.security.auth.spi.LoginModule} from which this is ultimately called
      * does not provide an asynchronous approach.
+     *
      * @return Non-<code>null</code> JWT access token string
+     *
      * @throws IOException Thrown on errors related to IO during retrieval
      */
 
     @Override
     public String retrieve() throws IOException {
-        String authorizationHeader = formatAuthorizationHeader(clientId, clientSecret);
+        String authorizationHeader = formatAuthorizationHeader(clientId, clientSecret, urlencodeHeader);
         String requestBody = formatRequestBody(scope);
         Retry<String> retry = new Retry<>(loginRetryBackoffMs, loginRetryBackoffMaxMs);
         Map<String, String> headers = Collections.singletonMap(AUTHORIZATION_HEADER, authorizationHeader);
@@ -164,12 +191,22 @@ public class HttpAccessTokenRetriever implements AccessTokenRetriever {
         return parseAccessToken(responseBody);
     }
 
-    public static String post(HttpURLConnection con, Map<String, String> headers, String requestBody, Integer connectTimeoutMs, Integer readTimeoutMs) throws IOException, UnretryableException {
+    public static String post(HttpURLConnection con,
+        Map<String, String> headers,
+        String requestBody,
+        Integer connectTimeoutMs,
+        Integer readTimeoutMs)
+        throws IOException, UnretryableException {
         handleInput(con, headers, requestBody, connectTimeoutMs, readTimeoutMs);
         return handleOutput(con);
     }
 
-    private static void handleInput(HttpURLConnection con, Map<String, String> headers, String requestBody, Integer connectTimeoutMs, Integer readTimeoutMs) throws IOException, UnretryableException {
+    private static void handleInput(HttpURLConnection con,
+        Map<String, String> headers,
+        String requestBody,
+        Integer connectTimeoutMs,
+        Integer readTimeoutMs)
+        throws IOException, UnretryableException {
         log.debug("handleInput - starting post for {}", con.getURL());
         con.setRequestMethod("POST");
         con.setRequestProperty("Accept", "application/json");
@@ -223,14 +260,14 @@ public class HttpAccessTokenRetriever implements AccessTokenRetriever {
             ByteArrayOutputStream os = new ByteArrayOutputStream();
             log.debug("handleOutput - preparing to read response body from {}", con.getURL());
             copy(is, os);
-            responseBody = os.toString(StandardCharsets.UTF_8.name());
+            responseBody = os.toString(StandardCharsets.UTF_8);
         } catch (Exception e) {
             // there still can be useful error response from the servers, lets get it
             try (InputStream is = con.getErrorStream()) {
                 ByteArrayOutputStream os = new ByteArrayOutputStream();
                 log.debug("handleOutput - preparing to read error response body from {}", con.getURL());
                 copy(is, os);
-                errorResponseBody = os.toString(StandardCharsets.UTF_8.name());
+                errorResponseBody = os.toString(StandardCharsets.UTF_8);
             } catch (Exception e2) {
                 log.warn("handleOutput - error retrieving error information", e2);
             }
@@ -238,23 +275,28 @@ public class HttpAccessTokenRetriever implements AccessTokenRetriever {
         }
 
         if (responseCode == HttpURLConnection.HTTP_OK || responseCode == HttpURLConnection.HTTP_CREATED) {
-            log.debug("handleOutput - responseCode: {}, error response: {}", responseCode, errorResponseBody);
+            log.debug("handleOutput - responseCode: {}, error response: {}", responseCode,
+                errorResponseBody);
 
             if (responseBody == null || responseBody.isEmpty())
-                throw new IOException(String.format("The token endpoint response was unexpectedly empty despite response code %s from %s and error message %s", responseCode, con.getURL(), formatErrorMessage(errorResponseBody)));
+                throw new IOException(String.format("The token endpoint response was unexpectedly empty despite response code %d from %s and error message %s",
+                    responseCode, con.getURL(), formatErrorMessage(errorResponseBody)));
 
             return responseBody;
         } else {
-            log.warn("handleOutput - error response code: {}, error response body: {}", responseCode, formatErrorMessage(errorResponseBody));
+            log.warn("handleOutput - error response code: {}, error response body: {}", responseCode,
+                formatErrorMessage(errorResponseBody));
 
             if (UNRETRYABLE_HTTP_CODES.contains(responseCode)) {
                 // We know that this is a non-transient error, so let's not keep retrying the
                 // request unnecessarily.
-                throw new UnretryableException(new IOException(String.format("The response code %s and error response %s was encountered reading the token endpoint response; will not attempt further retries", responseCode, formatErrorMessage(errorResponseBody))));
+                throw new UnretryableException(new IOException(String.format("The response code %s and error response %s was encountered reading the token endpoint response; will not attempt further retries",
+                    responseCode, formatErrorMessage(errorResponseBody))));
             } else {
                 // We don't know if this is a transient (retryable) error or not, so let's assume
                 // it is.
-                throw new IOException(String.format("The unexpected response code %s and error message %s was encountered reading the token endpoint response", responseCode, formatErrorMessage(errorResponseBody)));
+                throw new IOException(String.format("The unexpected response code %s and error message %s was encountered reading the token endpoint response",
+                    responseCode, formatErrorMessage(errorResponseBody)));
             }
         }
     }
@@ -270,7 +312,7 @@ public class HttpAccessTokenRetriever implements AccessTokenRetriever {
     static String formatErrorMessage(String errorResponseBody) {
         // See https://www.ietf.org/rfc/rfc6749.txt, section 5.2 for the format
         // of this error message.
-        if (errorResponseBody == null || errorResponseBody.trim().equals("")) {
+        if (errorResponseBody == null || errorResponseBody.trim().isEmpty()) {
             return "{}";
         }
         ObjectMapper mapper = new ObjectMapper();
@@ -302,7 +344,7 @@ public class HttpAccessTokenRetriever implements AccessTokenRetriever {
             if (snippet.length() > MAX_RESPONSE_BODY_LENGTH) {
                 int actualLength = responseBody.length();
                 String s = responseBody.substring(0, MAX_RESPONSE_BODY_LENGTH);
-                snippet = String.format("%s (trimmed to first %s characters out of %s total)", s, MAX_RESPONSE_BODY_LENGTH, actualLength);
+                snippet = String.format("%s (trimmed to first %d characters out of %d total)", s, MAX_RESPONSE_BODY_LENGTH, actualLength);
             }
 
             throw new IOException(String.format("The token endpoint response did not contain an access_token value. Response: (%s)", snippet));
@@ -311,9 +353,15 @@ public class HttpAccessTokenRetriever implements AccessTokenRetriever {
         return sanitizeString("the token endpoint response's access_token JSON attribute", accessTokenNode.textValue());
     }
 
-    static String formatAuthorizationHeader(String clientId, String clientSecret) {
+    static String formatAuthorizationHeader(String clientId, String clientSecret, boolean urlencode) {
         clientId = sanitizeString("the token endpoint request client ID parameter", clientId);
         clientSecret = sanitizeString("the token endpoint request client secret parameter", clientSecret);
+
+        // according to RFC-6749 clientId & clientSecret must be urlencoded, see https://tools.ietf.org/html/rfc6749#section-2.3.1
+        if (urlencode) {
+            clientId = URLEncoder.encode(clientId, StandardCharsets.UTF_8);
+            clientSecret = URLEncoder.encode(clientSecret, StandardCharsets.UTF_8);
+        }
 
         String s = String.format("%s:%s", clientId, clientSecret);
         // Per RFC-7617, we need to use the *non-URL safe* base64 encoder. See KAFKA-14496.
@@ -321,22 +369,17 @@ public class HttpAccessTokenRetriever implements AccessTokenRetriever {
         return String.format("Basic %s", encoded);
     }
 
-    static String formatRequestBody(String scope) throws IOException {
-        try {
-            StringBuilder requestParameters = new StringBuilder();
-            requestParameters.append("grant_type=client_credentials");
+    static String formatRequestBody(String scope) {
+        StringBuilder requestParameters = new StringBuilder();
+        requestParameters.append("grant_type=client_credentials");
 
-            if (scope != null && !scope.trim().isEmpty()) {
-                scope = scope.trim();
-                String encodedScope = URLEncoder.encode(scope, StandardCharsets.UTF_8.name());
-                requestParameters.append("&scope=").append(encodedScope);
-            }
-
-            return requestParameters.toString();
-        } catch (UnsupportedEncodingException e) {
-            // The world has gone crazy!
-            throw new IOException(String.format("Encoding %s not supported", StandardCharsets.UTF_8.name()));
+        if (scope != null && !scope.trim().isEmpty()) {
+            scope = scope.trim();
+            String encodedScope = URLEncoder.encode(scope, StandardCharsets.UTF_8);
+            requestParameters.append("&scope=").append(encodedScope);
         }
+
+        return requestParameters.toString();
     }
 
     private static String sanitizeString(String name, String value) {

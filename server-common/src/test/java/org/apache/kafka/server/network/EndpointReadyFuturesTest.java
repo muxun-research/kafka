@@ -20,32 +20,55 @@ package org.apache.kafka.server.network;
 import org.apache.kafka.common.ClusterResource;
 import org.apache.kafka.common.Endpoint;
 import org.apache.kafka.common.security.auth.SecurityProtocol;
+
 import org.junit.jupiter.api.Test;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-final public class EndpointReadyFuturesTest {
-    private static final Endpoint EXTERNAL = new Endpoint("EXTERNAL", SecurityProtocol.SSL, "127.0.0.1", 9092);
+public final class EndpointReadyFuturesTest {
+    private static final Endpoint EXTERNAL =
+            new Endpoint("EXTERNAL", SecurityProtocol.SSL, "127.0.0.1", 9092);
 
-    private static final Endpoint INTERNAL = new Endpoint("INTERNAL", SecurityProtocol.PLAINTEXT, "127.0.0.1", 9093);
+    private static final Endpoint INTERNAL =
+            new Endpoint("INTERNAL", SecurityProtocol.PLAINTEXT, "127.0.0.1", 9093);
 
-    private static final KafkaAuthorizerServerInfo INFO = new KafkaAuthorizerServerInfo(new ClusterResource("S6-01LPiQOCBhhFIunQUcQ"), 1, Arrays.asList(EXTERNAL, INTERNAL), INTERNAL, Arrays.asList("INTERNAL"));
+    private static final KafkaAuthorizerServerInfo INFO = new KafkaAuthorizerServerInfo(
+        new ClusterResource("S6-01LPiQOCBhhFIunQUcQ"),
+        1,
+        Arrays.asList(EXTERNAL, INTERNAL),
+        INTERNAL,
+        Arrays.asList("INTERNAL"));
 
-    static void assertComplete(EndpointReadyFutures readyFutures, Endpoint... endpoints) {
+    static void assertComplete(
+            EndpointReadyFutures readyFutures,
+            Endpoint... endpoints
+    ) {
         for (Endpoint endpoint : endpoints) {
             String name = endpoint.listenerName().get();
             CompletableFuture<Void> future = readyFutures.futures().get(endpoint);
             assertNotNull(future, "Unable to find future for " + name);
             assertTrue(future.isDone(), "Future for " + name + " is not done.");
-            assertFalse(future.isCompletedExceptionally(), "Future for " + name + " is completed exceptionally.");
+            assertFalse(future.isCompletedExceptionally(),
+                    "Future for " + name + " is completed exceptionally.");
         }
     }
 
-    static void assertIncomplete(EndpointReadyFutures readyFutures, Endpoint... endpoints) {
+    static void assertIncomplete(
+            EndpointReadyFutures readyFutures,
+            Endpoint... endpoints
+    ) {
         for (Endpoint endpoint : endpoints) {
             CompletableFuture<Void> future = readyFutures.futures().get(endpoint);
             assertNotNull(future, "Unable to find future for " + endpoint);
@@ -53,12 +76,18 @@ final public class EndpointReadyFuturesTest {
         }
     }
 
-    static void assertException(EndpointReadyFutures readyFutures, Throwable throwable, Endpoint... endpoints) {
+    static void assertException(
+            EndpointReadyFutures readyFutures,
+            Throwable throwable,
+            Endpoint... endpoints
+    ) {
         for (Endpoint endpoint : endpoints) {
             CompletableFuture<Void> future = readyFutures.futures().get(endpoint);
             assertNotNull(future, "Unable to find future for " + endpoint);
-            assertTrue(future.isCompletedExceptionally(), "Future for " + endpoint + " is not completed exceptionally.");
-            Throwable cause = assertThrows(CompletionException.class, () -> future.getNow(null)).getCause();
+            assertTrue(future.isCompletedExceptionally(),
+                    "Future for " + endpoint + " is not completed exceptionally.");
+            Throwable cause = assertThrows(CompletionException.class,
+                () -> future.getNow(null)).getCause();
             assertNotNull(cause, "Unable to find CompletionException cause for " + endpoint);
             assertEquals(throwable.getClass(), cause.getClass());
             assertEquals(throwable.getMessage(), cause.getMessage());
@@ -67,16 +96,21 @@ final public class EndpointReadyFuturesTest {
 
     @Test
     public void testImmediateCompletion() {
-        EndpointReadyFutures readyFutures = new EndpointReadyFutures.Builder().build(Optional.empty(), INFO);
-        assertEquals(new HashSet<>(Arrays.asList(EXTERNAL, INTERNAL)), readyFutures.futures().keySet());
+        EndpointReadyFutures readyFutures = new EndpointReadyFutures.Builder().
+                build(Optional.empty(), INFO);
+        assertEquals(new HashSet<>(Arrays.asList(EXTERNAL, INTERNAL)),
+                readyFutures.futures().keySet());
         assertComplete(readyFutures, EXTERNAL, INTERNAL);
     }
 
     @Test
     public void testAddReadinessFuture() {
         CompletableFuture<Void> foo = new CompletableFuture<>();
-        EndpointReadyFutures readyFutures = new EndpointReadyFutures.Builder().addReadinessFuture("foo", foo).build(Optional.empty(), INFO);
-        assertEquals(new HashSet<>(Arrays.asList(EXTERNAL, INTERNAL)), readyFutures.futures().keySet());
+        EndpointReadyFutures readyFutures = new EndpointReadyFutures.Builder().
+                addReadinessFuture("foo", foo).
+                build(Optional.empty(), INFO);
+        assertEquals(new HashSet<>(Arrays.asList(EXTERNAL, INTERNAL)),
+                readyFutures.futures().keySet());
         assertIncomplete(readyFutures, EXTERNAL, INTERNAL);
         foo.complete(null);
         assertComplete(readyFutures, EXTERNAL, INTERNAL);
@@ -86,8 +120,12 @@ final public class EndpointReadyFuturesTest {
     public void testAddMultipleReadinessFutures() {
         CompletableFuture<Void> foo = new CompletableFuture<>();
         CompletableFuture<Void> bar = new CompletableFuture<>();
-        EndpointReadyFutures readyFutures = new EndpointReadyFutures.Builder().addReadinessFuture("foo", foo).addReadinessFuture("bar", bar).build(Optional.empty(), INFO);
-        assertEquals(new HashSet<>(Arrays.asList(EXTERNAL, INTERNAL)), readyFutures.futures().keySet());
+        EndpointReadyFutures readyFutures = new EndpointReadyFutures.Builder().
+                addReadinessFuture("foo", foo).
+                addReadinessFuture("bar", bar).
+                build(Optional.empty(), INFO);
+        assertEquals(new HashSet<>(Arrays.asList(EXTERNAL, INTERNAL)),
+                readyFutures.futures().keySet());
         assertIncomplete(readyFutures, EXTERNAL, INTERNAL);
         foo.complete(null);
         assertIncomplete(readyFutures, EXTERNAL, INTERNAL);
@@ -100,8 +138,11 @@ final public class EndpointReadyFuturesTest {
         Map<Endpoint, CompletableFuture<Void>> bazFutures = new HashMap<>();
         bazFutures.put(EXTERNAL, new CompletableFuture<>());
         bazFutures.put(INTERNAL, new CompletableFuture<>());
-        EndpointReadyFutures readyFutures = new EndpointReadyFutures.Builder().addReadinessFutures("baz", bazFutures).build(Optional.empty(), INFO);
-        assertEquals(new HashSet<>(Arrays.asList(EXTERNAL, INTERNAL)), readyFutures.futures().keySet());
+        EndpointReadyFutures readyFutures = new EndpointReadyFutures.Builder().
+                addReadinessFutures("baz", bazFutures).
+                build(Optional.empty(), INFO);
+        assertEquals(new HashSet<>(Arrays.asList(EXTERNAL, INTERNAL)),
+                readyFutures.futures().keySet());
         assertIncomplete(readyFutures, EXTERNAL, INTERNAL);
         bazFutures.get(EXTERNAL).complete(null);
         assertComplete(readyFutures, EXTERNAL);
@@ -114,12 +155,17 @@ final public class EndpointReadyFuturesTest {
     public void testFailedReadinessFuture() {
         CompletableFuture<Void> foo = new CompletableFuture<>();
         CompletableFuture<Void> bar = new CompletableFuture<>();
-        EndpointReadyFutures readyFutures = new EndpointReadyFutures.Builder().addReadinessFuture("foo", foo).addReadinessFuture("bar", bar).build(Optional.empty(), INFO);
-        assertEquals(new HashSet<>(Arrays.asList(EXTERNAL, INTERNAL)), readyFutures.futures().keySet());
+        EndpointReadyFutures readyFutures = new EndpointReadyFutures.Builder().
+                addReadinessFuture("foo", foo).
+                addReadinessFuture("bar", bar).
+                build(Optional.empty(), INFO);
+        assertEquals(new HashSet<>(Arrays.asList(EXTERNAL, INTERNAL)),
+                readyFutures.futures().keySet());
         assertIncomplete(readyFutures, EXTERNAL, INTERNAL);
         foo.complete(null);
         assertIncomplete(readyFutures, EXTERNAL, INTERNAL);
         bar.completeExceptionally(new RuntimeException("Failed."));
-        assertException(readyFutures, new RuntimeException("Failed."), EXTERNAL, INTERNAL);
+        assertException(readyFutures, new RuntimeException("Failed."),
+                EXTERNAL, INTERNAL);
     }
 }

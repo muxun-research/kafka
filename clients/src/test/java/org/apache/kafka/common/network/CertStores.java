@@ -17,20 +17,33 @@
 package org.apache.kafka.common.network;
 
 import org.apache.kafka.common.config.SslConfigs;
-import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.test.TestSslUtils;
 import org.apache.kafka.test.TestSslUtils.SslConfigsBuilder;
 import org.apache.kafka.test.TestUtils;
 
 import java.io.File;
 import java.net.InetAddress;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class CertStores {
 
-    public static final Set<String> KEYSTORE_PROPS = Utils.mkSet(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG, SslConfigs.SSL_KEYSTORE_TYPE_CONFIG, SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG, SslConfigs.SSL_KEY_PASSWORD_CONFIG, SslConfigs.SSL_KEYSTORE_KEY_CONFIG, SslConfigs.SSL_KEYSTORE_CERTIFICATE_CHAIN_CONFIG);
+    public static final Set<String> KEYSTORE_PROPS = Set.of(
+            SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG,
+            SslConfigs.SSL_KEYSTORE_TYPE_CONFIG,
+            SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG,
+            SslConfigs.SSL_KEY_PASSWORD_CONFIG,
+            SslConfigs.SSL_KEYSTORE_KEY_CONFIG,
+            SslConfigs.SSL_KEYSTORE_CERTIFICATE_CHAIN_CONFIG);
 
-    public static final Set<String> TRUSTSTORE_PROPS = Utils.mkSet(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG, SslConfigs.SSL_TRUSTSTORE_TYPE_CONFIG, SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG, SslConfigs.SSL_TRUSTSTORE_CERTIFICATES_CONFIG);
+    public static final Set<String> TRUSTSTORE_PROPS = Set.of(
+            SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG,
+            SslConfigs.SSL_TRUSTSTORE_TYPE_CONFIG,
+            SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG,
+            SslConfigs.SSL_TRUSTSTORE_CERTIFICATES_CONFIG);
 
     private final Map<String, Object> sslConfig;
 
@@ -42,19 +55,23 @@ public class CertStores {
         this(server, commonName, new TestSslUtils.CertificateBuilder().sanDnsNames(sanHostName));
     }
 
-    public CertStores(boolean server, String commonName, InetAddress hostAddress) throws Exception {
-        this(server, commonName, new TestSslUtils.CertificateBuilder().sanIpAddress(hostAddress));
-    }
-
     private CertStores(boolean server, String commonName, TestSslUtils.CertificateBuilder certBuilder) throws Exception {
         this(server, commonName, "RSA", certBuilder, false);
     }
 
     private CertStores(boolean server, String commonName, String keyAlgorithm, TestSslUtils.CertificateBuilder certBuilder, boolean usePem) throws Exception {
         String name = server ? "server" : "client";
-        Mode mode = server ? Mode.SERVER : Mode.CLIENT;
+        ConnectionMode connectionMode = server ? ConnectionMode.SERVER : ConnectionMode.CLIENT;
         File truststoreFile = usePem ? null : TestUtils.tempFile(name + "TS", ".jks");
-        sslConfig = new SslConfigsBuilder(mode).useClientCert(!server).certAlias(name).cn(commonName).createNewTrustStore(truststoreFile).certBuilder(certBuilder).algorithm(keyAlgorithm).usePem(usePem).build();
+        sslConfig = new SslConfigsBuilder(connectionMode)
+                .useClientCert(!server)
+                .certAlias(name)
+                .cn(commonName)
+                .createNewTrustStore(truststoreFile)
+                .certBuilder(certBuilder)
+                .algorithm(keyAlgorithm)
+                .usePem(usePem)
+                .build();
     }
 
 
@@ -88,8 +105,8 @@ public class CertStores {
 
     public static class Builder {
         private final boolean isServer;
+        private final List<String> sanDns;
         private String cn;
-        private List<String> sanDns;
         private InetAddress sanIp;
         private String keyAlgorithm;
         private boolean usePem;
@@ -126,7 +143,8 @@ public class CertStores {
         }
 
         public CertStores build() throws Exception {
-            TestSslUtils.CertificateBuilder certBuilder = new TestSslUtils.CertificateBuilder().sanDnsNames(sanDns.toArray(new String[0]));
+            TestSslUtils.CertificateBuilder certBuilder = new TestSslUtils.CertificateBuilder()
+                .sanDnsNames(sanDns.toArray(new String[0]));
             if (sanIp != null)
                 certBuilder = certBuilder.sanIpAddress(sanIp);
             return new CertStores(isServer, cn, keyAlgorithm, certBuilder, usePem);

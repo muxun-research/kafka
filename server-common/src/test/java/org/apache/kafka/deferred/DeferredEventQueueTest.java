@@ -18,6 +18,7 @@
 package org.apache.kafka.deferred;
 
 import org.apache.kafka.common.utils.LogContext;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -25,7 +26,10 @@ import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Timeout(value = 40)
 public class DeferredEventQueueTest {
@@ -40,10 +44,6 @@ public class DeferredEventQueueTest {
             } else {
                 future.complete(null);
             }
-        }
-
-        CompletableFuture<Void> future() {
-            return future;
         }
     }
 
@@ -93,7 +93,9 @@ public class DeferredEventQueueTest {
         deferredEventQueue.failAll(new RuntimeException("failed"));
         assertTrue(event2.future.isDone());
         assertTrue(event3.future.isDone());
-        assertEquals(RuntimeException.class, assertThrows(ExecutionException.class, () -> event2.future.get()).getCause().getClass());
-        assertEquals(RuntimeException.class, assertThrows(ExecutionException.class, () -> event3.future.get()).getCause().getClass());
+        assertEquals(RuntimeException.class, assertThrows(ExecutionException.class,
+            () -> event2.future.get()).getCause().getClass());
+        assertEquals(RuntimeException.class, assertThrows(ExecutionException.class,
+            () -> event3.future.get()).getCause().getClass());
     }
 }

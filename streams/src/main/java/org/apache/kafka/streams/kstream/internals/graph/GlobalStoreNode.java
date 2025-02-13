@@ -17,46 +17,54 @@
 package org.apache.kafka.streams.kstream.internals.graph;
 
 import org.apache.kafka.streams.kstream.internals.ConsumedInternal;
-import org.apache.kafka.streams.processor.api.ProcessorSupplier;
 import org.apache.kafka.streams.processor.StateStore;
+import org.apache.kafka.streams.processor.api.ProcessorSupplier;
 import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
-import org.apache.kafka.streams.state.StoreBuilder;
+import org.apache.kafka.streams.processor.internals.StoreDelegatingProcessorSupplier;
+import org.apache.kafka.streams.processor.internals.StoreFactory;
+
+import java.util.Set;
 
 public class GlobalStoreNode<KIn, VIn, S extends StateStore> extends StateStoreNode<S> {
 
-	private final String sourceName;
-	private final String topic;
-	private final ConsumedInternal<KIn, VIn> consumed;
-	private final String processorName;
-	private final ProcessorSupplier<KIn, VIn, Void, Void> stateUpdateSupplier;
+    private final String sourceName;
+    private final String topic;
+    private final ConsumedInternal<KIn, VIn> consumed;
+    private final String processorName;
+    private final ProcessorSupplier<KIn, VIn, Void, Void> stateUpdateSupplier;
+    private final boolean reprocessOnRestore;
 
 
-	public GlobalStoreNode(final StoreBuilder<S> storeBuilder,
-						   final String sourceName,
-						   final String topic,
-						   final ConsumedInternal<KIn, VIn> consumed,
-						   final String processorName,
-						   final ProcessorSupplier<KIn, VIn, Void, Void> stateUpdateSupplier) {
+    public GlobalStoreNode(final StoreFactory storeBuilder,
+                           final String sourceName,
+                           final String topic,
+                           final ConsumedInternal<KIn, VIn> consumed,
+                           final String processorName,
+                           final ProcessorSupplier<KIn, VIn, Void, Void> stateUpdateSupplier,
+                           final boolean reprocessOnRestore) {
 
-		super(storeBuilder);
-		this.sourceName = sourceName;
-		this.topic = topic;
-		this.consumed = consumed;
-		this.processorName = processorName;
-		this.stateUpdateSupplier = stateUpdateSupplier;
-	}
+        super(storeBuilder);
+        this.sourceName = sourceName;
+        this.topic = topic;
+        this.consumed = consumed;
+        this.processorName = processorName;
+        this.stateUpdateSupplier = stateUpdateSupplier;
+        this.reprocessOnRestore = reprocessOnRestore;
+    }
 
     @Override
     public void writeToTopology(final InternalTopologyBuilder topologyBuilder) {
         storeBuilder.withLoggingDisabled();
-        topologyBuilder.addGlobalStore(storeBuilder,
-                                       sourceName,
+        topologyBuilder.addGlobalStore(sourceName,
                                        consumed.timestampExtractor(),
                                        consumed.keyDeserializer(),
                                        consumed.valueDeserializer(),
                                        topic,
                                        processorName,
-                                       stateUpdateSupplier);
+                                       new StoreDelegatingProcessorSupplier<>(
+                                               stateUpdateSupplier,
+                                               Set.of(new StoreFactory.FactoryWrappingStoreBuilder<>(storeBuilder))
+                                       ), reprocessOnRestore);
 
     }
 
@@ -66,6 +74,7 @@ public class GlobalStoreNode<KIn, VIn, S extends StateStore> extends StateStoreN
                "sourceName='" + sourceName + '\'' +
                ", topic='" + topic + '\'' +
                ", processorName='" + processorName + '\'' +
+               ", reprocessOnRestore='" + reprocessOnRestore + '\'' +
                "} ";
     }
 }

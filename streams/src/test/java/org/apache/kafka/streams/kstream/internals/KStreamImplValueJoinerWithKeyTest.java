@@ -23,8 +23,9 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.kstream.*;
 import org.apache.kafka.test.StreamsTestUtils;
-import org.junit.Before;
-import org.junit.Test;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.List;
@@ -32,7 +33,7 @@ import java.util.Properties;
 
 import static java.time.Duration.ofHours;
 import static java.time.Duration.ofMillis;
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class KStreamImplValueJoinerWithKeyTest {
 
@@ -55,7 +56,7 @@ public class KStreamImplValueJoinerWithKeyTest {
     private final Joined<String, Integer, Integer> joined = Joined.with(Serdes.String(), Serdes.Integer(), Serdes.Integer());
     private final KeyValueMapper<String, Integer, String> keyValueMapper = (k, v) -> k;
 
-    @Before
+    @BeforeEach
     public void setup() {
         builder = new StreamsBuilder();
         leftStream = builder.stream(leftTopic, Consumed.with(Serdes.String(), Serdes.Integer()));

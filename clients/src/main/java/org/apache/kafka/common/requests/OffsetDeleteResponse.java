@@ -31,27 +31,29 @@ import java.util.function.Function;
 
 /**
  * Possible error codes:
- * <p>
+ *
  * - Partition errors:
- * - {@link Errors#GROUP_SUBSCRIBED_TO_TOPIC}
- * - {@link Errors#TOPIC_AUTHORIZATION_FAILED}
- * - {@link Errors#UNKNOWN_TOPIC_OR_PARTITION}
- * <p>
+ *   - {@link Errors#GROUP_SUBSCRIBED_TO_TOPIC}
+ *   - {@link Errors#TOPIC_AUTHORIZATION_FAILED}
+ *   - {@link Errors#UNKNOWN_TOPIC_OR_PARTITION}
+ *
  * - Group or coordinator errors:
- * - {@link Errors#COORDINATOR_LOAD_IN_PROGRESS}
- * - {@link Errors#COORDINATOR_NOT_AVAILABLE}
- * - {@link Errors#NOT_COORDINATOR}
- * - {@link Errors#GROUP_AUTHORIZATION_FAILED}
- * - {@link Errors#INVALID_GROUP_ID}
- * - {@link Errors#GROUP_ID_NOT_FOUND}
- * - {@link Errors#NON_EMPTY_GROUP}
+ *   - {@link Errors#COORDINATOR_LOAD_IN_PROGRESS}
+ *   - {@link Errors#COORDINATOR_NOT_AVAILABLE}
+ *   - {@link Errors#NOT_COORDINATOR}
+ *   - {@link Errors#GROUP_AUTHORIZATION_FAILED}
+ *   - {@link Errors#INVALID_GROUP_ID}
+ *   - {@link Errors#GROUP_ID_NOT_FOUND}
+ *   - {@link Errors#NON_EMPTY_GROUP}
  */
 public class OffsetDeleteResponse extends AbstractResponse {
 
     public static class Builder {
         OffsetDeleteResponseData data = new OffsetDeleteResponseData();
 
-        private OffsetDeleteResponseTopic getOrCreateTopic(String topicName) {
+        private OffsetDeleteResponseTopic getOrCreateTopic(
+            String topicName
+        ) {
             OffsetDeleteResponseTopic topic = data.topics().find(topicName);
             if (topic == null) {
                 topic = new OffsetDeleteResponseTopic().setName(topicName);
@@ -60,26 +62,42 @@ public class OffsetDeleteResponse extends AbstractResponse {
             return topic;
         }
 
-        public Builder addPartition(String topicName, int partitionIndex, Errors error) {
+        public Builder addPartition(
+            String topicName,
+            int partitionIndex,
+            Errors error
+        ) {
             final OffsetDeleteResponseTopic topicResponse = getOrCreateTopic(topicName);
 
-            topicResponse.partitions().add(new OffsetDeleteResponsePartition().setPartitionIndex(partitionIndex).setErrorCode(error.code()));
+            topicResponse.partitions().add(new OffsetDeleteResponsePartition()
+                .setPartitionIndex(partitionIndex)
+                .setErrorCode(error.code()));
 
             return this;
         }
 
-        public <P> Builder addPartitions(String topicName, List<P> partitions, Function<P, Integer> partitionIndex, Errors error) {
+        public <P> Builder addPartitions(
+            String topicName,
+            List<P> partitions,
+            Function<P, Integer> partitionIndex,
+            Errors error
+        ) {
             final OffsetDeleteResponseTopic topicResponse = getOrCreateTopic(topicName);
-
-            partitions.forEach(partition -> {
-                topicResponse.partitions().add(new OffsetDeleteResponsePartition().setPartitionIndex(partitionIndex.apply(partition)).setErrorCode(error.code()));
-            });
-
+            partitions.forEach(partition ->
+                topicResponse.partitions().add(new OffsetDeleteResponsePartition()
+                    .setPartitionIndex(partitionIndex.apply(partition))
+                    .setErrorCode(error.code()))
+            );
             return this;
         }
 
-        public Builder merge(OffsetDeleteResponseData newData) {
-            if (data.topics().isEmpty()) {
+        public Builder merge(
+            OffsetDeleteResponseData newData
+        ) {
+            if (newData.errorCode() != Errors.NONE.code()) {
+                // If the top-level error exists, we can discard it and use the new data.
+                data = newData;
+            } else if (data.topics().isEmpty()) {
                 // If the current data is empty, we can discard it and use the new data.
                 data = newData;
             } else {
@@ -93,9 +111,9 @@ public class OffsetDeleteResponse extends AbstractResponse {
                         // Otherwise, we add the partitions to the existing one. Note we
                         // expect non-overlapping partitions here as we don't verify
                         // if the partition is already in the list before adding it.
-                        newTopic.partitions().forEach(partition -> {
-                            existingTopic.partitions().add(partition.duplicate());
-                        });
+                        newTopic.partitions().forEach(partition ->
+                            existingTopic.partitions().add(partition.duplicate())
+                        );
                     }
                 });
             }
@@ -124,7 +142,11 @@ public class OffsetDeleteResponse extends AbstractResponse {
     public Map<Errors, Integer> errorCounts() {
         Map<Errors, Integer> counts = new HashMap<>();
         updateErrorCounts(counts, Errors.forCode(data.errorCode()));
-        data.topics().forEach(topic -> topic.partitions().forEach(partition -> updateErrorCounts(counts, Errors.forCode(partition.errorCode()))));
+        data.topics().forEach(topic ->
+            topic.partitions().forEach(partition ->
+                updateErrorCounts(counts, Errors.forCode(partition.errorCode()))
+            )
+        );
         return counts;
     }
 

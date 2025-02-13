@@ -19,6 +19,7 @@ package org.apache.kafka.shell.command;
 
 import org.apache.kafka.shell.command.LsCommandHandler.ColumnSchema;
 import org.apache.kafka.shell.command.LsCommandHandler.TargetDirectory;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -30,69 +31,67 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.OptionalInt;
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-@Timeout(value = 120000, unit = MILLISECONDS)
+@Timeout(value = 120)
 public class LsCommandHandlerTest {
-	@Test
-	public void testCalculateColumnSchema() {
-		assertEquals(new ColumnSchema(1, 3),
-				LsCommandHandler.calculateColumnSchema(OptionalInt.empty(),
-						Arrays.asList("abc", "def", "ghi")));
-		assertEquals(new ColumnSchema(1, 2),
-				LsCommandHandler.calculateColumnSchema(OptionalInt.of(0),
-						Arrays.asList("abc", "def")));
-		assertEquals(new ColumnSchema(3, 1).setColumnWidths(3, 8, 6),
-				LsCommandHandler.calculateColumnSchema(OptionalInt.of(80),
-						Arrays.asList("a", "abcdef", "beta")));
-		assertEquals(new ColumnSchema(2, 3).setColumnWidths(10, 7),
-				LsCommandHandler.calculateColumnSchema(OptionalInt.of(18),
-						Arrays.asList("alphabet", "beta", "gamma", "theta", "zeta")));
-	}
+    @Test
+    public void testCalculateColumnSchema() {
+        assertEquals(new ColumnSchema(1, 3),
+            LsCommandHandler.calculateColumnSchema(OptionalInt.empty(),
+                Arrays.asList("abc", "def", "ghi")));
+        assertEquals(new ColumnSchema(1, 2),
+            LsCommandHandler.calculateColumnSchema(OptionalInt.of(0),
+                Arrays.asList("abc", "def")));
+        assertEquals(new ColumnSchema(3, 1).setColumnWidths(3, 8, 6),
+            LsCommandHandler.calculateColumnSchema(OptionalInt.of(80),
+                Arrays.asList("a", "abcdef", "beta")));
+        assertEquals(new ColumnSchema(2, 3).setColumnWidths(10, 7),
+            LsCommandHandler.calculateColumnSchema(OptionalInt.of(18),
+                Arrays.asList("alphabet", "beta", "gamma", "theta", "zeta")));
+    }
 
-	@Test
-	public void testPrintEntries() throws Exception {
-		try (ByteArrayOutputStream stream = new ByteArrayOutputStream()) {
-			try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(
-					stream, StandardCharsets.UTF_8))) {
-				LsCommandHandler.printEntries(writer, "", OptionalInt.of(18),
-						Arrays.asList("alphabet", "beta", "gamma", "theta", "zeta"));
-			}
-			assertEquals(String.join(String.format("%n"), Arrays.asList(
-					"alphabet  theta",
-					"beta      zeta",
-					"gamma")), stream.toString().trim());
-		}
-	}
+    @Test
+    public void testPrintEntries() throws Exception {
+        try (ByteArrayOutputStream stream = new ByteArrayOutputStream()) {
+            try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(
+                    stream, StandardCharsets.UTF_8))) {
+                LsCommandHandler.printEntries(writer, "", OptionalInt.of(18),
+                    Arrays.asList("alphabet", "beta", "gamma", "theta", "zeta"));
+            }
+            assertEquals(String.join(String.format("%n"), Arrays.asList(
+                "alphabet  theta",
+                "beta      zeta",
+                "gamma")), stream.toString().trim());
+        }
+    }
 
-	@Test
-	public void testPrintTargets() throws Exception {
-		try (ByteArrayOutputStream stream = new ByteArrayOutputStream()) {
-			try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(
-					stream, StandardCharsets.UTF_8))) {
-				LsCommandHandler.printTargets(writer, OptionalInt.of(18),
-						Arrays.asList("foo", "foobarbaz", "quux"), Arrays.asList(
-								new TargetDirectory("/some/dir",
-										Collections.singletonList("supercalifragalistic")),
-								new TargetDirectory("/some/other/dir",
-										Arrays.asList("capability", "delegation", "elephant",
-												"fungible", "green"))));
-			}
-			assertEquals(String.join(String.format("%n"), Arrays.asList(
-					"foo        quux",
-					"foobarbaz  ",
-					"",
-					"/some/dir:",
-					"supercalifragalistic",
-					"",
-					"/some/other/dir:",
-					"capability",
-					"delegation",
-					"elephant",
-					"fungible",
-					"green")), stream.toString().trim());
-		}
-	}
+    @Test
+    public void testPrintTargets() throws Exception {
+        try (ByteArrayOutputStream stream = new ByteArrayOutputStream()) {
+            try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(
+                    stream, StandardCharsets.UTF_8))) {
+                LsCommandHandler.printTargets(writer, OptionalInt.of(18),
+                    Arrays.asList("foo", "foobarbaz", "quux"), Arrays.asList(
+                        new TargetDirectory("/some/dir",
+                            Collections.singletonList("supercalifragalistic")),
+                        new TargetDirectory("/some/other/dir",
+                            Arrays.asList("capability", "delegation", "elephant",
+                                "fungible", "green"))));
+            }
+            assertEquals(String.join(String.format("%n"), Arrays.asList(
+                "foo        quux",
+                "foobarbaz  ",
+                "",
+                "/some/dir:",
+                "supercalifragalistic",
+                "",
+                "/some/other/dir:",
+                "capability",
+                "delegation",
+                "elephant",
+                "fungible",
+                "green")), stream.toString().trim());
+        }
+    }
 }
-

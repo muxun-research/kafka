@@ -19,10 +19,20 @@ package org.apache.kafka.connect.runtime;
 import org.apache.kafka.connect.errors.AlreadyExistsException;
 import org.apache.kafka.connect.runtime.isolation.Plugins;
 import org.apache.kafka.connect.runtime.rest.InternalRequestSignature;
-import org.apache.kafka.connect.runtime.rest.entities.*;
+import org.apache.kafka.connect.runtime.rest.entities.ActiveTopicsInfo;
+import org.apache.kafka.connect.runtime.rest.entities.ConfigInfos;
+import org.apache.kafka.connect.runtime.rest.entities.ConfigKeyInfo;
+import org.apache.kafka.connect.runtime.rest.entities.ConnectorInfo;
+import org.apache.kafka.connect.runtime.rest.entities.ConnectorOffsets;
+import org.apache.kafka.connect.runtime.rest.entities.ConnectorStateInfo;
+import org.apache.kafka.connect.runtime.rest.entities.LoggerLevel;
+import org.apache.kafka.connect.runtime.rest.entities.Message;
+import org.apache.kafka.connect.runtime.rest.entities.TaskInfo;
 import org.apache.kafka.connect.storage.StatusBackingStore;
 import org.apache.kafka.connect.util.Callback;
 import org.apache.kafka.connect.util.ConnectorTaskId;
+
+import org.apache.maven.artifact.versioning.VersionRange;
 
 import java.util.Collection;
 import java.util.List;
@@ -56,17 +66,29 @@ public interface Herder {
 
     void stop();
 
-    boolean isRunning();
+    /**
+     * @return whether the worker is ready; i.e., it has completed all initialization and startup
+     * steps such as creating internal topics, joining a cluster, etc.
+     */
+    boolean isReady();
+
+    /**
+     * Check for worker health; i.e., its ability to service external requests from the user such
+     * as creating, reconfiguring, and deleting connectors
+     * @param callback callback to invoke once worker health is assured
+     */
+    void healthCheck(Callback<Void> callback);
 
     /**
      * Get a list of connectors currently running in this cluster. This is a full list of connectors in the cluster gathered
      * from the current configuration.
+     *
      * @param callback callback to invoke with the full list of connector names
      * @throws org.apache.kafka.connect.runtime.distributed.RequestTargetException if this node can not resolve the request
-     *                                                                             (e.g., because it has not joined the cluster or does not have configs in sync with the group) and it is
-     *                                                                             not the leader or the task owner (e.g., task restart must be handled by the worker which owns the task)
-     * @throws org.apache.kafka.connect.errors.ConnectException                    if this node is the leader, but still cannot resolve the
-     *                                                                             request (e.g., it is not in sync with other worker's config state)
+     *         (e.g., because it has not joined the cluster or does not have configs in sync with the group) and it is
+     *         not the leader or the task owner (e.g., task restart must be handled by the worker which owns the task)
+     * @throws org.apache.kafka.connect.errors.ConnectException if this node is the leader, but still cannot resolve the
+     *         request (e.g., it is not in sync with other worker's config state)
      */
     void connectors(Callback<Collection<String>> callback);
 
@@ -83,21 +105,35 @@ public interface Herder {
     void connectorConfig(String connName, Callback<Map<String, String>> callback);
 
     /**
-     * Get the configuration for all tasks of a connector.
-     * @param connName name of the connector
-     * @param callback callback to invoke with the configuration
-     */
-    void tasksConfig(String connName, Callback<Map<ConnectorTaskId, Map<String, String>>> callback);
-
-    /**
      * Set the configuration for a connector. This supports creation and updating.
-     * @param connName     name of the connector
-     * @param config       the connector's configuration
+     * @param connName name of the connector
+     * @param config the connector's configuration
      * @param allowReplace if true, allow overwriting previous configs; if false, throw {@link AlreadyExistsException}
      *                     if a connector with the same name already exists
-     * @param callback     callback to invoke when the configuration has been written
+     * @param callback callback to invoke when the configuration has been written
      */
     void putConnectorConfig(String connName, Map<String, String> config, boolean allowReplace, Callback<Created<ConnectorInfo>> callback);
+
+    /**
+     * Set the configuration for a connector, along with a target state optionally. This supports creation and updating.
+     * @param connName name of the connector
+     * @param config the connector's configuration
+     * @param targetState the desired target state for the connector; may be {@code null} if no target state change is desired. Note that the default
+     *                    target state is {@link TargetState#STARTED} if no target state exists previously
+     * @param allowReplace if true, allow overwriting previous configs; if false, throw {@link AlreadyExistsException}
+     *                     if a connector with the same name already exists
+     * @param callback callback to invoke when the configuration has been written
+     */
+    void putConnectorConfig(String connName, Map<String, String> config, TargetState targetState, boolean allowReplace,
+                            Callback<Created<ConnectorInfo>> callback);
+
+    /**
+     * Patch the configuration for a connector.
+     * @param connName name of the connector
+     * @param configPatch the connector's configuration patch.
+     * @param callback callback to invoke when the configuration has been written
+     */
+    void patchConnectorConfig(String connName, Map<String, String> configPatch, Callback<Created<ConnectorInfo>> callback);
 
     /**
      * Delete a connector and its configuration.
@@ -109,6 +145,7 @@ public interface Herder {
     /**
      * Requests reconfiguration of the tasks of a connector. This should only be triggered by
      * {@link HerderConnectorContext}.
+     *
      * @param connName name of the connector that should be reconfigured
      */
     void requestTaskReconfiguration(String connName);
@@ -124,9 +161,9 @@ public interface Herder {
      * Set the configurations for the tasks of a connector. This should always include all tasks in the connector; if
      * there are existing configurations and fewer are provided, this will reduce the number of tasks, and if more are
      * provided it will increase the number of tasks.
-     * @param connName         connector to update
-     * @param configs          list of configurations
-     * @param callback         callback to invoke upon completion
+     * @param connName connector to update
+     * @param configs list of configurations
+     * @param callback callback to invoke upon completion
      * @param requestSignature the signature of the request made for this task (re-)configuration;
      *                         may be null if no signature was provided
      */
@@ -136,9 +173,9 @@ public interface Herder {
      * Fence out any older task generations for a source connector, and then write a record to the config topic
      * indicating that it is safe to bring up a new generation of tasks. If that record is already present, do nothing
      * and invoke the callback successfully.
-     * @param connName         the name of the connector to fence out, which must refer to a source connector; if the
-     *                         connector does not exist or is not a source connector, the callback will be invoked with an error
-     * @param callback         callback to invoke upon completion
+     * @param connName the name of the connector to fence out, which must refer to a source connector; if the
+     *                 connector does not exist or is not a source connector, the callback will be invoked with an error
+     * @param callback callback to invoke upon completion
      * @param requestSignature the signature of the request made for this connector;
      *                         may be null if no signature was provided
      */
@@ -164,6 +201,7 @@ public interface Herder {
 
     /**
      * Lookup the set of topics currently used by a connector.
+     *
      * @param connName name of the connector
      * @return the set of active topics
      */
@@ -171,12 +209,14 @@ public interface Herder {
 
     /**
      * Request to asynchronously reset the active topics for the named connector.
+     *
      * @param connName name of the connector
      */
     void resetConnectorActiveTopics(String connName);
 
     /**
      * Return a reference to the status backing store used by this herder.
+     *
      * @return the status backing store used by this herder
      */
     StatusBackingStore statusBackingStore();
@@ -190,16 +230,16 @@ public interface Herder {
     /**
      * Validate the provided connector config values against the configuration definition.
      * @param connectorConfig the provided connector config values
-     * @param callback        the callback to invoke after validation has completed (successfully or not)
+     * @param callback the callback to invoke after validation has completed (successfully or not)
      */
     void validateConnectorConfig(Map<String, String> connectorConfig, Callback<ConfigInfos> callback);
 
     /**
      * Validate the provided connector config values against the configuration definition.
      * @param connectorConfig the provided connector config values
-     * @param callback        the callback to invoke after validation has completed (successfully or not)
-     * @param doLog           if true log all the connector configurations at INFO level; if false, no connector configurations are logged.
-     *                        Note that logging of configuration is not necessary in every endpoint that uses this method.
+     * @param callback the callback to invoke after validation has completed (successfully or not)
+     * @param doLog if true log all the connector configurations at INFO level; if false, no connector configurations are logged.
+     *              Note that logging of configuration is not necessary in every endpoint that uses this method.
      */
     default void validateConnectorConfig(Map<String, String> connectorConfig, Callback<ConfigInfos> callback, boolean doLog) {
         validateConnectorConfig(connectorConfig, callback);
@@ -215,15 +255,15 @@ public interface Herder {
     /**
      * Restart the connector.
      * @param connName name of the connector
-     * @param cb       callback to invoke upon completion
+     * @param cb callback to invoke upon completion
      */
     void restartConnector(String connName, Callback<Void> cb);
 
     /**
      * Restart the connector.
-     * @param delayMs  delay before restart
+     * @param delayMs delay before restart
      * @param connName name of the connector
-     * @param cb       callback to invoke upon completion
+     * @param cb callback to invoke upon completion
      * @return The id of the request
      */
     HerderRequest restartConnector(long delayMs, String connName, Callback<Void> cb);
@@ -239,7 +279,7 @@ public interface Herder {
      * Stop the connector. This call will asynchronously suspend processing by the connector and
      * shut down all of its tasks.
      * @param connector name of the connector
-     * @param cb        callback to invoke upon completion
+     * @param cb callback to invoke upon completion
      */
     void stopConnector(String connector, Callback<Void> cb);
 
@@ -265,6 +305,7 @@ public interface Herder {
 
     /**
      * Returns a handle to the plugin factory used by this herder and its worker.
+     *
      * @return a reference to the plugin factory.
      */
     Plugins plugins();
@@ -283,18 +324,20 @@ public interface Herder {
      */
     List<ConfigKeyInfo> connectorPluginConfig(String pluginName);
 
+    List<ConfigKeyInfo> connectorPluginConfig(String pluginName, VersionRange version);
+
     /**
      * Get the current offsets for a connector.
      * @param connName the name of the connector whose offsets are to be retrieved
-     * @param cb       callback to invoke upon completion
+     * @param cb callback to invoke upon completion
      */
     void connectorOffsets(String connName, Callback<ConnectorOffsets> cb);
 
     /**
      * Alter a connector's offsets.
      * @param connName the name of the connector whose offsets are to be altered
-     * @param offsets  a mapping from partitions to offsets that need to be written
-     * @param cb       callback to invoke upon completion
+     * @param offsets a mapping from partitions to offsets that need to be written
+     * @param cb callback to invoke upon completion
      */
     void alterConnectorOffsets(String connName, Map<Map<String, ?>, Map<String, ?>> offsets, Callback<Message> cb);
 
@@ -304,6 +347,45 @@ public interface Herder {
      * @param cb callback to invoke upon completion
      */
     void resetConnectorOffsets(String connName, Callback<Message> cb);
+
+    /**
+     * Get the level for a logger.
+     * @param logger the name of the logger to retrieve the level for; may not be null
+     * @return the level for the logger, or null if no logger with the given name exists
+     */
+    LoggerLevel loggerLevel(String logger);
+
+    /**
+     * Get the levels for all known loggers.
+     * @return a map of logger name to {@link LoggerLevel}; may be empty, but never null
+     */
+    Map<String, LoggerLevel> allLoggerLevels();
+
+    /**
+     * Set the level for a logging namespace (i.e., a specific logger and all of its children) on this
+     * worker. Changes should only last over the lifetime of the worker, and should be wiped if/when
+     * the worker is restarted.
+     * @param namespace the logging namespace to alter; may not be null
+     * @param level the new level to set for the namespace; may not be null
+     * @return all loggers that were affected by this action; may be empty (including if the specified
+     * level is not a valid logging level), but never null
+     */
+    List<String> setWorkerLoggerLevel(String namespace, String level);
+
+    /**
+     * Set the level for a logging namespace (i.e., a specific logger and all of its children) for all workers
+     * in the cluster. Changes should only last over the lifetime of workers, and should be wiped if/when
+     * workers are restarted.
+     * @param namespace the logging namespace to alter; may not be null
+     * @param level the new level to set for the namespace; may not be null
+     */
+    void setClusterLoggerLevel(String namespace, String level);
+
+    /**
+     * Get the ConnectMetrics from the worker for this herder
+     * @return the ConnectMetrics
+     */
+    ConnectMetrics connectMetrics();
 
     enum ConfigReloadAction {
         NONE,

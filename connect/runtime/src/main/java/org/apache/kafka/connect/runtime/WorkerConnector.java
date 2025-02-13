@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.connect.runtime;
 
+import org.apache.kafka.common.metrics.PluginMetrics;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.connect.connector.Connector;
 import org.apache.kafka.connect.connector.ConnectorContext;
@@ -29,6 +30,7 @@ import org.apache.kafka.connect.storage.OffsetStorageReader;
 import org.apache.kafka.connect.util.Callback;
 import org.apache.kafka.connect.util.ConnectUtils;
 import org.apache.kafka.connect.util.LoggingContext;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -73,6 +75,7 @@ public class WorkerConnector implements Runnable {
     private final AtomicReference<TargetState> pendingTargetStateChange;
     private final AtomicReference<Callback<TargetState>> pendingStateChangeCallback;
     private final CountDownLatch shutdownLatch;
+    private volatile Throwable externalFailure;
     private volatile boolean stopping;  // indicates whether the Worker has asked the connector to stop
     private volatile boolean cancelled; // indicates whether the Worker has cancelled the connector (e.g. because of slow shutdown)
 
@@ -80,20 +83,29 @@ public class WorkerConnector implements Runnable {
     private final CloseableOffsetStorageReader offsetStorageReader;
     private final ConnectorOffsetBackingStore offsetStore;
 
-    public WorkerConnector(String connName, Connector connector, ConnectorConfig connectorConfig, CloseableConnectorContext ctx, ConnectMetrics metrics, ConnectorStatus.Listener statusListener, CloseableOffsetStorageReader offsetStorageReader, ConnectorOffsetBackingStore offsetStore, ClassLoader loader) {
+    public WorkerConnector(String connName,
+                           Connector connector,
+                           ConnectorConfig connectorConfig,
+                           CloseableConnectorContext ctx,
+                           ConnectMetrics connectMetrics,
+                           ConnectorStatus.Listener statusListener,
+                           CloseableOffsetStorageReader offsetStorageReader,
+                           ConnectorOffsetBackingStore offsetStore,
+                           ClassLoader loader) {
         this.connName = connName;
         this.config = connectorConfig.originalsStrings();
         this.loader = loader;
         this.ctx = ctx;
         this.connector = connector;
         this.state = State.INIT;
-        this.metrics = new ConnectorMetricsGroup(metrics, AbstractStatus.State.UNASSIGNED, statusListener);
+        this.metrics = new ConnectorMetricsGroup(connectMetrics, AbstractStatus.State.UNASSIGNED, statusListener);
         this.statusListener = this.metrics;
         this.offsetStorageReader = offsetStorageReader;
         this.offsetStore = offsetStore;
         this.pendingTargetStateChange = new AtomicReference<>();
         this.pendingStateChangeCallback = new AtomicReference<>();
         this.shutdownLatch = new CountDownLatch(1);
+        this.externalFailure = null;
         this.stopping = false;
         this.cancelled = false;
     }
@@ -123,9 +135,27 @@ public class WorkerConnector implements Runnable {
         }
     }
 
+    /**
+     * Fail the connector.
+     * @param cause the cause of the failure; if null, the connector will not be failed
+     */
+    public void fail(Throwable cause) {
+        synchronized (this) {
+            if (this.externalFailure != null)
+                return;
+            log.error("{} Connector has failed", this, cause);
+            this.externalFailure = cause;
+            notify();
+        }
+    }
+
     void doRun() {
         initialize();
         while (!stopping) {
+            Throwable failure = externalFailure;
+            if (failure != null)
+                onFailure(failure);
+
             TargetState newTargetState;
             Callback<TargetState> stateChangeCallback;
             synchronized (this) {
@@ -136,7 +166,10 @@ public class WorkerConnector implements Runnable {
                 doTransitionTo(newTargetState, stateChangeCallback);
             }
             synchronized (this) {
-                if (pendingTargetStateChange.get() != null || stopping) {
+                if (pendingTargetStateChange.get() != null
+                        || (!State.FAILED.equals(state) && externalFailure != null)
+                        || stopping
+                ) {
                     // An update occurred before we entered the synchronized block; no big deal,
                     // just start the loop again until we've handled everything
                 } else {
@@ -172,7 +205,7 @@ public class WorkerConnector implements Runnable {
         }
     }
 
-    private boolean doStart() throws Throwable {
+    private boolean doStart() {
         try {
             switch (state) {
                 case STARTED:
@@ -195,17 +228,21 @@ public class WorkerConnector implements Runnable {
         }
     }
 
-    private void onFailure(Throwable t) {
+    private synchronized void onFailure(Throwable t) {
+        // If we've already failed, we don't overwrite the last-reported cause of failure
+        if (this.state == State.FAILED)
+            return;
+
         statusListener.onFailure(connName, t);
         this.state = State.FAILED;
     }
 
-    private void resume() throws Throwable {
+    private void resume() {
         if (doStart())
             statusListener.onResume(connName);
     }
 
-    private void start() throws Throwable {
+    private void start() {
         if (doStart())
             statusListener.onStartup(connName);
     }
@@ -266,7 +303,11 @@ public class WorkerConnector implements Runnable {
             TargetState preEmptedState = pendingTargetStateChange.getAndSet(null);
             Callback<TargetState> stateChangeCallback = pendingStateChangeCallback.getAndSet(null);
             if (stateChangeCallback != null) {
-                stateChangeCallback.onCompletion(new ConnectException("Could not begin changing connector state to " + preEmptedState.name() + " as the connector has been scheduled for shutdown"), null);
+                stateChangeCallback.onCompletion(
+                        new ConnectException(
+                                "Could not begin changing connector state to " + preEmptedState.name()
+                                    + " as the connector has been scheduled for shutdown"),
+                        null);
             }
             if (state == State.STARTED)
                 connector.stop();
@@ -300,6 +341,7 @@ public class WorkerConnector implements Runnable {
 
     /**
      * Wait for this connector to finish shutting down.
+     *
      * @param timeoutMs time in milliseconds to await shutdown
      * @return true if successful, false if the timeout was reached
      */
@@ -320,14 +362,23 @@ public class WorkerConnector implements Runnable {
             notify();
         }
         if (preEmptedStateChangeCallback != null) {
-            preEmptedStateChangeCallback.onCompletion(new ConnectException("Could not begin changing connector state to " + preEmptedState.name() + " before another request to change state was made;" + " the new request (which is to change the state to " + targetState.name() + ") has pre-empted this one"), null);
+            preEmptedStateChangeCallback.onCompletion(
+                    new ConnectException(
+                            "Could not begin changing connector state to " + preEmptedState.name()
+                                + " before another request to change state was made;"
+                                + " the new request (which is to change the state to " + targetState.name()
+                                + ") has pre-empted this one"),
+                    null
+            );
         }
     }
 
     void doTransitionTo(TargetState targetState, Callback<TargetState> stateChangeCallback) {
         // Edge case: we don't do transitions most of the time if we've already failed, but for the STOPPED state, it's fine
         if (state == State.FAILED && targetState != TargetState.STOPPED) {
-            stateChangeCallback.onCompletion(new ConnectException(this + " Cannot transition connector to " + targetState + " since it has failed"), null);
+            stateChangeCallback.onCompletion(
+                    new ConnectException(this + " Cannot transition connector to " + targetState + " since it has failed"),
+                    null);
             return;
         }
 
@@ -335,11 +386,15 @@ public class WorkerConnector implements Runnable {
             doTransitionTo(targetState);
             stateChangeCallback.onCompletion(null, targetState);
         } catch (Throwable t) {
-            stateChangeCallback.onCompletion(new ConnectException("Failed to transition connector " + connName + " to state " + targetState, t), null);
+            stateChangeCallback.onCompletion(
+                    new ConnectException(
+                            "Failed to transition connector " + connName + " to state " + targetState,
+                            t),
+                    null);
         }
     }
 
-    private void doTransitionTo(TargetState targetState) throws Throwable {
+    private void doTransitionTo(TargetState targetState) {
         log.debug("{} Transition connector to {}", this, targetState);
         if (targetState == TargetState.PAUSED) {
             suspend(true);
@@ -355,15 +410,15 @@ public class WorkerConnector implements Runnable {
         }
     }
 
-    public boolean isSinkConnector() {
+    public final boolean isSinkConnector() {
         return ConnectUtils.isSinkConnector(connector);
     }
 
-    public boolean isSourceConnector() {
+    public final boolean isSourceConnector() {
         return ConnectUtils.isSourceConnector(connector);
     }
 
-    protected String connectorType() {
+    protected final String connectorType() {
         if (isSinkConnector())
             return "sink";
         if (isSourceConnector())
@@ -381,7 +436,9 @@ public class WorkerConnector implements Runnable {
 
     @Override
     public String toString() {
-        return "WorkerConnector{" + "id=" + connName + '}';
+        return "WorkerConnector{" +
+                       "id=" + connName +
+                       '}';
     }
 
     class ConnectorMetricsGroup implements ConnectorStatus.Listener, AutoCloseable {
@@ -401,7 +458,8 @@ public class WorkerConnector implements Runnable {
             this.delegate = delegate;
             this.state = initialState;
             ConnectMetricsRegistry registry = connectMetrics.registry();
-            this.metricGroup = connectMetrics.group(registry.connectorGroupName(), registry.connectorTagName(), connName);
+            this.metricGroup = connectMetrics.group(registry.connectorGroupName(),
+                    registry.connectorTagName(), connName);
             // prevent collisions by removing any previously created metrics in this group.
             metricGroup.close();
 
@@ -524,6 +582,11 @@ public class WorkerConnector implements Runnable {
             log.error("{} Connector raised an error", WorkerConnector.this, e);
             onFailure(e);
             WorkerConnector.this.ctx.raiseError(e);
+        }
+
+        @Override
+        public PluginMetrics pluginMetrics() {
+            return WorkerConnector.this.ctx.pluginMetrics();
         }
     }
 

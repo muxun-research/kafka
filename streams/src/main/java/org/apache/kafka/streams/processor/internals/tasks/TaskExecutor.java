@@ -31,25 +31,46 @@ public interface TaskExecutor {
 
     /**
      * Starts the task executor.
+     * Idempotent operation - will have no effect if thread is already started.
      */
     void start();
 
     /**
-     * Shuts down the task processor updater.
-     * @param timeout duration how long to wait until the state updater is shut down
-     * @throws org.apache.kafka.streams.errors.StreamsException if the state updater thread cannot shutdown within the timeout
+     * Returns true if the task executor thread is running.
      */
-    void shutdown(final Duration timeout);
+    boolean isRunning();
+
+    /**
+     * Asks the task executor to shut down.
+     * Idempotent operation - will have no effect if thread was already asked to shut down
+     *
+     * @throws
+     *     org.apache.kafka.streams.errors.StreamsException if the state updater thread cannot shutdown within the timeout
+     */
+    void requestShutdown();
+
+    /**
+     * Shuts down the task processor updater.
+     * Idempotent operation - will have no effect if thread is already shut down.
+     * Must call `requestShutdown` first.
+     *
+     * @param timeout duration how long to wait until the state updater is shut down
+     *
+     * @throws
+     *     org.apache.kafka.streams.errors.StreamsException if the state updater thread does not shutdown within the timeout
+     */
+    void awaitShutdown(final Duration timeout);
 
     /**
      * Get the current assigned processing task. The task returned is read-only and cannot be modified.
+     *
      * @return the current processing task
      */
     ReadOnlyTask currentTask();
 
     /**
      * Unassign the current processing task from the task processor and give it back to the state manager.
-     * <p>
+     *
      * Note there is an asymmetry between assignment and unassignment between {@link TaskManager} and {@link TaskExecutor},
      * since assigning a task from task manager to task executor is always initiated by the task executor itself, by calling
      * {@link TaskManager#assignNextTask(TaskExecutor)},
@@ -57,11 +78,12 @@ public interface TaskExecutor {
      * when it finds the task not processable anymore, or by the task manager when it needs to commit / close it.
      * This function is used for the second case, where task manager will call this function asking the task executor
      * to give back the task.
-     * <p>
+     *
      * The task must be flushed before being unassigned, since it may be committed or closed by the task manager next.
-     * <p>
+     *
      * This method does not block, instead a future is returned; when the task executor finishes
      * unassigning the task this future will then complete.
+     *
      * @return the future capturing the completion of the unassign process
      */
     KafkaFuture<StreamTask> unassign();

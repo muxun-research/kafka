@@ -31,7 +31,7 @@ import java.util.Objects;
 
 /**
  * Represents a topic in the metadata image.
- * <p>
+ *
  * This class is thread-safe.
  */
 public final class TopicImage {
@@ -41,7 +41,9 @@ public final class TopicImage {
 
     private final Map<Integer, PartitionRegistration> partitions;
 
-    public TopicImage(String name, Uuid id, Map<Integer, PartitionRegistration> partitions) {
+    public TopicImage(String name,
+                      Uuid id,
+                      Map<Integer, PartitionRegistration> partitions) {
         this.name = name;
         this.id = id;
         this.partitions = partitions;
@@ -60,20 +62,22 @@ public final class TopicImage {
     }
 
     public void write(ImageWriter writer, ImageWriterOptions options) {
-        writer.write(0, new TopicRecord().setName(name).setTopicId(id));
+        writer.write(0, new TopicRecord().
+            setName(name).
+            setTopicId(id));
         for (Entry<Integer, PartitionRegistration> entry : partitions.entrySet()) {
             int partitionId = entry.getKey();
             PartitionRegistration partition = entry.getValue();
-            writer.write(partition.toRecord(id, partitionId));
+            writer.write(partition.toRecord(id, partitionId, options));
         }
     }
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof TopicImage))
-            return false;
-        TopicImage other = (TopicImage) o;
-        return name.equals(other.name) && id.equals(other.id) && partitions.equals(other.partitions);
+        if (!(o instanceof TopicImage other)) return false;
+        return name.equals(other.name) &&
+            id.equals(other.id) &&
+            partitions.equals(other.partitions);
     }
 
     @Override

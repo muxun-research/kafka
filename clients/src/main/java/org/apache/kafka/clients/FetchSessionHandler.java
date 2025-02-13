@@ -25,11 +25,22 @@ import org.apache.kafka.common.requests.FetchMetadata;
 import org.apache.kafka.common.requests.FetchRequest.PartitionData;
 import org.apache.kafka.common.requests.FetchResponse;
 import org.apache.kafka.common.utils.LogContext;
-import org.apache.kafka.common.utils.Utils;
+
 import org.slf4j.Logger;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.kafka.common.requests.FetchMetadata.INVALID_SESSION_ID;
 
@@ -69,7 +80,8 @@ public class FetchSessionHandler {
     /**
      * All of the partitions which exist in the fetch request session.
      */
-    private LinkedHashMap<TopicPartition, PartitionData> sessionPartitions = new LinkedHashMap<>(0);
+    private LinkedHashMap<TopicPartition, PartitionData> sessionPartitions =
+        new LinkedHashMap<>(0);
 
     /**
      * All of the topic names mapped to topic ids for topics which exist in the fetch request session.
@@ -113,7 +125,12 @@ public class FetchSessionHandler {
          */
         private final boolean canUseTopicIds;
 
-        FetchRequestData(Map<TopicPartition, PartitionData> toSend, List<TopicIdPartition> toForget, List<TopicIdPartition> toReplace, Map<TopicPartition, PartitionData> sessionPartitions, FetchMetadata metadata, boolean canUseTopicIds) {
+        FetchRequestData(Map<TopicPartition, PartitionData> toSend,
+                         List<TopicIdPartition> toForget,
+                         List<TopicIdPartition> toReplace,
+                         Map<TopicPartition, PartitionData> sessionPartitions,
+                         FetchMetadata metadata,
+                         boolean canUseTopicIds) {
             this.toSend = toSend;
             this.toForget = toForget;
             this.toReplace = toReplace;
@@ -212,22 +229,22 @@ public class FetchSessionHandler {
     }
 
     public class Builder {
+        private final Map<Uuid, String> topicNames;
+        private final boolean copySessionPartitions;
         /**
          * The next partitions which we want to fetch.
-         * <p>
+         *
          * It is important to maintain the insertion order of this list by using a LinkedHashMap rather
          * than a regular Map.
-         * <p>
+         *
          * One reason is that when dealing with FULL fetch requests, if there is not enough response
          * space to return data from all partitions, the server will only return data from partitions
          * early in this list.
-         * <p>
+         *
          * Another reason is because we make use of the list ordering to optimize the preparation of
          * incremental fetch requests (see below).
          */
         private LinkedHashMap<TopicPartition, PartitionData> next;
-        private Map<Uuid, String> topicNames;
-        private final boolean copySessionPartitions;
         private int partitionsWithoutTopicIds = 0;
 
         Builder() {
@@ -260,7 +277,8 @@ public class FetchSessionHandler {
 
             if (nextMetadata.isFull()) {
                 if (log.isDebugEnabled()) {
-                    log.debug("Built full fetch {} for node {} with {}.", nextMetadata, node, topicPartitionsToLogString(next.keySet()));
+                    log.debug("Built full fetch {} for node {} with {}.",
+                            nextMetadata, node, topicPartitionsToLogString(next.keySet()));
                 }
                 sessionPartitions = next;
                 next = null;
@@ -270,7 +288,8 @@ public class FetchSessionHandler {
                 } else {
                     sessionTopicNames = Collections.emptyMap();
                 }
-                Map<TopicPartition, PartitionData> toSend = Collections.unmodifiableMap(new LinkedHashMap<>(sessionPartitions));
+                Map<TopicPartition, PartitionData> toSend =
+                        Collections.unmodifiableMap(new LinkedHashMap<>(sessionPartitions));
                 return new FetchRequestData(toSend, Collections.emptyList(), Collections.emptyList(), toSend, nextMetadata, canUseTopicIds);
             }
 
@@ -278,7 +297,8 @@ public class FetchSessionHandler {
             List<TopicIdPartition> removed = new ArrayList<>();
             List<TopicIdPartition> altered = new ArrayList<>();
             List<TopicIdPartition> replaced = new ArrayList<>();
-            for (Iterator<Entry<TopicPartition, PartitionData>> iter = sessionPartitions.entrySet().iterator(); iter.hasNext(); ) {
+            for (Iterator<Entry<TopicPartition, PartitionData>> iter =
+                 sessionPartitions.entrySet().iterator(); iter.hasNext(); ) {
                 Entry<TopicPartition, PartitionData> entry = iter.next();
                 TopicPartition topicPartition = entry.getKey();
                 PartitionData prevData = entry.getValue();
@@ -287,7 +307,9 @@ public class FetchSessionHandler {
                     // We basically check if the new partition had the same topic ID. If not,
                     // we add it to the "replaced" set. If the request is version 13 or higher, the replaced
                     // partition will be forgotten. In any case, we will send the new partition in the request.
-                    if (!prevData.topicId.equals(nextData.topicId) && !prevData.topicId.equals(Uuid.ZERO_UUID) && !nextData.topicId.equals(Uuid.ZERO_UUID)) {
+                    if (!prevData.topicId.equals(nextData.topicId)
+                            && !prevData.topicId.equals(Uuid.ZERO_UUID)
+                            && !nextData.topicId.equals(Uuid.ZERO_UUID)) {
                         // Re-add the replaced partition to the end of 'next'
                         next.put(topicPartition, nextData);
                         entry.setValue(nextData);
@@ -332,12 +354,22 @@ public class FetchSessionHandler {
             }
 
             if (log.isDebugEnabled()) {
-                log.debug("Built incremental fetch {} for node {}. Added {}, altered {}, removed {}, " + "replaced {} out of {}", nextMetadata, node, topicIdPartitionsToLogString(added), topicIdPartitionsToLogString(altered), topicIdPartitionsToLogString(removed), topicIdPartitionsToLogString(replaced), topicPartitionsToLogString(sessionPartitions.keySet()));
+                log.debug("Built incremental fetch {} for node {}. Added {}, altered {}, removed {}, " +
+                          "replaced {} out of {}", nextMetadata, node, topicIdPartitionsToLogString(added),
+                          topicIdPartitionsToLogString(altered), topicIdPartitionsToLogString(removed),
+                          topicIdPartitionsToLogString(replaced), topicPartitionsToLogString(sessionPartitions.keySet()));
             }
             Map<TopicPartition, PartitionData> toSend = Collections.unmodifiableMap(next);
-            Map<TopicPartition, PartitionData> curSessionPartitions = copySessionPartitions ? Collections.unmodifiableMap(new LinkedHashMap<>(sessionPartitions)) : Collections.unmodifiableMap(sessionPartitions);
+            Map<TopicPartition, PartitionData> curSessionPartitions = copySessionPartitions
+                    ? Collections.unmodifiableMap(new LinkedHashMap<>(sessionPartitions))
+                    : Collections.unmodifiableMap(sessionPartitions);
             next = null;
-            return new FetchRequestData(toSend, Collections.unmodifiableList(removed), Collections.unmodifiableList(replaced), curSessionPartitions, nextMetadata, canUseTopicIds);
+            return new FetchRequestData(toSend,
+                    Collections.unmodifiableList(removed),
+                    Collections.unmodifiableList(replaced),
+                    curSessionPartitions,
+                    nextMetadata,
+                    canUseTopicIds);
         }
     }
 
@@ -346,11 +378,10 @@ public class FetchSessionHandler {
     }
 
 
-    /**
-     * A builder that allows for presizing the PartitionData hashmap, and avoiding making a
-     * secondary copy of the sessionPartitions, in cases where this is not necessarily.
-     * This builder is primarily for use by the Replica Fetcher
-     * @param size                  the initial size of the PartitionData hashmap
+    /** A builder that allows for presizing the PartitionData hashmap, and avoiding making a
+     *  secondary copy of the sessionPartitions, in cases where this is not necessarily.
+     *  This builder is primarily for use by the Replica Fetcher
+     * @param size the initial size of the PartitionData hashmap
      * @param copySessionPartitions boolean denoting whether the builder should make a deep copy of
      *                              session partitions
      */
@@ -362,25 +393,26 @@ public class FetchSessionHandler {
         if (!log.isTraceEnabled()) {
             return String.format("%d partition(s)", partitions.size());
         }
-        return "(" + Utils.join(partitions, ", ") + ")";
+        return "(" + partitions.stream().map(TopicPartition::toString).collect(Collectors.joining(", ")) + ")";
     }
 
     private String topicIdPartitionsToLogString(Collection<TopicIdPartition> partitions) {
         if (!log.isTraceEnabled()) {
             return String.format("%d partition(s)", partitions.size());
         }
-        return "(" + Utils.join(partitions, ", ") + ")";
+        return "(" + partitions.stream().map(TopicIdPartition::toString).collect(Collectors.joining(", ")) + ")";
     }
 
     /**
      * Return missing items which are expected to be in a particular set, but which are not.
-     * @param toFind   The items to look for.
-     * @param toSearch The set of items to search.
-     * @return Empty set if all items were found; some of the missing ones in a set, if not.
+     *
+     * @param toFind    The items to look for.
+     * @param toSearch  The set of items to search.
+     * @return          Empty set if all items were found; some of the missing ones in a set, if not.
      */
     static <T> Set<T> findMissing(Set<T> toFind, Set<T> toSearch) {
         Set<T> ret = new LinkedHashSet<>();
-        for (T toFindItem : toFind) {
+        for (T toFindItem: toFind) {
             if (!toSearch.contains(toFindItem)) {
                 ret.add(toFindItem);
             }
@@ -390,30 +422,33 @@ public class FetchSessionHandler {
 
     /**
      * Verify that a full fetch response contains all the partitions in the fetch session.
-     * @param topicPartitions The topicPartitions from the FetchResponse.
-     * @param ids             The topic IDs from the FetchResponse.
-     * @param version         The version of the FetchResponse.
-     * @return null if the full fetch response partitions are valid; human-readable problem description otherwise.
+     *
+     * @param topicPartitions  The topicPartitions from the FetchResponse.
+     * @param ids              The topic IDs from the FetchResponse.
+     * @param version          The version of the FetchResponse.
+     * @return                 null if the full fetch response partitions are valid; human-readable problem description otherwise.
      */
     String verifyFullFetchResponsePartitions(Set<TopicPartition> topicPartitions, Set<Uuid> ids, short version) {
         StringBuilder bld = new StringBuilder();
-        Set<TopicPartition> extra = findMissing(topicPartitions, sessionPartitions.keySet());
-        Set<TopicPartition> omitted = findMissing(sessionPartitions.keySet(), topicPartitions);
+        Set<TopicPartition> extra =
+            findMissing(topicPartitions, sessionPartitions.keySet());
+        Set<TopicPartition> omitted =
+            findMissing(sessionPartitions.keySet(), topicPartitions);
         Set<Uuid> extraIds = new HashSet<>();
         if (version >= 13) {
             extraIds = findMissing(ids, sessionTopicNames.keySet());
         }
         if (!omitted.isEmpty()) {
-            bld.append("omittedPartitions=(").append(Utils.join(omitted, ", ")).append("), ");
+            bld.append("omittedPartitions=(").append(omitted.stream().map(TopicPartition::toString).collect(Collectors.joining(", "))).append("), ");
         }
         if (!extra.isEmpty()) {
-            bld.append("extraPartitions=(").append(Utils.join(extra, ", ")).append("), ");
+            bld.append("extraPartitions=(").append(extra.stream().map(TopicPartition::toString).collect(Collectors.joining(", "))).append("), ");
         }
         if (!extraIds.isEmpty()) {
-            bld.append("extraIds=(").append(Utils.join(extraIds, ", ")).append("), ");
+            bld.append("extraIds=(").append(extraIds.stream().map(Uuid::toString).collect(Collectors.joining(", "))).append("), ");
         }
         if ((!omitted.isEmpty()) || (!extra.isEmpty()) || (!extraIds.isEmpty())) {
-            bld.append("response=(").append(Utils.join(topicPartitions, ", ")).append(")");
+            bld.append("response=(").append(topicPartitions.stream().map(TopicPartition::toString).collect(Collectors.joining(", "))).append(")");
             return bld.toString();
         }
         return null;
@@ -421,24 +456,26 @@ public class FetchSessionHandler {
 
     /**
      * Verify that the partitions in an incremental fetch response are contained in the session.
-     * @param topicPartitions The topicPartitions from the FetchResponse.
-     * @param ids             The topic IDs from the FetchResponse.
-     * @param version         The version of the FetchResponse.
-     * @return null if the incremental fetch response partitions are valid; human-readable problem description otherwise.
+     *
+     * @param topicPartitions  The topicPartitions from the FetchResponse.
+     * @param ids              The topic IDs from the FetchResponse.
+     * @param version          The version of the FetchResponse.
+     * @return                 null if the incremental fetch response partitions are valid; human-readable problem description otherwise.
      */
     String verifyIncrementalFetchResponsePartitions(Set<TopicPartition> topicPartitions, Set<Uuid> ids, short version) {
         Set<Uuid> extraIds = new HashSet<>();
         if (version >= 13) {
             extraIds = findMissing(ids, sessionTopicNames.keySet());
         }
-        Set<TopicPartition> extra = findMissing(topicPartitions, sessionPartitions.keySet());
+        Set<TopicPartition> extra =
+            findMissing(topicPartitions, sessionPartitions.keySet());
         StringBuilder bld = new StringBuilder();
         if (!extra.isEmpty())
-            bld.append("extraPartitions=(").append(Utils.join(extra, ", ")).append("), ");
+            bld.append("extraPartitions=(").append(extra.stream().map(TopicPartition::toString).collect(Collectors.joining(", "))).append("), ");
         if (!extraIds.isEmpty())
-            bld.append("extraIds=(").append(Utils.join(extraIds, ", ")).append("), ");
+            bld.append("extraIds=(").append(extraIds.stream().map(Uuid::toString).collect(Collectors.joining(", "))).append("), ");
         if ((!extra.isEmpty()) || (!extraIds.isEmpty())) {
-            bld.append("response=(").append(Utils.join(topicPartitions, ", ")).append(")");
+            bld.append("response=(").append(topicPartitions.stream().map(TopicPartition::toString).collect(Collectors.joining(", "))).append(")");
             return bld.toString();
         }
         return null;
@@ -446,20 +483,25 @@ public class FetchSessionHandler {
 
     /**
      * Create a string describing the partitions in a FetchResponse.
-     * @param topicPartitions The topicPartitions from the FetchResponse.
-     * @return The string to log.
+     *
+     * @param topicPartitions  The topicPartitions from the FetchResponse.
+     * @return                 The string to log.
      */
     private String responseDataToLogString(Set<TopicPartition> topicPartitions) {
         if (!log.isTraceEnabled()) {
             int implied = sessionPartitions.size() - topicPartitions.size();
             if (implied > 0) {
-                return String.format(" with %d response partition(s), %d implied partition(s)", topicPartitions.size(), implied);
+                return String.format(" with %d response partition(s), %d implied partition(s)",
+                    topicPartitions.size(), implied);
             } else {
-                return String.format(" with %d response partition(s)", topicPartitions.size());
+                return String.format(" with %d response partition(s)",
+                    topicPartitions.size());
             }
         }
         StringBuilder bld = new StringBuilder();
-        bld.append(" with response=(").append(Utils.join(topicPartitions, ", ")).append(")");
+        bld.append(" with response=(").
+            append(topicPartitions.stream().map(TopicPartition::toString).collect(Collectors.joining(", "))).
+            append(")");
         String prefix = ", implied=(";
         String suffix = "";
         for (TopicPartition partition : sessionPartitions.keySet()) {
@@ -476,14 +518,16 @@ public class FetchSessionHandler {
 
     /**
      * Handle the fetch response.
-     * @param response The response.
-     * @param version  The version of the request.
-     * @return True if the response is well-formed; false if it can't be processed
-     * because of missing or unexpected partitions.
+     *
+     * @param response  The response.
+     * @param version   The version of the request.
+     * @return          True if the response is well-formed; false if it can't be processed
+     *                  because of missing or unexpected partitions.
      */
     public boolean handleResponse(FetchResponse response, short version) {
         if (response.error() != Errors.NONE) {
-            log.info("Node {} was unable to process the fetch request with {}: {}.", node, nextMetadata, response.error());
+            log.info("Node {} was unable to process the fetch request with {}: {}.",
+                node, nextMetadata, response.error());
             if (response.error() == Errors.FETCH_SESSION_ID_NOT_FOUND) {
                 nextMetadata = FetchMetadata.INITIAL;
             } else {
@@ -501,7 +545,8 @@ public class FetchSessionHandler {
                 // However, the empty full fetch response can't be processed, so it's still appropriate
                 // to return false here.
                 if (log.isDebugEnabled()) {
-                    log.debug("Node {} sent a empty full fetch response to indicate that this " + "client should be throttled for {} ms.", node, response.throttleTimeMs());
+                    log.debug("Node {} sent a empty full fetch response to indicate that this " +
+                        "client should be throttled for {} ms.", node, response.throttleTimeMs());
                 }
                 nextMetadata = FetchMetadata.INITIAL;
                 return false;
@@ -519,7 +564,8 @@ public class FetchSessionHandler {
             } else {
                 // The server created a new incremental fetch session.
                 if (log.isDebugEnabled())
-                    log.debug("Node {} sent a full fetch response that created a new incremental " + "fetch session {}{}", node, response.sessionId(), responseDataToLogString(topicPartitions));
+                    log.debug("Node {} sent a full fetch response that created a new incremental " +
+                            "fetch session {}{}", node, response.sessionId(), responseDataToLogString(topicPartitions));
                 nextMetadata = FetchMetadata.newIncremental(response.sessionId());
                 return true;
             }
@@ -532,7 +578,8 @@ public class FetchSessionHandler {
             } else if (response.sessionId() == INVALID_SESSION_ID) {
                 // The incremental fetch session was closed by the server.
                 if (log.isDebugEnabled())
-                    log.debug("Node {} sent an incremental fetch response closing session {}{}", node, nextMetadata.sessionId(), responseDataToLogString(topicPartitions));
+                    log.debug("Node {} sent an incremental fetch response closing session {}{}",
+                            node, nextMetadata.sessionId(), responseDataToLogString(topicPartitions));
                 nextMetadata = FetchMetadata.INITIAL;
                 return true;
             } else {
@@ -540,7 +587,9 @@ public class FetchSessionHandler {
                 // We don't have to do anything special here to support KIP-219, since an empty incremental
                 // fetch request is perfectly valid.
                 if (log.isDebugEnabled())
-                    log.debug("Node {} sent an incremental fetch response with throttleTimeMs = {} " + "for session {}{}", node, response.throttleTimeMs(), response.sessionId(), responseDataToLogString(topicPartitions));
+                    log.debug("Node {} sent an incremental fetch response with throttleTimeMs = {} " +
+                        "for session {}{}", node, response.throttleTimeMs(), response.sessionId(),
+                        responseDataToLogString(topicPartitions));
                 nextMetadata = nextMetadata.nextIncremental();
                 return true;
             }
@@ -551,16 +600,19 @@ public class FetchSessionHandler {
      * The client will initiate the session close on next fetch request.
      */
     public void notifyClose() {
-        log.debug("Set the metadata for next fetch request to close the existing session ID={}", nextMetadata.sessionId());
+        if (log.isDebugEnabled()) {
+            log.debug("Set the metadata for next fetch request to close the existing session ID={}", nextMetadata.sessionId());
+        }
         nextMetadata = nextMetadata.nextCloseExisting();
     }
 
     /**
      * Handle an error sending the prepared request.
-     * <p>
+     *
      * When a network error occurs, we close any existing fetch session on our next request,
      * and try to create a new session.
-     * @param t The exception.
+     *
+     * @param t     The exception.
      */
     public void handleError(Throwable t) {
         log.info("Error sending fetch request {} to node {}:", nextMetadata, node, t);

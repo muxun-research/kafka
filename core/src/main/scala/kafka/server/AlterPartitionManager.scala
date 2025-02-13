@@ -6,7 +6,7 @@
  * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,32 +16,32 @@
  */
 package kafka.server
 
-import kafka.api.LeaderAndIsr
-import kafka.utils.Logging
-import kafka.zk.KafkaZkClient
-import org.apache.kafka.clients.ClientResponse
-import org.apache.kafka.common.{TopicIdPartition, TopicPartition, Uuid}
-import org.apache.kafka.common.errors.OperationNotAttemptedException
-import org.apache.kafka.common.metrics.Metrics
-import org.apache.kafka.common.protocol.Errors
-import org.apache.kafka.common.requests.{AlterPartitionRequest, AlterPartitionResponse, RequestHeader}
-import org.apache.kafka.common.utils.Time
-import org.apache.kafka.metadata.LeaderRecoveryState
-import org.apache.kafka.server.common.MetadataVersion
-import org.apache.kafka.server.util.Scheduler
-
 import java.util
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{CompletableFuture, ConcurrentHashMap}
+import kafka.utils.Logging
+import org.apache.kafka.clients.ClientResponse
+import org.apache.kafka.common.TopicIdPartition
+import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.common.Uuid
+import org.apache.kafka.common.errors.OperationNotAttemptedException
+import org.apache.kafka.common.message.AlterPartitionRequestData
+import org.apache.kafka.common.metrics.Metrics
+import org.apache.kafka.common.protocol.Errors
+import org.apache.kafka.common.requests.RequestHeader
+import org.apache.kafka.common.requests.{AlterPartitionRequest, AlterPartitionResponse}
+import org.apache.kafka.common.utils.Time
+import org.apache.kafka.metadata.{LeaderAndIsr, LeaderRecoveryState}
+import org.apache.kafka.server.common.{ControllerRequestCompletionHandler, MetadataVersion, NodeToControllerChannelManager}
+import org.apache.kafka.server.util.Scheduler
+
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
-import scala.compat.java8.OptionConverters._
-import scala.jdk.CollectionConverters._
+import scala.jdk.OptionConverters.RichOptional
 
 /**
- * Handles updating the ISR by sending AlterPartition requests to the controller (as of 2.7) or by updating ZK directly
- * (prior to 2.7). Updating the ISR is an asynchronous operation, so partitions will learn about the result of their
- * request through a callback.
+ * Handles updating the ISR by sending AlterPartition requests to the controller. Updating the ISR is an asynchronous 
+ * operation, so partitions will learn about the result of their request through a callback.
  *
  * Note that ISR state changes can still be initiated by the controller and sent to the partitions via LeaderAndIsr
  * requests.
@@ -52,35 +52,33 @@ trait AlterPartitionManager {
   def shutdown(): Unit = {}
 
   def submit(
-              topicIdPartition: TopicIdPartition,
-              leaderAndIsr: LeaderAndIsr,
-              controllerEpoch: Int
-            ): CompletableFuture[LeaderAndIsr]
+    topicIdPartition: TopicIdPartition,
+    leaderAndIsr: LeaderAndIsr
+  ): CompletableFuture[LeaderAndIsr]
 }
 
 case class AlterPartitionItem(
-                               topicIdPartition: TopicIdPartition,
-                               leaderAndIsr: LeaderAndIsr,
-                               future: CompletableFuture[LeaderAndIsr],
-                               controllerEpoch: Int // controllerEpoch needed for `ZkAlterPartitionManager`
-                             )
+  topicIdPartition: TopicIdPartition,
+  leaderAndIsr: LeaderAndIsr,
+  future: CompletableFuture[LeaderAndIsr]
+)
 
 object AlterPartitionManager {
 
   /**
-   * Factory to AlterPartition based implementation, used when IBP >= 2.7-IV2
+   * Factory to AlterPartition based implementation
    */
   def apply(
-             config: KafkaConfig,
-             metadataCache: MetadataCache,
-             scheduler: Scheduler,
-             controllerNodeProvider: ControllerNodeProvider,
-             time: Time,
-             metrics: Metrics,
-             threadNamePrefix: String,
-             brokerEpochSupplier: () => Long,
-           ): AlterPartitionManager = {
-    val channelManager = BrokerToControllerChannelManager(
+    config: KafkaConfig,
+    metadataCache: MetadataCache,
+    scheduler: Scheduler,
+    controllerNodeProvider: ControllerNodeProvider,
+    time: Time,
+    metrics: Metrics,
+    threadNamePrefix: String,
+    brokerEpochSupplier: () => Long,
+  ): AlterPartitionManager = {
+    val channelManager = new NodeToControllerChannelManagerImpl(
       controllerNodeProvider,
       time = time,
       metrics = metrics,
@@ -98,42 +96,24 @@ object AlterPartitionManager {
       metadataVersionSupplier = () => metadataCache.metadataVersion()
     )
   }
-
-  /**
-   * Factory for ZK based implementation, used when IBP < 2.7-IV2
-   */
-  def apply(
-             scheduler: Scheduler,
-             time: Time,
-             zkClient: KafkaZkClient
-           ): AlterPartitionManager = {
-    new ZkAlterPartitionManager(scheduler, time, zkClient)
-  }
 }
 
 class DefaultAlterPartitionManager(
-                                    val controllerChannelManager: BrokerToControllerChannelManager,
-                                    val scheduler: Scheduler,
-                                    val time: Time,
-                                    val brokerId: Int,
-                                    val brokerEpochSupplier: () => Long,
-                                    val metadataVersionSupplier: () => MetadataVersion
-                                  ) extends AlterPartitionManager with Logging {
+  val controllerChannelManager: NodeToControllerChannelManager,
+  val scheduler: Scheduler,
+  val time: Time,
+  val brokerId: Int,
+  val brokerEpochSupplier: () => Long,
+  val metadataVersionSupplier: () => MetadataVersion
+) extends AlterPartitionManager with Logging {
 
   // Used to allow only one pending ISR update per partition (visible for testing).
   // Note that we key items by TopicPartition despite using TopicIdPartition while
-  // submitting changes. We do this to ensure that topics with the same name but
-  // with a different topic id or no topic id collide here. There are two cases to
-  // consider:
-  // 1) When the cluster is upgraded from IBP < 2.8 to IBP >= 2.8, the ZK controller
-  //    assigns topic ids to the partitions. So partitions will start sending updates
-  //    with a topic id while they might still have updates without topic ids in this
-  //    Map. This would break the contract of only allowing one pending ISR update per
-  //    partition.
-  // 2) When a topic is deleted and re-created, we cannot have two entries in this Map
-  //    especially if we cannot use an AlterPartition request version which supports
-  //    topic ids in the end because the two updates with the same name would be merged
-  //    together.
+  // submitting changes. This is done to ensure that topics with the same name but
+  // with a different topic id or no topic id collide here. When a topic is deleted 
+  // and re-created, we cannot have two entries in this Map especially if we cannot 
+  // use an AlterPartition request version which supports topic ids in the end because 
+  // the two updates with the same name would be merged together.
   private[server] val unsentIsrUpdates: util.Map[TopicPartition, AlterPartitionItem] = new ConcurrentHashMap[TopicPartition, AlterPartitionItem]()
 
   // Used to allow only one in-flight request at a time
@@ -148,12 +128,11 @@ class DefaultAlterPartitionManager(
   }
 
   override def submit(
-                       topicIdPartition: TopicIdPartition,
-                       leaderAndIsr: LeaderAndIsr,
-                       controllerEpoch: Int
-                     ): CompletableFuture[LeaderAndIsr] = {
+    topicIdPartition: TopicIdPartition,
+    leaderAndIsr: LeaderAndIsr
+  ): CompletableFuture[LeaderAndIsr] = {
     val future = new CompletableFuture[LeaderAndIsr]()
-    val alterPartitionItem = AlterPartitionItem(topicIdPartition, leaderAndIsr, future, controllerEpoch)
+    val alterPartitionItem = AlterPartitionItem(topicIdPartition, leaderAndIsr, future)
     val enqueued = unsentIsrUpdates.putIfAbsent(alterPartitionItem.topicIdPartition.topicPartition, alterPartitionItem) == null
     if (enqueued) {
       maybePropagateIsrChanges()
@@ -196,7 +175,7 @@ class DefaultAlterPartitionManager(
             if (response.authenticationException != null) {
               // For now we treat authentication errors as retriable. We use the
               // `NETWORK_EXCEPTION` error code for lack of a good alternative.
-              // Note that `BrokerToControllerChannelManager` will still log the
+              // Note that `NodeToControllerChannelManager` will still log the
               // authentication errors so that users have a chance to fix the problem.
               Errors.NETWORK_EXCEPTION
             } else if (response.versionMismatch != null) {
@@ -217,13 +196,13 @@ class DefaultAlterPartitionManager(
 
           // check if we need to send another request right away
           error match {
-            case Errors.NONE =>
-              // In the normal case, check for pending updates to send immediately
-              maybePropagateIsrChanges()
-            case _ =>
-              // If we received a top-level error from the controller, retry the request in the near future
-              scheduler.scheduleOnce("send-alter-partition", () => maybePropagateIsrChanges(), 50)
-          }
+              case Errors.NONE =>
+                // In the normal case, check for pending updates to send immediately
+                maybePropagateIsrChanges()
+              case _ =>
+                // If we received a top-level error from the controller, retry the request in the near future
+                scheduler.scheduleOnce("send-alter-partition", () => maybePropagateIsrChanges(), 50)
+            }
         }
 
         override def onTimeout(): Unit = {
@@ -239,25 +218,19 @@ class DefaultAlterPartitionManager(
    * supported by the controller. The final decision is taken when the AlterPartitionRequest
    * is built in the network client based on the advertised api versions of the controller.
    *
-   * We could use version 2 or above if all the pending changes have an topic id defined;
-   * otherwise we must use version 1 or below.
-   *
    * @return A tuple containing the AlterPartitionRequest.Builder and a mapping from
    *         topic id to topic name. This mapping is used in the response handling.
    */
   private def buildRequest(
-                            inflightAlterPartitionItems: Seq[AlterPartitionItem],
-                            brokerEpoch: Long
-                          ): (AlterPartitionRequest.Builder, mutable.Map[Uuid, String]) = {
+    inflightAlterPartitionItems: Seq[AlterPartitionItem],
+    brokerEpoch: Long
+  ): (AlterPartitionRequest.Builder, mutable.Map[Uuid, String]) = {
     val metadataVersion = metadataVersionSupplier()
     // We build this mapping in order to map topic id back to their name when we
     // receive the response. We cannot rely on the metadata cache for this because
     // the metadata cache is updated after the partition state so it might not know
     // yet about a topic id already used here.
     val topicNamesByIds = mutable.HashMap[Uuid, String]()
-    // We can use topic ids only if all the pending changed have one defined and
-    // we use IBP 2.8 or above.
-    var canUseTopicIds = metadataVersion.isTopicIdsSupported
 
     val message = new AlterPartitionRequestData()
       .setBrokerId(brokerId)
@@ -265,7 +238,6 @@ class DefaultAlterPartitionManager(
 
     inflightAlterPartitionItems.groupBy(_.topicIdPartition.topic).foreach { case (topicName, items) =>
       val topicId = items.head.topicIdPartition.topicId
-      canUseTopicIds &= topicId != Uuid.ZERO_UUID
       topicNamesByIds(topicId) = topicName
 
       // Both the topic name and the topic id are set here because at this stage
@@ -279,7 +251,7 @@ class DefaultAlterPartitionManager(
         val partitionData = new AlterPartitionRequestData.PartitionData()
           .setPartitionIndex(item.topicIdPartition.partition)
           .setLeaderEpoch(item.leaderAndIsr.leaderEpoch)
-          .setNewIsrWithEpochs(item.leaderAndIsr.isrWithBrokerEpoch.asJava)
+          .setNewIsrWithEpochs(item.leaderAndIsr.isrWithBrokerEpoch)
           .setPartitionEpoch(item.leaderAndIsr.partitionEpoch)
 
         if (metadataVersion.isLeaderRecoverySupported) {
@@ -290,17 +262,16 @@ class DefaultAlterPartitionManager(
       }
     }
 
-    // If we cannot use topic ids, the builder will ensure that no version higher than 1 is used.
-    (new AlterPartitionRequest.Builder(message, canUseTopicIds), topicNamesByIds)
+    (new AlterPartitionRequest.Builder(message), topicNamesByIds)
   }
 
-  def handleAlterPartitionResponse(
-                                    requestHeader: RequestHeader,
-                                    alterPartitionResp: AlterPartitionResponse,
-                                    sentBrokerEpoch: Long,
-                                    inflightAlterPartitionItems: Seq[AlterPartitionItem],
-                                    topicNamesByIds: mutable.Map[Uuid, String]
-                                  ): Errors = {
+  private def handleAlterPartitionResponse(
+    requestHeader: RequestHeader,
+    alterPartitionResp: AlterPartitionResponse,
+    sentBrokerEpoch: Long,
+    inflightAlterPartitionItems: Seq[AlterPartitionItem],
+    topicNamesByIds: mutable.Map[Uuid, String]
+  ): Errors = {
     val data = alterPartitionResp.data
 
     Errors.forCode(data.errorCode) match {
@@ -325,13 +296,13 @@ class DefaultAlterPartitionManager(
               val apiError = Errors.forCode(partition.errorCode)
               debug(s"Controller successfully handled AlterPartition request for $tp: $partition")
               if (apiError == Errors.NONE) {
-                LeaderRecoveryState.optionalOf(partition.leaderRecoveryState).asScala match {
+                LeaderRecoveryState.optionalOf(partition.leaderRecoveryState).toScala match {
                   case Some(leaderRecoveryState) =>
                     partitionResponses(tp) = Right(
-                      LeaderAndIsr(
+                      new LeaderAndIsr(
                         partition.leaderId,
                         partition.leaderEpoch,
-                        partition.isr.asScala.toList.map(_.toInt),
+                        partition.isr,
                         leaderRecoveryState,
                         partition.partitionEpoch
                       )

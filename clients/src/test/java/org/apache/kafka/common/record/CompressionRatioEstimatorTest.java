@@ -25,32 +25,31 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class CompressionRatioEstimatorTest {
 
-	@Test
-	public void testUpdateEstimation() {
-		class EstimationsObservedRatios {
-			float currentEstimation;
-			float observedRatio;
+    @Test
+    public void testUpdateEstimation() {
+        class EstimationsObservedRatios {
+            final float currentEstimation;
+            final float observedRatio;
+            EstimationsObservedRatios(float currentEstimation, float observedRatio) {
+                this.currentEstimation = currentEstimation;
+                this.observedRatio = observedRatio;
+            }
+        }
 
-			EstimationsObservedRatios(float currentEstimation, float observedRatio) {
-				this.currentEstimation = currentEstimation;
-				this.observedRatio = observedRatio;
-			}
-		}
-
-		// If currentEstimation is smaller than observedRatio, the updatedCompressionRatio is currentEstimation plus
-		// COMPRESSION_RATIO_DETERIORATE_STEP 0.05, otherwise currentEstimation minus COMPRESSION_RATIO_IMPROVING_STEP
-		// 0.005. There are four cases,and updatedCompressionRatio shouldn't smaller than observedRatio in all of cases.
-		// Refer to non test code for more details.
-		List<EstimationsObservedRatios> estimationsObservedRatios = Arrays.asList(
-				new EstimationsObservedRatios(0.8f, 0.84f),
-				new EstimationsObservedRatios(0.6f, 0.7f),
-				new EstimationsObservedRatios(0.6f, 0.4f),
-				new EstimationsObservedRatios(0.004f, 0.001f));
-		for (EstimationsObservedRatios estimationsObservedRatio : estimationsObservedRatios) {
-			String topic = "tp";
-			CompressionRatioEstimator.setEstimation(topic, CompressionType.ZSTD, estimationsObservedRatio.currentEstimation);
-			float updatedCompressionRatio = CompressionRatioEstimator.updateEstimation(topic, CompressionType.ZSTD, estimationsObservedRatio.observedRatio);
-			assertTrue(updatedCompressionRatio >= estimationsObservedRatio.observedRatio);
-		}
-	}
+        // If currentEstimation is smaller than observedRatio, the updatedCompressionRatio is currentEstimation plus
+        // COMPRESSION_RATIO_DETERIORATE_STEP 0.05, otherwise currentEstimation minus COMPRESSION_RATIO_IMPROVING_STEP
+        // 0.005. There are four cases,and updatedCompressionRatio shouldn't smaller than observedRatio in all of cases.
+        // Refer to non test code for more details.
+        List<EstimationsObservedRatios> estimationsObservedRatios = Arrays.asList(
+            new EstimationsObservedRatios(0.8f, 0.84f),
+            new EstimationsObservedRatios(0.6f, 0.7f),
+            new EstimationsObservedRatios(0.6f, 0.4f),
+            new EstimationsObservedRatios(0.004f, 0.001f));
+        for (EstimationsObservedRatios estimationsObservedRatio : estimationsObservedRatios) {
+            String topic = "tp";
+            CompressionRatioEstimator.setEstimation(topic, CompressionType.ZSTD, estimationsObservedRatio.currentEstimation);
+            float updatedCompressionRatio = CompressionRatioEstimator.updateEstimation(topic, CompressionType.ZSTD, estimationsObservedRatio.observedRatio);
+            assertTrue(updatedCompressionRatio >= estimationsObservedRatio.observedRatio);
+        }
+    }
 }

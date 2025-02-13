@@ -31,7 +31,7 @@ import java.util.Map.Entry;
 
 /**
  * Represents the ACLs in the metadata image.
- * <p>
+ *
  * This class is thread-safe.
  */
 public final class AclsImage {
@@ -69,9 +69,7 @@ public final class AclsImage {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof AclsImage))
-            return false;
-        AclsImage other = (AclsImage) o;
+        if (!(o instanceof AclsImage other)) return false;
         return acls.equals(other.acls);
     }
 

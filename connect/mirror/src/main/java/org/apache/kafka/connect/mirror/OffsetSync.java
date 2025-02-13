@@ -112,4 +112,3 @@ public class OffsetSync {
         return serializeValue().array();
     }
 }
-

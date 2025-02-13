@@ -39,7 +39,6 @@ public class TaggedFields extends DocumentedType {
      *               by associated Field objects.
      * @return The new {@link TaggedFields}
      */
-    @SuppressWarnings("unchecked")
     public static TaggedFields of(Object... fields) {
         if (fields.length % 2 != 0) {
             throw new RuntimeException("TaggedFields#of takes an even " + "number of parameters.");
@@ -77,7 +76,6 @@ public class TaggedFields extends DocumentedType {
         }
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     public NavigableMap<Integer, Object> read(ByteBuffer buffer) {
         int numTaggedFields = ByteUtils.readUnsignedVarint(buffer);
@@ -181,5 +179,12 @@ public class TaggedFields extends DocumentedType {
      */
     public int numFields() {
         return this.fields.size();
+    }
+
+    /**
+     * The fields
+     */
+    public Map<Integer, Field> fields() {
+        return this.fields;
     }
 }

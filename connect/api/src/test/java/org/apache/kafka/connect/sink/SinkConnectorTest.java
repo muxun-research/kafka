@@ -17,6 +17,7 @@
 package org.apache.kafka.connect.sink;
 
 import org.apache.kafka.common.config.ConfigDef;
+import org.apache.kafka.common.metrics.PluginMetrics;
 import org.apache.kafka.connect.connector.ConnectorContext;
 import org.apache.kafka.connect.connector.ConnectorTest;
 import org.apache.kafka.connect.connector.Task;
@@ -30,117 +31,123 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class SinkConnectorTest extends ConnectorTest {
 
-	@Override
-	protected TestSinkConnectorContext createContext() {
-		return new TestSinkConnectorContext();
-	}
+    @Override
+    protected TestSinkConnectorContext createContext() {
+        return new TestSinkConnectorContext();
+    }
 
-	@Override
-	protected TestSinkConnector createConnector() {
-		return new TestSinkConnector();
-	}
+    @Override
+    protected TestSinkConnector createConnector() {
+        return new TestSinkConnector();
+    }
 
-	private static class TestSinkConnectorContext implements SinkConnectorContext {
+    private static class TestSinkConnectorContext implements SinkConnectorContext {
 
-		@Override
-		public void requestTaskReconfiguration() {
-			// Unexpected in these tests
-			throw new UnsupportedOperationException();
-		}
+        @Override
+        public void requestTaskReconfiguration() {
+            // Unexpected in these tests
+            throw new UnsupportedOperationException();
+        }
 
-		@Override
-		public void raiseError(Exception e) {
-			// Unexpected in these tests
-			throw new UnsupportedOperationException();
-		}
-	}
+        @Override
+        public void raiseError(Exception e) {
+            // Unexpected in these tests
+            throw new UnsupportedOperationException();
+        }
 
-	protected static class TestSinkConnector extends SinkConnector implements ConnectorTest.AssertableConnector {
+        @Override
+        public PluginMetrics pluginMetrics() {
+            // Unexpected in these tests
+            throw new UnsupportedOperationException();
+        }
+    }
 
-		public static final String VERSION = "an entirely different version";
+    protected static class TestSinkConnector extends SinkConnector implements ConnectorTest.AssertableConnector {
 
-		private boolean initialized;
-		private List<Map<String, String>> taskConfigs;
-		private Map<String, String> props;
-		private boolean started;
-		private boolean stopped;
+        public static final String VERSION = "an entirely different version";
 
-		@Override
-		public String version() {
-			return VERSION;
-		}
+        private boolean initialized;
+        private List<Map<String, String>> taskConfigs;
+        private Map<String, String> props;
+        private boolean started;
+        private boolean stopped;
 
-		@Override
-		public void initialize(ConnectorContext ctx) {
-			super.initialize(ctx);
-			initialized = true;
-			this.taskConfigs = null;
-		}
+        @Override
+        public String version() {
+            return VERSION;
+        }
 
-		@Override
-		public void initialize(ConnectorContext ctx, List<Map<String, String>> taskConfigs) {
-			super.initialize(ctx, taskConfigs);
-			initialized = true;
-			this.taskConfigs = taskConfigs;
-		}
+        @Override
+        public void initialize(ConnectorContext ctx) {
+            super.initialize(ctx);
+            initialized = true;
+            this.taskConfigs = null;
+        }
 
-		@Override
-		public void start(Map<String, String> props) {
-			this.props = props;
-			started = true;
-		}
+        @Override
+        public void initialize(ConnectorContext ctx, List<Map<String, String>> taskConfigs) {
+            super.initialize(ctx, taskConfigs);
+            initialized = true;
+            this.taskConfigs = taskConfigs;
+        }
 
-		@Override
-		public Class<? extends Task> taskClass() {
-			return null;
-		}
+        @Override
+        public void start(Map<String, String> props) {
+            this.props = props;
+            started = true;
+        }
 
-		@Override
-		public List<Map<String, String>> taskConfigs(int maxTasks) {
-			return null;
-		}
+        @Override
+        public Class<? extends Task> taskClass() {
+            return null;
+        }
 
-		@Override
-		public void stop() {
-			stopped = true;
-		}
+        @Override
+        public List<Map<String, String>> taskConfigs(int maxTasks) {
+            return null;
+        }
 
-		@Override
-		public ConfigDef config() {
-			return new ConfigDef()
-					.define("required", ConfigDef.Type.STRING, ConfigDef.Importance.HIGH, "required docs")
-					.define("optional", ConfigDef.Type.STRING, "defaultVal", ConfigDef.Importance.HIGH, "optional docs");
-		}
+        @Override
+        public void stop() {
+            stopped = true;
+        }
 
-		@Override
-		public void assertContext(ConnectorContext expected) {
-			assertSame(expected, context);
-			assertSame(expected, context());
-		}
+        @Override
+        public ConfigDef config() {
+            return new ConfigDef()
+                    .define("required", ConfigDef.Type.STRING, ConfigDef.Importance.HIGH, "required docs")
+                    .define("optional", ConfigDef.Type.STRING, "defaultVal", ConfigDef.Importance.HIGH, "optional docs");
+        }
 
-		@Override
-		public void assertInitialized() {
-			assertTrue(initialized);
-		}
+        @Override
+        public void assertContext(ConnectorContext expected) {
+            assertSame(expected, context);
+            assertSame(expected, context());
+        }
 
-		@Override
-		public void assertTaskConfigs(List<Map<String, String>> expectedTaskConfigs) {
-			assertSame(expectedTaskConfigs, taskConfigs);
-		}
+        @Override
+        public void assertInitialized() {
+            assertTrue(initialized);
+        }
 
-		@Override
-		public void assertStarted(boolean expected) {
-			assertEquals(expected, started);
-		}
+        @Override
+        public void assertTaskConfigs(List<Map<String, String>> expectedTaskConfigs) {
+            assertSame(expectedTaskConfigs, taskConfigs);
+        }
 
-		@Override
-		public void assertStopped(boolean expected) {
-			assertEquals(expected, stopped);
-		}
+        @Override
+        public void assertStarted(boolean expected) {
+            assertEquals(expected, started);
+        }
 
-		@Override
-		public void assertProperties(Map<String, String> expected) {
-			assertSame(expected, props);
-		}
-	}
+        @Override
+        public void assertStopped(boolean expected) {
+            assertEquals(expected, stopped);
+        }
+
+        @Override
+        public void assertProperties(Map<String, String> expected) {
+            assertSame(expected, props);
+        }
+    }
 }

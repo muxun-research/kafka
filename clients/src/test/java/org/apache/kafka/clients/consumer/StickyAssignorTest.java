@@ -25,6 +25,7 @@ import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.protocol.types.Struct;
 import org.apache.kafka.common.utils.CollectionUtils;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -32,13 +33,23 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static java.util.Collections.emptyList;
 import static org.apache.kafka.clients.consumer.StickyAssignor.serializeTopicPartitionAssignment;
 import static org.apache.kafka.clients.consumer.internals.AbstractPartitionAssignorTest.TEST_NAME_WITH_RACK_CONFIG;
 import static org.apache.kafka.clients.consumer.internals.AbstractStickyAssignor.DEFAULT_GENERATION;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class StickyAssignorTest extends AbstractStickyAssignorTest {
 
@@ -49,17 +60,20 @@ public class StickyAssignorTest extends AbstractStickyAssignorTest {
 
     @Override
     public Subscription buildSubscriptionV0(List<String> topics, List<TopicPartition> partitions, int generationId, int consumerIndex) {
-        return new Subscription(topics, serializeTopicPartitionAssignment(new MemberData(partitions, Optional.of(generationId))), Collections.emptyList(), DEFAULT_GENERATION, consumerRackId(consumerIndex));
+        return new Subscription(topics, serializeTopicPartitionAssignment(new MemberData(partitions, Optional.of(generationId))),
+            Collections.emptyList(), DEFAULT_GENERATION, consumerRackId(consumerIndex));
     }
 
     @Override
     public Subscription buildSubscriptionV1(List<String> topics, List<TopicPartition> partitions, int generationId, int consumerIndex) {
-        return new Subscription(topics, serializeTopicPartitionAssignment(new MemberData(partitions, Optional.of(generationId))), partitions, DEFAULT_GENERATION, Optional.empty());
+        return new Subscription(topics, serializeTopicPartitionAssignment(new MemberData(partitions, Optional.of(generationId))),
+            partitions, DEFAULT_GENERATION, Optional.empty());
     }
 
     @Override
     public Subscription buildSubscriptionV2Above(List<String> topics, List<TopicPartition> partitions, int generationId, int consumerIndex) {
-        return new Subscription(topics, serializeTopicPartitionAssignment(new MemberData(partitions, Optional.of(generationId))), partitions, generationId, Optional.empty());
+        return new Subscription(topics, serializeTopicPartitionAssignment(new MemberData(partitions, Optional.of(generationId))),
+            partitions, generationId, Optional.empty());
     }
 
     @Override
@@ -237,7 +251,8 @@ public class StickyAssignorTest extends AbstractStickyAssignorTest {
         TopicPartition t3p2 = new TopicPartition(topic3, 2);
         TopicPartition t3p3 = new TopicPartition(topic3, 3);
 
-        List<TopicPartition> c1partitions0 = isAllSubscriptionsEqual ? partitions(tp0, tp1, tp2, t2p2, t2p3, t3p0) : partitions(tp0, tp1, tp2, tp3);
+        List<TopicPartition> c1partitions0 = isAllSubscriptionsEqual ? partitions(tp0, tp1, tp2, t2p2, t2p3, t3p0) :
+            partitions(tp0, tp1, tp2, tp3);
         List<TopicPartition> c2partitions0 = partitions(tp0, tp1, t2p0, t2p1, t2p2, t2p3);
         List<TopicPartition> c3partitions0 = partitions(tp2, tp3, t3p0, t3p1, t3p2, t3p3);
         subscriptions.put(consumer1, buildSubscriptionV2Above(consumer1SubscribedTopics, c1partitions0, 1, 0));
@@ -355,6 +370,12 @@ public class StickyAssignorTest extends AbstractStickyAssignorTest {
     }
 
     public static Collection<Arguments> rackAndSubscriptionCombinations() {
-        return Arrays.asList(Arguments.of(RackConfig.NO_BROKER_RACK, true), Arguments.of(RackConfig.NO_CONSUMER_RACK, true), Arguments.of(RackConfig.BROKER_AND_CONSUMER_RACK, true), Arguments.of(RackConfig.NO_BROKER_RACK, false), Arguments.of(RackConfig.NO_CONSUMER_RACK, false), Arguments.of(RackConfig.BROKER_AND_CONSUMER_RACK, false));
+        return Arrays.asList(
+                Arguments.of(RackConfig.NO_BROKER_RACK, true),
+                Arguments.of(RackConfig.NO_CONSUMER_RACK, true),
+                Arguments.of(RackConfig.BROKER_AND_CONSUMER_RACK, true),
+                Arguments.of(RackConfig.NO_BROKER_RACK, false),
+                Arguments.of(RackConfig.NO_CONSUMER_RACK, false),
+                Arguments.of(RackConfig.BROKER_AND_CONSUMER_RACK, false));
     }
 }

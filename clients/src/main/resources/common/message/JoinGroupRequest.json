@@ -16,14 +16,11 @@
 {
   "apiKey": 11,
   "type": "request",
-  "listeners": [
-    "zkBroker",
-    "broker"
-  ],
+  "listeners": ["broker"],
   "name": "JoinGroupRequest",
-  // Version 1 adds RebalanceTimeoutMs.
+  // Versions 0-1 were removed in Apache Kafka 4.0, Version 2 is the new baseline.
   //
-  // Version 2 and 3 are the same as version 1.
+  // Version 1 adds RebalanceTimeoutMs. Version 2 and 3 are the same as version 1.
   //
   // Starting from version 4, the client needs to issue a second request to join group
   //
@@ -37,77 +34,32 @@
   // Version 8 adds the Reason field (KIP-800).
   //
   // Version 9 is the same as version 8.
-  "validVersions": "0-9",
+  "validVersions": "2-9",
   "flexibleVersions": "6+",
   "fields": [
-    {
-      "name": "GroupId",
-      "type": "string",
-      "versions": "0+",
-      "entityType": "groupId",
-      "about": "The group identifier."
-    },
-    {
-      "name": "SessionTimeoutMs",
-      "type": "int32",
-      "versions": "0+",
-      "about": "The coordinator considers the consumer dead if it receives no heartbeat after this timeout in milliseconds."
-    },
+    { "name": "GroupId", "type": "string", "versions": "0+", "entityType": "groupId",
+      "about": "The group identifier." },
+    { "name": "SessionTimeoutMs", "type": "int32", "versions": "0+",
+      "about": "The coordinator considers the consumer dead if it receives no heartbeat after this timeout in milliseconds." },
     // Note: if RebalanceTimeoutMs is not present, SessionTimeoutMs should be
     // used instead.  The default of -1 here is just intended as a placeholder.
-    {
-      "name": "RebalanceTimeoutMs",
-      "type": "int32",
-      "versions": "1+",
-      "default": "-1",
-      "ignorable": true,
-      "about": "The maximum time in milliseconds that the coordinator will wait for each member to rejoin when rebalancing the group."
-    },
-    {
-      "name": "MemberId",
-      "type": "string",
-      "versions": "0+",
+    { "name": "RebalanceTimeoutMs", "type": "int32", "versions": "1+", "default": "-1", "ignorable": true,
+      "about": "The maximum time in milliseconds that the coordinator will wait for each member to rejoin when rebalancing the group." },
+    { "name": "MemberId", "type": "string", "versions": "0+",
       "about": "The member id assigned by the group coordinator." },
-    { "name": "GroupInstanceId", "type": "string", "versions": "5+",
-      "nullableVersions": "5+",
-      "default": "null",
-      "about": "The unique identifier of the consumer instance provided by end user."
-    },
-    {
-      "name": "ProtocolType",
-      "type": "string",
-      "versions": "0+",
-      "about": "The unique name the for class of protocols implemented by the group we want to join."
-    },
-    {
-      "name": "Protocols",
-      "type": "[]JoinGroupRequestProtocol",
-      "versions": "0+",
-      "about": "The list of protocols that the member supports.",
-      "fields": [
-        {
-          "name": "Name",
-          "type": "string",
-          "versions": "0+",
-          "mapKey": true,
-          "about": "The protocol name."
-        },
-        {
-          "name": "Metadata",
-          "type": "bytes",
-          "versions": "0+",
-          "about": "The protocol metadata."
-        }
-      ]
-    },
-    {
-      "name": "Reason",
-      "type": "string",
-      "versions": "8+",
-      "nullableVersions": "8+",
-      "default": "null",
-      "ignorable": true,
-      "about": "The reason why the member (re-)joins the group."
-    }
+    { "name": "GroupInstanceId", "type": "string", "versions": "5+", 
+      "nullableVersions": "5+", "default": "null",
+      "about": "The unique identifier of the consumer instance provided by end user." },
+    { "name": "ProtocolType", "type": "string", "versions": "0+",
+      "about": "The unique name the for class of protocols implemented by the group we want to join." },
+    { "name": "Protocols", "type": "[]JoinGroupRequestProtocol", "versions": "0+",
+      "about": "The list of protocols that the member supports.", "fields": [
+      { "name": "Name", "type": "string", "versions": "0+", "mapKey": true,
+        "about": "The protocol name." },
+      { "name": "Metadata", "type": "bytes", "versions": "0+",
+        "about": "The protocol metadata." }
+    ]},
+    { "name": "Reason", "type": "string", "versions": "8+", "nullableVersions": "8+", "default": "null", "ignorable": true,
+      "about": "The reason why the member (re-)joins the group." }
   ]
 }

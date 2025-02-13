@@ -27,26 +27,27 @@ import java.util.function.Supplier;
  * The supplier should always generate a new instance each time {@link TransformerSupplier#get()} gets called. Creating
  * a single {@link Transformer} object and returning the same object reference in {@link TransformerSupplier#get()} would be
  * a violation of the supplier pattern and leads to runtime exceptions.
+ *
  * @param <K> key type
  * @param <V> value type
  * @param <R> {@link org.apache.kafka.streams.KeyValue KeyValue} return type (both key and value type can be set
  *            arbitrarily)
  * @see Transformer
- * @see KStream#transform(TransformerSupplier, String...)
  * @see ValueTransformer
  * @see ValueTransformerSupplier
- * @see KStream#transformValues(ValueTransformerSupplier, String...)
+ * @deprecated Since 4.0. Use {@link org.apache.kafka.streams.processor.api.ProcessorSupplier api.ProcessorSupplier} instead.
  */
+@Deprecated
 public interface TransformerSupplier<K, V, R> extends ConnectedStoreProvider, Supplier<Transformer<K, V, R>> {
 
-	/**
-	 * Return a newly constructed {@link Transformer} instance.
-	 * The supplier should always generate a new instance each time {@link  TransformerSupplier#get() gets called}.
-	 * <p>
-	 * Creating a single {@link Transformer} object and returning the same object reference in {@link TransformerSupplier#get()}
-	 * is a violation of the supplier pattern and leads to runtime exceptions.
-	 *
-	 * @return a newly constructed {@link Transformer} instance
-	 */
+    /**
+     * Return a newly constructed {@link Transformer} instance.
+     * The supplier should always generate a new instance each time {@link TransformerSupplier#get() gets called}.
+     * <p>
+     * Creating a single {@link Transformer} object and returning the same object reference in {@link TransformerSupplier#get()}
+     * is a violation of the supplier pattern and leads to runtime exceptions.
+     *
+     * @return a newly constructed {@link Transformer} instance
+     */
     Transformer<K, V, R> get();
 }

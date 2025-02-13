@@ -39,21 +39,22 @@ public class SerializedJwt {
             token = token.trim();
 
         if (token.isEmpty())
-            throw new ValidateException("Empty JWT provided; expected three sections (header, payload, and signature)");
+            throw new ValidateException("Malformed JWT provided; expected three sections (header, payload, and signature)");
 
         String[] splits = token.split("\\.");
 
         if (splits.length != 3)
-            throw new ValidateException(String.format("Malformed JWT provided (%s); expected three sections (header, payload, and signature), but %s sections provided", token, splits.length));
+            throw new ValidateException("Malformed JWT provided; expected three sections (header, payload, and signature)");
 
         this.token = token.trim();
-        this.header = validateSection(splits[0], "header");
-        this.payload = validateSection(splits[1], "payload");
-        this.signature = validateSection(splits[2], "signature");
+        this.header = validateSection(splits[0]);
+        this.payload = validateSection(splits[1]);
+        this.signature = validateSection(splits[2]);
     }
 
     /**
      * Returns the entire base 64-encoded JWT.
+     *
      * @return JWT
      */
 
@@ -63,6 +64,7 @@ public class SerializedJwt {
 
     /**
      * Returns the first section--the JWT header--in its base 64-encoded form.
+     *
      * @return Header section of the JWT
      */
 
@@ -72,6 +74,7 @@ public class SerializedJwt {
 
     /**
      * Returns the second section--the JWT payload--in its base 64-encoded form.
+     *
      * @return Payload section of the JWT
      */
 
@@ -81,6 +84,7 @@ public class SerializedJwt {
 
     /**
      * Returns the third section--the JWT signature--in its base 64-encoded form.
+     *
      * @return Signature section of the JWT
      */
 
@@ -88,11 +92,11 @@ public class SerializedJwt {
         return signature;
     }
 
-    private String validateSection(String section, String sectionName) throws ValidateException {
+    private String validateSection(String section) throws ValidateException {
         section = section.trim();
 
         if (section.isEmpty())
-            throw new ValidateException(String.format("Malformed JWT provided; expected at least three sections (header, payload, and signature), but %s section missing", sectionName));
+            throw new ValidateException("Malformed JWT provided; expected three sections (header, payload, and signature)");
 
         return section;
     }

@@ -31,7 +31,7 @@ import java.util.Properties;
 
 /**
  * Represents the configuration of a resource.
- * <p>
+ *
  * This class is thread-safe.
  */
 public final class ConfigurationImage {
@@ -39,7 +39,10 @@ public final class ConfigurationImage {
 
     private final Map<String, String> data;
 
-    public ConfigurationImage(ConfigResource resource, Map<String, String> data) {
+    public ConfigurationImage(
+        ConfigResource resource,
+        Map<String, String> data
+    ) {
         this.resource = resource;
         this.data = data;
     }
@@ -66,17 +69,23 @@ public final class ConfigurationImage {
         return Collections.unmodifiableMap(data);
     }
 
-    public void write(ConfigResource configResource, ImageWriter writer, ImageWriterOptions options) {
+    public void write(
+        ConfigResource configResource,
+        ImageWriter writer,
+        ImageWriterOptions options
+    ) {
         for (Map.Entry<String, String> entry : data.entrySet()) {
-            writer.write(0, new ConfigRecord().setResourceType(configResource.type().id()).setResourceName(configResource.name()).setName(entry.getKey()).setValue(entry.getValue()));
+            writer.write(0, new ConfigRecord().
+                setResourceType(configResource.type().id()).
+                setResourceName(configResource.name()).
+                setName(entry.getKey()).
+                setValue(entry.getValue()));
         }
     }
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof ConfigurationImage))
-            return false;
-        ConfigurationImage other = (ConfigurationImage) o;
+        if (!(o instanceof ConfigurationImage other)) return false;
         return data.equals(other.data);
     }
 

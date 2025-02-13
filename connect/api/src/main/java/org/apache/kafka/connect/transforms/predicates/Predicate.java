@@ -27,24 +27,33 @@ import org.apache.kafka.connect.connector.ConnectRecord;
  * In particular, the {@code Filter} transformation can be conditionally applied in order to filter
  * certain records from further processing.
  *
- * <p>Implementations of this interface must be public and have a public constructor with no parameters.
+ * <p>Kafka Connect may discover implementations of this interface using the Java {@link java.util.ServiceLoader} mechanism.
+ * To support this, implementations of this interface should also contain a service provider configuration file in
+ * {@code META-INF/services/org.apache.kafka.connect.transforms.predicates.Predicate}.
+ *
+ * <p>Implement {@link org.apache.kafka.common.metrics.Monitorable} to enable the predicate to register metrics.
+ * The following tags are automatically added to all metrics registered: <code>connector</code> set to connector name,
+ * <code>task</code> set to the task id and <code>predicate</code> set to the predicate alias.
+ *
  * @param <R> The type of record.
  */
 public interface Predicate<R extends ConnectRecord<R>> extends Configurable, AutoCloseable {
 
-	/**
-	 * Configuration specification for this predicate.
-	 * @return the configuration definition for this predicate; never null
-	 */
-	ConfigDef config();
+    /**
+     * Configuration specification for this predicate.
+     *
+     * @return the configuration definition for this predicate; never null
+     */
+    ConfigDef config();
 
-	/**
-	 * Returns whether the given record satisfies this predicate.
-	 * @param record the record to evaluate; may not be null
-	 * @return true if the predicate matches, or false otherwise
-	 */
-	boolean test(R record);
+    /**
+     * Returns whether the given record satisfies this predicate.
+     *
+     * @param record the record to evaluate; may not be null
+     * @return true if the predicate matches, or false otherwise
+     */
+    boolean test(R record);
 
-	@Override
-	void close();
+    @Override
+    void close();
 }

@@ -20,16 +20,17 @@ package org.apache.kafka.message;
 import java.io.BufferedWriter;
 
 public interface MessageClassGenerator {
-	/**
-	 * The short name of the converter class we are generating.  For example,
-	 * FetchRequestDataJsonConverter.java.
-	 */
-	String outputName(MessageSpec spec);
+    /**
+     * The short name of the converter class we are generating.  For example,
+     * FetchRequestDataJsonConverter.java.
+     */
+    String outputName(MessageSpec spec);
 
-	/**
-	 * Generate the convertere, and then write it out.
-	 * @param spec   The message to generate a converter for.
-	 * @param writer The writer to write out the state to.
-	 */
-	void generateAndWrite(MessageSpec spec, BufferedWriter writer) throws Exception;
+    /**
+     * Generate the converter, and then write it out.
+     *
+     * @param spec      The message to generate a converter for.
+     * @param writer    The writer to write out the state to.
+     */
+    void generateAndWrite(MessageSpec spec, BufferedWriter writer) throws Exception;
 }

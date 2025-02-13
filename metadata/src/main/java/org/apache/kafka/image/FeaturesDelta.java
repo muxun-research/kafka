@@ -18,8 +18,6 @@
 package org.apache.kafka.image;
 
 import org.apache.kafka.common.metadata.FeatureLevelRecord;
-import org.apache.kafka.common.metadata.ZkMigrationStateRecord;
-import org.apache.kafka.metadata.migration.ZkMigrationState;
 import org.apache.kafka.server.common.MetadataVersion;
 
 import java.util.HashMap;
@@ -38,18 +36,12 @@ public final class FeaturesDelta {
 
     private MetadataVersion metadataVersionChange = null;
 
-    private ZkMigrationState zkMigrationStateChange = null;
-
     public FeaturesDelta(FeaturesImage image) {
         this.image = image;
     }
 
     public Map<String, Optional<Short>> changes() {
         return changes;
-    }
-
-    public Optional<ZkMigrationState> getZkMigrationStateChange() {
-        return Optional.ofNullable(zkMigrationStateChange);
     }
 
     public Optional<MetadataVersion> metadataVersionChange() {
@@ -76,12 +68,9 @@ public final class FeaturesDelta {
         }
     }
 
-    public void replay(ZkMigrationStateRecord record) {
-        this.zkMigrationStateChange = ZkMigrationState.of(record.zkMigrationState());
-    }
-
     public FeaturesImage apply() {
-        Map<String, Short> newFinalizedVersions = new HashMap<>(image.finalizedVersions().size());
+        Map<String, Short> newFinalizedVersions =
+            new HashMap<>(image.finalizedVersions().size());
         for (Entry<String, Short> entry : image.finalizedVersions().entrySet()) {
             String name = entry.getKey();
             Optional<Short> change = changes.get(name);
@@ -108,17 +97,14 @@ public final class FeaturesDelta {
             metadataVersion = metadataVersionChange;
         }
 
-        final ZkMigrationState zkMigrationState;
-        if (zkMigrationStateChange == null) {
-            zkMigrationState = image.zkMigrationState();
-        } else {
-            zkMigrationState = zkMigrationStateChange;
-        }
-        return new FeaturesImage(newFinalizedVersions, metadataVersion, zkMigrationState);
+        return new FeaturesImage(newFinalizedVersions, metadataVersion);
     }
 
     @Override
     public String toString() {
-        return "FeaturesDelta(" + "changes=" + changes + ", metadataVersionChange=" + metadataVersionChange + ", zkMigrationStateChange=" + zkMigrationStateChange + ')';
+        return "FeaturesDelta(" +
+            "changes=" + changes +
+            ", metadataVersionChange=" + metadataVersionChange +
+            ')';
     }
 }

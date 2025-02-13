@@ -21,9 +21,25 @@ import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.metadata.PartitionRecord;
 import org.apache.kafka.image.TopicsDelta;
 import org.apache.kafka.image.TopicsImage;
-import org.openjdk.jmh.annotations.*;
 
-import java.util.*;
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Warmup;
+
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -57,13 +73,22 @@ public class TopicsImageZonalOutageBenchmark {
         // It turns out that
         topicsDelta = new TopicsDelta(builtupTopicsImage);
         Set<Uuid> perturbedTopics = new HashSet<>();
-        builtupTopicsImage.topicsById().forEach((topicId, topicImage) -> topicImage.partitions().forEach((partitionNumber, partitionRegistration) -> {
-            List<Integer> newIsr = Arrays.stream(partitionRegistration.isr).boxed().filter(n -> n != 0).collect(Collectors.toList());
-            if (newIsr.size() < replicationFactor) {
-                perturbedTopics.add(topicId);
-                topicsDelta.replay(new PartitionRecord().setPartitionId(partitionNumber).setTopicId(topicId).setReplicas(Arrays.stream(partitionRegistration.replicas).boxed().collect(Collectors.toList())).setIsr(newIsr).setRemovingReplicas(Collections.emptyList()).setAddingReplicas(Collections.emptyList()).setLeader(newIsr.get(0)));
-            }
-        }));
+        builtupTopicsImage.topicsById().forEach((topicId, topicImage) ->
+            topicImage.partitions().forEach((partitionNumber, partitionRegistration) -> {
+                List<Integer> newIsr = Arrays.stream(partitionRegistration.isr).boxed().filter(n -> n != 0).collect(Collectors.toList());
+                if (newIsr.size() < replicationFactor) {
+                    perturbedTopics.add(topicId);
+                    topicsDelta.replay(new PartitionRecord().
+                        setPartitionId(partitionNumber).
+                        setTopicId(topicId).
+                        setReplicas(Arrays.stream(partitionRegistration.replicas).boxed().collect(Collectors.toList())).
+                        setIsr(newIsr).
+                        setRemovingReplicas(Collections.emptyList()).
+                        setAddingReplicas(Collections.emptyList()).
+                        setLeader(newIsr.get(0)));
+                }
+            })
+        );
         int numBrokers = TopicsImageSnapshotLoadBenchmark.getNumBrokers(totalTopicCount, partitionsPerTopic, replicationFactor, numReplicasPerBroker);
         System.out.print("(Perturbing 1 of " + numBrokers + " brokers, or " + perturbedTopics.size() + " topics within metadata having " + totalTopicCount + " total topics) ");
     }

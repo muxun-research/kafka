@@ -16,29 +16,38 @@
  */
 package org.apache.kafka.connect.runtime;
 
-import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.metrics.PluginMetrics;
 import org.apache.kafka.connect.errors.IllegalWorkerStateException;
 import org.apache.kafka.connect.sink.ErrantRecordReporter;
 import org.apache.kafka.connect.sink.SinkTaskContext;
 import org.apache.kafka.connect.storage.ClusterConfigState;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 public class WorkerSinkTaskContext implements SinkTaskContext {
 
-    private final Logger log = LoggerFactory.getLogger(getClass());
+    private static final Logger log = LoggerFactory.getLogger(WorkerSinkTaskContext.class);
     private final Map<TopicPartition, Long> offsets;
-    private final KafkaConsumer<byte[], byte[]> consumer;
+    private final Consumer<byte[], byte[]> consumer;
     private final WorkerSinkTask sinkTask;
     private final ClusterConfigState configState;
     private final Set<TopicPartition> pausedPartitions;
     private long timeoutMs;
     private boolean commitRequested;
 
-    public WorkerSinkTaskContext(KafkaConsumer<byte[], byte[]> consumer, WorkerSinkTask sinkTask, ClusterConfigState configState) {
+    public WorkerSinkTaskContext(Consumer<byte[], byte[]> consumer,
+                                 WorkerSinkTask sinkTask,
+                                 ClusterConfigState configState) {
         this.offsets = new HashMap<>();
         this.timeoutMs = -1L;
         this.consumer = consumer;
@@ -142,25 +151,30 @@ public class WorkerSinkTaskContext implements SinkTaskContext {
     public void requestCommit() {
         log.debug("{} Requesting commit", this);
         commitRequested = true;
-	}
+    }
 
-	public boolean isCommitRequested() {
-		return commitRequested;
-	}
+    public boolean isCommitRequested() {
+        return commitRequested;
+    }
 
-	public void clearCommitRequest() {
-		commitRequested = false;
-	}
+    public void clearCommitRequest() {
+        commitRequested = false;
+    }
 
-	@Override
-	public ErrantRecordReporter errantRecordReporter() {
-		return sinkTask.workerErrantRecordReporter();
-	}
+    @Override
+    public ErrantRecordReporter errantRecordReporter() {
+        return sinkTask.workerErrantRecordReporter();
+    }
 
-	@Override
-	public String toString() {
-		return "WorkerSinkTaskContext{" +
-				"id=" + sinkTask.id +
-				'}';
-	}
+    @Override
+    public PluginMetrics pluginMetrics() {
+        return sinkTask.pluginMetrics();
+    }
+
+    @Override
+    public String toString() {
+        return "WorkerSinkTaskContext{" +
+               "id=" + sinkTask.id +
+               '}';
+    }
 }

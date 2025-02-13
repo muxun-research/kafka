@@ -25,35 +25,38 @@ import org.apache.kafka.connect.runtime.ConnectorConfig;
 import org.apache.kafka.connect.runtime.InternalSinkRecord;
 import org.apache.kafka.connect.storage.Converter;
 import org.apache.kafka.connect.storage.HeaderConverter;
-import org.junit.Test;
-import org.junit.runner.RunWith;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.mockito.junit.MockitoJUnitRunner;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
-@RunWith(MockitoJUnitRunner.StrictStubs.class)
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)
 public class WorkerErrantRecordReporterTest {
 
     private WorkerErrantRecordReporter reporter;
 
-    @Mock
-    private Converter converter;
-    @Mock
-    private HeaderConverter headerConverter;
-    @Mock
-    private InternalSinkRecord record;
-    @Mock
-    private ErrorHandlingMetrics errorHandlingMetrics;
-    @Mock
-    private ErrorReporter errorReporter;
+    @Mock private Converter converter;
+    @Mock private HeaderConverter headerConverter;
+    @Mock private ProcessingContext<ConsumerRecord<byte[], byte[]>> context;
+    @Mock private InternalSinkRecord record;
+    @Mock private ErrorHandlingMetrics errorHandlingMetrics;
+    @Mock private ErrorReporter<ConsumerRecord<byte[], byte[]>> errorReporter;
 
     @Test
     public void testGetFutures() {
@@ -83,8 +86,7 @@ public class WorkerErrantRecordReporterTest {
     private void testReport(boolean errorsTolerated) {
         initializeReporter(errorsTolerated);
         when(errorReporter.report(any())).thenReturn(CompletableFuture.completedFuture(null));
-        @SuppressWarnings("unchecked") ConsumerRecord<byte[], byte[]> consumerRecord = mock(ConsumerRecord.class);
-        when(record.originalRecord()).thenReturn(consumerRecord);
+        when(record.context()).thenReturn(context);
 
         if (errorsTolerated) {
             reporter.report(record, new Throwable());
@@ -96,8 +98,19 @@ public class WorkerErrantRecordReporterTest {
     }
 
     private void initializeReporter(boolean errorsTolerated) {
-        RetryWithToleranceOperator retryWithToleranceOperator = new RetryWithToleranceOperator(5000, ConnectorConfig.ERRORS_RETRY_MAX_DELAY_DEFAULT, errorsTolerated ? ToleranceType.ALL : ToleranceType.NONE, Time.SYSTEM, errorHandlingMetrics);
+        RetryWithToleranceOperator<ConsumerRecord<byte[], byte[]>> retryWithToleranceOperator = new RetryWithToleranceOperator<>(
+                5000,
+                ConnectorConfig.ERRORS_RETRY_MAX_DELAY_DEFAULT,
+                errorsTolerated ? ToleranceType.ALL : ToleranceType.NONE,
+                Time.SYSTEM,
+                errorHandlingMetrics
+        );
         retryWithToleranceOperator.reporters(Collections.singletonList(errorReporter));
-        reporter = new WorkerErrantRecordReporter(retryWithToleranceOperator, converter, converter, headerConverter);
+        reporter = new WorkerErrantRecordReporter(
+                retryWithToleranceOperator,
+                converter,
+                converter,
+                headerConverter
+        );
     }
 }

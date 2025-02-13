@@ -17,11 +17,15 @@
 package org.apache.kafka.clients.producer.internals;
 
 
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerInterceptor;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.internals.Plugin;
+import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.record.RecordBatch;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,30 +38,34 @@ import java.util.List;
  */
 public class ProducerInterceptors<K, V> implements Closeable {
     private static final Logger log = LoggerFactory.getLogger(ProducerInterceptors.class);
-    private final List<ProducerInterceptor<K, V>> interceptors;
+    private final List<Plugin<ProducerInterceptor<K, V>>> interceptorPlugins;
 
-    public ProducerInterceptors(List<ProducerInterceptor<K, V>> interceptors) {
-        this.interceptors = interceptors;
+    public ProducerInterceptors(List<ProducerInterceptor<K, V>> interceptors, Metrics metrics) {
+        this.interceptorPlugins = Plugin.wrapInstances(interceptors, metrics, ProducerConfig.INTERCEPTOR_CLASSES_CONFIG);
     }
 
     /**
-	 * 在key和value进行序列化之前，客户端发送记录到KafkaProducer时调用此方法
-	 * 会进行连接器的责任链调用
-	 * 在最后一个拦截器被调用后，返回
+     * This is called when client sends the record to KafkaProducer, before key and value gets serialized.
+     * The method calls {@link ProducerInterceptor#onSend(ProducerRecord)} method. ProducerRecord
+     * returned from the first interceptor's onSend() is passed to the second interceptor onSend(), and so on in the
+     * interceptor chain. The record returned from the last interceptor is returned from this method.
      *
-	 * 此方法不会抛出异常，任何由拦截器抛出的异常将会被忽略
+     * This method does not throw exceptions. Exceptions thrown by any of interceptor methods are caught and ignored.
+     * If an interceptor in the middle of the chain, that normally modifies the record, throws an exception,
+     * the next interceptor in the chain will be called with a record returned by the previous interceptor that did not
+     * throw an exception.
      *
-	 * @param record 客户端发送的记录
-	 * @return 记录将要发往的信息
+     * @param record the record from client
+     * @return producer record to send to topic/partition
      */
     public ProducerRecord<K, V> onSend(ProducerRecord<K, V> record) {
         ProducerRecord<K, V> interceptRecord = record;
-        for (ProducerInterceptor<K, V> interceptor : this.interceptors) {
+        for (Plugin<ProducerInterceptor<K, V>> interceptorPlugin : this.interceptorPlugins) {
             try {
-                interceptRecord = interceptor.onSend(interceptRecord);
+                interceptRecord = interceptorPlugin.get().onSend(interceptRecord);
             } catch (Exception e) {
-				// 不会继续传播拦截器的异常，日志记录一下，然后继续调用其他的拦截器
-				// 也不要抛出任何异常
+                // do not propagate interceptor exception, log and continue calling other interceptors
+                // be careful not to throw exception from here
                 if (record != null)
                     log.warn("Error executing interceptor onSend callback for topic: {}, partition: {}", record.topic(), record.partition(), e);
                 else
@@ -79,9 +87,9 @@ public class ProducerInterceptors<K, V> implements Closeable {
      * @param exception The exception thrown during processing of this record. Null if no error occurred.
      */
     public void onAcknowledgement(RecordMetadata metadata, Exception exception) {
-        for (ProducerInterceptor<K, V> interceptor : this.interceptors) {
+        for (Plugin<ProducerInterceptor<K, V>> interceptorPlugin : this.interceptorPlugins) {
             try {
-                interceptor.onAcknowledgement(metadata, exception);
+                interceptorPlugin.get().onAcknowledgement(metadata, exception);
             } catch (Exception e) {
                 // do not propagate interceptor exceptions, just log
                 log.warn("Error executing interceptor onAcknowledgement callback", e);
@@ -100,15 +108,16 @@ public class ProducerInterceptors<K, V> implements Closeable {
      * @param exception The exception thrown during processing of this record.
      */
     public void onSendError(ProducerRecord<K, V> record, TopicPartition interceptTopicPartition, Exception exception) {
-        for (ProducerInterceptor<K, V> interceptor : this.interceptors) {
+        for (Plugin<ProducerInterceptor<K, V>> interceptorPlugin : this.interceptorPlugins) {
             try {
                 if (record == null && interceptTopicPartition == null) {
-                    interceptor.onAcknowledgement(null, exception);
+                    interceptorPlugin.get().onAcknowledgement(null, exception);
                 } else {
                     if (interceptTopicPartition == null) {
                         interceptTopicPartition = extractTopicPartition(record);
                     }
-                    interceptor.onAcknowledgement(new RecordMetadata(interceptTopicPartition, -1, -1, RecordBatch.NO_TIMESTAMP, -1, -1), exception);
+                    interceptorPlugin.get().onAcknowledgement(new RecordMetadata(interceptTopicPartition, -1, -1,
+                                    RecordBatch.NO_TIMESTAMP, -1, -1), exception);
                 }
             } catch (Exception e) {
                 // do not propagate interceptor exceptions, just log
@@ -126,9 +135,9 @@ public class ProducerInterceptors<K, V> implements Closeable {
      */
     @Override
     public void close() {
-        for (ProducerInterceptor<K, V> interceptor : this.interceptors) {
+        for (Plugin<ProducerInterceptor<K, V>> interceptorPlugin : this.interceptorPlugins) {
             try {
-                interceptor.close();
+                interceptorPlugin.close();
             } catch (Exception e) {
                 log.error("Failed to close producer interceptor ", e);
             }

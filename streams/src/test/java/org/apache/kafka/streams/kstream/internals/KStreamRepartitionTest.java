@@ -16,9 +16,17 @@
  */
 package org.apache.kafka.streams.kstream.internals;
 
-import org.apache.kafka.common.serialization.*;
+import org.apache.kafka.common.serialization.IntegerDeserializer;
+import org.apache.kafka.common.serialization.IntegerSerializer;
+import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.Utils;
-import org.apache.kafka.streams.*;
+import org.apache.kafka.streams.StreamsBuilder;
+import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.TestInputTopic;
+import org.apache.kafka.streams.TestOutputTopic;
+import org.apache.kafka.streams.TopologyTestDriver;
 import org.apache.kafka.streams.errors.TopologyException;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.JoinWindows;
@@ -27,23 +35,37 @@ import org.apache.kafka.streams.kstream.Repartitioned;
 import org.apache.kafka.streams.processor.StreamPartitioner;
 import org.apache.kafka.streams.test.TestRecord;
 import org.apache.kafka.test.StreamsTestUtils;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.mockito.junit.MockitoJUnitRunner;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.*;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Properties;
+import java.util.TreeMap;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @SuppressWarnings("deprecation")
-@RunWith(MockitoJUnitRunner.StrictStubs.class)
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)
 public class KStreamRepartitionTest {
     private final String inputTopic = "input-topic";
 
@@ -51,7 +73,7 @@ public class KStreamRepartitionTest {
 
     private StreamsBuilder builder;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         builder = new StreamsBuilder();
     }
@@ -59,22 +81,32 @@ public class KStreamRepartitionTest {
     @Test
     public void shouldInvokePartitionerWhenSet() {
         final int[] expectedKeys = new int[]{0, 1};
-        @SuppressWarnings("unchecked") final StreamPartitioner<Integer, String> streamPartitionerMock = mock(StreamPartitioner.class);
+        @SuppressWarnings("unchecked")
+        final StreamPartitioner<Integer, String> streamPartitionerMock = mock(StreamPartitioner.class);
 
         when(streamPartitionerMock.partitions(anyString(), eq(0), eq("X0"), anyInt())).thenReturn(Optional.of(Collections.singleton(1)));
         when(streamPartitionerMock.partitions(anyString(), eq(1), eq("X1"), anyInt())).thenReturn(Optional.of(Collections.singleton(1)));
 
         final String repartitionOperationName = "test";
-        final Repartitioned<Integer, String> repartitioned = Repartitioned.streamPartitioner(streamPartitionerMock).withName(repartitionOperationName);
+        final Repartitioned<Integer, String> repartitioned = Repartitioned
+            .streamPartitioner(streamPartitionerMock)
+            .withName(repartitionOperationName);
 
-        builder.<Integer, String>stream(inputTopic).repartition(repartitioned);
+        builder.<Integer, String>stream(inputTopic)
+            .repartition(repartitioned);
 
         try (final TopologyTestDriver driver = new TopologyTestDriver(builder.build(), props)) {
-            final TestInputTopic<Integer, String> testInputTopic = driver.createInputTopic(inputTopic, new IntegerSerializer(), new StringSerializer());
+            final TestInputTopic<Integer, String> testInputTopic = driver.createInputTopic(inputTopic,
+                                                                                           new IntegerSerializer(),
+                                                                                           new StringSerializer());
 
             final String topicName = repartitionOutputTopic(props, repartitionOperationName);
 
-            final TestOutputTopic<Integer, String> testOutputTopic = driver.createOutputTopic(topicName, new IntegerDeserializer(), new StringDeserializer());
+            final TestOutputTopic<Integer, String> testOutputTopic = driver.createOutputTopic(
+                topicName,
+                new IntegerDeserializer(),
+                new StringDeserializer()
+            );
 
             for (int i = 0; i < 2; i++) {
                 testInputTopic.pipeInput(expectedKeys[i], "X" + expectedKeys[i], i + 10);
@@ -99,18 +131,34 @@ public class KStreamRepartitionTest {
         final int inputTopicNumberOfPartitions = 4;
         final StreamsBuilder builder = new StreamsBuilder();
 
-        final Repartitioned<Integer, String> inputTopicRepartitioned = Repartitioned.<Integer, String>as(inputTopicRepartitionedName).withNumberOfPartitions(inputTopicNumberOfPartitions);
+        final Repartitioned<Integer, String> inputTopicRepartitioned = Repartitioned
+                .<Integer, String>as(inputTopicRepartitionedName)
+                .withNumberOfPartitions(inputTopicNumberOfPartitions);
 
-        final Repartitioned<Integer, String> topicBRepartitioned = Repartitioned.<Integer, String>as(topicBRepartitionedName).withNumberOfPartitions(topicBNumberOfPartitions);
+        final Repartitioned<Integer, String> topicBRepartitioned = Repartitioned
+                .<Integer, String>as(topicBRepartitionedName)
+                .withNumberOfPartitions(topicBNumberOfPartitions);
 
-        final KStream<Integer, String> topicBStream = builder.stream(topicB, Consumed.with(Serdes.Integer(), Serdes.String())).repartition(topicBRepartitioned);
+        final KStream<Integer, String> topicBStream = builder
+                .stream(topicB, Consumed.with(Serdes.Integer(), Serdes.String()))
+                .repartition(topicBRepartitioned);
 
-        builder.stream(inputTopic, Consumed.with(Serdes.Integer(), Serdes.String())).repartition(inputTopicRepartitioned).join(topicBStream, (value1, value2) -> value2, JoinWindows.of(Duration.ofSeconds(10))).to(outputTopic);
+        builder.stream(inputTopic, Consumed.with(Serdes.Integer(), Serdes.String()))
+                .repartition(inputTopicRepartitioned)
+                .join(topicBStream, (value1, value2) -> value2, JoinWindows.of(Duration.ofSeconds(10)))
+                .to(outputTopic);
 
-        final Map<String, Integer> repartitionTopicsWithNumOfPartitions = Utils.mkMap(Utils.mkEntry(toRepartitionTopicName(topicBRepartitionedName), topicBNumberOfPartitions), Utils.mkEntry(toRepartitionTopicName(inputTopicRepartitionedName), inputTopicNumberOfPartitions));
+        final Map<String, Integer> repartitionTopicsWithNumOfPartitions = Utils.mkMap(
+                Utils.mkEntry(toRepartitionTopicName(topicBRepartitionedName), topicBNumberOfPartitions),
+                Utils.mkEntry(toRepartitionTopicName(inputTopicRepartitionedName), inputTopicNumberOfPartitions)
+        );
 
-        final TopologyException expected = assertThrows(TopologyException.class, () -> builder.build(props));
-        final String expectedErrorMessage = String.format("Following topics do not have the same " + "number of partitions: [%s]", new TreeMap<>(repartitionTopicsWithNumOfPartitions));
+        final TopologyException expected = assertThrows(
+                TopologyException.class, () -> builder.build(props)
+        );
+        final String expectedErrorMessage = String.format("Following topics do not have the same " +
+                        "number of partitions: [%s]",
+                new TreeMap<>(repartitionTopicsWithNumOfPartitions));
         assertNotNull(expected);
         assertTrue(expected.getMessage().contains(expectedErrorMessage));
     }

@@ -17,15 +17,10 @@
 
 package org.apache.kafka.streams.kstream.internals.graph;
 
-import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.kstream.internals.ConsumedInternal;
 import org.apache.kafka.streams.kstream.internals.KTableSource;
-import org.apache.kafka.streams.kstream.internals.KeyValueStoreMaterializer;
-import org.apache.kafka.streams.kstream.internals.MaterializedInternal;
 import org.apache.kafka.streams.processor.api.ProcessorSupplier;
 import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
-import org.apache.kafka.streams.state.KeyValueStore;
-import org.apache.kafka.streams.state.StoreBuilder;
 
 import java.util.Collections;
 import java.util.Iterator;
@@ -36,20 +31,25 @@ import java.util.Iterator;
  */
 public class TableSourceNode<K, V> extends SourceGraphNode<K, V> {
 
-    private final MaterializedInternal<K, V, ?> materializedInternal;
     private final ProcessorParameters<K, V, ?, ?> processorParameters;
     private final String sourceName;
     private final boolean isGlobalKTable;
     private boolean shouldReuseSourceTopicForChangelog = false;
 
-    private TableSourceNode(final String nodeName, final String sourceName, final String topic, final ConsumedInternal<K, V> consumedInternal, final MaterializedInternal<K, V, ?> materializedInternal, final ProcessorParameters<K, V, ?, ?> processorParameters, final boolean isGlobalKTable) {
+    private TableSourceNode(final String nodeName,
+                            final String sourceName,
+                            final String topic,
+                            final ConsumedInternal<K, V> consumedInternal,
+                            final ProcessorParameters<K, V, ?, ?> processorParameters,
+                            final boolean isGlobalKTable) {
 
-        super(nodeName, Collections.singletonList(topic), consumedInternal);
+        super(nodeName,
+              Collections.singletonList(topic),
+              consumedInternal);
 
         this.sourceName = sourceName;
         this.isGlobalKTable = isGlobalKTable;
         this.processorParameters = processorParameters;
-        this.materializedInternal = materializedInternal;
     }
 
 
@@ -60,7 +60,6 @@ public class TableSourceNode<K, V> extends SourceGraphNode<K, V> {
     @Override
     public String toString() {
         return "TableSourceNode{" +
-               "materializedInternal=" + materializedInternal +
                ", processorParameters=" + processorParameters +
                ", sourceName='" + sourceName + '\'' +
                ", isGlobalKTable=" + isGlobalKTable +
@@ -85,23 +84,38 @@ public class TableSourceNode<K, V> extends SourceGraphNode<K, V> {
             throw new IllegalStateException("A table source node must have a single topic as input");
         }
 
-        final StoreBuilder<?> storeBuilder = new KeyValueStoreMaterializer<>((MaterializedInternal<K, V, KeyValueStore<Bytes, byte[]>>) materializedInternal).materialize();
-
         if (isGlobalKTable) {
-            topologyBuilder.addGlobalStore(storeBuilder, sourceName, consumedInternal().timestampExtractor(), consumedInternal().keyDeserializer(), consumedInternal().valueDeserializer(), topicName, processorParameters.processorName(), (ProcessorSupplier<K, V, Void, Void>) processorParameters.processorSupplier());
+            topologyBuilder.addGlobalStore(
+                sourceName,
+                consumedInternal().timestampExtractor(),
+                consumedInternal().keyDeserializer(),
+                consumedInternal().valueDeserializer(),
+                topicName,
+                processorParameters.processorName(),
+                (ProcessorSupplier<K, V, Void, Void>) processorParameters.processorSupplier(),
+                false
+            );
         } else {
-            topologyBuilder.addSource(consumedInternal().offsetResetPolicy(), sourceName, consumedInternal().timestampExtractor(), consumedInternal().keyDeserializer(), consumedInternal().valueDeserializer(), topicName);
+            topologyBuilder.addSource(consumedInternal().offsetResetPolicy(),
+                                      sourceName,
+                                      consumedInternal().timestampExtractor(),
+                                      consumedInternal().keyDeserializer(),
+                                      consumedInternal().valueDeserializer(),
+                                      topicName);
 
-            topologyBuilder.addProcessor(processorParameters.processorName(), processorParameters.processorSupplier(), sourceName);
+            processorParameters.addProcessorTo(topologyBuilder, sourceName);
 
-            // only add state store if the source KTable should be materialized
+            // if the KTableSource should not be materialized, stores will be null or empty
             final KTableSource<K, V> tableSource = (KTableSource<K, V>) processorParameters.processorSupplier();
-            if (tableSource.materialized()) {
-                topologyBuilder.addStateStore(storeBuilder, nodeName());
-
+            if (tableSource.stores() != null) {
                 if (shouldReuseSourceTopicForChangelog) {
-                    storeBuilder.withLoggingDisabled();
-                    topologyBuilder.connectSourceStoreAndTopic(storeBuilder.name(), topicName);
+                    // TODO: rewrite this part to use Topology.addReadOnlyStateStore() instead
+                    // should allow to move off using `InternalTopologyBuilder` in favor of the public `Topology` API
+                    tableSource.stores().forEach(store -> {
+                        // connect the source topic as (read-only) changelog topic for fault-tolerance
+                        store.withLoggingDisabled();
+                        topologyBuilder.connectSourceStoreAndTopic(store.name(), topicName);
+                    });
                 }
             }
         }
@@ -114,7 +128,6 @@ public class TableSourceNode<K, V> extends SourceGraphNode<K, V> {
         private String sourceName;
         private String topic;
         private ConsumedInternal<K, V> consumedInternal;
-        private MaterializedInternal<K, V, ?> materializedInternal;
         private ProcessorParameters<K, V, ?, ?> processorParameters;
         private boolean isGlobalKTable = false;
 
@@ -128,11 +141,6 @@ public class TableSourceNode<K, V> extends SourceGraphNode<K, V> {
 
         public TableSourceNodeBuilder<K, V> withTopic(final String topic) {
             this.topic = topic;
-            return this;
-        }
-
-        public TableSourceNodeBuilder<K, V> withMaterializedInternal(final MaterializedInternal<K, V, ?> materializedInternal) {
-            this.materializedInternal = materializedInternal;
             return this;
         }
 
@@ -157,7 +165,11 @@ public class TableSourceNode<K, V> extends SourceGraphNode<K, V> {
         }
 
         public TableSourceNode<K, V> build() {
-            return new TableSourceNode<>(nodeName, sourceName, topic, consumedInternal, materializedInternal, processorParameters,
+            return new TableSourceNode<>(nodeName,
+                                         sourceName,
+                                         topic,
+                                         consumedInternal,
+                                         processorParameters,
                                          isGlobalKTable);
         }
     }

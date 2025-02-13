@@ -21,7 +21,12 @@ import org.apache.kafka.metadata.PartitionRegistration;
 import org.apache.kafka.metadata.Replicas;
 import org.apache.kafka.metadata.placement.PartitionAssignment;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 
 
 class PartitionReassignmentReplicas {
@@ -29,7 +34,11 @@ class PartitionReassignmentReplicas {
     private final List<Integer> adding;
     private final List<Integer> replicas;
 
-    public PartitionReassignmentReplicas(List<Integer> removing, List<Integer> adding, List<Integer> replicas) {
+    public PartitionReassignmentReplicas(
+        List<Integer> removing,
+        List<Integer> adding,
+        List<Integer> replicas
+    ) {
         this.removing = removing;
         this.adding = adding;
         this.replicas = replicas;
@@ -41,7 +50,10 @@ class PartitionReassignmentReplicas {
         return result;
     }
 
-    PartitionReassignmentReplicas(PartitionAssignment currentAssignment, PartitionAssignment targetAssignment) {
+    PartitionReassignmentReplicas(
+        PartitionAssignment currentAssignment,
+        PartitionAssignment targetAssignment
+    ) {
         Set<Integer> removing = calculateDifference(currentAssignment.replicas(), targetAssignment.replicas());
         this.removing = new ArrayList<>(removing);
         Set<Integer> adding = calculateDifference(targetAssignment.replicas(), currentAssignment.replicas());
@@ -63,15 +75,22 @@ class PartitionReassignmentReplicas {
     }
 
     boolean isReassignmentInProgress() {
-        return isReassignmentInProgress(removing, adding);
+        return isReassignmentInProgress(
+            removing,
+            adding);
     }
 
     static boolean isReassignmentInProgress(PartitionRegistration part) {
-        return isReassignmentInProgress(Replicas.toList(part.removingReplicas), Replicas.toList(part.addingReplicas));
+        return isReassignmentInProgress(
+            Replicas.toList(part.removingReplicas),
+            Replicas.toList(part.addingReplicas));
     }
 
-    private static boolean isReassignmentInProgress(List<Integer> removingReplicas, List<Integer> addingReplicas) {
-        return removingReplicas.size() > 0 || addingReplicas.size() > 0;
+    private static boolean isReassignmentInProgress(
+        List<Integer> removingReplicas,
+        List<Integer> addingReplicas
+    ) {
+        return !removingReplicas.isEmpty() || !addingReplicas.isEmpty();
     }
 
 
@@ -90,8 +109,7 @@ class PartitionReassignmentReplicas {
                     newTargetIsr.add(replica);
                 }
             }
-            if (newTargetIsr.isEmpty())
-                return Optional.empty();
+            if (newTargetIsr.isEmpty()) return Optional.empty();
 
             newTargetReplicas = new ArrayList<>(replicas.size());
             for (int replica : replicas) {
@@ -99,15 +117,16 @@ class PartitionReassignmentReplicas {
                     newTargetReplicas.add(replica);
                 }
             }
-            if (newTargetReplicas.isEmpty())
-                return Optional.empty();
+            if (newTargetReplicas.isEmpty()) return Optional.empty();
         }
-        for (int replica : adding) {
-            if (!newTargetIsr.contains(replica))
-                return Optional.empty();
-        }
+        if (!newTargetIsr.containsAll(newTargetReplicas)) return Optional.empty();
 
-        return Optional.of(new CompletedReassignment(newTargetReplicas, newTargetIsr));
+        return Optional.of(
+            new CompletedReassignment(
+                newTargetReplicas,
+                newTargetIsr
+            )
+        );
     }
 
     static class CompletedReassignment {
@@ -133,14 +152,17 @@ class PartitionReassignmentReplicas {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof PartitionReassignmentReplicas))
-            return false;
-        PartitionReassignmentReplicas other = (PartitionReassignmentReplicas) o;
-        return removing.equals(other.removing) && adding.equals(other.adding) && replicas.equals(other.replicas);
+        if (!(o instanceof PartitionReassignmentReplicas other)) return false;
+        return removing.equals(other.removing) &&
+            adding.equals(other.adding) &&
+            replicas.equals(other.replicas);
     }
 
     @Override
     public String toString() {
-        return "PartitionReassignmentReplicas(" + "removing=" + removing + ", " + "adding=" + adding + ", " + "replicas=" + replicas + ")";
+        return "PartitionReassignmentReplicas(" +
+            "removing=" + removing + ", " +
+            "adding=" + adding + ", " +
+            "replicas=" + replicas + ")";
     }
 }

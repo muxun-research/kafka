@@ -19,7 +19,12 @@ package org.apache.kafka.common;
 import org.apache.kafka.common.internals.KafkaFutureImpl;
 
 import java.util.Arrays;
-import java.util.concurrent.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * A flexible future which supports call chaining and other asynchronous programming patterns.
@@ -41,13 +46,6 @@ public abstract class KafkaFuture<T> implements Future<T> {
     public interface BaseFunction<A, B> {
         B apply(A a);
     }
-
-    /**
-     * A function which takes objects of type A and returns objects of type B.
-     * @deprecated Since Kafka 3.0. Use the {@link BaseFunction} functional interface.
-     */
-    @Deprecated
-    public static abstract class Function<A, B> implements BaseFunction<A, B> { }
 
     /**
      * A consumer of two different types of object.
@@ -73,18 +71,20 @@ public abstract class KafkaFuture<T> implements Future<T> {
      */
     public static KafkaFuture<Void> allOf(KafkaFuture<?>... futures) {
         KafkaFutureImpl<Void> result = new KafkaFutureImpl<>();
-        CompletableFuture.allOf(Arrays.stream(futures).map(kafkaFuture -> {
-            // Safe since KafkaFuture's only subclass is KafkaFuture for which toCompletionStage()
-            // always return a CF.
-            return (CompletableFuture<?>) kafkaFuture.toCompletionStage();
-        }).toArray(CompletableFuture[]::new)).whenComplete((value, ex) -> {
-            if (ex == null) {
-                result.complete(value);
-            } else {
-                // Have to unwrap the CompletionException which allOf() introduced
-                result.completeExceptionally(ex.getCause());
-            }
-        });
+        CompletableFuture.allOf(Arrays.stream(futures)
+                .map(kafkaFuture -> {
+                    // Safe since KafkaFuture's only subclass is KafkaFuture for which toCompletionStage()
+                    // always return a CF.
+                    return (CompletableFuture<?>) kafkaFuture.toCompletionStage();
+                })
+                .toArray(CompletableFuture[]::new)).whenComplete((value, ex) -> {
+                    if (ex == null) {
+                        result.complete(value);
+                    } else {
+                        // Have to unwrap the CompletionException which allOf() introduced
+                        result.completeExceptionally(ex.getCause());
+                    }
+                });
 
         return result;
     }
@@ -102,8 +102,9 @@ public abstract class KafkaFuture<T> implements Future<T> {
      * {@code CompletionStage} will work normally.
      *
      * <p>If you want to block on the completion of a KafkaFuture you should use
-     * {@link #get()}, {@link #get(long, TimeUnit)} or {@link #getNow(Object)}, rather then calling
+     * {@link #get()}, {@link #get(long, TimeUnit)} or {@link #getNow(Object)}, rather than calling
      * {@code .toCompletionStage().toCompletableFuture().get()} etc.
+     *
      * @since Kafka 3.0
      */
     public abstract CompletionStage<T> toCompletionStage();
@@ -111,17 +112,11 @@ public abstract class KafkaFuture<T> implements Future<T> {
     /**
      * Returns a new KafkaFuture that, when this future completes normally, is executed with this
      * futures's result as the argument to the supplied function.
-     * <p>
+     *
      * The function may be invoked by the thread that calls {@code thenApply} or it may be invoked by the thread that
      * completes the future.
      */
     public abstract <R> KafkaFuture<R> thenApply(BaseFunction<T, R> function);
-
-    /**
-     * Prefer {@link KafkaFuture#thenApply(BaseFunction)} as this function is here for backwards compatibility reasons
-     * and might be deprecated/removed in a future release.
-     */
-    public abstract <R> KafkaFuture<R> thenApply(Function<T, R> function);
 
     /**
      * Returns a new KafkaFuture with the same result or exception as this future, that executes the given action

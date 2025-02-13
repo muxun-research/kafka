@@ -18,7 +18,14 @@ package org.apache.kafka.streams;
 
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.errors.TopologyException;
-import org.apache.kafka.streams.kstream.*;
+import org.apache.kafka.streams.kstream.Consumed;
+import org.apache.kafka.streams.kstream.GlobalKTable;
+import org.apache.kafka.streams.kstream.KGroupedStream;
+import org.apache.kafka.streams.kstream.KGroupedTable;
+import org.apache.kafka.streams.kstream.KStream;
+import org.apache.kafka.streams.kstream.KTable;
+import org.apache.kafka.streams.kstream.Materialized;
+import org.apache.kafka.streams.kstream.ValueTransformerWithKeySupplier;
 import org.apache.kafka.streams.kstream.internals.ConsumedInternal;
 import org.apache.kafka.streams.kstream.internals.InternalStreamsBuilder;
 import org.apache.kafka.streams.kstream.internals.MaterializedInternal;
@@ -27,9 +34,8 @@ import org.apache.kafka.streams.processor.TimestampExtractor;
 import org.apache.kafka.streams.processor.api.Processor;
 import org.apache.kafka.streams.processor.api.ProcessorSupplier;
 import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
-import org.apache.kafka.streams.processor.internals.ProcessorAdapter;
-import org.apache.kafka.streams.processor.internals.ProcessorNode;
 import org.apache.kafka.streams.processor.internals.SourceNode;
+import org.apache.kafka.streams.processor.internals.StoreBuilderWrapper;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.ReadOnlyKeyValueStore;
 import org.apache.kafka.streams.state.StoreBuilder;
@@ -58,14 +64,10 @@ import java.util.regex.Pattern;
  */
 public class StreamsBuilder {
 
-    /**
-     * The actual topology that is constructed by this StreamsBuilder.
-     */
+    /** The actual topology that is constructed by this StreamsBuilder. */
     protected final Topology topology;
 
-    /**
-     * The topology's internal builder.
-     */
+    /** The topology's internal builder. */
     protected final InternalTopologyBuilder internalTopologyBuilder;
 
     protected final InternalStreamsBuilder internalStreamsBuilder;
@@ -78,15 +80,17 @@ public class StreamsBuilder {
 
     /**
      * Create a {@code StreamsBuilder} instance.
-     * @param topologyConfigs the streams configs that apply at the topology level. Please refer to {@link TopologyConfig} for more detail
+     *
+     * @param topologyConfigs    the streams configs that apply at the topology level. Please refer to {@link TopologyConfig} for more detail
      */
+    @SuppressWarnings("this-escape")
     public StreamsBuilder(final TopologyConfig topologyConfigs) {
-        topology = getNewTopology(topologyConfigs);
+        topology = newTopology(topologyConfigs);
         internalTopologyBuilder = topology.internalTopologyBuilder;
         internalStreamsBuilder = new InternalStreamsBuilder(internalTopologyBuilder);
     }
 
-    protected Topology getNewTopology(final TopologyConfig topologyConfigs) {
+    protected Topology newTopology(final TopologyConfig topologyConfigs) {
         return new Topology(topologyConfigs);
     }
 
@@ -141,7 +145,7 @@ public class StreamsBuilder {
      * @return a {@link KStream} for the specified topics
      */
     public synchronized <K, V> KStream<K, V> stream(final Collection<String> topics) {
-        return stream(topics, Consumed.with(null, null, null, null));
+        return stream(topics, Consumed.with(null, null));
     }
 
     /**
@@ -180,6 +184,7 @@ public class StreamsBuilder {
      * Note that the specified input topics must be partitioned by key.
      * If this is not the case it is the user's responsibility to repartition the data before any key based operation
      * (like aggregation or join) is applied to the returned {@link KStream}.
+     *
      * @param topicPattern the pattern to match for topic names
      * @return a {@link KStream} for topics matching the regex pattern.
      */
@@ -200,11 +205,13 @@ public class StreamsBuilder {
      * Note that the specified input topics must be partitioned by key.
      * If this is not the case it is the user's responsibility to repartition the data before any key based operation
      * (like aggregation or join) is applied to the returned {@link KStream}.
-     * @param topicPattern the pattern to match for topic names
-     * @param consumed     the instance of {@link Consumed} used to define optional parameters
+     *
+     * @param topicPattern  the pattern to match for topic names
+     * @param consumed      the instance of {@link Consumed} used to define optional parameters
      * @return a {@link KStream} for topics matching the regex pattern.
      */
-    public synchronized <K, V> KStream<K, V> stream(final Pattern topicPattern, final Consumed<K, V> consumed) {
+    public synchronized <K, V> KStream<K, V> stream(final Pattern topicPattern,
+                                                    final Consumed<K, V> consumed) {
         Objects.requireNonNull(topicPattern, "topicPattern can't be null");
         Objects.requireNonNull(consumed, "consumed can't be null");
         return internalStreamsBuilder.stream(topicPattern, new ConsumedInternal<>(consumed));
@@ -282,7 +289,7 @@ public class StreamsBuilder {
      * @return a {@link KTable} for the specified topic
      */
     public synchronized <K, V> KTable<K, V> table(final String topic) {
-        return table(topic, new ConsumedInternal<>());
+        return table(topic, Consumed.with(null, null));
     }
 
     /**
@@ -304,12 +311,17 @@ public class StreamsBuilder {
      * @param consumed  the instance of {@link Consumed} used to define optional parameters; cannot be {@code null}
      * @return a {@link KTable} for the specified topic
      */
-    public synchronized <K, V> KTable<K, V> table(final String topic, final Consumed<K, V> consumed) {
+    public synchronized <K, V> KTable<K, V> table(final String topic,
+                                                  final Consumed<K, V> consumed) {
         Objects.requireNonNull(topic, "topic can't be null");
         Objects.requireNonNull(consumed, "consumed can't be null");
         final ConsumedInternal<K, V> consumedInternal = new ConsumedInternal<>(consumed);
 
-        final MaterializedInternal<K, V, KeyValueStore<Bytes, byte[]>> materializedInternal = new MaterializedInternal<>(Materialized.with(consumedInternal.keySerde(), consumedInternal.valueSerde()), internalStreamsBuilder, topic + "-");
+        final MaterializedInternal<K, V, KeyValueStore<Bytes, byte[]>> materializedInternal =
+            new MaterializedInternal<>(
+                Materialized.with(consumedInternal.keySerde(), consumedInternal.valueSerde()),
+                internalStreamsBuilder,
+                topic + "-");
 
         return internalStreamsBuilder.table(topic, consumedInternal, materializedInternal);
     }
@@ -364,12 +376,18 @@ public class StreamsBuilder {
      * @param consumed  the instance of {@link Consumed} used to define optional parameters
      * @return a {@link GlobalKTable} for the specified topic
      */
-    public synchronized <K, V> GlobalKTable<K, V> globalTable(final String topic, final Consumed<K, V> consumed) {
+    public synchronized <K, V> GlobalKTable<K, V> globalTable(final String topic,
+                                                              final Consumed<K, V> consumed) {
         Objects.requireNonNull(topic, "topic can't be null");
         Objects.requireNonNull(consumed, "consumed can't be null");
         final ConsumedInternal<K, V> consumedInternal = new ConsumedInternal<>(consumed);
 
-        final MaterializedInternal<K, V, KeyValueStore<Bytes, byte[]>> materializedInternal = new MaterializedInternal<>(Materialized.with(consumedInternal.keySerde(), consumedInternal.valueSerde()), internalStreamsBuilder, topic + "-");
+        final MaterializedInternal<K, V, KeyValueStore<Bytes, byte[]>> materializedInternal =
+            new MaterializedInternal<>(
+                Materialized.with(consumedInternal.keySerde(), consumedInternal.valueSerde()),
+                internalStreamsBuilder,
+                topic + "-",
+                true /* force materializing global tables */);
 
         return internalStreamsBuilder.globalTable(topic, consumedInternal, materializedInternal);
     }
@@ -398,7 +416,7 @@ public class StreamsBuilder {
 
     /**
      * Create a {@link GlobalKTable} for the specified topic.
-     *
+     * <p>
      * Input {@link KeyValue} pairs with {@code null} key will be dropped.
      * <p>
      * The resulting {@link GlobalKTable} will be materialized in a local {@link KeyValueStore} configured with
@@ -449,7 +467,7 @@ public class StreamsBuilder {
 
     /**
      * Create a {@link GlobalKTable} for the specified topic.
-     *
+     * <p>
      * Input {@link KeyValue} pairs with {@code null} key will be dropped.
      * <p>
      * The resulting {@link GlobalKTable} will be materialized in a local {@link KeyValueStore} configured with
@@ -493,8 +511,8 @@ public class StreamsBuilder {
      * Adds a state store to the underlying {@link Topology}.
      * <p>
      * It is required to connect state stores to {@link org.apache.kafka.streams.processor.api.Processor Processors},
-     * {@link Transformer Transformers},
-     * or {@link ValueTransformer ValueTransformers} before they can be used.
+     * or {@link org.apache.kafka.streams.kstream.KTable#transformValues(ValueTransformerWithKeySupplier, String...) ValueTransformers}
+     * before they can be used.
      *
      * @param builder the builder used to obtain this state store {@link StateStore} instance
      * @return itself
@@ -502,45 +520,7 @@ public class StreamsBuilder {
      */
     public synchronized StreamsBuilder addStateStore(final StoreBuilder<?> builder) {
         Objects.requireNonNull(builder, "builder can't be null");
-        internalStreamsBuilder.addStateStore(builder);
-        return this;
-    }
-
-    /**
-     * Adds a global {@link StateStore} to the topology.
-     * The {@link StateStore} sources its data from all partitions of the provided input topic.
-     * There will be exactly one instance of this {@link StateStore} per Kafka Streams instance.
-     * <p>
-     * A {@link SourceNode} with the provided sourceName will be added to consume the data arriving from the partitions
-     * of the input topic.
-     * <p>
-     * The provided {@link org.apache.kafka.streams.processor.ProcessorSupplier} will be used to create an {@link ProcessorNode} that will receive all
-     * records forwarded from the {@link SourceNode}. NOTE: you should not use the {@code Processor} to insert transformed records into
-     * the global state store. This store uses the source topic as changelog and during restore will insert records directly
-     * from the source.
-     * This {@link ProcessorNode} should be used to keep the {@link StateStore} up-to-date.
-     * The default {@link TimestampExtractor} as specified in the {@link StreamsConfig config} is used.
-     * <p>
-     * It is not required to connect a global store to {@link org.apache.kafka.streams.processor.api.Processor Processors},
-     * {@link Transformer Transformers},
-     * or {@link ValueTransformer ValueTransformer}; those have read-only access to all global stores by default.
-     * <p>
-     * The supplier should always generate a new instance each time {@link  ProcessorSupplier#get()} gets called. Creating
-     * a single {@link Processor} object and returning the same object reference in {@link ProcessorSupplier#get()} would be
-     * a violation of the supplier pattern and leads to runtime exceptions.
-     * @param storeBuilder        user defined {@link StoreBuilder}; can't be {@code null}
-     * @param topic               the topic to source the data from
-     * @param consumed            the instance of {@link Consumed} used to define optional parameters; can't be {@code null}
-     * @param stateUpdateSupplier the instance of {@link org.apache.kafka.streams.processor.ProcessorSupplier}
-     * @return itself
-     * @throws TopologyException if the processor of state is already registered
-     * @deprecated Since 2.7.0; use {@link #addGlobalStore(StoreBuilder, String, Consumed, ProcessorSupplier)} instead.
-     */
-    @Deprecated
-    public synchronized <K, V> StreamsBuilder addGlobalStore(final StoreBuilder<?> storeBuilder, final String topic, final Consumed<K, V> consumed, final org.apache.kafka.streams.processor.ProcessorSupplier<K, V> stateUpdateSupplier) {
-        Objects.requireNonNull(storeBuilder, "storeBuilder can't be null");
-        Objects.requireNonNull(consumed, "consumed can't be null");
-        internalStreamsBuilder.addGlobalStore(storeBuilder, topic, new ConsumedInternal<>(consumed), () -> ProcessorAdapter.adapt(stateUpdateSupplier.get()));
+        internalStreamsBuilder.addStateStore(StoreBuilderWrapper.wrapStoreBuilder(builder));
         return this;
     }
 
@@ -557,37 +537,46 @@ public class StreamsBuilder {
      * The supplier should always generate a new instance. Creating a single {@link Processor} object
      * and returning the same object reference in {@link ProcessorSupplier#get()} is a
      * violation of the supplier pattern and leads to runtime exceptions.
-     * NOTE: you should not use the {@link Processor} to insert transformed records into
-     * the global state store. This store uses the source topic as changelog and during restore will insert records directly
-     * from the source.
      * This {@link Processor} should be used to keep the {@link StateStore} up-to-date.
      * The default {@link TimestampExtractor} as specified in the {@link StreamsConfig config} is used.
      * <p>
      * It is not required to connect a global store to the {@link Processor Processors},
-     * {@link Transformer Transformers}, or {@link ValueTransformer ValueTransformer}; those have read-only access to all global stores by default.
-     * @param storeBuilder        user defined {@link StoreBuilder}; can't be {@code null}
-     * @param topic               the topic to source the data from
-     * @param consumed            the instance of {@link Consumed} used to define optional parameters; can't be {@code null}
-     * @param stateUpdateSupplier the instance of {@link ProcessorSupplier}
+     * or {@link org.apache.kafka.streams.kstream.KTable#transformValues(ValueTransformerWithKeySupplier, String...) ValueTransformer};
+     * those have read-only access to all global stores by default.
+     *
+     * @param storeBuilder          user defined {@link StoreBuilder}; can't be {@code null}
+     * @param topic                 the topic to source the data from
+     * @param consumed              the instance of {@link Consumed} used to define optional parameters; can't be {@code null}
+     * @param stateUpdateSupplier   the instance of {@link ProcessorSupplier}
      * @return itself
      * @throws TopologyException if the processor of state is already registered
      */
-    public synchronized <KIn, VIn> StreamsBuilder addGlobalStore(final StoreBuilder<?> storeBuilder, final String topic, final Consumed<KIn, VIn> consumed, final ProcessorSupplier<KIn, VIn, Void, Void> stateUpdateSupplier) {
+    public synchronized <KIn, VIn> StreamsBuilder addGlobalStore(final StoreBuilder<?> storeBuilder,
+                                                                 final String topic,
+                                                                 final Consumed<KIn, VIn> consumed,
+                                                                 final ProcessorSupplier<KIn, VIn, Void, Void> stateUpdateSupplier) {
         Objects.requireNonNull(storeBuilder, "storeBuilder can't be null");
         Objects.requireNonNull(consumed, "consumed can't be null");
-        internalStreamsBuilder.addGlobalStore(storeBuilder, topic, new ConsumedInternal<>(consumed), stateUpdateSupplier);
+        internalStreamsBuilder.addGlobalStore(
+            StoreBuilderWrapper.wrapStoreBuilder(storeBuilder),
+            topic,
+            new ConsumedInternal<>(consumed),
+            stateUpdateSupplier,
+            true
+        );
         return this;
     }
 
     /**
      * Returns the {@link Topology} that represents the specified processing logic.
      * Note that using this method means no optimizations are performed.
+     *
      * @return the {@link Topology} that represents the specified processing logic
      */
     public synchronized Topology build() {
         return build(null);
     }
-
+    
     /**
      * Returns the {@link Topology} that represents the specified processing logic and accepts
      * a {@link Properties} instance used to indicate whether to optimize topology or not.

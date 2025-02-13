@@ -18,51 +18,52 @@
 package kafka.api
 
 import com.yammer.metrics.core.Gauge
-import kafka.security.authorizer.AclAuthorizer
-import kafka.security.authorizer.AclEntry.WildcardHost
-import kafka.server._
+
+import java.util.{Collections, Properties}
+import java.util.concurrent.ExecutionException
+import org.apache.kafka.metadata.authorizer.StandardAuthorizer
 import kafka.utils._
 import org.apache.kafka.clients.admin.Admin
 import org.apache.kafka.clients.consumer.{Consumer, ConsumerConfig, ConsumerRecords}
 import org.apache.kafka.clients.producer.{KafkaProducer, ProducerConfig, ProducerRecord}
+import org.apache.kafka.common.acl._
 import org.apache.kafka.common.acl.AclOperation._
 import org.apache.kafka.common.acl.AclPermissionType._
-import org.apache.kafka.common.acl._
-import org.apache.kafka.common.errors.{GroupAuthorizationException, TopicAuthorizationException}
-import org.apache.kafka.common.resource.PatternType.{LITERAL, PREFIXED}
-import org.apache.kafka.common.resource.ResourceType._
-import org.apache.kafka.common.resource._
-import org.apache.kafka.common.security.auth._
+import org.apache.kafka.common.config.internals.BrokerSecurityConfigs
 import org.apache.kafka.common.{KafkaException, TopicPartition}
-import org.apache.kafka.metadata.authorizer.StandardAuthorizer
+import org.apache.kafka.common.errors.{GroupAuthorizationException, TopicAuthorizationException}
+import org.apache.kafka.common.resource._
+import org.apache.kafka.common.resource.ResourceType._
+import org.apache.kafka.common.resource.PatternType.{LITERAL, PREFIXED}
+import org.apache.kafka.common.security.auth._
+import org.apache.kafka.coordinator.group.GroupCoordinatorConfig
+import org.apache.kafka.security.authorizer.AclEntry.WILDCARD_HOST
+import org.apache.kafka.server.config.{ReplicationConfigs, ServerConfigs, ServerLogConfigs}
 import org.apache.kafka.server.metrics.KafkaYammerMetrics
 import org.junit.jupiter.api.Assertions._
 import org.junit.jupiter.api.{AfterEach, BeforeEach, TestInfo, Timeout}
 import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.{CsvSource, ValueSource}
+import org.junit.jupiter.params.provider.{CsvSource, MethodSource}
 
-import java.util.concurrent.ExecutionException
-import java.util.{Collections, Properties}
 import scala.jdk.CollectionConverters._
 
 /**
- * The test cases here verify that a producer authorized to publish to a topic
- * is able to, and that consumers in a group authorized to consume are able to
- * to do so.
- *
- * This test relies on a chain of test harness traits to set up. It directly
- * extends IntegrationTestHarness. IntegrationTestHarness creates producers and
- * consumers, and it extends KafkaServerTestHarness. KafkaServerTestHarness starts
- * brokers, but first it initializes a ZooKeeper server and client, which happens
- * in QuorumTestHarness.
- *
- * To start brokers we need to set a cluster ACL, which happens optionally in KafkaServerTestHarness.
- * The remaining ACLs to enable access to producers and consumers are set here. To set ACLs, we use AclCommand directly.
- *
- * Finally, we rely on SaslSetup to bootstrap and setup Kerberos. We don't use
- * SaslTestHarness here directly because it extends QuorumTestHarness, and we
- * would end up with QuorumTestHarness twice.
- */
+  * The test cases here verify that a producer authorized to publish to a topic
+  * is able to, and that consumers in a group authorized to consume are able to
+  * do so.
+  *
+  * This test relies on a chain of test harness traits to set up. It directly
+  * extends IntegrationTestHarness. IntegrationTestHarness creates producers and
+  * consumers, and it extends KafkaServerTestHarness. KafkaServerTestHarness starts
+  * brokers.
+  *
+  * To start brokers we need to set a cluster ACL, which happens optionally in KafkaServerTestHarness.
+  * The remaining ACLs to enable access to producers and consumers are set here.
+  *
+  * Finally, we rely on SaslSetup to bootstrap and setup Kerberos. We don't use
+  * SaslTestHarness here directly because it extends QuorumTestHarness, and we
+  * would end up with QuorumTestHarness twice.
+  */
 @Timeout(60)
 abstract class EndToEndAuthorizationTest extends IntegrationTestHarness with SaslSetup {
 
@@ -79,113 +80,82 @@ abstract class EndToEndAuthorizationTest extends IntegrationTestHarness with Sas
 
   override protected lazy val trustStoreFile = Some(TestUtils.tempFile("truststore", ".jks"))
 
-  protected def authorizerClass: Class[_] = classOf[AclAuthorizer]
-
   val topicResource = new ResourcePattern(TOPIC, topic, LITERAL)
-  val groupResource = new ResourcePattern(GROUP, group, LITERAL)
+  val groupResource =  new ResourcePattern(GROUP, group, LITERAL)
   val clusterResource = new ResourcePattern(CLUSTER, Resource.CLUSTER_NAME, LITERAL)
-  val prefixedTopicResource = new ResourcePattern(TOPIC, topicPrefix, PREFIXED)
-  val prefixedGroupResource = new ResourcePattern(GROUP, groupPrefix, PREFIXED)
-  val wildcardTopicResource = new ResourcePattern(TOPIC, wildcard, LITERAL)
-  val wildcardGroupResource = new ResourcePattern(GROUP, wildcard, LITERAL)
+  val prefixedTopicResource =  new ResourcePattern(TOPIC, topicPrefix, PREFIXED)
+  val prefixedGroupResource =  new ResourcePattern(GROUP, groupPrefix, PREFIXED)
+  val wildcardTopicResource =  new ResourcePattern(TOPIC, wildcard, LITERAL)
+  val wildcardGroupResource =  new ResourcePattern(GROUP, wildcard, LITERAL)
 
   def clientPrincipal: KafkaPrincipal
-
   def kafkaPrincipal: KafkaPrincipal
 
-  def GroupReadAcl = Set(new AccessControlEntry(clientPrincipal.toString, WildcardHost, READ, ALLOW))
+  def GroupReadAcl = Set(new AccessControlEntry(clientPrincipal.toString, WILDCARD_HOST, READ, ALLOW))
+  def TopicReadAcl = Set(new AccessControlEntry(clientPrincipal.toString, WILDCARD_HOST, READ, ALLOW))
+  def TopicWriteAcl = Set(new AccessControlEntry(clientPrincipal.toString, WILDCARD_HOST, WRITE, ALLOW))
+  def TopicDescribeAcl = Set(new AccessControlEntry(clientPrincipal.toString, WILDCARD_HOST, DESCRIBE, ALLOW))
+  def TopicCreateAcl = Set(new AccessControlEntry(clientPrincipal.toString, WILDCARD_HOST, CREATE, ALLOW))
 
-  def TopicReadAcl = Set(new AccessControlEntry(clientPrincipal.toString, WildcardHost, READ, ALLOW))
-
-  def TopicWriteAcl = Set(new AccessControlEntry(clientPrincipal.toString, WildcardHost, WRITE, ALLOW))
-
-  def TopicDescribeAcl = Set(new AccessControlEntry(clientPrincipal.toString, WildcardHost, DESCRIBE, ALLOW))
-
-  def TopicCreateAcl = Set(new AccessControlEntry(clientPrincipal.toString, WildcardHost, CREATE, ALLOW))
-
-  def AclTopicWrite(topicResource: ResourcePattern = topicResource) = new AclBinding(topicResource,
+  def AclTopicWrite(topicResource : ResourcePattern = topicResource) = new AclBinding(topicResource,
     new AccessControlEntry(clientPrincipal.toString, "*", AclOperation.WRITE, AclPermissionType.ALLOW))
-
-  def AclTopicCreate(topicResource: ResourcePattern = topicResource) = new AclBinding(topicResource,
+  def AclTopicCreate(topicResource : ResourcePattern = topicResource) = new AclBinding(topicResource,
     new AccessControlEntry(clientPrincipal.toString, "*", AclOperation.CREATE, AclPermissionType.ALLOW))
-
-  def AclTopicDescribe(topicResource: ResourcePattern = topicResource) = new AclBinding(topicResource,
+  def AclTopicDescribe(topicResource : ResourcePattern = topicResource) = new AclBinding(topicResource,
     new AccessControlEntry(clientPrincipal.toString, "*", AclOperation.DESCRIBE, AclPermissionType.ALLOW))
-
-  def AclTopicRead(topicResource: ResourcePattern = topicResource) = new AclBinding(topicResource,
+  def AclTopicRead(topicResource : ResourcePattern = topicResource) = new AclBinding(topicResource,
     new AccessControlEntry(clientPrincipal.toString, "*", AclOperation.READ, AclPermissionType.ALLOW))
-
   def AclGroupRead = new AclBinding(groupResource,
     new AccessControlEntry(clientPrincipal.toString, "*", AclOperation.READ, AclPermissionType.ALLOW))
 
   def AclWildcardTopicWrite = new AclBinding(wildcardTopicResource,
     new AccessControlEntry(clientPrincipal.toString, "*", AclOperation.WRITE, AclPermissionType.ALLOW))
-
   def AclWildcardTopicCreate = new AclBinding(wildcardTopicResource,
     new AccessControlEntry(clientPrincipal.toString, "*", AclOperation.CREATE, AclPermissionType.ALLOW))
-
   def AclWildcardTopicDescribe = new AclBinding(wildcardTopicResource,
     new AccessControlEntry(clientPrincipal.toString, "*", AclOperation.DESCRIBE, AclPermissionType.ALLOW))
-
   def AclWildcardTopicRead = new AclBinding(wildcardTopicResource,
     new AccessControlEntry(clientPrincipal.toString, "*", AclOperation.READ, AclPermissionType.ALLOW))
-
   def AclWildcardGroupRead = new AclBinding(wildcardGroupResource,
     new AccessControlEntry(clientPrincipal.toString, "*", AclOperation.READ, AclPermissionType.ALLOW))
 
   def AclPrefixedTopicWrite = new AclBinding(prefixedTopicResource,
     new AccessControlEntry(clientPrincipal.toString, "*", AclOperation.WRITE, AclPermissionType.ALLOW))
-
   def AclPrefixedTopicCreate = new AclBinding(prefixedTopicResource,
     new AccessControlEntry(clientPrincipal.toString, "*", AclOperation.CREATE, AclPermissionType.ALLOW))
-
   def AclPrefixedTopicDescribe = new AclBinding(prefixedTopicResource,
     new AccessControlEntry(clientPrincipal.toString, "*", AclOperation.DESCRIBE, AclPermissionType.ALLOW))
-
   def AclPrefixedTopicRead = new AclBinding(prefixedTopicResource,
     new AccessControlEntry(clientPrincipal.toString, "*", AclOperation.READ, AclPermissionType.ALLOW))
-
   def AclPrefixedGroupRead = new AclBinding(prefixedGroupResource,
     new AccessControlEntry(clientPrincipal.toString, "*", AclOperation.READ, AclPermissionType.ALLOW))
 
   // Some needed configuration for brokers, producers, and consumers
-  this.serverConfig.setProperty(KafkaConfig.OffsetsTopicPartitionsProp, "1")
-  this.serverConfig.setProperty(KafkaConfig.OffsetsTopicReplicationFactorProp, "3")
-  this.serverConfig.setProperty(KafkaConfig.MinInSyncReplicasProp, "3")
-  this.serverConfig.setProperty(KafkaConfig.DefaultReplicationFactorProp, "3")
-  this.serverConfig.setProperty(KafkaConfig.ConnectionsMaxReauthMsProp, "1500")
+  this.serverConfig.setProperty(GroupCoordinatorConfig.OFFSETS_TOPIC_PARTITIONS_CONFIG, "1")
+  this.serverConfig.setProperty(GroupCoordinatorConfig.OFFSETS_TOPIC_REPLICATION_FACTOR_CONFIG, "3")
+  this.serverConfig.setProperty(ServerLogConfigs.MIN_IN_SYNC_REPLICAS_CONFIG, "3")
+  this.serverConfig.setProperty(ReplicationConfigs.DEFAULT_REPLICATION_FACTOR_CONFIG, "3")
+  this.serverConfig.setProperty(BrokerSecurityConfigs.CONNECTIONS_MAX_REAUTH_MS_CONFIG, "1500")
   this.consumerConfig.setProperty(ConsumerConfig.GROUP_ID_CONFIG, "group")
   this.consumerConfig.setProperty(ConsumerConfig.METADATA_MAX_AGE_CONFIG, "1500")
 
-  val unimplementedquorum = ""
 
   /**
-   * Starts MiniKDC and only then sets up the parent trait.
-   */
+    * Starts MiniKDC and only then sets up the parent trait.
+    */
   @BeforeEach
   override def setUp(testInfo: TestInfo): Unit = {
-
-    if (TestInfoUtils.isKRaft(testInfo)) {
-      this.serverConfig.setProperty(StandardAuthorizer.SUPER_USERS_CONFIG, kafkaPrincipal.toString)
-      this.controllerConfig.setProperty(StandardAuthorizer.SUPER_USERS_CONFIG, kafkaPrincipal.toString + ";" + "User:ANONYMOUS")
-      this.serverConfig.setProperty(KafkaConfig.AuthorizerClassNameProp, classOf[StandardAuthorizer].getName)
-      this.controllerConfig.setProperty(KafkaConfig.AuthorizerClassNameProp, classOf[StandardAuthorizer].getName)
-    } else {
-      // The next two configuration parameters enable ZooKeeper secure ACLs
-      // and sets the Kafka authorizer, both necessary to enable security.
-      this.serverConfig.setProperty(KafkaConfig.ZkEnableSecureAclsProp, "true")
-      this.serverConfig.setProperty(KafkaConfig.AuthorizerClassNameProp, authorizerClass.getName)
-
-      // Set the specific principal that can update ACLs.
-      this.serverConfig.setProperty(AclAuthorizer.SuperUsersProp, kafkaPrincipal.toString)
-    }
+    this.serverConfig.setProperty(StandardAuthorizer.SUPER_USERS_CONFIG, kafkaPrincipal.toString)
+    this.controllerConfig.setProperty(StandardAuthorizer.SUPER_USERS_CONFIG, kafkaPrincipal.toString + ";" + "User:ANONYMOUS")
+    this.serverConfig.setProperty(ServerConfigs.AUTHORIZER_CLASS_NAME_CONFIG, classOf[StandardAuthorizer].getName)
+    this.controllerConfig.setProperty(ServerConfigs.AUTHORIZER_CLASS_NAME_CONFIG, classOf[StandardAuthorizer].getName)
 
     super.setUp(testInfo)
 
     // create the test topic with all the brokers as replicas
     val superuserAdminClient = createSuperuserAdminClient()
-    TestUtils.createTopicWithAdmin(admin = superuserAdminClient, topic = topic, brokers = brokers,
-      numPartitions = 1, replicationFactor = 3, topicConfig = new Properties)
+    TestUtils.createTopicWithAdmin(admin = superuserAdminClient, topic = topic, brokers = brokers, controllers = controllerServers,
+      replicationFactor = 3, topicConfig = new Properties)
   }
 
   /**
@@ -198,27 +168,23 @@ abstract class EndToEndAuthorizationTest extends IntegrationTestHarness with Sas
   }
 
   /**
-   * Tests the ability of producing and consuming with the appropriate ACLs set.
-   */
-  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
-  @ValueSource(strings = Array("kraft", "zk"))
-  def testProduceConsumeViaAssign(quorum: String): Unit = {
-    if (quorum == unimplementedquorum) {
-      Console.err.println("QuorumName : " + quorum + " is not supported.")
-    } else {
-      setAclsAndProduce(tp)
-      val consumer = createConsumer()
-      consumer.assign(List(tp).asJava)
-      consumeRecords(consumer, numRecords)
-      confirmReauthenticationMetrics()
-    }
+    * Tests the ability of producing and consuming with the appropriate ACLs set.
+    */
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumAndGroupProtocolNames)
+  @MethodSource(Array("getTestQuorumAndGroupProtocolParametersAll"))
+  def testProduceConsumeViaAssign(quorum: String, groupProtocol: String): Unit = {
+    setAclsAndProduce(tp)
+    val consumer = createConsumer()
+    consumer.assign(List(tp).asJava)
+    consumeRecords(consumer, numRecords)
+    confirmReauthenticationMetrics()
   }
 
   protected def confirmReauthenticationMetrics(): Unit = {
     val expiredConnectionsKilledCountTotal = getGauge("ExpiredConnectionsKilledCount").value()
     brokers.foreach { s =>
-      val numExpiredKilled = TestUtils.totalMetricValue(s, "expired-connections-killed-count")
-      assertEquals(0, numExpiredKilled, "Should have been zero expired connections killed: " + numExpiredKilled + "(total=" + expiredConnectionsKilledCountTotal + ")")
+        val numExpiredKilled = TestUtils.totalMetricValue(s, "expired-connections-killed-count")
+        assertEquals(0, numExpiredKilled, "Should have been zero expired connections killed: " + numExpiredKilled + "(total=" + expiredConnectionsKilledCountTotal + ")")
     }
     assertEquals(0, expiredConnectionsKilledCountTotal, 0.0, "Should have been zero expired connections killed total")
     brokers.foreach { s =>
@@ -229,70 +195,54 @@ abstract class EndToEndAuthorizationTest extends IntegrationTestHarness with Sas
   private def getGauge(metricName: String) = {
     KafkaYammerMetrics.defaultRegistry.allMetrics.asScala
       .find { case (k, _) => k.getName == metricName }
-      .getOrElse(throw new RuntimeException("Unable to find metric " + metricName))
+      .getOrElse(throw new RuntimeException( "Unable to find metric " + metricName))
       ._2.asInstanceOf[Gauge[Double]]
   }
 
-  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
-  @ValueSource(strings = Array("kraft", "zk"))
-  def testProduceConsumeViaSubscribe(quorum: String): Unit = {
-    if (quorum == unimplementedquorum) {
-      Console.err.println("QuorumName : " + quorum + " is not supported.")
-    } else {
-      setAclsAndProduce(tp)
-      val consumer = createConsumer()
-      consumer.subscribe(List(topic).asJava)
-      consumeRecords(consumer, numRecords)
-      confirmReauthenticationMetrics()
-    }
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumAndGroupProtocolNames)
+  @MethodSource(Array("getTestQuorumAndGroupProtocolParametersAll"))
+  def testProduceConsumeViaSubscribe(quorum: String, groupProtocol: String): Unit = {
+    setAclsAndProduce(tp)
+    val consumer = createConsumer()
+    consumer.subscribe(List(topic).asJava)
+    consumeRecords(consumer, numRecords)
+    confirmReauthenticationMetrics()
   }
 
-  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
-  @ValueSource(strings = Array("kraft", "zk"))
-  def testProduceConsumeWithWildcardAcls(quorum: String): Unit = {
-    if (quorum == unimplementedquorum) {
-      Console.err.println("QuorumName : " + quorum + " is not supported.")
-    } else {
-      setWildcardResourceAcls()
-      val producer = createProducer()
-      sendRecords(producer, numRecords, tp)
-      val consumer = createConsumer()
-      consumer.subscribe(List(topic).asJava)
-      consumeRecords(consumer, numRecords)
-      confirmReauthenticationMetrics()
-    }
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumAndGroupProtocolNames)
+  @MethodSource(Array("getTestQuorumAndGroupProtocolParametersAll"))
+  def testProduceConsumeWithWildcardAcls(quorum: String, groupProtocol: String): Unit = {
+    setWildcardResourceAcls()
+    val producer = createProducer()
+    sendRecords(producer, numRecords, tp)
+    val consumer = createConsumer()
+    consumer.subscribe(List(topic).asJava)
+    consumeRecords(consumer, numRecords)
+    confirmReauthenticationMetrics()
   }
 
-  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
-  @ValueSource(strings = Array("kraft", "zk"))
-  def testProduceConsumeWithPrefixedAcls(quorum: String): Unit = {
-    if (quorum == unimplementedquorum) {
-      Console.err.println("QuorumName : " + quorum + " is not supported.")
-    } else {
-      setPrefixedResourceAcls()
-      val producer = createProducer()
-      sendRecords(producer, numRecords, tp)
-      val consumer = createConsumer()
-      consumer.subscribe(List(topic).asJava)
-      consumeRecords(consumer, numRecords)
-      confirmReauthenticationMetrics()
-    }
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumAndGroupProtocolNames)
+  @MethodSource(Array("getTestQuorumAndGroupProtocolParametersAll"))
+  def testProduceConsumeWithPrefixedAcls(quorum: String, groupProtocol: String): Unit = {
+    setPrefixedResourceAcls()
+    val producer = createProducer()
+    sendRecords(producer, numRecords, tp)
+    val consumer = createConsumer()
+    consumer.subscribe(List(topic).asJava)
+    consumeRecords(consumer, numRecords)
+    confirmReauthenticationMetrics()
   }
 
-  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
-  @ValueSource(strings = Array("kraft", "zk"))
-  def testProduceConsumeTopicAutoCreateTopicCreateAcl(quorum: String): Unit = {
-    if (quorum == unimplementedquorum) {
-      Console.err.println("QuorumName : " + quorum + " is not supported.")
-    } else {
-      // topic2 is not created on setup()
-      val tp2 = new TopicPartition("topic2", 0)
-      setAclsAndProduce(tp2)
-      val consumer = createConsumer()
-      consumer.assign(List(tp2).asJava)
-      consumeRecords(consumer, numRecords, topic = tp2.topic)
-      confirmReauthenticationMetrics()
-    }
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumAndGroupProtocolNames)
+  @MethodSource(Array("getTestQuorumAndGroupProtocolParametersAll"))
+  def testProduceConsumeTopicAutoCreateTopicCreateAcl(quorum: String, groupProtocol: String): Unit = {
+    // topic2 is not created on setup()
+    val tp2 = new TopicPartition("topic2", 0)
+    setAclsAndProduce(tp2)
+    val consumer = createConsumer()
+    consumer.assign(List(tp2).asJava)
+    consumeRecords(consumer, numRecords, topic = tp2.topic)
+    confirmReauthenticationMetrics()
   }
 
   private def setWildcardResourceAcls(): Unit = {
@@ -347,68 +297,63 @@ abstract class EndToEndAuthorizationTest extends IntegrationTestHarness with Sas
   }
 
   /**
-   * Tests that producer, consumer and adminClient fail to publish messages, consume
-   * messages and describe topics respectively when the describe ACL isn't set.
-   * Also verifies that subsequent publish, consume and describe to authorized topic succeeds.
-   */
-  @ParameterizedTest
+    * Tests that producer, consumer and adminClient fail to publish messages, consume
+    * messages and describe topics respectively when the describe ACL isn't set.
+    * Also verifies that subsequent publish, consume and describe to authorized topic succeeds.
+    */
+  @ParameterizedTest(name = "{displayName}.quorum={0}.groupProtocol={1}.isIdempotenceEnabled={2}")
   @CsvSource(value = Array(
-    "kraft, true",
-    "kraft, false",
-    "zk, true",
-    "zk, false"
+    "kraft, classic, true",
+    //"kraft, consumer, true",
+    "kraft, classic, false",
+    //"kraft, consumer, false",
   ))
-  def testNoDescribeProduceOrConsumeWithoutTopicDescribeAcl(quorum: String, isIdempotenceEnabled: Boolean): Unit = {
-    if (quorum == unimplementedquorum) {
-      Console.err.println("QuorumName : " + quorum + " is not supported.")
-    } else {
-      // Set consumer group acls since we are testing topic authorization
-      setConsumerGroupAcls()
+  def testNoDescribeProduceOrConsumeWithoutTopicDescribeAcl(quorum:String, groupProtocol:String, isIdempotenceEnabled:Boolean): Unit = {
+    // Set consumer group acls since we are testing topic authorization
+    setConsumerGroupAcls()
 
-      // Verify produce/consume/describe throw TopicAuthorizationException
+    // Verify produce/consume/describe throw TopicAuthorizationException
+    val prop = new Properties()
+    prop.setProperty(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, isIdempotenceEnabled.toString)
+    val producer = createProducer(configOverrides = prop)
 
-      val prop = new Properties()
-      prop.setProperty(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, isIdempotenceEnabled.toString)
-      val producer = createProducer(configOverrides = prop)
+    assertThrows(classOf[TopicAuthorizationException], () => sendRecords(producer, numRecords, tp))
+    val consumer = createConsumer()
+    consumer.assign(List(tp).asJava)
+    assertThrows(classOf[TopicAuthorizationException], () => consumeRecords(consumer, numRecords, topic = tp.topic))
+    val adminClient = createAdminClient()
+    val e1 = assertThrows(classOf[ExecutionException], () => adminClient.describeTopics(Set(topic).asJava).allTopicNames().get())
+    assertTrue(e1.getCause.isInstanceOf[TopicAuthorizationException], "Unexpected exception " + e1.getCause)
 
-      assertThrows(classOf[TopicAuthorizationException], () => sendRecords(producer, numRecords, tp))
-      val consumer = createConsumer()
-      consumer.assign(List(tp).asJava)
-      assertThrows(classOf[TopicAuthorizationException], () => consumeRecords(consumer, numRecords, topic = tp.topic))
-      val adminClient = createAdminClient()
-      val e1 = assertThrows(classOf[ExecutionException], () => adminClient.describeTopics(Set(topic).asJava).allTopicNames().get())
-      assertTrue(e1.getCause.isInstanceOf[TopicAuthorizationException], "Unexpected exception " + e1.getCause)
+    // Verify successful produce/consume/describe on another topic using the same producer, consumer and adminClient
+    val topic2 = "topic2"
+    val tp2 = new TopicPartition(topic2, 0)
 
-      // Verify successful produce/consume/describe on another topic using the same producer, consumer and adminClient
-      val topic2 = "topic2"
-      val tp2 = new TopicPartition(topic2, 0)
+    setReadAndWriteAcls(tp2)
+    // in idempotence producer, we need to create another producer because the previous one is in FATAL_ERROR state (due to authorization error)
+    // If the transaction state in FATAL_ERROR, it'll never transit to other state. check TransactionManager#isTransitionValid for detail
+    val producer2 = if (isIdempotenceEnabled)
+      createProducer(configOverrides = prop)
+    else
+      producer
 
-      setReadAndWriteAcls(tp2)
-      // in idempotence producer, we need to create another producer because the previous one is in FATAL_ERROR state (due to authorization error)
-      // If the transaction state in FATAL_ERROR, it'll never transit to other state. check TransactionManager#isTransitionValid for detail
-      val producer2 = if (isIdempotenceEnabled)
-        createProducer(configOverrides = prop)
-      else
-        producer
+    sendRecords(producer2, numRecords, tp2)
+    consumer.assign(List(tp2).asJava)
+    consumeRecords(consumer, numRecords, topic = topic2)
+    val describeResults = adminClient.describeTopics(Set(topic, topic2).asJava).topicNameValues()
+    assertEquals(1, describeResults.get(topic2).get().partitions().size())
 
-      sendRecords(producer2, numRecords, tp2)
-      consumer.assign(List(tp2).asJava)
-      consumeRecords(consumer, numRecords, topic = topic2)
-      val describeResults = adminClient.describeTopics(Set(topic, topic2).asJava).topicNameValues()
-      assertEquals(1, describeResults.get(topic2).get().partitions().size())
+    val e2 = assertThrows(classOf[ExecutionException], () => adminClient.describeTopics(Set(topic).asJava).allTopicNames().get())
+    assertTrue(e2.getCause.isInstanceOf[TopicAuthorizationException], "Unexpected exception " + e2.getCause)
 
-      val e2 = assertThrows(classOf[ExecutionException], () => adminClient.describeTopics(Set(topic).asJava).allTopicNames().get())
-      assertTrue(e2.getCause.isInstanceOf[TopicAuthorizationException], "Unexpected exception " + e2.getCause)
-
-      // Verify that consumer manually assigning both authorized and unauthorized topic doesn't consume
-      // from the unauthorized topic and throw; since we can now return data during the time we are updating
-      // metadata / fetching positions, it is possible that the authorized topic record is returned during this time.
-      consumer.assign(List(tp, tp2).asJava)
-      sendRecords(producer2, numRecords, tp2)
-      var topic2RecordConsumed = false
-
-      def verifyNoRecords(records: ConsumerRecords[Array[Byte], Array[Byte]]): Boolean = {
-        assertEquals(Collections.singleton(tp2), records.partitions(), "Consumed records with unexpected partitions: " + records)
+    // Verify that consumer manually assigning both authorized and unauthorized topic doesn't consume
+    // from the unauthorized topic and throw; since we can now return data during the time we are updating
+    // metadata / fetching positions, it is possible that the authorized topic record is returned during this time.
+    consumer.assign(List(tp, tp2).asJava)
+    sendRecords(producer2, numRecords, tp2)
+    var topic2RecordConsumed = false
+    def verifyNoRecords(records: ConsumerRecords[Array[Byte], Array[Byte]]): Boolean = {
+      assertEquals(Collections.singleton(tp2), records.partitions(), "Consumed records with unexpected partitions: " + records)
       topic2RecordConsumed = true
       false
     }
@@ -420,87 +365,72 @@ abstract class EndToEndAuthorizationTest extends IntegrationTestHarness with Sas
     if (!topic2RecordConsumed) {
       consumeRecordsIgnoreOneAuthorizationException(consumer, numRecords, startingOffset = 1, topic2)
     }
-      sendRecords(producer2, numRecords, tp)
-      consumeRecordsIgnoreOneAuthorizationException(consumer, numRecords, startingOffset = 0, topic)
-      val describeResults2 = adminClient.describeTopics(Set(topic, topic2).asJava).topicNameValues
-      assertEquals(1, describeResults2.get(topic).get().partitions().size())
-      assertEquals(1, describeResults2.get(topic2).get().partitions().size())
-    }
+    sendRecords(producer2, numRecords, tp)
+    consumeRecordsIgnoreOneAuthorizationException(consumer, numRecords, startingOffset = 0, topic)
+    val describeResults2 = adminClient.describeTopics(Set(topic, topic2).asJava).topicNameValues
+    assertEquals(1, describeResults2.get(topic).get().partitions().size())
+    assertEquals(1, describeResults2.get(topic2).get().partitions().size())
   }
 
   @ParameterizedTest
   @CsvSource(value = Array(
     "kraft, true",
     "kraft, false",
-    "zk, true",
-    "zk, false"
   ))
-  def testNoProduceWithDescribeAcl(quorum: String, isIdempotenceEnabled: Boolean): Unit = {
-    if (quorum == unimplementedquorum) {
-      Console.err.println("QuorumName : " + quorum + " is not supported.")
-    } else {
-      val superuserAdminClient = createSuperuserAdminClient()
-      superuserAdminClient.createAcls(List(AclTopicDescribe()).asJava).values
+  def testNoProduceWithDescribeAcl(quorum:String, isIdempotenceEnabled:Boolean): Unit = {
+    val superuserAdminClient = createSuperuserAdminClient()
+    superuserAdminClient.createAcls(List(AclTopicDescribe()).asJava).values
 
-      brokers.foreach { s =>
-        TestUtils.waitAndVerifyAcls(TopicDescribeAcl, s.dataPlaneRequestProcessor.authorizer.get, topicResource)
-      }
-
-      val prop = new Properties()
-      prop.setProperty(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, isIdempotenceEnabled.toString)
-      val producer = createProducer(configOverrides = prop)
-
-      if (isIdempotenceEnabled) {
-        // in idempotent producer, it'll fail at InitProducerId request
-        assertThrows(classOf[KafkaException], () => sendRecords(producer, numRecords, tp))
-      } else {
-        val e = assertThrows(classOf[TopicAuthorizationException], () => sendRecords(producer, numRecords, tp))
-        assertEquals(Set(topic).asJava, e.unauthorizedTopics())
-      }
-      confirmReauthenticationMetrics()
+    brokers.foreach { s =>
+      TestUtils.waitAndVerifyAcls(TopicDescribeAcl, s.dataPlaneRequestProcessor.authorizer.get, topicResource)
     }
+
+    val prop = new Properties()
+    prop.setProperty(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, isIdempotenceEnabled.toString)
+    val producer = createProducer(configOverrides = prop)
+
+    if (isIdempotenceEnabled) {
+      // in idempotent producer, it'll fail at InitProducerId request
+      assertThrows(classOf[KafkaException], () => sendRecords(producer, numRecords, tp))
+    } else {
+      val e = assertThrows(classOf[TopicAuthorizationException], () => sendRecords(producer, numRecords, tp))
+      assertEquals(Set(topic).asJava, e.unauthorizedTopics())
+    }
+    confirmReauthenticationMetrics()
   }
 
-  /**
-   * Tests that a consumer fails to consume messages without the appropriate
-   * ACL set.
-   */
-  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
-  @ValueSource(strings = Array("kraft", "zk"))
-  def testNoConsumeWithoutDescribeAclViaAssign(quorum: String): Unit = {
-    if (quorum == unimplementedquorum) {
-      Console.err.println("QuorumName : " + quorum + " is not supported.")
-    } else {
-      noConsumeWithoutDescribeAclSetup()
-      val consumer = createConsumer()
-      consumer.assign(List(tp).asJava)
-      // the exception is expected when the consumer attempts to lookup offsets
-      assertThrows(classOf[KafkaException], () => consumeRecords(consumer))
-      confirmReauthenticationMetrics()
-    }
+   /**
+    * Tests that a consumer fails to consume messages without the appropriate
+    * ACL set.
+    */
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumAndGroupProtocolNames)
+  @MethodSource(Array("getTestQuorumAndGroupProtocolParametersAll"))
+  def testNoConsumeWithoutDescribeAclViaAssign(quorum: String, groupProtocol: String): Unit = {
+    noConsumeWithoutDescribeAclSetup()
+    val consumer = createConsumer()
+    consumer.assign(List(tp).asJava)
+    // the exception is expected when the consumer attempts to lookup offsets
+    assertThrows(classOf[KafkaException], () => consumeRecords(consumer))
+    confirmReauthenticationMetrics()
   }
 
-  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
-  @ValueSource(strings = Array("kraft", "zk"))
-  def testNoConsumeWithoutDescribeAclViaSubscribe(quorum: String): Unit = {
-    if (quorum == unimplementedquorum) {
-      Console.err.println("QuorumName : " + quorum + " is not supported.")
-    } else {
-      noConsumeWithoutDescribeAclSetup()
-      val consumer = createConsumer()
-      consumer.subscribe(List(topic).asJava)
-      // this should timeout since the consumer will not be able to fetch any metadata for the topic
-      assertThrows(classOf[TopicAuthorizationException], () => consumeRecords(consumer, timeout = 3000))
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumAndGroupProtocolNames)
+  @MethodSource(Array("getTestQuorumAndGroupProtocolParametersAll"))
+  def testNoConsumeWithoutDescribeAclViaSubscribe(quorum: String, groupProtocol: String): Unit = {
+    noConsumeWithoutDescribeAclSetup()
+    val consumer = createConsumer()
+    consumer.subscribe(List(topic).asJava)
+    // this should timeout since the consumer will not be able to fetch any metadata for the topic
+    assertThrows(classOf[TopicAuthorizationException], () => consumeRecords(consumer, timeout = 3000))
 
-      // Verify that no records are consumed even if one of the requested topics is authorized
-      setReadAndWriteAcls(tp)
-      consumer.subscribe(List(topic, "topic2").asJava)
-      assertThrows(classOf[TopicAuthorizationException], () => consumeRecords(consumer, timeout = 3000))
+    // Verify that no records are consumed even if one of the requested topics is authorized
+    setReadAndWriteAcls(tp)
+    consumer.subscribe(List(topic, "topic2").asJava)
+    assertThrows(classOf[TopicAuthorizationException], () => consumeRecords(consumer, timeout = 3000))
 
     // Verify that records are consumed if all topics are authorized
     consumer.subscribe(List(topic).asJava)
     consumeRecordsIgnoreOneAuthorizationException(consumer)
-    }
   }
 
   private def noConsumeWithoutDescribeAclSetup(): Unit = {
@@ -525,36 +455,28 @@ abstract class EndToEndAuthorizationTest extends IntegrationTestHarness with Sas
     }
   }
 
-  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
-  @ValueSource(strings = Array("kraft", "zk"))
-  def testNoConsumeWithDescribeAclViaAssign(quorum: String): Unit = {
-    if (quorum == unimplementedquorum) {
-      Console.err.println("QuorumName : " + quorum + " is not supported.")
-    } else {
-      noConsumeWithDescribeAclSetup()
-      val consumer = createConsumer()
-      consumer.assign(List(tp).asJava)
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumAndGroupProtocolNames)
+  @MethodSource(Array("getTestQuorumAndGroupProtocolParametersAll"))
+  def testNoConsumeWithDescribeAclViaAssign(quorum: String, groupProtocol: String): Unit = {
+    noConsumeWithDescribeAclSetup()
+    val consumer = createConsumer()
+    consumer.assign(List(tp).asJava)
 
-      val e = assertThrows(classOf[TopicAuthorizationException], () => consumeRecords(consumer))
-      assertEquals(Set(topic).asJava, e.unauthorizedTopics())
-      confirmReauthenticationMetrics()
-    }
+    val e = assertThrows(classOf[TopicAuthorizationException], () => consumeRecords(consumer))
+    assertEquals(Set(topic).asJava, e.unauthorizedTopics())
+    confirmReauthenticationMetrics()
   }
 
-  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
-  @ValueSource(strings = Array("kraft", "zk"))
-  def testNoConsumeWithDescribeAclViaSubscribe(quorum: String): Unit = {
-    if (quorum == unimplementedquorum) {
-      Console.err.println("QuorumName : " + quorum + " is not supported.")
-    } else {
-      noConsumeWithDescribeAclSetup()
-      val consumer = createConsumer()
-      consumer.subscribe(List(topic).asJava)
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumAndGroupProtocolNames)
+  @MethodSource(Array("getTestQuorumAndGroupProtocolParametersAll"))
+  def testNoConsumeWithDescribeAclViaSubscribe(quorum: String, groupProtocol: String): Unit = {
+    noConsumeWithDescribeAclSetup()
+    val consumer = createConsumer()
+    consumer.subscribe(List(topic).asJava)
 
-      val e = assertThrows(classOf[TopicAuthorizationException], () => consumeRecords(consumer))
-      assertEquals(Set(topic).asJava, e.unauthorizedTopics())
-      confirmReauthenticationMetrics()
-    }
+    val e = assertThrows(classOf[TopicAuthorizationException], () => consumeRecords(consumer))
+    assertEquals(Set(topic).asJava, e.unauthorizedTopics())
+    confirmReauthenticationMetrics()
   }
 
   private def noConsumeWithDescribeAclSetup(): Unit = {
@@ -571,29 +493,25 @@ abstract class EndToEndAuthorizationTest extends IntegrationTestHarness with Sas
   }
 
   /**
-   * Tests that a consumer fails to consume messages without the appropriate
-   * ACL set.
-   */
-  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
-  @ValueSource(strings = Array("kraft", "zk"))
-  def testNoGroupAcl(quorum: String): Unit = {
-    if (quorum == unimplementedquorum) {
-      Console.err.println("QuorumName : " + quorum + " is not supported.")
-    } else {
-      val superuserAdminClient = createSuperuserAdminClient()
-      superuserAdminClient.createAcls(List(AclTopicWrite(), AclTopicCreate(), AclTopicDescribe()).asJava).values
-      brokers.foreach { s =>
-        TestUtils.waitAndVerifyAcls(TopicWriteAcl ++ TopicDescribeAcl ++ TopicCreateAcl, s.dataPlaneRequestProcessor.authorizer.get, topicResource)
-      }
-      val producer = createProducer()
-      sendRecords(producer, numRecords, tp)
-
-      val consumer = createConsumer()
-      consumer.assign(List(tp).asJava)
-      val e = assertThrows(classOf[GroupAuthorizationException], () => consumeRecords(consumer))
-      assertEquals(group, e.groupId())
-      confirmReauthenticationMetrics()
+    * Tests that a consumer fails to consume messages without the appropriate
+    * ACL set.
+    */
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumAndGroupProtocolNames)
+  @MethodSource(Array("getTestQuorumAndGroupProtocolParametersAll"))
+  def testNoGroupAcl(quorum: String, groupProtocol: String): Unit = {
+    val superuserAdminClient = createSuperuserAdminClient()
+    superuserAdminClient.createAcls(List(AclTopicWrite(), AclTopicCreate(), AclTopicDescribe()).asJava).values
+    brokers.foreach { s =>
+      TestUtils.waitAndVerifyAcls(TopicWriteAcl ++ TopicDescribeAcl ++ TopicCreateAcl, s.dataPlaneRequestProcessor.authorizer.get, topicResource)
     }
+    val producer = createProducer()
+    sendRecords(producer, numRecords, tp)
+
+    val consumer = createConsumer()
+    consumer.assign(List(tp).asJava)
+    val e = assertThrows(classOf[GroupAuthorizationException], () => consumeRecords(consumer))
+    assertEquals(group, e.groupId())
+    confirmReauthenticationMetrics()
   }
 
   protected final def sendRecords(producer: KafkaProducer[Array[Byte], Array[Byte]],

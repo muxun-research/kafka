@@ -17,13 +17,14 @@
 package org.apache.kafka.streams.processor.api;
 
 import org.apache.kafka.streams.kstream.ValueTransformerWithKeySupplier;
+import org.apache.kafka.streams.processor.Punctuator;
 
 public interface RecordMetadata {
     /**
      * Return the topic name of the current input record; could be {@code null} if it is not
      * available.
      *
-     * <p> For example, if this method is invoked within a @link Punctuator#punctuate(long)
+     * <p> For example, if this method is invoked within a {@link Punctuator#punctuate(long)
      * punctuation callback}, or while processing a record that was forwarded by a punctuation
      * callback, the record won't have an associated topic.
      * Another example is
@@ -38,7 +39,7 @@ public interface RecordMetadata {
      * Return the partition id of the current input record; could be {@code -1} if it is not
      * available.
      *
-     * <p> For example, if this method is invoked within a @link Punctuator#punctuate(long)
+     * <p> For example, if this method is invoked within a {@link Punctuator#punctuate(long)
      * punctuation callback}, or while processing a record that was forwarded by a punctuation
      * callback, the record won't have an associated partition id.
      * Another example is
@@ -53,7 +54,7 @@ public interface RecordMetadata {
      * Return the offset of the current input record; could be {@code -1} if it is not
      * available.
      *
-     * <p> For example, if this method is invoked within a @link Punctuator#punctuate(long)
+     * <p> For example, if this method is invoked within a {@link Punctuator#punctuate(long)
      * punctuation callback}, or while processing a record that was forwarded by a punctuation
      * callback, the record won't have an associated offset.
      * Another example is

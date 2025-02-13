@@ -27,47 +27,47 @@ import java.util.stream.Collectors;
 
 public class DescribeConfigsRequest extends AbstractRequest {
 
-	public static class Builder extends AbstractRequest.Builder<DescribeConfigsRequest> {
-		private final DescribeConfigsRequestData data;
+    public static class Builder extends AbstractRequest.Builder<DescribeConfigsRequest> {
+        private final DescribeConfigsRequestData data;
 
-		public Builder(DescribeConfigsRequestData data) {
-			super(ApiKeys.DESCRIBE_CONFIGS);
-			this.data = data;
-		}
+        public Builder(DescribeConfigsRequestData data) {
+            super(ApiKeys.DESCRIBE_CONFIGS);
+            this.data = data;
+        }
 
-		@Override
-		public DescribeConfigsRequest build(short version) {
-			return new DescribeConfigsRequest(data, version);
-		}
+        @Override
+        public DescribeConfigsRequest build(short version) {
+            return new DescribeConfigsRequest(data, version);
+        }
     }
 
-	private final DescribeConfigsRequestData data;
+    private final DescribeConfigsRequestData data;
 
-	public DescribeConfigsRequest(DescribeConfigsRequestData data, short version) {
-		super(ApiKeys.DESCRIBE_CONFIGS, version);
-		this.data = data;
-	}
+    public DescribeConfigsRequest(DescribeConfigsRequestData data, short version) {
+        super(ApiKeys.DESCRIBE_CONFIGS, version);
+        this.data = data;
+    }
 
-	@Override
-	public DescribeConfigsRequestData data() {
-		return data;
-	}
+    @Override
+    public DescribeConfigsRequestData data() {
+        return data;
+    }
 
     @Override
     public DescribeConfigsResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-		Errors error = Errors.forException(e);
-		return new DescribeConfigsResponse(new DescribeConfigsResponseData()
-				.setThrottleTimeMs(throttleTimeMs)
-				.setResults(data.resources().stream().map(result -> {
-							return new DescribeConfigsResponseData.DescribeConfigsResult().setErrorCode(error.code())
-									.setErrorMessage(error.message())
-									.setResourceName(result.resourceName())
-									.setResourceType(result.resourceType());
-						}).collect(Collectors.toList())
-				));
-	}
+        Errors error = Errors.forException(e);
+        return new DescribeConfigsResponse(new DescribeConfigsResponseData()
+                .setThrottleTimeMs(throttleTimeMs)
+                .setResults(data.resources().stream().map(result ->
+                    new DescribeConfigsResponseData.DescribeConfigsResult().setErrorCode(error.code())
+                            .setErrorMessage(error.message())
+                            .setResourceName(result.resourceName())
+                            .setResourceType(result.resourceType()))
+                .collect(Collectors.toList())
+        ));
+    }
 
     public static DescribeConfigsRequest parse(ByteBuffer buffer, short version) {
-		return new DescribeConfigsRequest(new DescribeConfigsRequestData(new ByteBufferAccessor(buffer), version), version);
+        return new DescribeConfigsRequest(new DescribeConfigsRequestData(new ByteBufferAccessor(buffer), version), version);
     }
 }

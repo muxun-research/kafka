@@ -19,17 +19,28 @@ package org.apache.kafka.streams.state;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.processor.StateStore;
-import org.apache.kafka.streams.state.internals.*;
-import org.junit.Test;
+import org.apache.kafka.streams.state.internals.InMemoryKeyValueStore;
+import org.apache.kafka.streams.state.internals.MemoryNavigableLRUCache;
+import org.apache.kafka.streams.state.internals.RocksDBSegmentedBytesStore;
+import org.apache.kafka.streams.state.internals.RocksDBSessionStore;
+import org.apache.kafka.streams.state.internals.RocksDBStore;
+import org.apache.kafka.streams.state.internals.RocksDBTimestampedSegmentedBytesStore;
+import org.apache.kafka.streams.state.internals.RocksDBTimestampedStore;
+import org.apache.kafka.streams.state.internals.RocksDBWindowStore;
+import org.apache.kafka.streams.state.internals.WrappedStateStore;
+
+import org.junit.jupiter.api.Test;
 
 import static java.time.Duration.ZERO;
 import static java.time.Duration.ofMillis;
-import static org.hamcrest.CoreMatchers.*;
+import static org.hamcrest.CoreMatchers.allOf;
+import static org.hamcrest.CoreMatchers.equalTo;
+import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.core.IsInstanceOf.instanceOf;
 import static org.hamcrest.core.IsNot.not;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class StoresTest {
 
@@ -174,7 +185,9 @@ public class StoresTest {
 
     @Test
     public void shouldCreateRocksDbStore() {
-        assertThat(Stores.persistentKeyValueStore("store").get(), allOf(not(instanceOf(RocksDBTimestampedStore.class)), instanceOf(RocksDBStore.class)));
+        assertThat(
+            Stores.persistentKeyValueStore("store").get(),
+            allOf(not(instanceOf(RocksDBTimestampedStore.class)), instanceOf(RocksDBStore.class)));
     }
 
     @Test
@@ -242,20 +255,32 @@ public class StoresTest {
 
     @Test
     public void shouldBuildTimestampedKeyValueStoreThatWrapsInMemoryKeyValueStore() {
-        final TimestampedKeyValueStore<String, String> store = Stores.timestampedKeyValueStoreBuilder(Stores.inMemoryKeyValueStore("name"), Serdes.String(), Serdes.String()).withLoggingDisabled().withCachingDisabled().build();
+        final TimestampedKeyValueStore<String, String> store = Stores.timestampedKeyValueStoreBuilder(
+            Stores.inMemoryKeyValueStore("name"),
+            Serdes.String(),
+            Serdes.String()
+        ).withLoggingDisabled().withCachingDisabled().build();
         assertThat(store, not(nullValue()));
         assertThat(((WrappedStateStore) store).wrapped(), instanceOf(TimestampedBytesStore.class));
     }
 
     @Test
     public void shouldBuildVersionedKeyValueStore() {
-        final VersionedKeyValueStore<String, String> store = Stores.versionedKeyValueStoreBuilder(Stores.persistentVersionedKeyValueStore("name", ofMillis(1)), Serdes.String(), Serdes.String()).build();
+        final VersionedKeyValueStore<String, String> store = Stores.versionedKeyValueStoreBuilder(
+            Stores.persistentVersionedKeyValueStore("name", ofMillis(1)),
+            Serdes.String(),
+            Serdes.String()
+        ).build();
         assertThat(store, not(nullValue()));
     }
 
     @Test
     public void shouldBuildWindowStore() {
-        final WindowStore<String, String> store = Stores.windowStoreBuilder(Stores.persistentWindowStore("store", ofMillis(3L), ofMillis(3L), true), Serdes.String(), Serdes.String()).build();
+        final WindowStore<String, String> store = Stores.windowStoreBuilder(
+            Stores.persistentWindowStore("store", ofMillis(3L), ofMillis(3L), true),
+            Serdes.String(),
+            Serdes.String()
+        ).build();
         assertThat(store, not(nullValue()));
     }
 
@@ -280,15 +305,15 @@ public class StoresTest {
     }
 
     @Test
-	public void shouldBuildTimestampedWindowStoreThatWrapsInMemoryWindowStore() {
-		final TimestampedWindowStore<String, String> store = Stores.timestampedWindowStoreBuilder(
-				Stores.inMemoryWindowStore("store", ofMillis(3L), ofMillis(3L), true),
-				Serdes.String(),
-				Serdes.String()
-		).withLoggingDisabled().withCachingDisabled().build();
-		assertThat(store, not(nullValue()));
-		assertThat(((WrappedStateStore) store).wrapped(), instanceOf(TimestampedBytesStore.class));
-	}
+    public void shouldBuildTimestampedWindowStoreThatWrapsInMemoryWindowStore() {
+        final TimestampedWindowStore<String, String> store = Stores.timestampedWindowStoreBuilder(
+            Stores.inMemoryWindowStore("store", ofMillis(3L), ofMillis(3L), true),
+            Serdes.String(),
+            Serdes.String()
+        ).withLoggingDisabled().withCachingDisabled().build();
+        assertThat(store, not(nullValue()));
+        assertThat(((WrappedStateStore) store).wrapped(), instanceOf(TimestampedBytesStore.class));
+    }
 
     @Test
     public void shouldBuildSessionStore() {

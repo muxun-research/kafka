@@ -23,15 +23,33 @@ import java.util.List;
 import java.util.Map;
 
 public final class ProcessorTopologyFactories {
-    private ProcessorTopologyFactories() {
+    private ProcessorTopologyFactories() {}
+
+    public static ProcessorTopology with(final List<ProcessorNode<?, ?, ?, ?>> processorNodes,
+                                         final Map<String, SourceNode<?, ?>> sourcesByTopic,
+                                         final List<StateStore> stateStoresByName,
+                                         final Map<String, String> storeToChangelogTopic) {
+        return new ProcessorTopology(processorNodes,
+                                     sourcesByTopic,
+                                     Collections.emptyMap(),
+                                     stateStoresByName,
+                                     Collections.emptyList(),
+                                     storeToChangelogTopic,
+                                     Collections.emptySet(),
+                                     Collections.emptyMap());
     }
 
-    public static ProcessorTopology with(final List<ProcessorNode<?, ?, ?, ?>> processorNodes, final Map<String, SourceNode<?, ?>> sourcesByTopic, final List<StateStore> stateStoresByName, final Map<String, String> storeToChangelogTopic) {
-        return new ProcessorTopology(processorNodes, sourcesByTopic, Collections.emptyMap(), stateStoresByName, Collections.emptyList(), storeToChangelogTopic, Collections.emptySet());
-    }
+    static ProcessorTopology withLocalStores(final List<StateStore> stateStores,
+                                             final Map<String, String> storeToChangelogTopic) {
+        return new ProcessorTopology(Collections.emptyList(),
+                                     Collections.emptyMap(),
+                                     Collections.emptyMap(),
+                                     stateStores,
+                                     Collections.emptyList(),
+                                     storeToChangelogTopic,
+                                     Collections.emptySet(),
+                                     Collections.emptyMap());
 
-    static ProcessorTopology withLocalStores(final List<StateStore> stateStores, final Map<String, String> storeToChangelogTopic) {
-        return new ProcessorTopology(Collections.emptyList(), Collections.emptyMap(), Collections.emptyMap(), stateStores, Collections.emptyList(), storeToChangelogTopic, Collections.emptySet());
     }
 
 }

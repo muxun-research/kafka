@@ -31,13 +31,22 @@ import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.requests.OffsetDeleteRequest;
 import org.apache.kafka.common.requests.OffsetDeleteResponse;
 import org.apache.kafka.common.utils.LogContext;
+
 import org.junit.jupiter.api.Test;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
-import static java.util.Collections.*;
+import static java.util.Collections.emptyList;
+import static java.util.Collections.emptySet;
+import static java.util.Collections.singleton;
+import static java.util.Collections.singletonList;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 public class DeleteConsumerGroupOffsetsHandlerTest {
 
@@ -85,49 +94,86 @@ public class DeleteConsumerGroupOffsetsHandlerTest {
 
     @Test
     public void testFailedHandleResponseWithPartitionError() {
-        assertPartitionFailed(Collections.singletonMap(t0p0, Errors.GROUP_SUBSCRIBED_TO_TOPIC), handleWithPartitionError(Errors.GROUP_SUBSCRIBED_TO_TOPIC));
-        assertPartitionFailed(Collections.singletonMap(t0p0, Errors.TOPIC_AUTHORIZATION_FAILED), handleWithPartitionError(Errors.TOPIC_AUTHORIZATION_FAILED));
-        assertPartitionFailed(Collections.singletonMap(t0p0, Errors.UNKNOWN_TOPIC_OR_PARTITION), handleWithPartitionError(Errors.UNKNOWN_TOPIC_OR_PARTITION));
+        assertPartitionFailed(Collections.singletonMap(t0p0, Errors.GROUP_SUBSCRIBED_TO_TOPIC),
+            handleWithPartitionError(Errors.GROUP_SUBSCRIBED_TO_TOPIC));
+        assertPartitionFailed(Collections.singletonMap(t0p0, Errors.TOPIC_AUTHORIZATION_FAILED),
+            handleWithPartitionError(Errors.TOPIC_AUTHORIZATION_FAILED));
+        assertPartitionFailed(Collections.singletonMap(t0p0, Errors.UNKNOWN_TOPIC_OR_PARTITION),
+            handleWithPartitionError(Errors.UNKNOWN_TOPIC_OR_PARTITION));
     }
 
     private OffsetDeleteResponse buildGroupErrorResponse(Errors error) {
-        OffsetDeleteResponse response = new OffsetDeleteResponse(new OffsetDeleteResponseData().setErrorCode(error.code()));
+        OffsetDeleteResponse response = new OffsetDeleteResponse(
+            new OffsetDeleteResponseData()
+                .setErrorCode(error.code()));
         if (error == Errors.NONE) {
-            response.data().setThrottleTimeMs(0).setTopics(new OffsetDeleteResponseTopicCollection(singletonList(new OffsetDeleteResponseTopic().setName(t0p0.topic()).setPartitions(new OffsetDeleteResponsePartitionCollection(singletonList(new OffsetDeleteResponsePartition().setPartitionIndex(t0p0.partition()).setErrorCode(error.code())).iterator()))).iterator()));
+            response.data()
+                .setThrottleTimeMs(0)
+                .setTopics(new OffsetDeleteResponseTopicCollection(singletonList(
+                    new OffsetDeleteResponseTopic()
+                        .setName(t0p0.topic())
+                        .setPartitions(new OffsetDeleteResponsePartitionCollection(singletonList(
+                            new OffsetDeleteResponsePartition()
+                                .setPartitionIndex(t0p0.partition())
+                                .setErrorCode(error.code())
+                        ).iterator()))
+                ).iterator()));
         }
         return response;
     }
 
     private OffsetDeleteResponse buildPartitionErrorResponse(Errors error) {
-        OffsetDeleteResponse response = new OffsetDeleteResponse(new OffsetDeleteResponseData().setThrottleTimeMs(0).setTopics(new OffsetDeleteResponseTopicCollection(singletonList(new OffsetDeleteResponseTopic().setName(t0p0.topic()).setPartitions(new OffsetDeleteResponsePartitionCollection(singletonList(new OffsetDeleteResponsePartition().setPartitionIndex(t0p0.partition()).setErrorCode(error.code())).iterator()))).iterator())));
-        return response;
+        return new OffsetDeleteResponse(
+            new OffsetDeleteResponseData()
+                .setThrottleTimeMs(0)
+                .setTopics(new OffsetDeleteResponseTopicCollection(singletonList(
+                    new OffsetDeleteResponseTopic()
+                        .setName(t0p0.topic())
+                        .setPartitions(new OffsetDeleteResponsePartitionCollection(singletonList(
+                            new OffsetDeleteResponsePartition()
+                                .setPartitionIndex(t0p0.partition())
+                                .setErrorCode(error.code())
+                        ).iterator()))
+                ).iterator()))
+        );
     }
 
-    private AdminApiHandler.ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> handleWithGroupError(Errors error) {
+    private AdminApiHandler.ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> handleWithGroupError(
+        Errors error
+    ) {
         DeleteConsumerGroupOffsetsHandler handler = new DeleteConsumerGroupOffsetsHandler(groupId, tps, logContext);
         OffsetDeleteResponse response = buildGroupErrorResponse(error);
         return handler.handleResponse(new Node(1, "host", 1234), singleton(CoordinatorKey.byGroupId(groupId)), response);
     }
 
-    private AdminApiHandler.ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> handleWithPartitionError(Errors error) {
+    private AdminApiHandler.ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> handleWithPartitionError(
+        Errors error
+    ) {
         DeleteConsumerGroupOffsetsHandler handler = new DeleteConsumerGroupOffsetsHandler(groupId, tps, logContext);
         OffsetDeleteResponse response = buildPartitionErrorResponse(error);
         return handler.handleResponse(new Node(1, "host", 1234), singleton(CoordinatorKey.byGroupId(groupId)), response);
     }
 
-    private void assertUnmapped(AdminApiHandler.ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> result) {
+    private void assertUnmapped(
+        AdminApiHandler.ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> result
+    ) {
         assertEquals(emptySet(), result.completedKeys.keySet());
         assertEquals(emptySet(), result.failedKeys.keySet());
         assertEquals(singletonList(CoordinatorKey.byGroupId(groupId)), result.unmappedKeys);
     }
 
-    private void assertRetriable(AdminApiHandler.ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> result) {
+    private void assertRetriable(
+        AdminApiHandler.ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> result
+    ) {
         assertEquals(emptySet(), result.completedKeys.keySet());
         assertEquals(emptySet(), result.failedKeys.keySet());
         assertEquals(emptyList(), result.unmappedKeys);
     }
 
-    private void assertCompleted(AdminApiHandler.ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> result, Map<TopicPartition, Errors> expected) {
+    private void assertCompleted(
+        AdminApiHandler.ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> result,
+        Map<TopicPartition, Errors> expected
+    ) {
         CoordinatorKey key = CoordinatorKey.byGroupId(groupId);
         assertEquals(emptySet(), result.failedKeys.keySet());
         assertEquals(emptyList(), result.unmappedKeys);
@@ -135,15 +181,21 @@ public class DeleteConsumerGroupOffsetsHandlerTest {
         assertEquals(expected, result.completedKeys.get(key));
     }
 
-    private void assertGroupFailed(Class<? extends Throwable> expectedExceptionType, AdminApiHandler.ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> result) {
+    private void assertGroupFailed(
+        Class<? extends Throwable> expectedExceptionType,
+        AdminApiHandler.ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> result
+    ) {
         CoordinatorKey key = CoordinatorKey.byGroupId(groupId);
         assertEquals(emptySet(), result.completedKeys.keySet());
         assertEquals(emptyList(), result.unmappedKeys);
         assertEquals(singleton(key), result.failedKeys.keySet());
-        assertTrue(expectedExceptionType.isInstance(result.failedKeys.get(key)));
+        assertInstanceOf(expectedExceptionType, result.failedKeys.get(key));
     }
 
-    private void assertPartitionFailed(Map<TopicPartition, Errors> expectedResult, AdminApiHandler.ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> result) {
+    private void assertPartitionFailed(
+        Map<TopicPartition, Errors> expectedResult,
+        AdminApiHandler.ApiResult<CoordinatorKey, Map<TopicPartition, Errors>> result
+    ) {
         CoordinatorKey key = CoordinatorKey.byGroupId(groupId);
         assertEquals(singleton(key), result.completedKeys.keySet());
 

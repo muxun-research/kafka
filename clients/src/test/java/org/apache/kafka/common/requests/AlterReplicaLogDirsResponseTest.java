@@ -20,8 +20,10 @@ import org.apache.kafka.common.message.AlterReplicaLogDirsResponseData;
 import org.apache.kafka.common.message.AlterReplicaLogDirsResponseData.AlterReplicaLogDirPartitionResult;
 import org.apache.kafka.common.message.AlterReplicaLogDirsResponseData.AlterReplicaLogDirTopicResult;
 import org.apache.kafka.common.protocol.Errors;
+
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
 import java.util.Map;
 
 import static java.util.Arrays.asList;
@@ -29,29 +31,29 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class AlterReplicaLogDirsResponseTest {
 
-	@Test
-	public void testErrorCounts() {
-		AlterReplicaLogDirsResponseData data = new AlterReplicaLogDirsResponseData()
-				.setResults(asList(
-						new AlterReplicaLogDirTopicResult()
-								.setTopicName("t0")
-								.setPartitions(asList(
-										new AlterReplicaLogDirPartitionResult()
-												.setPartitionIndex(0)
-												.setErrorCode(Errors.LOG_DIR_NOT_FOUND.code()),
-										new AlterReplicaLogDirPartitionResult()
-												.setPartitionIndex(1)
-												.setErrorCode(Errors.NONE.code()))),
-						new AlterReplicaLogDirTopicResult()
-								.setTopicName("t1")
-								.setPartitions(asList(
-										new AlterReplicaLogDirPartitionResult()
-												.setPartitionIndex(0)
-												.setErrorCode(Errors.LOG_DIR_NOT_FOUND.code())))));
-		Map<Errors, Integer> counts = new AlterReplicaLogDirsResponse(data).errorCounts();
-		assertEquals(2, counts.size());
-		assertEquals(Integer.valueOf(2), counts.get(Errors.LOG_DIR_NOT_FOUND));
-		assertEquals(Integer.valueOf(1), counts.get(Errors.NONE));
+    @Test
+    public void testErrorCounts() {
+        AlterReplicaLogDirsResponseData data = new AlterReplicaLogDirsResponseData()
+                .setResults(asList(
+                        new AlterReplicaLogDirTopicResult()
+                                .setTopicName("t0")
+                                .setPartitions(asList(
+                                        new AlterReplicaLogDirPartitionResult()
+                                                .setPartitionIndex(0)
+                                                .setErrorCode(Errors.LOG_DIR_NOT_FOUND.code()),
+                                        new AlterReplicaLogDirPartitionResult()
+                                                .setPartitionIndex(1)
+                                                .setErrorCode(Errors.NONE.code()))),
+                        new AlterReplicaLogDirTopicResult()
+                                .setTopicName("t1")
+                                .setPartitions(Collections.singletonList(
+                                        new AlterReplicaLogDirPartitionResult()
+                                                .setPartitionIndex(0)
+                                                .setErrorCode(Errors.LOG_DIR_NOT_FOUND.code())))));
+        Map<Errors, Integer> counts = new AlterReplicaLogDirsResponse(data).errorCounts();
+        assertEquals(2, counts.size());
+        assertEquals(Integer.valueOf(2), counts.get(Errors.LOG_DIR_NOT_FOUND));
+        assertEquals(Integer.valueOf(1), counts.get(Errors.NONE));
 
-	}
+    }
 }

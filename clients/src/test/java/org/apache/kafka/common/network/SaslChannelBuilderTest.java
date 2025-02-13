@@ -34,22 +34,32 @@ import org.apache.kafka.common.security.scram.ScramLoginModule;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.test.TestUtils;
-import org.ietf.jgss.*;
+
+import org.ietf.jgss.GSSContext;
+import org.ietf.jgss.GSSCredential;
+import org.ietf.jgss.GSSManager;
+import org.ietf.jgss.GSSName;
+import org.ietf.jgss.Oid;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+
+import java.lang.reflect.Field;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Function;
 
 import javax.security.auth.Subject;
 import javax.security.auth.callback.CallbackHandler;
 import javax.security.auth.login.LoginException;
 import javax.security.auth.spi.LoginModule;
-import java.lang.reflect.Field;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.function.Supplier;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 
 public class SaslChannelBuilderTest {
@@ -103,9 +113,11 @@ public class SaslChannelBuilderTest {
         Map<String, JaasContext> jaasContexts = Collections.singletonMap("GSSAPI", jaasContext);
         GSSManager gssManager = Mockito.mock(GSSManager.class);
         GSSName gssName = Mockito.mock(GSSName.class);
-        Mockito.when(gssManager.createName(Mockito.anyString(), Mockito.any())).thenAnswer(unused -> gssName);
+        Mockito.when(gssManager.createName(Mockito.anyString(), Mockito.any()))
+                .thenAnswer(unused -> gssName);
         Oid oid = new Oid("1.2.840.113554.1.2.2");
-        Mockito.when(gssManager.createCredential(gssName, GSSContext.INDEFINITE_LIFETIME, oid, GSSCredential.ACCEPT_ONLY)).thenAnswer(unused -> Mockito.mock(GSSCredential.class));
+        Mockito.when(gssManager.createCredential(gssName, GSSContext.INDEFINITE_LIFETIME, oid, GSSCredential.ACCEPT_ONLY))
+                .thenAnswer(unused -> Mockito.mock(GSSCredential.class));
 
         SaslChannelBuilder channelBuilder1 = createGssapiChannelBuilder(jaasContexts, gssManager);
         assertEquals(1, channelBuilder1.subject("GSSAPI").getPrincipals().size());
@@ -116,7 +128,8 @@ public class SaslChannelBuilderTest {
         assertEquals(1, channelBuilder2.subject("GSSAPI").getPrivateCredentials().size());
         assertSame(channelBuilder1.subject("GSSAPI"), channelBuilder2.subject("GSSAPI"));
 
-        Mockito.verify(gssManager, Mockito.times(1)).createCredential(gssName, GSSContext.INDEFINITE_LIFETIME, oid, GSSCredential.ACCEPT_ONLY);
+        Mockito.verify(gssManager, Mockito.times(1))
+                .createCredential(gssName, GSSContext.INDEFINITE_LIFETIME, oid, GSSCredential.ACCEPT_ONLY);
     }
 
     /**
@@ -125,9 +138,8 @@ public class SaslChannelBuilderTest {
      */
     @Test
     public void testClientChannelBuilderWithBrokerConfigs() throws Exception {
-        Map<String, Object> configs = new HashMap<>();
         CertStores certStores = new CertStores(false, "client", "localhost");
-        configs.putAll(certStores.getTrustingConfig(certStores));
+        Map<String, Object> configs = new HashMap<>(certStores.getTrustingConfig(certStores));
         configs.put(SaslConfigs.SASL_KERBEROS_SERVICE_NAME, "kafka");
         configs.putAll(new ConfigDef().withClientSaslSupport().parse(configs));
         for (Field field : BrokerSecurityConfigs.class.getFields()) {
@@ -152,7 +164,9 @@ public class SaslChannelBuilderTest {
     }
 
     private SaslChannelBuilder createGssapiChannelBuilder(Map<String, JaasContext> jaasContexts, GSSManager gssManager) {
-        SaslChannelBuilder channelBuilder = new SaslChannelBuilder(Mode.SERVER, jaasContexts, SecurityProtocol.SASL_PLAINTEXT, new ListenerName("GSSAPI"), false, "GSSAPI", true, null, null, null, Time.SYSTEM, new LogContext(), defaultApiVersionsSupplier()) {
+        SaslChannelBuilder channelBuilder = new SaslChannelBuilder(ConnectionMode.SERVER, jaasContexts,
+            SecurityProtocol.SASL_PLAINTEXT, new ListenerName("GSSAPI"), false, "GSSAPI",
+            null, null, null, Time.SYSTEM, new LogContext(), defaultApiVersionsSupplier()) {
 
             @Override
             protected GSSManager gssManager() {
@@ -164,12 +178,12 @@ public class SaslChannelBuilderTest {
         return channelBuilder;
     }
 
-    private Supplier<ApiVersionsResponse> defaultApiVersionsSupplier() {
-        return () -> TestUtils.defaultApiVersionsResponse(ApiMessageType.ListenerType.ZK_BROKER);
+    private Function<Short, ApiVersionsResponse> defaultApiVersionsSupplier() {
+        return version -> TestUtils.defaultApiVersionsResponse(ApiMessageType.ListenerType.BROKER);
     }
 
     private SaslChannelBuilder createChannelBuilder(SecurityProtocol securityProtocol, String saslMechanism) {
-        Class<?> loginModule = null;
+        Class<?> loginModule;
         switch (saslMechanism) {
             case "PLAIN":
                 loginModule = PlainLoginModule.class;
@@ -190,7 +204,9 @@ public class SaslChannelBuilderTest {
         jaasConfig.addEntry("jaasContext", loginModule.getName(), new HashMap<>());
         JaasContext jaasContext = new JaasContext("jaasContext", JaasContext.Type.SERVER, jaasConfig, null);
         Map<String, JaasContext> jaasContexts = Collections.singletonMap(saslMechanism, jaasContext);
-        return new SaslChannelBuilder(Mode.CLIENT, jaasContexts, securityProtocol, new ListenerName(saslMechanism), false, saslMechanism, true, null, null, null, Time.SYSTEM, new LogContext(), defaultApiVersionsSupplier());
+        return new SaslChannelBuilder(ConnectionMode.CLIENT, jaasContexts, securityProtocol, new ListenerName(saslMechanism),
+                false, saslMechanism, null,
+                null, null, Time.SYSTEM, new LogContext(), defaultApiVersionsSupplier());
     }
 
     public static final class TestGssapiLoginModule implements LoginModule {
@@ -218,7 +234,7 @@ public class SaslChannelBuilderTest {
         }
 
         @Override
-        public boolean logout() throws LoginException {
+        public boolean logout() {
             return true;
         }
     }

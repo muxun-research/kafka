@@ -413,12 +413,14 @@ public interface FieldType {
             default:
                 if (string.startsWith(ARRAY_PREFIX)) {
                     String elementTypeString = string.substring(ARRAY_PREFIX.length());
-                    if (elementTypeString.length() == 0) {
-                        throw new RuntimeException("Can't parse array type " + string + ".  No element type found.");
+                    if (elementTypeString.isEmpty()) {
+                        throw new RuntimeException("Can't parse array type " + string +
+                            ".  No element type found.");
                     }
                     FieldType elementType = parse(elementTypeString);
                     if (elementType.isArray()) {
-                        throw new RuntimeException("Can't have an array of arrays.  " + "Use an array of structs containing an array instead.");
+                        throw new RuntimeException("Can't have an array of arrays.  " +
+                            "Use an array of structs containing an array instead.");
                     }
                     return new ArrayType(elementType);
                 } else if (MessageGenerator.firstIsCapitalized(string)) {
@@ -495,14 +497,14 @@ public interface FieldType {
     }
 
     /**
-     * Gets the fixed length of the field, or None if the field is variable-length.
+     * Gets the fixed length of the field, or Empty if the field is variable-length.
      */
     default Optional<Integer> fixedLength() {
         return Optional.empty();
     }
 
     default boolean isVariableLength() {
-        return !fixedLength().isPresent();
+        return fixedLength().isEmpty();
     }
 
     /**

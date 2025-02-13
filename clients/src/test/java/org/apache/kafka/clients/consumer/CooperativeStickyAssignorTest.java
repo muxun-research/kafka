@@ -23,17 +23,27 @@ import org.apache.kafka.clients.consumer.internals.AbstractStickyAssignor;
 import org.apache.kafka.clients.consumer.internals.AbstractStickyAssignorTest;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import static java.util.Collections.emptyList;
 import static org.apache.kafka.clients.consumer.internals.AbstractPartitionAssignorTest.TEST_NAME_WITH_RACK_CONFIG;
 import static org.apache.kafka.clients.consumer.internals.AbstractStickyAssignor.DEFAULT_GENERATION;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class CooperativeStickyAssignorTest extends AbstractStickyAssignorTest {
 
@@ -197,6 +207,23 @@ public class CooperativeStickyAssignorTest extends AbstractStickyAssignorTest {
         assertTrue(isFullyBalanced(assignment));
     }
 
+    @Test
+    public void testUniformSubscriptionTransferOwnershipListIsRight() {
+        this.replicationFactor = 1;
+        this.numBrokerRacks = 2;
+        this.hasConsumerRack = true;
+        Map<String, List<PartitionInfo>> partitionsPerTopic = new HashMap<>();
+        partitionsPerTopic.put(topic1, partitionInfos(topic1, 4));
+
+        subscriptions.put("c0", buildSubscriptionV2Above(topics(topic1), partitions(tp(topic1, 0), tp(topic1, 1)),
+                generationId, 0));
+        subscriptions.put("c1", buildSubscriptionV2Above(topics(topic1), partitions(tp(topic1, 2), tp(topic1, 3)),
+                generationId, 1));
+
+        assignor.assignPartitions(partitionsPerTopic, subscriptions);
+        assertEquals(2, assignor.partitionsTransferringOwnership().size());
+    }
+
     /**
      * The cooperative assignor must do some additional work and verification of some assignments relative to the eager
      * assignor, since it may or may not need to trigger a second follow-up rebalance.
@@ -208,7 +235,9 @@ public class CooperativeStickyAssignorTest extends AbstractStickyAssignorTest {
      * to get the final assignment and then verify that it is both valid and balanced.
      */
     @Override
-    public void verifyValidityAndBalance(Map<String, Subscription> subscriptions, Map<String, List<TopicPartition>> assignments, Map<String, List<PartitionInfo>> partitionsPerTopic) {
+    public void verifyValidityAndBalance(Map<String, Subscription> subscriptions,
+                                         Map<String, List<TopicPartition>> assignments,
+                                         Map<String, List<PartitionInfo>> partitionsPerTopic) {
         int rebalances = 0;
         // partitions are being revoked, we must go through another assignment to get the final state
         while (verifyCooperativeValidity(subscriptions, assignments)) {
@@ -252,7 +281,9 @@ public class CooperativeStickyAssignorTest extends AbstractStickyAssignorTest {
 
         Set<TopicPartition> intersection = new HashSet<>(allAddedPartitions);
         intersection.retainAll(allRevokedPartitions);
-        assertTrue(intersection.isEmpty(), "Error: Some partitions were assigned to a new consumer during the same rebalance they are being " + "revoked from their previous owner. Partitions: " + intersection);
+        assertTrue(intersection.isEmpty(),
+            "Error: Some partitions were assigned to a new consumer during the same rebalance they are being " +
+            "revoked from their previous owner. Partitions: " + intersection);
 
         return !allRevokedPartitions.isEmpty();
     }

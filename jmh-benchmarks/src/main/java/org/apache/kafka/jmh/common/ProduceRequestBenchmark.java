@@ -17,10 +17,11 @@
 
 package org.apache.kafka.jmh.common;
 
-import kafka.network.RequestConvertToJson;
 import org.apache.kafka.common.message.ProduceRequestData;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.requests.ProduceRequest;
+import org.apache.kafka.network.RequestConvertToJson;
+
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -43,22 +44,22 @@ import java.util.concurrent.TimeUnit;
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 public class ProduceRequestBenchmark {
-	@Param({"10", "500", "1000"})
-	private int topicCount;
+    @Param({"10", "500", "1000"})
+    private int topicCount;
 
-	@Param({"3", "10", "20"})
-	private int partitionCount;
+    @Param({"3", "10", "20"})
+    private int partitionCount;
 
-	ProduceRequest produceRequest;
+    ProduceRequest produceRequest;
 
-	@Setup(Level.Trial)
-	public void setup() {
-		this.produceRequest = ProduceRequest.forCurrentMagic(new ProduceRequestData())
-				.build(ApiKeys.PRODUCE.latestVersion());
-	}
+    @Setup(Level.Trial)
+    public void setup() {
+        this.produceRequest = ProduceRequest.builder(new ProduceRequestData())
+                .build(ApiKeys.PRODUCE.latestVersion());
+    }
 
-	@Benchmark
-	public String testRequestToJson() {
-		return RequestConvertToJson.request(produceRequest).toString();
-	}
+    @Benchmark
+    public String testRequestToJson() {
+        return RequestConvertToJson.request(produceRequest).toString();
+    }
 }

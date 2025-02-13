@@ -23,23 +23,21 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 /**
  * This interface is used to facilitate running a configurable number of messages per second by throttling if the
  * throughput goes above a certain amount.
- * <p>
+ *
  * Currently there are 2 throughput methods:
- * <p>
- * * `constant` will use `ConstantThroughputGenerator` to keep the number of messages per second constant.
- * * `gaussian` will use `GaussianThroughputGenerator` to vary the number of messages per second on a normal
- * distribution.
- * <p>
+ *
+ *   * `constant` will use `ConstantThroughputGenerator` to keep the number of messages per second constant.
+ *   * `gaussian` will use `GaussianThroughputGenerator` to vary the number of messages per second on a normal
+ *     distribution.
+ *
  * Please see the implementation classes for more details.
  */
 
-@JsonTypeInfo(use = JsonTypeInfo.Id.NAME,
-		include = JsonTypeInfo.As.PROPERTY,
-		property = "type")
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
 @JsonSubTypes(value = {
-		@JsonSubTypes.Type(value = ConstantThroughputGenerator.class, name = "constant"),
-		@JsonSubTypes.Type(value = GaussianThroughputGenerator.class, name = "gaussian")
-})
+    @JsonSubTypes.Type(value = ConstantThroughputGenerator.class, name = "constant"),
+    @JsonSubTypes.Type(value = GaussianThroughputGenerator.class, name = "gaussian")
+    })
 public interface ThroughputGenerator {
-	void throttle() throws InterruptedException;
+    void throttle() throws InterruptedException;
 }

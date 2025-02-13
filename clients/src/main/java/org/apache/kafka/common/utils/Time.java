@@ -17,8 +17,8 @@
 package org.apache.kafka.common.utils;
 
 import java.time.Duration;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
@@ -30,7 +30,7 @@ import java.util.function.Supplier;
  */
 public interface Time {
 
-    Time SYSTEM = new SystemTime();
+    Time SYSTEM = SystemTime.getSystemTime();
 
     /**
      * Returns the current time in milliseconds.
@@ -65,10 +65,12 @@ public interface Time {
     /**
      * Wait for a condition using the monitor of a given object. This avoids the implicit
      * dependence on system time when calling {@link Object#wait()}.
-     * @param obj        The object that will be waited with {@link Object#wait()}. Note that it is the responsibility
-     *                   of the caller to call notify on this object when the condition is satisfied.
-     * @param condition  The condition we are awaiting
+     *
+     * @param obj The object that will be waited with {@link Object#wait()}. Note that it is the responsibility
+     *      of the caller to call notify on this object when the condition is satisfied.
+     * @param condition The condition we are awaiting
      * @param deadlineMs The deadline timestamp at which to raise a timeout error
+     *
      * @throws org.apache.kafka.common.errors.TimeoutException if the timeout expires before the condition is satisfied
      */
     void waitObject(Object obj, Supplier<Boolean> condition, long deadlineMs) throws InterruptedException;
@@ -89,12 +91,16 @@ public interface Time {
 
     /**
      * Wait for a future to complete, or time out.
-     * @param future     The future to wait for.
-     * @param deadlineNs The time in the future, in monotonic nanoseconds, to time out.
-     * @param <T>        The type of the future.
-     * @return The result of the future.
+     *
+     * @param future        The future to wait for.
+     * @param deadlineNs    The time in the future, in monotonic nanoseconds, to time out.
+     * @return              The result of the future.
+     * @param <T>           The type of the future.
      */
-    default <T> T waitForFuture(CompletableFuture<T> future, long deadlineNs) throws TimeoutException, InterruptedException, ExecutionException {
+    default <T> T waitForFuture(
+        Future<T> future,
+        long deadlineNs
+    ) throws TimeoutException, InterruptedException, ExecutionException  {
         TimeoutException timeoutException = null;
         while (true) {
             long nowNs = nanoseconds();

@@ -26,12 +26,13 @@ import org.apache.kafka.common.message.DeleteAclsRequestData;
 import org.apache.kafka.common.resource.PatternType;
 import org.apache.kafka.common.resource.ResourcePatternFilter;
 import org.apache.kafka.common.resource.ResourceType;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.stream.Collectors;
 
-import static java.util.Arrays.asList;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -51,67 +52,41 @@ public class DeleteAclsRequestTest {
     private static final AclBindingFilter UNKNOWN_FILTER = new AclBindingFilter(new ResourcePatternFilter(ResourceType.UNKNOWN, "prefix", PatternType.PREFIXED),
         new AccessControlEntryFilter("User:*", "127.0.0.1", AclOperation.CREATE, AclPermissionType.ALLOW));
 
-	@Test
+    @Test
     public void shouldThrowOnV0IfPrefixed() {
-		assertThrows(UnsupportedVersionException.class, () -> new DeleteAclsRequest.Builder(requestData(PREFIXED_FILTER)).build(V0));
+        assertThrows(UnsupportedVersionException.class, () -> new DeleteAclsRequest.Builder(requestData(PREFIXED_FILTER)).build(V0));
     }
 
-	@Test
+    @Test
     public void shouldThrowOnUnknownElements() {
-		assertThrows(IllegalArgumentException.class, () -> new DeleteAclsRequest.Builder(requestData(UNKNOWN_FILTER)).build(V1));
-    }
-
-    @Test
-    public void shouldRoundTripLiteralV0() {
-		final DeleteAclsRequest original = new DeleteAclsRequest.Builder(requestData(LITERAL_FILTER)).build(V0);
-		final ByteBuffer buffer = original.serialize();
-
-		final DeleteAclsRequest result = DeleteAclsRequest.parse(buffer, V0);
-
-		assertRequestEquals(original, result);
-	}
-
-    @Test
-    public void shouldRoundTripAnyV0AsLiteral() {
-		final DeleteAclsRequest original = new DeleteAclsRequest.Builder(requestData(ANY_FILTER)).build(V0);
-		final DeleteAclsRequest expected = new DeleteAclsRequest.Builder(requestData(
-				new AclBindingFilter(new ResourcePatternFilter(
-						ANY_FILTER.patternFilter().resourceType(),
-						ANY_FILTER.patternFilter().name(),
-						PatternType.LITERAL),
-						ANY_FILTER.entryFilter()))
-		).build(V0);
-
-		final DeleteAclsRequest result = DeleteAclsRequest.parse(original.serialize(), V0);
-
-		assertRequestEquals(expected, result);
+        assertThrows(IllegalArgumentException.class, () -> new DeleteAclsRequest.Builder(requestData(UNKNOWN_FILTER)).build(V1));
     }
 
     @Test
     public void shouldRoundTripV1() {
-		final DeleteAclsRequest original = new DeleteAclsRequest.Builder(
-				requestData(LITERAL_FILTER, PREFIXED_FILTER, ANY_FILTER)
-		).build(V1);
-		final ByteBuffer buffer = original.serialize();
+        final DeleteAclsRequest original = new DeleteAclsRequest.Builder(
+                requestData(LITERAL_FILTER, PREFIXED_FILTER, ANY_FILTER)
+        ).build(V1);
+        final ByteBuffer buffer = original.serialize();
 
-		final DeleteAclsRequest result = DeleteAclsRequest.parse(buffer, V1);
+        final DeleteAclsRequest result = DeleteAclsRequest.parse(buffer, V1);
 
-		assertRequestEquals(original, result);
-	}
+        assertRequestEquals(original, result);
+    }
 
-	private static void assertRequestEquals(final DeleteAclsRequest original, final DeleteAclsRequest actual) {
-		assertEquals(original.filters().size(), actual.filters().size(), "Number of filters wrong");
+    private static void assertRequestEquals(final DeleteAclsRequest original, final DeleteAclsRequest actual) {
+        assertEquals(original.filters().size(), actual.filters().size(), "Number of filters wrong");
 
-		for (int idx = 0; idx != original.filters().size(); ++idx) {
-			final AclBindingFilter originalFilter = original.filters().get(idx);
-			final AclBindingFilter actualFilter = actual.filters().get(idx);
-			assertEquals(originalFilter, actualFilter);
-		}
-	}
+        for (int idx = 0; idx != original.filters().size(); ++idx) {
+            final AclBindingFilter originalFilter = original.filters().get(idx);
+            final AclBindingFilter actualFilter = actual.filters().get(idx);
+            assertEquals(originalFilter, actualFilter);
+        }
+    }
 
-	private static DeleteAclsRequestData requestData(AclBindingFilter... acls) {
-		return new DeleteAclsRequestData().setFilters(asList(acls).stream()
-				.map(DeleteAclsRequest::deleteAclsFilter)
-				.collect(Collectors.toList()));
-	}
+    private static DeleteAclsRequestData requestData(AclBindingFilter... acls) {
+        return new DeleteAclsRequestData().setFilters(Arrays.stream(acls)
+            .map(DeleteAclsRequest::deleteAclsFilter)
+            .collect(Collectors.toList()));
+    }
 }

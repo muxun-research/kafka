@@ -17,20 +17,24 @@
 
 package kafka.server
 
-import kafka.network.SocketServer
-import kafka.utils.TestUtils
-import org.apache.kafka.common.protocol.Errors
-import org.apache.kafka.common.requests._
-import org.junit.jupiter.api.Assertions._
-
 import java.util
 import java.util.Properties
+
+import kafka.network.SocketServer
+import kafka.utils.TestUtils
+import org.apache.kafka.common.message.CreateTopicsRequestData
+import org.apache.kafka.common.message.CreateTopicsRequestData._
+import org.apache.kafka.common.protocol.Errors
+import org.apache.kafka.common.requests._
+import org.apache.kafka.server.config.ServerLogConfigs
+import org.junit.jupiter.api.Assertions.{assertEquals, assertFalse, assertNotEquals, assertNotNull, assertTrue}
+
 import scala.jdk.CollectionConverters._
 
 abstract class AbstractCreateTopicsRequestTest extends BaseRequestTest {
 
   override def brokerPropertyOverrides(properties: Properties): Unit =
-    properties.put(KafkaConfig.AutoCreateTopicsEnableProp, false.toString)
+    properties.put(ServerLogConfigs.AUTO_CREATE_TOPICS_ENABLE_CONFIG, false.toString)
 
   def topicsReq(topics: Seq[CreatableTopic],
                 timeout: Integer = 10000,
@@ -64,10 +68,10 @@ abstract class AbstractCreateTopicsRequestTest extends BaseRequestTest {
       topic.setReplicationFactor(1.toShort)
     }
     if (config != null) {
-      val effectiveConfigs = new CreateableTopicConfigCollection()
+      val effectiveConfigs = new CreatableTopicConfigCollection()
       config.foreach {
         case (name, value) =>
-          effectiveConfigs.add(new CreateableTopicConfig().setName(name).setValue(value))
+          effectiveConfigs.add(new CreatableTopicConfig().setName(name).setValue(value))
       }
       topic.setConfigs(effectiveConfigs)
     }
@@ -95,7 +99,7 @@ abstract class AbstractCreateTopicsRequestTest extends BaseRequestTest {
       s"There should be no errors, found ${response.errorCounts().keySet().asScala.mkString(", ")},")
 
     request.data.topics.forEach { topic =>
-      def verifyMetadata(socketServer: SocketServer) = {
+      def verifyMetadata(socketServer: SocketServer): Unit = {
         val metadata = sendMetadataRequest(
           new MetadataRequest.Builder(List(topic.name()).asJava, false).build(), socketServer).topicMetadata.asScala
         val metadataForTopic = metadata.filter(_.topic == topic.name()).head
@@ -133,10 +137,6 @@ abstract class AbstractCreateTopicsRequestTest extends BaseRequestTest {
         }
       }
 
-      if (!isKRaftTest()) {
-        // Verify controller broker has the correct metadata
-        verifyMetadata(controllerSocketServer)
-      }
       if (!request.data.validateOnly) {
         // Wait until metadata is propagated and validate non-controller broker has the correct metadata
         TestUtils.waitForPartitionMetadata(brokers, topic.name(), 0)
@@ -179,16 +179,16 @@ abstract class AbstractCreateTopicsRequestTest extends BaseRequestTest {
   }
 
   protected def sendCreateTopicRequest(
-                                        request: CreateTopicsRequest,
-                                        socketServer: SocketServer = controllerSocketServer
-                                      ): CreateTopicsResponse = {
+    request: CreateTopicsRequest,
+    socketServer: SocketServer = controllerSocketServer
+  ): CreateTopicsResponse = {
     connectAndReceive[CreateTopicsResponse](request, socketServer)
   }
 
   protected def sendMetadataRequest(
-                                     request: MetadataRequest,
-                                     socketServer: SocketServer = anySocketServer
-                                   ): MetadataResponse = {
+    request: MetadataRequest,
+    socketServer: SocketServer = anySocketServer
+  ): MetadataResponse = {
     connectAndReceive[MetadataResponse](request, socketServer)
   }
 

@@ -20,25 +20,47 @@ import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.compress.Compression;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeader;
-import org.apache.kafka.common.record.*;
+import org.apache.kafka.common.record.CompressionType;
+import org.apache.kafka.common.record.MemoryRecords;
+import org.apache.kafka.common.record.MemoryRecordsBuilder;
+import org.apache.kafka.common.record.Record;
+import org.apache.kafka.common.record.RecordBatch;
+import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.test.TestUtils;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.OptionalInt;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 
-import static org.apache.kafka.common.record.RecordBatch.*;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.apache.kafka.common.record.RecordBatch.MAGIC_VALUE_V0;
+import static org.apache.kafka.common.record.RecordBatch.MAGIC_VALUE_V1;
+import static org.apache.kafka.common.record.RecordBatch.MAGIC_VALUE_V2;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class ProducerBatchTest {
 
     private final long now = 1488748346917L;
 
-    private final MemoryRecordsBuilder memoryRecordsBuilder = MemoryRecords.builder(ByteBuffer.allocate(512), CompressionType.NONE, TimestampType.CREATE_TIME, 128);
+    private final MemoryRecordsBuilder memoryRecordsBuilder = MemoryRecords.builder(ByteBuffer.allocate(512),
+            Compression.NONE, TimestampType.CREATE_TIME, 128);
 
     @Test
     public void testBatchAbort() throws Exception {
@@ -116,7 +138,7 @@ public class ProducerBatchTest {
             MemoryRecordsBuilder builder = MemoryRecords.builder(
                     ByteBuffer.allocate(1024),
                     MAGIC_VALUE_V2,
-                    compressionType,
+                    Compression.of(compressionType).build(),
                     TimestampType.CREATE_TIME,
                     0L);
             ProducerBatch batch = new ProducerBatch(new TopicPartition("topic", 1), builder, now);
@@ -156,7 +178,7 @@ public class ProducerBatchTest {
                     continue;
 
                 MemoryRecordsBuilder builder = MemoryRecords.builder(ByteBuffer.allocate(1024), magic,
-                        compressionType, TimestampType.CREATE_TIME, 0L);
+                        Compression.of(compressionType).build(), TimestampType.CREATE_TIME, 0L);
 
                 ProducerBatch batch = new ProducerBatch(new TopicPartition("topic", 1), builder, now);
                 while (true) {
@@ -230,7 +252,8 @@ public class ProducerBatchTest {
         recordExceptionMap.put(0, new RuntimeException());
         recordExceptionMap.put(3, new RuntimeException());
 
-        Function<Integer, RuntimeException> recordExceptions = batchIndex -> recordExceptionMap.getOrDefault(batchIndex, topLevelException);
+        Function<Integer, RuntimeException> recordExceptions = batchIndex ->
+            recordExceptionMap.getOrDefault(batchIndex, topLevelException);
 
         testCompleteExceptionally(recordCount, topLevelException, recordExceptions);
     }
@@ -239,11 +262,84 @@ public class ProducerBatchTest {
     public void testCompleteExceptionallyWithNullRecordErrors() {
         int recordCount = 5;
         RuntimeException topLevelException = new RuntimeException();
-        assertThrows(NullPointerException.class, () -> testCompleteExceptionally(recordCount, topLevelException, null));
+        assertThrows(NullPointerException.class, () ->
+            testCompleteExceptionally(recordCount, topLevelException, null));
     }
 
-    private void testCompleteExceptionally(int recordCount, RuntimeException topLevelException, Function<Integer, RuntimeException> recordExceptions) {
+    /**
+     * This tests that leader is correctly maintained & leader-change is correctly detected across retries
+     * of the batch. It does so by testing primarily testing methods
+     * 1. maybeUpdateLeaderEpoch
+     * 2. hasLeaderChangedForTheOngoingRetry
+     */
+
+    @Test
+    public void testWithLeaderChangesAcrossRetries() {
         ProducerBatch batch = new ProducerBatch(new TopicPartition("topic", 1), memoryRecordsBuilder, now);
+
+        // Starting state for the batch, no attempt made to send it yet.
+        assertEquals(OptionalInt.empty(), batch.currentLeaderEpoch());
+        assertEquals(0, batch.attemptsWhenLeaderLastChanged()); // default value
+        batch.maybeUpdateLeaderEpoch(OptionalInt.empty());
+        assertFalse(batch.hasLeaderChangedForTheOngoingRetry());
+
+        // 1st attempt[Not a retry] to send the batch.
+        // Check leader isn't flagged as a new leader.
+        int batchLeaderEpoch = 100;
+        batch.maybeUpdateLeaderEpoch(OptionalInt.of(batchLeaderEpoch));
+        assertFalse(batch.hasLeaderChangedForTheOngoingRetry(), "batch leader is assigned for 1st time");
+        assertEquals(batchLeaderEpoch, batch.currentLeaderEpoch().getAsInt());
+        assertEquals(0, batch.attemptsWhenLeaderLastChanged());
+
+        // 2nd attempt[1st retry] to send the batch to a new leader.
+        // Check leader change is detected.
+        batchLeaderEpoch = 101;
+        batch.reenqueued(0);
+        batch.maybeUpdateLeaderEpoch(OptionalInt.of(batchLeaderEpoch));
+        assertTrue(batch.hasLeaderChangedForTheOngoingRetry(), "batch leader has changed");
+        assertEquals(batchLeaderEpoch, batch.currentLeaderEpoch().getAsInt());
+        assertEquals(1, batch.attemptsWhenLeaderLastChanged());
+
+        // 2nd attempt[1st retry] still ongoing, yet to be made.
+        // Check same leaderEpoch(101) is still considered as a leader-change.
+        batch.maybeUpdateLeaderEpoch(OptionalInt.of(batchLeaderEpoch));
+        assertTrue(batch.hasLeaderChangedForTheOngoingRetry(), "batch leader has changed");
+        assertEquals(batchLeaderEpoch, batch.currentLeaderEpoch().getAsInt());
+        assertEquals(1, batch.attemptsWhenLeaderLastChanged());
+
+        // 3rd attempt[2nd retry] to the same leader-epoch(101).
+        // Check same leaderEpoch(101) as not detected as a leader-change.
+        batch.reenqueued(0);
+        batch.maybeUpdateLeaderEpoch(OptionalInt.of(batchLeaderEpoch));
+        assertFalse(batch.hasLeaderChangedForTheOngoingRetry(), "batch leader has not changed");
+        assertEquals(batchLeaderEpoch, batch.currentLeaderEpoch().getAsInt());
+        assertEquals(1, batch.attemptsWhenLeaderLastChanged());
+
+        // Attempt made to update batch leader-epoch to an older leader-epoch(100).
+        // Check batch leader-epoch remains unchanged as 101.
+        batch.maybeUpdateLeaderEpoch(OptionalInt.of(batchLeaderEpoch - 1));
+        assertFalse(batch.hasLeaderChangedForTheOngoingRetry(), "batch leader has not changed");
+        assertEquals(batchLeaderEpoch, batch.currentLeaderEpoch().getAsInt());
+        assertEquals(1, batch.attemptsWhenLeaderLastChanged());
+
+        // Attempt made to update batch leader-epoch to an unknown leader(optional.empty())
+        // Check batch leader-epoch remains unchanged as 101.
+        batch.maybeUpdateLeaderEpoch(OptionalInt.empty());
+        assertFalse(batch.hasLeaderChangedForTheOngoingRetry(), "batch leader has not changed");
+        assertEquals(batchLeaderEpoch, batch.currentLeaderEpoch().getAsInt());
+        assertEquals(1, batch.attemptsWhenLeaderLastChanged());
+    }
+
+    private void testCompleteExceptionally(
+        int recordCount,
+        RuntimeException topLevelException,
+        Function<Integer, RuntimeException> recordExceptions
+    ) {
+        ProducerBatch batch = new ProducerBatch(
+            new TopicPartition("topic", 1),
+            memoryRecordsBuilder,
+            now
+        );
 
         List<FutureRecordMetadata> futures = new ArrayList<>(recordCount);
         for (int i = 0; i < recordCount; i++) {

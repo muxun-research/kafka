@@ -16,11 +16,19 @@
  */
 package org.apache.kafka.streams.processor.api;
 
+import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsMetrics;
 import org.apache.kafka.streams.Topology;
-import org.apache.kafka.streams.processor.*;
+import org.apache.kafka.streams.kstream.Consumed;
+import org.apache.kafka.streams.processor.Cancellable;
+import org.apache.kafka.streams.processor.PunctuationType;
+import org.apache.kafka.streams.processor.Punctuator;
+import org.apache.kafka.streams.processor.StateStore;
+import org.apache.kafka.streams.processor.TaskId;
+import org.apache.kafka.streams.processor.TimestampExtractor;
+import org.apache.kafka.streams.state.StoreBuilder;
 
 import java.io.File;
 import java.time.Duration;
@@ -34,12 +42,14 @@ public interface ProcessingContext {
 
     /**
      * Return the application id.
+     *
      * @return the application id
      */
     String applicationId();
 
     /**
      * Return the task id.
+     *
      * @return the task id
      */
     TaskId taskId();
@@ -68,33 +78,39 @@ public interface ProcessingContext {
 
     /**
      * Return the default key serde.
+     *
      * @return the key serializer
      */
     Serde<?> keySerde();
 
     /**
      * Return the default value serde.
+     *
      * @return the value serializer
      */
     Serde<?> valueSerde();
 
     /**
      * Return the state directory for the partition.
+     *
      * @return the state directory
      */
     File stateDir();
 
     /**
      * Return Metrics instance.
+     *
      * @return StreamsMetrics
      */
     StreamsMetrics metrics();
 
     /**
      * Get the state store given the store name.
+     *
      * @param name The store name
-     * @param <S>  The type or interface of the store to return
+     * @param <S> The type or interface of the store to return
      * @return The state store instance
+     *
      * @throws ClassCastException if the return type isn't a type or interface of the actual returned store.
      */
     <S extends StateStore> S getStateStore(final String name);
@@ -126,16 +142,21 @@ public interface ProcessingContext {
      *   <li>with {@link PunctuationType#STREAM_TIME}, when stream time advances more than interval</li>
      *   <li>with {@link PunctuationType#WALL_CLOCK_TIME}, on GC pause, too short interval, ...</li>
      * </ul>
+     *
      * @param interval the time interval between punctuations (supported minimum is 1 millisecond)
-     * @param type     one of: {@link PunctuationType#STREAM_TIME}, {@link PunctuationType#WALL_CLOCK_TIME}
+     * @param type one of: {@link PunctuationType#STREAM_TIME}, {@link PunctuationType#WALL_CLOCK_TIME}
      * @param callback a function consuming timestamps representing the current stream or system time
      * @return a handle allowing cancellation of the punctuation schedule established by this method
      * @throws IllegalArgumentException if the interval is not representable in milliseconds
      */
-    Cancellable schedule(final Duration interval, final PunctuationType type, final Punctuator callback);
+    Cancellable schedule(final Duration interval,
+                         final PunctuationType type,
+                         final Punctuator callback);
 
     /**
-     * Request a commit.
+     * Request a commit. Note that calling {@code commit()} is only a request for a commit, but it does not execute one.
+     * Hence, when {@code commit()} returns, no commit was executed yet. However, Kafka Streams will commit as soon
+     * as possible, instead of waiting for next {@code commit.interval.ms} to pass.
      */
     void commit();
 
@@ -149,6 +170,7 @@ public interface ProcessingContext {
      * (e.g. the value of {@link org.apache.kafka.streams.StreamsConfig#DEFAULT_KEY_SERDE_CLASS_CONFIG DEFAULT_KEY_SERDE_CLASS_CONFIG}
      * will be of type {@link Class}, even if it was specified as a String to
      * {@link org.apache.kafka.streams.StreamsConfig#StreamsConfig(Map) StreamsConfig(Map)}).
+     *
      * @return all the key/values from the StreamsConfig properties
      */
     Map<String, Object> appConfigs();
@@ -159,6 +181,7 @@ public interface ProcessingContext {
      *
      * <p> The config properties are defined in the {@link org.apache.kafka.streams.StreamsConfig}
      * object and associated to the ProcessorContext.
+     *
      * @param prefix the properties prefix
      * @return the key/values matching the given prefix from the StreamsConfig properties.
      */
@@ -169,6 +192,7 @@ public interface ProcessingContext {
      *
      * <p> Note: this method returns the internally cached system timestamp from the Kafka Stream runtime.
      * Thus, it may return a different value compared to {@code System.currentTimeMillis()}.
+     *
      * @return the current system timestamp in milliseconds
      */
     long currentSystemTimeMs();
@@ -180,10 +204,12 @@ public interface ProcessingContext {
      * (including the currently processed record), i.e., it can be considered a high-watermark.
      * Stream-time is tracked on a per-task basis and is preserved across restarts and during task migration.
      *
-     * <p> Note: this method is not supported for global processors (cf. {@link Topology#addGlobalStore} (...)
-     * and {@link StreamsBuilder#addGlobalStore} (...),
+     * <p> Note: this method is not supported for global processors (cf.
+     * {@link Topology#addGlobalStore(StoreBuilder, String, TimestampExtractor, Deserializer, Deserializer, String, String, ProcessorSupplier) Topology#addGlobalStore(...)}
+     * and {@link StreamsBuilder#addGlobalStore(StoreBuilder, String, Consumed, ProcessorSupplier) StreamsBuilder.addGlobalStore(...)}),
      * because there is no concept of stream-time for this case.
      * Calling this method in a global processor will result in an {@link UnsupportedOperationException}.
+     *
      * @return the current stream-time in milliseconds
      */
     long currentStreamTimeMs();

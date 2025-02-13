@@ -23,14 +23,24 @@ import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.processor.internals.MockStreamsMetrics;
-import org.junit.Test;
 
-import java.util.*;
+import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.function.Supplier;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.core.Is.is;
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class ThreadCacheTest {
     final String namespace = "0.0-namespace";
@@ -41,9 +51,16 @@ public class ThreadCacheTest {
 
     @Test
     public void basicPutGet() {
-        final List<KeyValue<String, String>> toInsert = Arrays.asList(new KeyValue<>("K1", "V1"), new KeyValue<>("K2", "V2"), new KeyValue<>("K3", "V3"), new KeyValue<>("K4", "V4"), new KeyValue<>("K5", "V5"));
+        final List<KeyValue<String, String>> toInsert = Arrays.asList(
+            new KeyValue<>("K1", "V1"),
+            new KeyValue<>("K2", "V2"),
+            new KeyValue<>("K3", "V3"),
+            new KeyValue<>("K4", "V4"),
+            new KeyValue<>("K5", "V5"));
         final KeyValue<String, String> kv = toInsert.get(0);
-        final ThreadCache cache = new ThreadCache(logContext, toInsert.size() * memoryCacheEntrySize(kv.key.getBytes(), kv.value.getBytes(), ""), new MockStreamsMetrics(new Metrics()));
+        final ThreadCache cache = new ThreadCache(logContext,
+            toInsert.size() * memoryCacheEntrySize(kv.key.getBytes(), kv.value.getBytes(), ""),
+            new MockStreamsMetrics(new Metrics()));
 
         for (final KeyValue<String, String> kvToInsert : toInsert) {
             final Bytes key = Bytes.wrap(kvToInsert.key.getBytes());
@@ -90,8 +107,8 @@ public class ThreadCacheTest {
         final long usedRuntimeMemory = runtime.totalMemory() - runtime.freeMemory() - prevRuntimeMemory;
         assertTrue((double) cache.sizeBytes() <= ceiling);
 
-        assertTrue("Used memory size " + usedRuntimeMemory + " greater than expected " + cache.sizeBytes() * systemFactor,
-            cache.sizeBytes() * systemFactor >= usedRuntimeMemory);
+        assertTrue(cache.sizeBytes() * systemFactor >= usedRuntimeMemory,
+                "Used memory size " + usedRuntimeMemory + " greater than expected " + cache.sizeBytes() * systemFactor);
     }
 
     @Test
@@ -120,24 +137,36 @@ public class ThreadCacheTest {
 
 
     static long memoryCacheEntrySize(final byte[] key, final byte[] value, final String topic) {
-        return key.length + value.length + 1 + // isDirty
-                8 + // timestamp
-                8 + // offset
-                4 + topic.length() +
-                // LRU Node entries
-                key.length + 8 + // entry
-                8 + // previous
-                8; // next
+        return key.length +
+            value.length +
+            1 + // isDirty
+            8 + // timestamp
+            8 + // offset
+            4 +
+            topic.length() +
+            // LRU Node entries
+            key.length +
+            8 + // entry
+            8 + // previous
+            8; // next
     }
 
     @Test
     public void evict() {
         final List<KeyValue<String, String>> received = new ArrayList<>();
-        final List<KeyValue<String, String>> expected = Collections.singletonList(new KeyValue<>("K1", "V1"));
+        final List<KeyValue<String, String>> expected = Collections.singletonList(
+            new KeyValue<>("K1", "V1"));
 
-        final List<KeyValue<String, String>> toInsert = Arrays.asList(new KeyValue<>("K1", "V1"), new KeyValue<>("K2", "V2"), new KeyValue<>("K3", "V3"), new KeyValue<>("K4", "V4"), new KeyValue<>("K5", "V5"));
+        final List<KeyValue<String, String>> toInsert = Arrays.asList(
+            new KeyValue<>("K1", "V1"),
+            new KeyValue<>("K2", "V2"),
+            new KeyValue<>("K3", "V3"),
+            new KeyValue<>("K4", "V4"),
+            new KeyValue<>("K5", "V5"));
         final KeyValue<String, String> kv = toInsert.get(0);
-        final ThreadCache cache = new ThreadCache(logContext, memoryCacheEntrySize(kv.key.getBytes(), kv.value.getBytes(), ""), new MockStreamsMetrics(new Metrics()));
+        final ThreadCache cache = new ThreadCache(logContext,
+            memoryCacheEntrySize(kv.key.getBytes(), kv.value.getBytes(), ""),
+            new MockStreamsMetrics(new Metrics()));
         cache.addDirtyEntryFlushListener(namespace, dirty -> {
             for (final ThreadCache.DirtyEntry dirtyEntry : dirty) {
                 received.add(new KeyValue<>(dirtyEntry.key().toString(), new String(dirtyEntry.newValue())));
@@ -212,8 +241,7 @@ public class ThreadCacheTest {
 
     private ThreadCache setupThreadCache(final int first, final int last, final long entrySize, final boolean reverse) {
         final ThreadCache cache = new ThreadCache(logContext, entrySize, new MockStreamsMetrics(new Metrics()));
-        cache.addDirtyEntryFlushListener(namespace, dirty -> {
-        });
+        cache.addDirtyEntryFlushListener(namespace, dirty -> { });
         int index = first;
         while ((!reverse && index < last) || (reverse && index >= last)) {
             cache.put(namespace, Bytes.wrap(bytes[index]), dirtyEntry(bytes[index]));
@@ -478,7 +506,8 @@ public class ThreadCacheTest {
         final ThreadCache cache = new ThreadCache(logContext, 1, new MockStreamsMetrics(new Metrics()));
         cache.addDirtyEntryFlushListener(namespace, received::addAll);
 
-        cache.putAll(namespace, Arrays.asList(KeyValue.pair(Bytes.wrap(new byte[]{0}), dirtyEntry(new byte[]{5})), KeyValue.pair(Bytes.wrap(new byte[]{1}), dirtyEntry(new byte[]{6}))));
+        cache.putAll(namespace, Arrays.asList(KeyValue.pair(Bytes.wrap(new byte[]{0}), dirtyEntry(new byte[]{5})),
+            KeyValue.pair(Bytes.wrap(new byte[]{1}), dirtyEntry(new byte[]{6}))));
 
         assertEquals(cache.evicts(), 2);
         assertEquals(received.size(), 2);
@@ -488,7 +517,8 @@ public class ThreadCacheTest {
     public void shouldPutAll() {
         final ThreadCache cache = new ThreadCache(logContext, 100000, new MockStreamsMetrics(new Metrics()));
 
-        cache.putAll(namespace, Arrays.asList(KeyValue.pair(Bytes.wrap(new byte[]{0}), dirtyEntry(new byte[]{5})), KeyValue.pair(Bytes.wrap(new byte[]{1}), dirtyEntry(new byte[]{6}))));
+        cache.putAll(namespace, Arrays.asList(KeyValue.pair(Bytes.wrap(new byte[]{0}), dirtyEntry(new byte[]{5})),
+            KeyValue.pair(Bytes.wrap(new byte[]{1}), dirtyEntry(new byte[]{6}))));
 
         assertArrayEquals(new byte[]{5}, cache.get(namespace, Bytes.wrap(new byte[]{0})).value());
         assertArrayEquals(new byte[]{6}, cache.get(namespace, Bytes.wrap(new byte[]{1})).value());
@@ -561,7 +591,7 @@ public class ThreadCacheTest {
     @Test
     public void shouldReturnNullIfKeyIsNull() {
         final ThreadCache threadCache = new ThreadCache(logContext, 10, new MockStreamsMetrics(new Metrics()));
-        threadCache.put(namespace, Bytes.wrap(new byte[]{1}), cleanEntry(new byte[]{1}));
+        threadCache.put(namespace, Bytes.wrap(new byte[]{1}), cleanEntry(new byte[] {1}));
         assertNull(threadCache.get(namespace, null));
     }
 

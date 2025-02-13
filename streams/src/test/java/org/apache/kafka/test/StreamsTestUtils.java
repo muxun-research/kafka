@@ -26,26 +26,44 @@ import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.Windowed;
 import org.apache.kafka.streams.processor.TaskId;
-import org.apache.kafka.streams.processor.internals.*;
+import org.apache.kafka.streams.processor.internals.ProcessorStateManager;
+import org.apache.kafka.streams.processor.internals.StandbyTask;
+import org.apache.kafka.streams.processor.internals.StreamTask;
+import org.apache.kafka.streams.processor.internals.Task;
+import org.apache.kafka.streams.processor.internals.TopologyMetadata;
 import org.apache.kafka.streams.state.KeyValueIterator;
+
 import org.mockito.quality.Strictness;
 
-import java.io.Closeable;
-import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 import static org.apache.kafka.common.metrics.Sensor.RecordingLevel.DEBUG;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertFalse;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 public final class StreamsTestUtils {
-    private StreamsTestUtils() {
-    }
+    private StreamsTestUtils() {}
 
-    public static Properties getStreamsConfig(final String applicationId, final String bootstrapServers, final String keySerdeClassName, final String valueSerdeClassName, final Properties additional) {
+    public static Properties getStreamsConfig(final String applicationId,
+                                              final String bootstrapServers,
+                                              final String keySerdeClassName,
+                                              final String valueSerdeClassName,
+                                              final Properties additional) {
 
         final Properties props = new Properties();
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
@@ -58,7 +76,9 @@ public final class StreamsTestUtils {
         return props;
     }
 
-    public static Properties getStreamsConfig(final String applicationId, final String bootstrapServers, final Properties additional) {
+    public static Properties getStreamsConfig(final String applicationId,
+                                              final String bootstrapServers,
+                                              final Properties additional) {
 
         final Properties props = new Properties();
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
@@ -69,8 +89,14 @@ public final class StreamsTestUtils {
         return props;
     }
 
-    public static Properties getStreamsConfig(final Serde<?> keyDeserializer, final Serde<?> valueDeserializer) {
-        return getStreamsConfig(UUID.randomUUID().toString(), "localhost:9091", keyDeserializer.getClass().getName(), valueDeserializer.getClass().getName(), new Properties());
+    public static Properties getStreamsConfig(final Serde<?> keyDeserializer,
+                                              final Serde<?> valueDeserializer) {
+        return getStreamsConfig(
+                UUID.randomUUID().toString(),
+                "localhost:9091",
+                keyDeserializer.getClass().getName(),
+                valueDeserializer.getClass().getName(),
+                new Properties());
     }
 
     public static Properties getStreamsConfig(final String applicationId) {
@@ -78,27 +104,26 @@ public final class StreamsTestUtils {
     }
 
     public static Properties getStreamsConfig(final String applicationId, final Properties additional) {
-        return getStreamsConfig(applicationId, "localhost:9091", additional);
+        return getStreamsConfig(
+            applicationId,
+            "localhost:9091",
+            additional);
     }
 
     public static Properties getStreamsConfig() {
         return getStreamsConfig(UUID.randomUUID().toString());
     }
 
-    public static <K, V> List<KeyValue<K, V>> toList(final Iterator<KeyValue<K, V>> iterator) {
-        final List<KeyValue<K, V>> results = new ArrayList<>();
+    public static <K, V> List<KeyValue<K, V>> toListAndCloseIterator(final KeyValueIterator<K, V> iterator) {
+        try (iterator) {
+            final List<KeyValue<K, V>> results = new ArrayList<>();
 
-        while (iterator.hasNext()) {
-            results.add(iterator.next());
+            while (iterator.hasNext()) {
+                results.add(iterator.next());
+            }
+
+            return results;
         }
-
-        if (iterator instanceof Closeable) {
-            try {
-                ((Closeable) iterator).close();
-            } catch (IOException e) { /* do nothing */ }
-        }
-
-        return results;
     }
 
     public static <K, V> Set<KeyValue<K, V>> toSet(final Iterator<KeyValue<K, V>> iterator) {
@@ -110,13 +135,19 @@ public final class StreamsTestUtils {
         return results;
     }
 
-    public static <K, V> Set<V> valuesToSet(final Iterator<KeyValue<K, V>> iterator) {
+    public static <K, V> Set<V> valuesToSet(final KeyValueIterator<K, V> iterator) {
         final Set<V> results = new HashSet<>();
 
         while (iterator.hasNext()) {
             results.add(iterator.next().value);
         }
         return results;
+    }
+
+    public static <K, V> Set<V> valuesToSetAndCloseIterator(final KeyValueIterator<K, V> iterator) {
+        try (iterator) {
+            return valuesToSet(iterator);
+        }
     }
 
     public static <K> void verifyKeyValueList(final List<KeyValue<K, byte[]>> expected, final List<KeyValue<K, byte[]>> actual) {
@@ -129,18 +160,27 @@ public final class StreamsTestUtils {
         }
     }
 
-    public static void verifyAllWindowedKeyValues(final KeyValueIterator<Windowed<Bytes>, byte[]> iterator, final List<Windowed<Bytes>> expectedKeys, final List<String> expectedValues) {
+    public static void verifyAllWindowedKeyValues(final KeyValueIterator<Windowed<Bytes>, byte[]> iterator,
+                                                  final List<Windowed<Bytes>> expectedKeys,
+                                                  final List<String> expectedValues) {
         if (expectedKeys.size() != expectedValues.size()) {
-            throw new IllegalArgumentException("expectedKeys and expectedValues should have the same size. " + "expectedKeys size: " + expectedKeys.size() + ", expectedValues size: " + expectedValues.size());
+            throw new IllegalArgumentException("expectedKeys and expectedValues should have the same size. " +
+                "expectedKeys size: " + expectedKeys.size() + ", expectedValues size: " + expectedValues.size());
         }
 
         for (int i = 0; i < expectedKeys.size(); i++) {
-            verifyWindowedKeyValue(iterator.next(), expectedKeys.get(i), expectedValues.get(i));
+            verifyWindowedKeyValue(
+                iterator.next(),
+                expectedKeys.get(i),
+                expectedValues.get(i)
+            );
         }
         assertFalse(iterator.hasNext());
     }
 
-    public static void verifyWindowedKeyValue(final KeyValue<Windowed<Bytes>, byte[]> actual, final Windowed<Bytes> expectedKey, final String expectedValue) {
+    public static void verifyWindowedKeyValue(final KeyValue<Windowed<Bytes>, byte[]> actual,
+                                              final Windowed<Bytes> expectedKey,
+                                              final String expectedValue) {
         assertThat(actual.key.window(), equalTo(expectedKey.window()));
         assertThat(actual.key.key(), equalTo(expectedKey.key()));
         assertThat(actual.value, equalTo(expectedValue.getBytes()));
@@ -188,7 +228,12 @@ public final class StreamsTestUtils {
                     if (metric == null) {
                         metric = entry.getValue();
                     } else {
-                        throw new IllegalStateException("Found two metrics with name=[" + name + "] and tags=[" + filterTags + "]: \n" + metric.metricName().toString() + " AND \n" + entry.getKey().toString());
+                        throw new IllegalStateException(
+                            "Found two metrics with name=[" + name + "] and tags=[" + filterTags + "]: \n" +
+                                metric.metricName().toString() +
+                                " AND \n" +
+                                entry.getKey().toString()
+                        );
                     }
                 }
             }
@@ -200,17 +245,21 @@ public final class StreamsTestUtils {
         }
     }
 
-    public static boolean containsMetric(final Metrics metrics, final String name, final String group, final Map<String, String> tags) {
+    public static boolean containsMetric(final Metrics metrics,
+                                         final String name,
+                                         final String group,
+                                         final Map<String, String> tags) {
         final MetricName metricName = metrics.metricName(name, group, tags);
         return metrics.metric(metricName) != null;
     }
 
     /**
-     * Used to keep tests simple, and ignore calls from {@link org.apache.kafka.streams.internals.ApiUtils#checkSupplier(Supplier)} )}.
-     * @return true if the stack context is within a {@link org.apache.kafka.streams.internals.ApiUtils#checkSupplier(Supplier)} )} call
+     * Used to keep tests simple, and ignore calls from {@link org.apache.kafka.streams.internals.ApiUtils#checkSupplier(Supplier)}.
+     * @return true if the stack context is within a {@link org.apache.kafka.streams.internals.ApiUtils#checkSupplier(Supplier)} call
      */
     public static boolean isCheckSupplierCall() {
-        return Arrays.stream(Thread.currentThread().getStackTrace()).anyMatch(caller -> "org.apache.kafka.streams.internals.ApiUtils".equals(caller.getClassName()) && "checkSupplier".equals(caller.getMethodName()));
+        return Arrays.stream(Thread.currentThread().getStackTrace())
+                .anyMatch(caller -> "org.apache.kafka.streams.internals.ApiUtils".equals(caller.getClassName()) && "checkSupplier".equals(caller.getMethodName()));
     }
 
     public static class TaskBuilder<T extends Task> {
@@ -228,21 +277,25 @@ public final class StreamsTestUtils {
             return new TaskBuilder<>(task);
         }
 
-        public static TaskBuilder<StreamTask> statefulTask(final TaskId taskId, final Set<TopicPartition> changelogPartitions) {
+        public static TaskBuilder<StreamTask> statefulTask(final TaskId taskId,
+                                                           final Set<TopicPartition> changelogPartitions) {
             final StreamTask task = mock(StreamTask.class, withSettings().strictness(Strictness.LENIENT));
             when(task.isActive()).thenReturn(true);
             setupStatefulTask(task, taskId, changelogPartitions);
             return new TaskBuilder<>(task);
         }
 
-        public static TaskBuilder<StandbyTask> standbyTask(final TaskId taskId, final Set<TopicPartition> changelogPartitions) {
+        public static TaskBuilder<StandbyTask> standbyTask(final TaskId taskId,
+                                                           final Set<TopicPartition> changelogPartitions) {
             final StandbyTask task = mock(StandbyTask.class, withSettings().strictness(Strictness.LENIENT));
             when(task.isActive()).thenReturn(false);
             setupStatefulTask(task, taskId, changelogPartitions);
             return new TaskBuilder<>(task);
         }
 
-        private static void setupStatefulTask(final Task task, final TaskId taskId, final Set<TopicPartition> changelogPartitions) {
+        private static void setupStatefulTask(final Task task,
+                                              final TaskId taskId,
+                                              final Set<TopicPartition> changelogPartitions) {
             when(task.changelogPartitions()).thenReturn(changelogPartitions);
             when(task.id()).thenReturn(taskId);
             when(task.stateManager()).thenReturn(mock(ProcessorStateManager.class));

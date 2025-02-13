@@ -17,13 +17,15 @@
 
 package org.apache.kafka.shell.command;
 
-import net.sourceforge.argparse4j.inf.ArgumentParser;
-import net.sourceforge.argparse4j.inf.Namespace;
 import org.apache.kafka.image.node.MetadataNode;
 import org.apache.kafka.shell.InteractiveShell;
 import org.apache.kafka.shell.glob.GlobVisitor;
 import org.apache.kafka.shell.node.printer.ShellNodePrinter;
 import org.apache.kafka.shell.state.MetadataShellState;
+
+import net.sourceforge.argparse4j.inf.ArgumentParser;
+import net.sourceforge.argparse4j.inf.Namespace;
+
 import org.jline.reader.Candidate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,7 +41,7 @@ import java.util.Optional;
 public final class CatCommandHandler implements Commands.Handler {
     private static final Logger log = LoggerFactory.getLogger(CatCommandHandler.class);
 
-    public final static Commands.Type TYPE = new CatCommandType();
+    public static final Commands.Type TYPE = new CatCommandType();
 
     public static class CatCommandType implements Commands.Type {
         private CatCommandType() {
@@ -62,7 +64,9 @@ public final class CatCommandHandler implements Commands.Handler {
 
         @Override
         public void addArguments(ArgumentParser parser) {
-            parser.addArgument("targets").nargs("+").help("The metadata files to display.");
+            parser.addArgument("targets").
+                nargs("+").
+                help("The metadata files to display.");
         }
 
         @Override
@@ -71,7 +75,11 @@ public final class CatCommandHandler implements Commands.Handler {
         }
 
         @Override
-        public void completeNext(MetadataShellState state, List<String> nextWords, List<Candidate> candidates) throws Exception {
+        public void completeNext(
+            MetadataShellState state,
+            List<String> nextWords,
+            List<Candidate> candidates
+        ) throws Exception {
             CommandUtils.completePath(state, nextWords.get(nextWords.size() - 1), candidates);
         }
     }
@@ -83,7 +91,11 @@ public final class CatCommandHandler implements Commands.Handler {
     }
 
     @Override
-    public void run(Optional<InteractiveShell> shell, PrintWriter writer, MetadataShellState state) throws Exception {
+    public void run(
+        Optional<InteractiveShell> shell,
+        PrintWriter writer,
+        MetadataShellState state
+    ) throws Exception {
         log.trace("cat " + targets);
         for (String target : targets) {
             state.visit(new GlobVisitor(target, entryOption -> {
@@ -109,11 +121,7 @@ public final class CatCommandHandler implements Commands.Handler {
 
     @Override
     public boolean equals(Object other) {
-        if (!(other instanceof CatCommandHandler))
-            return false;
-        CatCommandHandler o = (CatCommandHandler) other;
-        if (!Objects.equals(o.targets, targets))
-            return false;
-        return true;
+        if (!(other instanceof CatCommandHandler o)) return false;
+        return Objects.equals(o.targets, targets);
     }
 }

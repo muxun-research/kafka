@@ -29,16 +29,27 @@ import org.apache.kafka.common.resource.ResourcePattern;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.SecurityUtils;
-import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.server.authorizer.Action;
 import org.apache.kafka.server.authorizer.AuthorizableRequestContext;
 import org.apache.kafka.server.authorizer.AuthorizationResult;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.Iterator;
+import java.util.NavigableSet;
+import java.util.Set;
 
-import static org.apache.kafka.common.acl.AclOperation.*;
+import static org.apache.kafka.common.acl.AclOperation.ALL;
+import static org.apache.kafka.common.acl.AclOperation.ALTER;
+import static org.apache.kafka.common.acl.AclOperation.ALTER_CONFIGS;
+import static org.apache.kafka.common.acl.AclOperation.DELETE;
+import static org.apache.kafka.common.acl.AclOperation.DESCRIBE;
+import static org.apache.kafka.common.acl.AclOperation.DESCRIBE_CONFIGS;
+import static org.apache.kafka.common.acl.AclOperation.READ;
+import static org.apache.kafka.common.acl.AclOperation.WRITE;
 import static org.apache.kafka.common.acl.AclPermissionType.ALLOW;
 import static org.apache.kafka.common.resource.PatternType.LITERAL;
 import static org.apache.kafka.server.authorizer.AuthorizationResult.ALLOWED;
@@ -47,7 +58,7 @@ import static org.apache.kafka.server.authorizer.AuthorizationResult.DENIED;
 
 /**
  * A class which encapsulates the configuration and the ACL data owned by StandardAuthorizer.
- * <p>
+ *
  * The class is not thread-safe.
  */
 public class StandardAuthorizerData {
@@ -98,6 +109,7 @@ public class StandardAuthorizerData {
     private AclCache aclCache;
 
 
+
     private static Logger createLogger(int nodeId) {
         return new LogContext("[StandardAuthorizer " + nodeId + "] ").logger(StandardAuthorizerData.class);
     }
@@ -107,10 +119,20 @@ public class StandardAuthorizerData {
     }
 
     static StandardAuthorizerData createEmpty() {
-        return new StandardAuthorizerData(createLogger(-1), null, false, Collections.emptySet(), DENIED, new AclCache());
+        return new StandardAuthorizerData(createLogger(-1),
+            null,
+            false,
+            Collections.emptySet(),
+            DENIED,
+            new AclCache());
     }
 
-    private StandardAuthorizerData(Logger log, AclMutator aclMutator, boolean loadingComplete, Set<String> superUsers, AuthorizationResult defaultResult, AclCache aclCache) {
+    private StandardAuthorizerData(Logger log,
+                                   AclMutator aclMutator,
+                                   boolean loadingComplete,
+                                   Set<String> superUsers,
+                                   AuthorizationResult defaultResult,
+                                   AclCache aclCache) {
         this.log = log;
         this.auditLog = auditLogger();
         this.aclMutator = aclMutator;
@@ -121,19 +143,44 @@ public class StandardAuthorizerData {
     }
 
     StandardAuthorizerData copyWithNewAclMutator(AclMutator newAclMutator) {
-        return new StandardAuthorizerData(log, newAclMutator, loadingComplete, superUsers, noAclRule.result, aclCache);
+        return new StandardAuthorizerData(
+            log,
+            newAclMutator,
+            loadingComplete,
+            superUsers,
+            noAclRule.result,
+            aclCache);
     }
 
     StandardAuthorizerData copyWithNewLoadingComplete(boolean newLoadingComplete) {
-        return new StandardAuthorizerData(log, aclMutator, newLoadingComplete, superUsers, noAclRule.result, aclCache);
+        return new StandardAuthorizerData(log,
+            aclMutator,
+            newLoadingComplete,
+            superUsers,
+            noAclRule.result,
+            aclCache);
     }
 
-    StandardAuthorizerData copyWithNewConfig(int nodeId, Set<String> newSuperUsers, AuthorizationResult newDefaultResult) {
-        return new StandardAuthorizerData(createLogger(nodeId), aclMutator, loadingComplete, newSuperUsers, newDefaultResult, aclCache);
+    StandardAuthorizerData copyWithNewConfig(int nodeId,
+                                             Set<String> newSuperUsers,
+                                             AuthorizationResult newDefaultResult) {
+        return new StandardAuthorizerData(
+            createLogger(nodeId),
+            aclMutator,
+            loadingComplete,
+            newSuperUsers,
+            newDefaultResult,
+            aclCache);
     }
 
     StandardAuthorizerData copyWithNewAcls(AclCache aclCache) {
-        StandardAuthorizerData newData = new StandardAuthorizerData(log, aclMutator, loadingComplete, superUsers, noAclRule.result, aclCache);
+        StandardAuthorizerData newData =  new StandardAuthorizerData(
+            log,
+            aclMutator,
+            loadingComplete,
+            superUsers,
+            noAclRule.result,
+            aclCache);
         log.info("Initialized with {} acl(s).", aclCache.count());
         return newData;
     }
@@ -173,14 +220,17 @@ public class StandardAuthorizerData {
 
     /**
      * Authorize an action based on the current set of ACLs.
-     * <p>
+     *
      * In order to know whether to allow or deny the action, we need to examine the ACLs
      * that apply to it. If any DENY ACLs match, the operation is denied, no matter how
      * many ALLOW ACLs match. If neither ALLOW nor DENY ACLs match, we return the default
      * result. In general it makes more sense to configure the default result to be
      * DENY, but some people (and unit tests) configure it as ALLOW.
      */
-    public AuthorizationResult authorize(AuthorizableRequestContext requestContext, Action action) {
+    public AuthorizationResult authorize(
+        AuthorizableRequestContext requestContext,
+        Action action
+    ) {
         if (action.resourcePattern().patternType() != LITERAL) {
             throw new IllegalArgumentException("Only literal resources are supported. Got: " + action.resourcePattern().patternType());
         }
@@ -193,13 +243,22 @@ public class StandardAuthorizerData {
         } else if (!loadingComplete) {
             throw new AuthorizerNotReadyException();
         } else {
-            rule = findAclRule(matchingPrincipals(requestContext), requestContext.clientAddress().getHostAddress(), action);
+            rule = findAclRule(
+                matchingPrincipals(requestContext),
+                requestContext.clientAddress().getHostAddress(),
+                action
+            );
         }
         logAuditMessage(principal, requestContext, action, rule);
         return rule.result();
     }
 
-    private String buildAuditMessage(KafkaPrincipal principal, AuthorizableRequestContext context, Action action, MatchingRule rule) {
+    private String buildAuditMessage(
+        KafkaPrincipal principal,
+        AuthorizableRequestContext context,
+        Action action,
+        MatchingRule rule
+    ) {
         StringBuilder bldr = new StringBuilder();
         bldr.append("Principal = ").append(principal);
         bldr.append(" is ").append(rule.result() == ALLOWED ? "Allowed" : "Denied");
@@ -214,10 +273,19 @@ public class StandardAuthorizerData {
     }
 
     private void appendResourcePattern(ResourcePattern resourcePattern, StringBuilder bldr) {
-        bldr.append(SecurityUtils.resourceTypeName(resourcePattern.resourceType())).append(":").append(resourcePattern.patternType()).append(":").append(resourcePattern.name());
+        bldr.append(SecurityUtils.resourceTypeName(resourcePattern.resourceType()))
+            .append(":")
+            .append(resourcePattern.patternType())
+            .append(":")
+            .append(resourcePattern.name());
     }
 
-    private void logAuditMessage(KafkaPrincipal principal, AuthorizableRequestContext requestContext, Action action, MatchingRule rule) {
+    private void logAuditMessage(
+        KafkaPrincipal principal,
+        AuthorizableRequestContext requestContext,
+        Action action,
+        MatchingRule rule
+    ) {
         switch (rule.result()) {
             case ALLOWED:
                 // logIfAllowed is true if access is granted to the resource as a result of this authorization.
@@ -243,7 +311,11 @@ public class StandardAuthorizerData {
         }
     }
 
-    private MatchingRule findAclRule(Set<KafkaPrincipal> matchingPrincipals, String host, Action action) {
+    private MatchingRule findAclRule(
+        Set<KafkaPrincipal> matchingPrincipals,
+        String host,
+        Action action
+    ) {
         // This code relies on the ordering of StandardAcl within the NavigableMap.
         // Entries are sorted by resource type first, then REVERSE resource name.
         // Therefore, we can find all the applicable ACLs by starting at
@@ -266,8 +338,14 @@ public class StandardAuthorizerData {
         //
         // Once we reached element 5, we would jump to element 7.
         MatchingRuleBuilder matchingRuleBuilder = new MatchingRuleBuilder(noAclRule);
-        StandardAcl exemplar = new StandardAcl(action.resourcePattern().resourceType(), action.resourcePattern().name(), PatternType.UNKNOWN, // Note that the UNKNOWN value sorts before all others.
-                "", "", AclOperation.UNKNOWN, AclPermissionType.UNKNOWN);
+        StandardAcl exemplar = new StandardAcl(
+            action.resourcePattern().resourceType(),
+            action.resourcePattern().name(),
+            PatternType.UNKNOWN, // Note that the UNKNOWN value sorts before all others.
+            "",
+            "",
+            AclOperation.UNKNOWN,
+            AclPermissionType.UNKNOWN);
         AclCache aclCacheSnapshot = aclCache;
         checkSection(aclCacheSnapshot, action, exemplar, matchingPrincipals, host, matchingRuleBuilder);
         if (matchingRuleBuilder.foundDeny()) {
@@ -277,26 +355,39 @@ public class StandardAuthorizerData {
         // In addition to ACLs for this specific resource name, there can also be wildcard
         // ACLs that match any resource name. These are stored as type = LITERAL,
         // name = "*". We search these next.
-        exemplar = new StandardAcl(action.resourcePattern().resourceType(), WILDCARD, LITERAL, "", "", AclOperation.UNKNOWN, AclPermissionType.UNKNOWN);
+        exemplar = new StandardAcl(
+            action.resourcePattern().resourceType(),
+            WILDCARD,
+            LITERAL,
+            "",
+            "",
+            AclOperation.UNKNOWN,
+            AclPermissionType.UNKNOWN);
         checkSection(aclCacheSnapshot, action, exemplar, matchingPrincipals, host, matchingRuleBuilder);
         return matchingRuleBuilder.build();
     }
 
-    static int matchesUpTo(String resource, String pattern) {
+    static int matchesUpTo(
+        String resource,
+        String pattern
+    ) {
         int i = 0;
         while (true) {
-            if (resource.length() == i)
-                break;
-            if (pattern.length() == i)
-                break;
-            if (resource.charAt(i) != pattern.charAt(i))
-                break;
+            if (resource.length() == i) break;
+            if (pattern.length() == i) break;
+            if (resource.charAt(i) != pattern.charAt(i)) break;
             i++;
         }
         return i;
     }
 
-    private void checkSection(AclCache aclCacheSnapshot, Action action, StandardAcl exemplar, Set<KafkaPrincipal> matchingPrincipals, String host, MatchingRuleBuilder matchingRuleBuilder) {
+    private void checkSection(
+            AclCache aclCacheSnapshot, Action action,
+            StandardAcl exemplar,
+            Set<KafkaPrincipal> matchingPrincipals,
+            String host,
+            MatchingRuleBuilder matchingRuleBuilder
+    ) {
         String resourceName = action.resourcePattern().name();
         NavigableSet<StandardAcl> tailSet = aclCacheSnapshot.aclsByResource().tailSet(exemplar, true);
         Iterator<StandardAcl> iterator = tailSet.iterator();
@@ -321,7 +412,13 @@ public class StandardAuthorizerData {
                 // and we're not dealing with the special case of a wildcard ACL, we've
                 // stepped outside of the section we care about. Scan for any other potential
                 // prefix matches.
-                exemplar = new StandardAcl(exemplar.resourceType(), exemplar.resourceName().substring(0, matchesUpTo), exemplar.patternType(), exemplar.principal(), exemplar.host(), exemplar.operation(), exemplar.permissionType());
+                exemplar = new StandardAcl(exemplar.resourceType(),
+                    exemplar.resourceName().substring(0, matchesUpTo),
+                    exemplar.patternType(),
+                    exemplar.principal(),
+                    exemplar.host(),
+                    exemplar.operation(),
+                    exemplar.permissionType());
                 tailSet = aclCacheSnapshot.aclsByResource().tailSet(exemplar, true);
                 iterator = tailSet.iterator();
                 continue;
@@ -340,40 +437,57 @@ public class StandardAuthorizerData {
     /**
      * The set of operations which imply DESCRIBE permission, when used in an ALLOW acl.
      */
-    private static final Set<AclOperation> IMPLIES_DESCRIBE = Collections.unmodifiableSet(EnumSet.of(DESCRIBE, READ, WRITE, DELETE, ALTER));
+    private static final Set<AclOperation> IMPLIES_DESCRIBE = Collections.unmodifiableSet(
+        EnumSet.of(DESCRIBE, READ, WRITE, DELETE, ALTER));
 
     /**
      * The set of operations which imply DESCRIBE_CONFIGS permission, when used in an ALLOW acl.
      */
-    private static final Set<AclOperation> IMPLIES_DESCRIBE_CONFIGS = Collections.unmodifiableSet(EnumSet.of(DESCRIBE_CONFIGS, ALTER_CONFIGS));
+    private static final Set<AclOperation> IMPLIES_DESCRIBE_CONFIGS = Collections.unmodifiableSet(
+        EnumSet.of(DESCRIBE_CONFIGS, ALTER_CONFIGS));
 
-    static AuthorizationResult findResult(Action action, AuthorizableRequestContext requestContext, StandardAcl acl) {
-        return findResult(action, matchingPrincipals(requestContext), requestContext.clientAddress().getHostAddress(), acl);
+    static AuthorizationResult findResult(Action action,
+                                          AuthorizableRequestContext requestContext,
+                                          StandardAcl acl) {
+        return findResult(
+            action,
+            matchingPrincipals(requestContext),
+            requestContext.clientAddress().getHostAddress(),
+            acl
+        );
     }
 
     static KafkaPrincipal baseKafkaPrincipal(AuthorizableRequestContext context) {
         KafkaPrincipal sessionPrincipal = context.principal();
-        return sessionPrincipal.getClass().equals(KafkaPrincipal.class) ? sessionPrincipal : new KafkaPrincipal(sessionPrincipal.getPrincipalType(), sessionPrincipal.getName());
+        return sessionPrincipal.getClass().equals(KafkaPrincipal.class)
+            ? sessionPrincipal
+            : new KafkaPrincipal(sessionPrincipal.getPrincipalType(), sessionPrincipal.getName());
     }
 
     static Set<KafkaPrincipal> matchingPrincipals(AuthorizableRequestContext context) {
         KafkaPrincipal sessionPrincipal = context.principal();
-        KafkaPrincipal basePrincipal = sessionPrincipal.getClass().equals(KafkaPrincipal.class) ? sessionPrincipal : new KafkaPrincipal(sessionPrincipal.getPrincipalType(), sessionPrincipal.getName());
-        return Utils.mkSet(basePrincipal, WILDCARD_KAFKA_PRINCIPAL);
+        KafkaPrincipal basePrincipal = sessionPrincipal.getClass().equals(KafkaPrincipal.class)
+            ? sessionPrincipal
+            : new KafkaPrincipal(sessionPrincipal.getPrincipalType(), sessionPrincipal.getName());
+        return Set.of(basePrincipal, WILDCARD_KAFKA_PRINCIPAL);
     }
 
     /**
      * Determine what the result of applying an ACL to the given action and request
      * context should be. Note that this function assumes that the resource name matches;
      * the resource name is not checked here.
+     *
      * @param action             The input action.
      * @param matchingPrincipals The set of input matching principals
      * @param host               The input host.
      * @param acl                The input ACL.
-     * @return null if the ACL does not match. The authorization result
-     * otherwise.
+     * @return                   null if the ACL does not match. The authorization result
+     *                           otherwise.
      */
-    static AuthorizationResult findResult(Action action, Set<KafkaPrincipal> matchingPrincipals, String host, StandardAcl acl) {
+    static AuthorizationResult findResult(Action action,
+                                          Set<KafkaPrincipal> matchingPrincipals,
+                                          String host,
+                                          StandardAcl acl) {
         // Check if the principal matches. If it doesn't, return no result (null).
         if (!matchingPrincipals.contains(acl.kafkaPrincipal())) {
             return null;
@@ -393,12 +507,10 @@ public class StandardAuthorizerData {
             if (acl.permissionType().equals(ALLOW)) {
                 switch (action.operation()) {
                     case DESCRIBE:
-                        if (!IMPLIES_DESCRIBE.contains(acl.operation()))
-                            return null;
+                        if (!IMPLIES_DESCRIBE.contains(acl.operation())) return null;
                         break;
                     case DESCRIBE_CONFIGS:
-                        if (!IMPLIES_DESCRIBE_CONFIGS.contains(acl.operation()))
-                            return null;
+                        if (!IMPLIES_DESCRIBE_CONFIGS.contains(acl.operation())) return null;
                         break;
                     default:
                         if (action.operation() != acl.operation()) {
@@ -416,6 +528,7 @@ public class StandardAuthorizerData {
 
     /**
      * Creates a consistent Iterable on read-only copy of AclBindings data for the given filter.
+     *
      * @param filter The filter constraining the AclBindings to be present in the Iterable.
      * @return Iterable over AclBindings matching the filter.
      */

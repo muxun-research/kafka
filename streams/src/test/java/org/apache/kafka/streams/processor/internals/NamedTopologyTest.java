@@ -28,10 +28,12 @@ import org.apache.kafka.streams.processor.internals.namedtopology.NamedTopologyB
 import org.apache.kafka.streams.processor.internals.namedtopology.NamedTopologyStoreQueryParameters;
 import org.apache.kafka.streams.state.Stores;
 import org.apache.kafka.test.TestUtils;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.time.Duration;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 import java.util.regex.Pattern;
@@ -40,8 +42,9 @@ import static java.util.Arrays.asList;
 import static org.apache.kafka.streams.state.QueryableStoreTypes.keyValueStore;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+@SuppressWarnings("deprecation")
 public class NamedTopologyTest {
     private static final String UNKNOWN_TOPOLOGY = "not-a-real-topology";
     private static final String UNKNOWN_STORE = "not-a-real-store";
@@ -53,16 +56,16 @@ public class NamedTopologyTest {
     private final NamedTopologyBuilder builder2 = streams.newNamedTopologyBuilder("topology-2");
     private final NamedTopologyBuilder builder3 = streams.newNamedTopologyBuilder("topology-3");
 
-    @Before
+    @BeforeEach
     public void setup() {
         builder1.stream("input-1");
         builder2.stream("input-2");
         builder3.stream("input-3");
     }
 
-    @After
+    @AfterEach
     public void cleanup() {
-        streams.close();
+        streams.close(Duration.ofSeconds(60));
     }
 
     private static Properties configProps() {
@@ -90,7 +93,12 @@ public class NamedTopologyTest {
         builder2.stream("stream-2").selectKey((k, v) -> v).groupByKey().count().toStream().to("output-2");
         builder3.stream("stream-3").selectKey((k, v) -> v).groupByKey().count().toStream().to("output-3");
 
-        streams.start(asList(builder1.build(), builder2.build(), builder3.build()));
+        streams.start(
+            asList(
+                builder1.build(),
+                builder2.build(),
+                builder3.build())
+        );
     }
 
     @Test
@@ -134,7 +142,12 @@ public class NamedTopologyTest {
         builder1.stream("stream");
         builder2.stream("stream");
 
-        assertThrows(TopologyException.class, () -> streams.start(asList(builder1.build(), builder2.build())));
+        assertThrows(
+            TopologyException.class,
+            () -> streams.start(asList(
+                builder1.build(),
+                builder2.build()))
+        );
     }
 
     @Test
@@ -146,7 +159,10 @@ public class NamedTopologyTest {
 
         streams.addNamedTopology(builder1.build());
 
-        final ExecutionException exception = assertThrows(ExecutionException.class, () -> streams.addNamedTopology(builder2.build()).all().get());
+        final ExecutionException exception = assertThrows(
+            ExecutionException.class,
+            () -> streams.addNamedTopology(builder2.build()).all().get()
+        );
 
         assertThat(exception.getCause().getClass(), equalTo(TopologyException.class));
     }
@@ -155,10 +171,13 @@ public class NamedTopologyTest {
     public void shouldThrowTopologyExceptionWhenAddingNamedTopologyReadingFromSameInputTopicBeforeStart() {
         builder1.stream("stream");
         builder2.stream("stream");
-
+        
         streams.addNamedTopology(builder1.build());
 
-        final ExecutionException exception = assertThrows(ExecutionException.class, () -> streams.addNamedTopology(builder2.build()).all().get());
+        final ExecutionException exception = assertThrows(
+            ExecutionException.class,
+            () -> streams.addNamedTopology(builder2.build()).all().get()
+        );
 
         assertThat(exception.getCause().getClass(), equalTo(TopologyException.class));
     }
@@ -168,7 +187,12 @@ public class NamedTopologyTest {
         builder1.table("table");
         builder2.table("table");
 
-        assertThrows(TopologyException.class, () -> streams.start(asList(builder1.build(), builder2.build())));
+        assertThrows(
+            TopologyException.class,
+            () -> streams.start(asList(
+                builder1.build(),
+                builder2.build()))
+        );
     }
 
     @Test
@@ -176,7 +200,12 @@ public class NamedTopologyTest {
         builder1.stream("input");
         builder2.table("input");
 
-        assertThrows(TopologyException.class, () -> streams.start(asList(builder1.build(), builder2.build())));
+        assertThrows(
+            TopologyException.class,
+            () -> streams.start(asList(
+                builder1.build(),
+                builder2.build()))
+        );
     }
 
     @Test
@@ -184,7 +213,12 @@ public class NamedTopologyTest {
         builder1.stream("stream");
         builder2.stream(asList("unique-input", "stream"));
 
-        assertThrows(TopologyException.class, () -> streams.start(asList(builder1.build(), builder2.build())));
+        assertThrows(
+            TopologyException.class,
+            () -> streams.start(asList(
+                builder1.build(),
+                builder2.build()))
+        );
     }
 
     @Test
@@ -192,56 +226,92 @@ public class NamedTopologyTest {
         builder1.stream(Pattern.compile("some-regex"));
         builder2.stream(Pattern.compile("some-regex"));
 
-        assertThrows(TopologyException.class, () -> streams.start(asList(builder1.build(), builder2.build())));
+        assertThrows(
+            TopologyException.class,
+            () -> streams.start(asList(
+                builder1.build(),
+                builder2.build()))
+        );
     }
 
     @Test
     public void shouldThrowUnknownTopologyExceptionForAllLocalStorePartitionLags() {
         streams.addNamedTopology(builder1.build());
         streams.start();
-        assertThrows(UnknownTopologyException.class, () -> streams.allLocalStorePartitionLagsForTopology(UNKNOWN_TOPOLOGY));
+        assertThrows(
+            UnknownTopologyException.class,
+            () -> streams.allLocalStorePartitionLagsForTopology(UNKNOWN_TOPOLOGY)
+        );
     }
 
     @Test
     public void shouldThrowUnknownTopologyExceptionForQueryMetadataForKey() {
         streams.addNamedTopology(builder1.build());
         streams.start();
-        assertThrows(UnknownTopologyException.class, () -> streams.queryMetadataForKey("store", "A", new StringSerializer(), UNKNOWN_TOPOLOGY));
+        assertThrows(
+            UnknownTopologyException.class,
+            () -> streams.queryMetadataForKey("store", "A", new StringSerializer(), UNKNOWN_TOPOLOGY)
+        );
     }
 
     @Test
     public void shouldThrowUnknownStateStoreExceptionForQueryMetadataForKey() {
         streams.addNamedTopology(builder1.build());
         streams.start();
-        assertThrows(UnknownStateStoreException.class, () -> streams.queryMetadataForKey(UNKNOWN_STORE, "A", new StringSerializer(), "topology-1"));
+        assertThrows(
+            UnknownStateStoreException.class,
+            () -> streams.queryMetadataForKey(UNKNOWN_STORE, "A", new StringSerializer(), "topology-1")
+        );
     }
 
     @Test
     public void shouldThrowUnknownTopologyExceptionForStreamsMetadataForStore() {
         streams.addNamedTopology(builder1.build());
         streams.start();
-        assertThrows(UnknownTopologyException.class, () -> streams.streamsMetadataForStore("store", UNKNOWN_TOPOLOGY));
+        assertThrows(
+            UnknownTopologyException.class,
+            () -> streams.streamsMetadataForStore("store", UNKNOWN_TOPOLOGY)
+        );
     }
 
     @Test
     public void shouldThrowUnknownStateStoreExceptionForStreamsMetadataForStore() {
         streams.addNamedTopology(builder1.build());
         streams.start();
-        assertThrows(UnknownStateStoreException.class, () -> streams.streamsMetadataForStore(UNKNOWN_STORE, "topology-1"));
+        assertThrows(
+            UnknownStateStoreException.class,
+            () -> streams.streamsMetadataForStore(UNKNOWN_STORE, "topology-1")
+        );
     }
 
     @Test
     public void shouldThrowUnknownTopologyExceptionForStore() {
         streams.addNamedTopology(builder1.build());
         streams.start();
-        assertThrows(UnknownTopologyException.class, () -> streams.store(NamedTopologyStoreQueryParameters.fromNamedTopologyAndStoreNameAndType(UNKNOWN_TOPOLOGY, "store", keyValueStore())));
+        assertThrows(
+            UnknownTopologyException.class,
+            () -> streams.store(
+                NamedTopologyStoreQueryParameters.fromNamedTopologyAndStoreNameAndType(
+                    UNKNOWN_TOPOLOGY,
+                    "store",
+                    keyValueStore()
+                ))
+        );
     }
 
     @Test
     public void shouldThrowUnknownStateStoreExceptionForStore() {
         streams.addNamedTopology(builder1.build());
         streams.start();
-        assertThrows(UnknownStateStoreException.class, () -> streams.store(NamedTopologyStoreQueryParameters.fromNamedTopologyAndStoreNameAndType("topology-1", UNKNOWN_STORE, keyValueStore())));
+        assertThrows(
+            UnknownStateStoreException.class,
+            () -> streams.store(
+                NamedTopologyStoreQueryParameters.fromNamedTopologyAndStoreNameAndType(
+                    "topology-1",
+                    UNKNOWN_STORE,
+                    keyValueStore()
+                ))
+        );
     }
 
     @Test
@@ -249,7 +319,23 @@ public class NamedTopologyTest {
         builder1.stream("input").filter((k, v) -> !k.equals(v)).to("output");
         streams.start(builder1.build());
 
-        assertThat(streams.getFullTopologyDescription(), equalTo("Topology: topology-1:\n" + "   Sub-topology: 0\n" + "    Source: KSTREAM-SOURCE-0000000000 (topics: [input-1])\n" + "      --> none\n" + "\n" + "  Sub-topology: 1\n" + "    Source: KSTREAM-SOURCE-0000000001 (topics: [input])\n" + "      --> KSTREAM-FILTER-0000000002\n" + "    Processor: KSTREAM-FILTER-0000000002 (stores: [])\n" + "      --> KSTREAM-SINK-0000000003\n" + "      <-- KSTREAM-SOURCE-0000000001\n" + "    Sink: KSTREAM-SINK-0000000003 (topic: output)\n" + "      <-- KSTREAM-FILTER-0000000002\n\n"));
+        assertThat(
+            streams.getFullTopologyDescription(),
+            equalTo(
+                "Topology: topology-1:\n"
+                    + "   Sub-topology: 0\n"
+                    + "    Source: KSTREAM-SOURCE-0000000000 (topics: [input-1])\n"
+                    + "      --> none\n"
+                    + "\n"
+                    + "  Sub-topology: 1\n"
+                    + "    Source: KSTREAM-SOURCE-0000000001 (topics: [input])\n"
+                    + "      --> KSTREAM-FILTER-0000000002\n"
+                    + "    Processor: KSTREAM-FILTER-0000000002 (stores: [])\n"
+                    + "      --> KSTREAM-SINK-0000000003\n"
+                    + "      <-- KSTREAM-SOURCE-0000000001\n"
+                    + "    Sink: KSTREAM-SINK-0000000003 (topic: output)\n"
+                    + "      <-- KSTREAM-FILTER-0000000002\n\n")
+        );
     }
 
     @Test
@@ -258,9 +344,58 @@ public class NamedTopologyTest {
         builder2.stream("stream-2").filter((k, v) -> !k.equals(v)).to("output-2");
         builder3.stream("stream-3").filter((k, v) -> !k.equals(v)).to("output-3");
 
-        streams.start(asList(builder1.build(), builder2.build(), builder3.build()));
+        streams.start(
+            asList(
+                builder1.build(),
+                builder2.build(),
+                builder3.build())
+        );
 
-        assertThat(streams.getFullTopologyDescription(), equalTo("Topology: topology-1:\n" + "   Sub-topology: 0\n" + "    Source: KSTREAM-SOURCE-0000000000 (topics: [input-1])\n" + "      --> none\n" + "\n" + "  Sub-topology: 1\n" + "    Source: KSTREAM-SOURCE-0000000001 (topics: [stream-1])\n" + "      --> KSTREAM-FILTER-0000000002\n" + "    Processor: KSTREAM-FILTER-0000000002 (stores: [])\n" + "      --> KSTREAM-SINK-0000000003\n" + "      <-- KSTREAM-SOURCE-0000000001\n" + "    Sink: KSTREAM-SINK-0000000003 (topic: output-1)\n" + "      <-- KSTREAM-FILTER-0000000002\n" + "\n" + "Topology: topology-2:\n" + "   Sub-topology: 0\n" + "    Source: KSTREAM-SOURCE-0000000000 (topics: [input-2])\n" + "      --> none\n" + "\n" + "  Sub-topology: 1\n" + "    Source: KSTREAM-SOURCE-0000000001 (topics: [stream-2])\n" + "      --> KSTREAM-FILTER-0000000002\n" + "    Processor: KSTREAM-FILTER-0000000002 (stores: [])\n" + "      --> KSTREAM-SINK-0000000003\n" + "      <-- KSTREAM-SOURCE-0000000001\n" + "    Sink: KSTREAM-SINK-0000000003 (topic: output-2)\n" + "      <-- KSTREAM-FILTER-0000000002\n" + "\n" + "Topology: topology-3:\n" + "   Sub-topology: 0\n" + "    Source: KSTREAM-SOURCE-0000000000 (topics: [input-3])\n" + "      --> none\n" + "\n" + "  Sub-topology: 1\n" + "    Source: KSTREAM-SOURCE-0000000001 (topics: [stream-3])\n" + "      --> KSTREAM-FILTER-0000000002\n" + "    Processor: KSTREAM-FILTER-0000000002 (stores: [])\n" + "      --> KSTREAM-SINK-0000000003\n" + "      <-- KSTREAM-SOURCE-0000000001\n" + "    Sink: KSTREAM-SINK-0000000003 (topic: output-3)\n" + "      <-- KSTREAM-FILTER-0000000002\n\n"));
+        assertThat(
+            streams.getFullTopologyDescription(),
+            equalTo(
+                     "Topology: topology-1:\n"
+                    + "   Sub-topology: 0\n"
+                    + "    Source: KSTREAM-SOURCE-0000000000 (topics: [input-1])\n"
+                    + "      --> none\n"
+                    + "\n"
+                    + "  Sub-topology: 1\n"
+                    + "    Source: KSTREAM-SOURCE-0000000001 (topics: [stream-1])\n"
+                    + "      --> KSTREAM-FILTER-0000000002\n"
+                    + "    Processor: KSTREAM-FILTER-0000000002 (stores: [])\n"
+                    + "      --> KSTREAM-SINK-0000000003\n"
+                    + "      <-- KSTREAM-SOURCE-0000000001\n"
+                    + "    Sink: KSTREAM-SINK-0000000003 (topic: output-1)\n"
+                    + "      <-- KSTREAM-FILTER-0000000002\n"
+                    + "\n"
+                    + "Topology: topology-2:\n"
+                    + "   Sub-topology: 0\n"
+                    + "    Source: KSTREAM-SOURCE-0000000000 (topics: [input-2])\n"
+                    + "      --> none\n"
+                    + "\n"
+                    + "  Sub-topology: 1\n"
+                    + "    Source: KSTREAM-SOURCE-0000000001 (topics: [stream-2])\n"
+                    + "      --> KSTREAM-FILTER-0000000002\n"
+                    + "    Processor: KSTREAM-FILTER-0000000002 (stores: [])\n"
+                    + "      --> KSTREAM-SINK-0000000003\n"
+                    + "      <-- KSTREAM-SOURCE-0000000001\n"
+                    + "    Sink: KSTREAM-SINK-0000000003 (topic: output-2)\n"
+                    + "      <-- KSTREAM-FILTER-0000000002\n"
+                    + "\n"
+                    + "Topology: topology-3:\n"
+                    + "   Sub-topology: 0\n"
+                    + "    Source: KSTREAM-SOURCE-0000000000 (topics: [input-3])\n"
+                    + "      --> none\n"
+                    + "\n"
+                    + "  Sub-topology: 1\n"
+                    + "    Source: KSTREAM-SOURCE-0000000001 (topics: [stream-3])\n"
+                    + "      --> KSTREAM-FILTER-0000000002\n"
+                    + "    Processor: KSTREAM-FILTER-0000000002 (stores: [])\n"
+                    + "      --> KSTREAM-SINK-0000000003\n"
+                    + "      <-- KSTREAM-SOURCE-0000000001\n"
+                    + "    Sink: KSTREAM-SINK-0000000003 (topic: output-3)\n"
+                    + "      <-- KSTREAM-FILTER-0000000002\n\n")
+        );
     }
 
     @Test

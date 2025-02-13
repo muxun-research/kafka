@@ -17,6 +17,7 @@
 package org.apache.kafka.server.util;
 
 import org.apache.kafka.common.utils.KafkaThread;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,7 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * A scheduler based on java.util.concurrent.ScheduledThreadPoolExecutor
- * <p>
+ * <br>
  * It has a pool of kafka-scheduler- threads that do the actual work.
  */
 public class KafkaScheduler implements Scheduler {
@@ -117,7 +118,8 @@ public class KafkaScheduler implements Scheduler {
             executor.setContinueExistingPeriodicTasksAfterShutdownPolicy(false);
             executor.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
             executor.setRemoveOnCancelPolicy(true);
-            executor.setThreadFactory(runnable -> new KafkaThread(threadNamePrefix + schedulerThreadId.getAndIncrement(), runnable, daemon));
+            executor.setThreadFactory(runnable ->
+                new KafkaThread(threadNamePrefix + schedulerThreadId.getAndIncrement(), runnable, daemon));
             this.executor = executor;
         }
     }

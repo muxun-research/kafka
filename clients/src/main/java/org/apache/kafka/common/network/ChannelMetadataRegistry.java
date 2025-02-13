@@ -24,32 +24,32 @@ import java.io.Closeable;
  */
 public interface ChannelMetadataRegistry extends Closeable {
 
-	/**
-	 * Register information about the SSL cipher we are using.
-	 * Re-registering the information will overwrite the previous one.
-	 */
-	void registerCipherInformation(CipherInformation cipherInformation);
+    /**
+     * Register information about the SSL cipher we are using.
+     *  Re-registering the information will overwrite the previous one.
+     */
+    void registerCipherInformation(CipherInformation cipherInformation);
 
-	/**
-	 * Get the currently registered cipher information.
-	 */
-	CipherInformation cipherInformation();
+    /**
+     * Get the currently registered cipher information.
+     */
+    CipherInformation cipherInformation();
 
-	/**
-	 * Register information about the client client we are using.
-	 * Depending on the clients, the ApiVersionsRequest could be received
-	 * multiple times or not at all. Re-registering the information will
-	 * overwrite the previous one.
-	 */
-	void registerClientInformation(ClientInformation clientInformation);
+    /**
+     * Register information about the client we are using.
+     * Depending on the clients, the ApiVersionsRequest could be received
+     * multiple times or not at all. Re-registering the information will
+     * overwrite the previous one.
+     */
+    void registerClientInformation(ClientInformation clientInformation);
 
-	/**
-	 * Get the currently registered client information.
-	 */
-	ClientInformation clientInformation();
+    /**
+     * Get the currently registered client information.
+     */
+    ClientInformation clientInformation();
 
-	/**
-	 * Unregister everything that has been registered and close the registry.
-	 */
-	void close();
+    /**
+     * Unregister everything that has been registered and close the registry.
+     */
+    void close();
 }

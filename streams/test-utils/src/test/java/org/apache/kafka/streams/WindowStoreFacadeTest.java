@@ -18,17 +18,20 @@ package org.apache.kafka.streams;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.streams.TopologyTestDriver.WindowStoreFacade;
-import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.state.TimestampedWindowStore;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 public class WindowStoreFacadeTest {
     @SuppressWarnings("unchecked")
@@ -41,29 +44,21 @@ public class WindowStoreFacadeTest {
         windowStoreFacade = new WindowStoreFacade<>(mockedWindowTimestampStore);
     }
 
-    @SuppressWarnings("deprecation") // test of deprecated method
-    @Test
-    public void shouldForwardDeprecatedInit() {
-        final ProcessorContext context = mock(ProcessorContext.class);
-        final StateStore store = mock(StateStore.class);
-
-        windowStoreFacade.init(context, store);
-        verify(mockedWindowTimestampStore).init(context, store);
-    }
-
     @Test
     public void shouldForwardInit() {
         final StateStoreContext context = mock(StateStoreContext.class);
         final StateStore store = mock(StateStore.class);
 
         windowStoreFacade.init(context, store);
-        verify(mockedWindowTimestampStore).init(context, store);
+        verify(mockedWindowTimestampStore)
+            .init(context, store);
     }
 
     @Test
     public void shouldPutWindowStartTimestampWithUnknownTimestamp() {
         windowStoreFacade.put("key", "value", 21L);
-        verify(mockedWindowTimestampStore).put("key", ValueAndTimestamp.make("value", ConsumerRecord.NO_TIMESTAMP), 21L);
+        verify(mockedWindowTimestampStore)
+            .put("key", ValueAndTimestamp.make("value", ConsumerRecord.NO_TIMESTAMP), 21L);
     }
 
     @Test
@@ -88,7 +83,8 @@ public class WindowStoreFacadeTest {
 
     @Test
     public void shouldReturnIsPersistent() {
-        when(mockedWindowTimestampStore.persistent()).thenReturn(true, false);
+        when(mockedWindowTimestampStore.persistent())
+            .thenReturn(true, false);
 
         assertThat(windowStoreFacade.persistent(), is(true));
         assertThat(windowStoreFacade.persistent(), is(false));
@@ -97,7 +93,8 @@ public class WindowStoreFacadeTest {
 
     @Test
     public void shouldReturnIsOpen() {
-        when(mockedWindowTimestampStore.isOpen()).thenReturn(true, false);
+        when(mockedWindowTimestampStore.isOpen())
+            .thenReturn(true, false);
 
         assertThat(windowStoreFacade.isOpen(), is(true));
         assertThat(windowStoreFacade.isOpen(), is(false));

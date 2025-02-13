@@ -20,6 +20,7 @@ package org.apache.kafka.common.security.oauthbearer.internals.secured;
 import org.apache.kafka.common.security.oauthbearer.OAuthBearerToken;
 import org.apache.kafka.common.security.oauthbearer.internals.unsecured.OAuthBearerIllegalTokenException;
 import org.apache.kafka.common.security.oauthbearer.internals.unsecured.OAuthBearerUnsecuredJws;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,7 +37,7 @@ import static org.apache.kafka.common.config.SaslConfigs.DEFAULT_SASL_OAUTHBEARE
  * by the client to perform some rudimentary validation of the JWT access token that is received
  * as part of the response from posting the client credentials to the OAuth/OIDC provider's
  * token endpoint.
- * <p>
+ *
  * The validation steps performed are:
  *
  * <ol>
@@ -64,6 +65,7 @@ public class LoginAccessTokenValidator implements AccessTokenValidator {
     /**
      * Creates a new LoginAccessTokenValidator that will be used by the client for lightweight
      * validation of the JWT.
+     *
      * @param scopeClaimName Name of the scope claim to use; must be non-<code>null</code>
      * @param subClaimName   Name of the subject claim to use; must be non-<code>null</code>
      */
@@ -76,6 +78,7 @@ public class LoginAccessTokenValidator implements AccessTokenValidator {
     /**
      * Accepts an OAuth JWT access token in base-64 encoded format, validates, and returns an
      * OAuthBearerToken.
+     *
      * @param accessToken Non-<code>null</code> JWT access token
      * @return {@link OAuthBearerToken}
      * @throws ValidateException Thrown on errors performing validation of given token
@@ -107,13 +110,17 @@ public class LoginAccessTokenValidator implements AccessTokenValidator {
         Number issuedAtRaw = (Number) getClaim(payload, ISSUED_AT_CLAIM_NAME);
 
         Set<String> scopes = ClaimValidationUtils.validateScopes(scopeClaimName, scopeRawCollection);
-        long expiration = ClaimValidationUtils.validateExpiration(EXPIRATION_CLAIM_NAME, expirationRaw != null ? expirationRaw.longValue() * 1000L : null);
+        long expiration = ClaimValidationUtils.validateExpiration(EXPIRATION_CLAIM_NAME,
+            expirationRaw != null ? expirationRaw.longValue() * 1000L : null);
         String subject = ClaimValidationUtils.validateSubject(subClaimName, subRaw);
-        Long issuedAt = ClaimValidationUtils.validateIssuedAt(ISSUED_AT_CLAIM_NAME, issuedAtRaw != null ? issuedAtRaw.longValue() * 1000L : null);
+        Long issuedAt = ClaimValidationUtils.validateIssuedAt(ISSUED_AT_CLAIM_NAME,
+            issuedAtRaw != null ? issuedAtRaw.longValue() * 1000L : null);
 
-        OAuthBearerToken token = new BasicOAuthBearerToken(accessToken, scopes, expiration, subject, issuedAt);
-
-        return token;
+        return new BasicOAuthBearerToken(accessToken,
+            scopes,
+            expiration,
+            subject,
+            issuedAt);
     }
 
     private Object getClaim(Map<String, Object> payload, String claimName) {

@@ -31,7 +31,10 @@ import java.util.List;
 import java.util.Random;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.spy;
 
 public class ChunkedBytesStreamTest {
@@ -172,22 +175,28 @@ public class ChunkedBytesStreamTest {
     private static Stream<Arguments> provideEdgeCaseInputForMethodSkip() {
         int bufferLength = 16;
         // Test toSkip larger than int and negative for both delegateToSourceStream true and false
-        return Stream.of(Arguments.of(bufferLength, Integer.MAX_VALUE + 1L, true, bufferLength), Arguments.of(bufferLength, -1, true, 0), Arguments.of(bufferLength, Integer.MAX_VALUE + 1L, false, bufferLength), Arguments.of(bufferLength, -1, false, 0));
+        return Stream.of(
+            Arguments.of(bufferLength, Integer.MAX_VALUE + 1L, true, bufferLength),
+            Arguments.of(bufferLength, -1, true, 0),
+            Arguments.of(bufferLength, Integer.MAX_VALUE + 1L, false, bufferLength),
+            Arguments.of(bufferLength, -1, false, 0)
+        );
     }
 
     private static Stream<Arguments> provideCasesWithInvalidInputsForMethodRead() {
         byte[] b = new byte[16];
         return Stream.of(
-                // negative off
-                Arguments.of(b, -1, b.length),
-                // negative len
-                Arguments.of(b, 0, -1),
-                // overflow off + len
-                Arguments.of(b, Integer.MAX_VALUE, 10),
-                // len greater than size of target array
-                Arguments.of(b, 0, b.length + 1),
-                // off + len greater than size of target array
-                Arguments.of(b, b.length - 1, 2));
+            // negative off
+            Arguments.of(b, -1, b.length),
+            // negative len
+            Arguments.of(b, 0, -1),
+            // overflow off + len
+            Arguments.of(b, Integer.MAX_VALUE, 10),
+            // len greater than size of target array
+            Arguments.of(b, 0, b.length + 1),
+            // off + len greater than size of target array
+            Arguments.of(b, b.length - 1, 2)
+        );
     }
 
     private static List<Arguments> provideSourceSkipValuesForTest() {
@@ -207,12 +216,22 @@ public class ChunkedBytesStreamTest {
         oneByteBuf.flip();
 
         List<List<Object>> testInputs = Arrays.asList(
-                // empty source byte array
-                Arrays.asList(0, emptyBuffer, 0), Arrays.asList(0, emptyBuffer, 1), Arrays.asList(1, emptyBuffer, 1), Arrays.asList(1, emptyBuffer, 0),
-                // byte source array with 1 byte
-                Arrays.asList(0, oneByteBuf, 0), Arrays.asList(0, oneByteBuf, 1), Arrays.asList(1, oneByteBuf, 0), Arrays.asList(1, oneByteBuf, 1),
-                // byte source array with full read from intermediate buf
-                Arrays.asList(0, bufGreaterThanIntermediateBuf.duplicate(), bufGreaterThanIntermediateBuf.capacity()), Arrays.asList(bufGreaterThanIntermediateBuf.capacity(), bufGreaterThanIntermediateBuf.duplicate(), 0), Arrays.asList(2, bufGreaterThanIntermediateBuf.duplicate(), 10), Arrays.asList(2, bufGreaterThanIntermediateBuf.duplicate(), 8));
+            // empty source byte array
+            Arrays.asList(0, emptyBuffer, 0),
+            Arrays.asList(0, emptyBuffer, 1),
+            Arrays.asList(1, emptyBuffer, 1),
+            Arrays.asList(1, emptyBuffer, 0),
+            // byte source array with 1 byte
+            Arrays.asList(0, oneByteBuf, 0),
+            Arrays.asList(0, oneByteBuf, 1),
+            Arrays.asList(1, oneByteBuf, 0),
+            Arrays.asList(1, oneByteBuf, 1),
+            // byte source array with full read from intermediate buf
+            Arrays.asList(0, bufGreaterThanIntermediateBuf.duplicate(), bufGreaterThanIntermediateBuf.capacity()),
+            Arrays.asList(bufGreaterThanIntermediateBuf.capacity(), bufGreaterThanIntermediateBuf.duplicate(), 0),
+            Arrays.asList(2, bufGreaterThanIntermediateBuf.duplicate(), 10),
+            Arrays.asList(2, bufGreaterThanIntermediateBuf.duplicate(), 8)
+        );
 
         Boolean[] tailArgs = new Boolean[]{true, false};
         List<Arguments> finalArguments = new ArrayList<>(2 * testInputs.size());
@@ -236,15 +255,16 @@ public class ChunkedBytesStreamTest {
         bufMuchGreaterThanIntermediateBuf.position(bufMuchGreaterThanIntermediateBuf.capacity());
 
         return Stream.of(
-                // empty byte array
-                Arguments.of(ByteBuffer.allocate(2)),
-                // byte array with 1 byte
-                Arguments.of(ByteBuffer.allocate(1).put((byte) 1).flip()),
-                // byte array with size < intermediate buffer
-                Arguments.of(ByteBuffer.allocate(8).put("12345678".getBytes()).flip()),
-                // byte array with size > intermediate buffer
-                Arguments.of(bufGreaterThanIntermediateBuf.flip()),
-                // byte array with size >> intermediate buffer
-                Arguments.of(bufMuchGreaterThanIntermediateBuf.flip()));
+            // empty byte array
+            Arguments.of(ByteBuffer.allocate(2)),
+            // byte array with 1 byte
+            Arguments.of(ByteBuffer.allocate(1).put((byte) 1).flip()),
+            // byte array with size < intermediate buffer
+            Arguments.of(ByteBuffer.allocate(8).put("12345678".getBytes()).flip()),
+            // byte array with size > intermediate buffer
+            Arguments.of(bufGreaterThanIntermediateBuf.flip()),
+            // byte array with size >> intermediate buffer
+            Arguments.of(bufMuchGreaterThanIntermediateBuf.flip())
+        );
     }
 }

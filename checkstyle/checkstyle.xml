@@ -25,7 +25,7 @@
 
   <!-- header -->
   <module name="Header">
-    <property name="headerFile" value="${headerFile}" />
+    <property name="headerFile" value="${config_loc}/java.header" />
   </module>
 
   <module name="TreeWalker">
@@ -39,7 +39,9 @@
     <module name="EqualsHashCode"/>
     <module name="SimplifyBooleanExpression"/>
     <module name="OneStatementPerLine"/>
-    <module name="UnnecessaryParentheses" />
+    <module name="UnnecessaryParentheses">
+      <property name="tokens" value="IDENT, NUM_DOUBLE, LAMBDA, TEXT_BLOCK_LITERAL_BEGIN, UNARY_MINUS, UNARY_PLUS, INC, DEC, POST_INC, POST_DEC" />
+    </module>
     <module name="SimplifyBooleanReturn"/>
 
     <!-- style -->
@@ -79,8 +81,10 @@
 
     <!-- dependencies -->
     <module name="ImportControl">
-      <property name="file" value="${importControlFile}"/>
+      <property name="file" value="${config_loc}/${importControlFile}"/>
     </module>
+
+    <!--   don't define any import order here! Import order check/format is addressed by spotless.-->
 
     <!-- whitespace -->
     <module name="GenericWhitespace"/>
@@ -93,34 +97,36 @@
     </module>
     <module name="Indentation"/>
     <module name="MethodParamPad"/>
-      <module name="ParenPad"/>
-      <module name="TypecastParenPad"/>
+    <module name="ParenPad"/>
+    <module name="TypecastParenPad"/>
 
-      <!-- locale-sensitive methods should specify locale -->
-      <module name="Regexp">
-          <property name="format" value="\.to(Lower|Upper)Case\(\)"/>
-          <property name="illegalPattern" value="true"/>
-          <property name="ignoreComments" value="true"/>
-      </module>
+    <!-- locale-sensitive methods should specify locale -->
+    <module name="Regexp">
+      <property name="format" value="\.to(Lower|Upper)Case\(\)"/>
+      <property name="illegalPattern" value="true"/>
+      <property name="ignoreComments" value="true"/>
+    </module>
 
-      <module name="Regexp">
-          <property name="id" value="dontUseSystemExit"/>
-          <property name="format" value="System\.exit"/>
-          <property name="illegalPattern" value="true"/>
-          <property name="ignoreComments" value="true"/>
-          <property name="message" value="'System.exit': Should not directly call System.exit, but Exit.exit instead."/>
-      </module>
+    <module name="Regexp">
+      <property name="id" value="dontUseSystemExit"/>
+      <property name="format" value="System\.exit"/>
+      <property name="illegalPattern" value="true"/>
+      <property name="ignoreComments" value="true"/>
+      <property name="message" value="'System.exit': Should not directly call System.exit, but Exit.exit instead."/>
+    </module>
 
-      <!-- code quality -->
-      <module name="MethodLength"/>
-      <module name="ParameterNumber">
-          <!-- default is 8 -->
-          <property name="max" value="13"/>
-      </module>
-      <module name="ClassDataAbstractionCoupling">
-          <!-- default is 7 -->
-          <property name="max" value="25"/>
-          <property name="excludeClassesRegexps" value="AtomicInteger"/>
+    <!-- code quality -->
+    <module name="MethodLength">
+      <property name="max" value="170" />
+    </module>
+    <module name="ParameterNumber">
+      <!-- default is 8 -->
+      <property name="max" value="13"/>
+    </module>
+    <module name="ClassDataAbstractionCoupling">
+      <!-- default is 7 -->
+      <property name="max" value="25"/>
+      <property name="excludeClassesRegexps" value="AtomicInteger"/>
     </module>
     <module name="BooleanExpressionComplexity">
       <!-- default is 3 -->
@@ -129,29 +135,32 @@
 
     <module name="ClassFanOutComplexity">
       <!-- default is 20 -->
-      <property name="max" value="50"/>
+      <property name="max" value="52"/>
     </module>
     <module name="CyclomaticComplexity">
       <!-- default is 10-->
-        <property name="max" value="16"/>
+      <property name="max" value="16"/>
     </module>
-      <module name="JavaNCSS">
-          <!-- default is 50 -->
-          <property name="methodMaximum" value="100"/>
-      </module>
-      <module name="NPathComplexity">
-          <!-- default is 200 -->
-          <property name="max" value="500"/>
-      </module>
-
-      <!-- Allows the use of the @SuppressWarnings annotation in the code -->
-      <module name="SuppressWarningsHolder"/>
-  </module>
-
-    <module name="SuppressionFilter">
-        <property name="file" value="${suppressionsFile}"/>
+    <module name="JavaNCSS">
+      <!-- default is 50 -->
+      <property name="methodMaximum" value="100"/>
+    </module>
+    <module name="NPathComplexity">
+      <!-- default is 200 -->
+      <property name="max" value="500"/>
     </module>
 
     <!-- Allows the use of the @SuppressWarnings annotation in the code -->
-    <module name="SuppressWarningsFilter"/>
+    <module name="SuppressWarningsHolder"/>
+
+    <module name="ModifierOrder"/>
+    
+  </module>
+
+  <module name="SuppressionFilter">
+    <property name="file" value="${config_loc}/suppressions.xml"/>
+  </module>
+
+  <!-- Allows the use of the @SuppressWarnings annotation in the code -->
+  <module name="SuppressWarningsFilter"/>
 </module>

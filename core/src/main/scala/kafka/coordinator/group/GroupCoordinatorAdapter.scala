@@ -6,7 +6,7 @@
  * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,32 +16,35 @@
  */
 package kafka.coordinator.group
 
-import kafka.common.OffsetAndMetadata
-import kafka.server.{KafkaConfig, ReplicaManager, RequestLocal}
-import kafka.utils.Implicits.MapExtensionMethods
+import kafka.server.{KafkaConfig, ReplicaManager}
+import org.apache.kafka.common.{TopicIdPartition, TopicPartition, Uuid}
+import org.apache.kafka.common.message.{ConsumerGroupDescribeResponseData, ConsumerGroupHeartbeatRequestData, ConsumerGroupHeartbeatResponseData, DeleteGroupsResponseData, DescribeGroupsResponseData, DescribeShareGroupOffsetsRequestData, DescribeShareGroupOffsetsResponseData, HeartbeatRequestData, HeartbeatResponseData, JoinGroupRequestData, JoinGroupResponseData, LeaveGroupRequestData, LeaveGroupResponseData, ListGroupsRequestData, ListGroupsResponseData, OffsetCommitRequestData, OffsetCommitResponseData, OffsetDeleteRequestData, OffsetDeleteResponseData, OffsetFetchRequestData, OffsetFetchResponseData, ShareGroupDescribeResponseData, ShareGroupHeartbeatRequestData, ShareGroupHeartbeatResponseData, SyncGroupRequestData, SyncGroupResponseData, TxnOffsetCommitRequestData, TxnOffsetCommitResponseData}
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 import org.apache.kafka.common.record.RecordBatch
 import org.apache.kafka.common.requests.{OffsetCommitRequest, RequestContext, TransactionResult}
 import org.apache.kafka.common.utils.{BufferSupplier, Time}
-import org.apache.kafka.common.{TopicIdPartition, TopicPartition, Uuid}
+import org.apache.kafka.coordinator.group
+import org.apache.kafka.coordinator.group.OffsetAndMetadata
 import org.apache.kafka.image.{MetadataDelta, MetadataImage}
+import org.apache.kafka.server.common.RequestLocal
 import org.apache.kafka.server.util.FutureUtils
 
+import java.time.Duration
 import java.util
+import java.util.{Optional, OptionalInt, OptionalLong, Properties}
 import java.util.concurrent.CompletableFuture
 import java.util.function.IntSupplier
-import java.util.{Optional, OptionalInt, Properties}
 import scala.collection.{immutable, mutable}
 import scala.jdk.CollectionConverters._
 
 object GroupCoordinatorAdapter {
   def apply(
-             config: KafkaConfig,
-             replicaManager: ReplicaManager,
-             time: Time,
-             metrics: Metrics
-           ): GroupCoordinatorAdapter = {
+    config: KafkaConfig,
+    replicaManager: ReplicaManager,
+    time: Time,
+    metrics: Metrics
+  ): GroupCoordinatorAdapter = {
     new GroupCoordinatorAdapter(
       GroupCoordinator(
         config,
@@ -59,24 +62,44 @@ object GroupCoordinatorAdapter {
  * that exposes the new org.apache.kafka.coordinator.group.GroupCoordinator interface.
  */
 private[group] class GroupCoordinatorAdapter(
-                                              private val coordinator: GroupCoordinator,
-                                              private val time: Time
-                                            ) extends org.apache.kafka.coordinator.group.GroupCoordinator {
+  private val coordinator: GroupCoordinator,
+  private val time: Time
+) extends org.apache.kafka.coordinator.group.GroupCoordinator {
+
+  override def isNewGroupCoordinator: Boolean = false
 
   override def consumerGroupHeartbeat(
-                                       context: RequestContext,
-                                       request: ConsumerGroupHeartbeatRequestData
-                                     ): CompletableFuture[ConsumerGroupHeartbeatResponseData] = {
+    context: RequestContext,
+    request: ConsumerGroupHeartbeatRequestData
+  ): CompletableFuture[ConsumerGroupHeartbeatResponseData] = {
     FutureUtils.failedFuture(Errors.UNSUPPORTED_VERSION.exception(
       s"The old group coordinator does not support ${ApiKeys.CONSUMER_GROUP_HEARTBEAT.name} API."
     ))
   }
 
+  override def shareGroupHeartbeat(
+    context: RequestContext,
+    request: ShareGroupHeartbeatRequestData
+  ): CompletableFuture[ShareGroupHeartbeatResponseData] = {
+    FutureUtils.failedFuture(Errors.UNSUPPORTED_VERSION.exception(
+      s"The old group coordinator does not support ${ApiKeys.SHARE_GROUP_HEARTBEAT.name} API."
+    ))
+  }
+
+  override def describeShareGroupOffsets(
+     context: RequestContext,
+     request: DescribeShareGroupOffsetsRequestData
+  ): CompletableFuture[DescribeShareGroupOffsetsResponseData] = {
+    FutureUtils.failedFuture(Errors.UNSUPPORTED_VERSION.exception(
+      s"The old group coordinator does not support ${ApiKeys.DESCRIBE_SHARE_GROUP_OFFSETS.name} API."
+    ))
+  }
+
   override def joinGroup(
-                          context: RequestContext,
-                          request: JoinGroupRequestData,
-                          bufferSupplier: BufferSupplier
-                        ): CompletableFuture[JoinGroupResponseData] = {
+    context: RequestContext,
+    request: JoinGroupRequestData,
+    bufferSupplier: BufferSupplier
+  ): CompletableFuture[JoinGroupResponseData] = {
     val future = new CompletableFuture[JoinGroupResponseData]()
 
     def callback(joinResult: JoinGroupResult): Unit = {
@@ -118,17 +141,17 @@ private[group] class GroupCoordinatorAdapter(
       protocols,
       callback,
       Option(request.reason),
-      RequestLocal(bufferSupplier)
+      new RequestLocal(bufferSupplier)
     )
 
     future
   }
 
   override def syncGroup(
-                          context: RequestContext,
-                          request: SyncGroupRequestData,
-                          bufferSupplier: BufferSupplier
-                        ): CompletableFuture[SyncGroupResponseData] = {
+    context: RequestContext,
+    request: SyncGroupRequestData,
+    bufferSupplier: BufferSupplier
+  ): CompletableFuture[SyncGroupResponseData] = {
     val future = new CompletableFuture[SyncGroupResponseData]()
 
     def callback(syncGroupResult: SyncGroupResult): Unit = {
@@ -154,16 +177,16 @@ private[group] class GroupCoordinatorAdapter(
       Option(request.groupInstanceId),
       assignmentMap.result(),
       callback,
-      RequestLocal(bufferSupplier)
+      new RequestLocal(bufferSupplier)
     )
 
     future
   }
 
   override def heartbeat(
-                          context: RequestContext,
-                          request: HeartbeatRequestData
-                        ): CompletableFuture[HeartbeatResponseData] = {
+    context: RequestContext,
+    request: HeartbeatRequestData
+  ): CompletableFuture[HeartbeatResponseData] = {
     val future = new CompletableFuture[HeartbeatResponseData]()
 
     coordinator.handleHeartbeat(
@@ -179,9 +202,9 @@ private[group] class GroupCoordinatorAdapter(
   }
 
   override def leaveGroup(
-                           context: RequestContext,
-                           request: LeaveGroupRequestData
-                         ): CompletableFuture[LeaveGroupResponseData] = {
+    context: RequestContext,
+    request: LeaveGroupRequestData
+  ): CompletableFuture[LeaveGroupResponseData] = {
     val future = new CompletableFuture[LeaveGroupResponseData]()
 
     def callback(leaveGroupResult: LeaveGroupResult): Unit = {
@@ -206,12 +229,13 @@ private[group] class GroupCoordinatorAdapter(
   }
 
   override def listGroups(
-                           context: RequestContext,
-                           request: ListGroupsRequestData
-                         ): CompletableFuture[ListGroupsResponseData] = {
-    // Handle a null array the same as empty
+    context: RequestContext,
+    request: ListGroupsRequestData
+  ): CompletableFuture[ListGroupsResponseData] = {
+    // Handle a null array the same as empty.
     val (error, groups) = coordinator.handleListGroups(
-      Option(request.statesFilter).map(_.asScala.toSet).getOrElse(Set.empty)
+      Option(request.statesFilter).map(_.asScala.toSet).getOrElse(Set.empty),
+      Option(request.typesFilter).map(_.asScala.toSet).getOrElse(Set.empty)
     )
 
     val response = new ListGroupsResponseData()
@@ -221,22 +245,24 @@ private[group] class GroupCoordinatorAdapter(
       response.groups.add(new ListGroupsResponseData.ListedGroup()
         .setGroupId(group.groupId)
         .setProtocolType(group.protocolType)
-        .setGroupState(group.state))
+        .setGroupState(group.state)
+        .setGroupType(group.groupType))
     }
 
     CompletableFuture.completedFuture(response)
   }
 
   override def describeGroups(
-                               context: RequestContext,
-                               groupIds: util.List[String]
-                             ): CompletableFuture[util.List[DescribeGroupsResponseData.DescribedGroup]] = {
+    context: RequestContext,
+    groupIds: util.List[String]
+  ): CompletableFuture[util.List[DescribeGroupsResponseData.DescribedGroup]] = {
 
     def describeGroup(groupId: String): DescribeGroupsResponseData.DescribedGroup = {
-      val (error, summary) = coordinator.handleDescribeGroup(groupId)
+      val (error, errorMessage, summary) = coordinator.handleDescribeGroup(groupId, context.apiVersion())
 
       new DescribeGroupsResponseData.DescribedGroup()
         .setErrorCode(error.code)
+        .setErrorMessage(errorMessage.orNull)
         .setGroupId(groupId)
         .setGroupState(summary.state)
         .setProtocolType(summary.protocolType)
@@ -256,15 +282,15 @@ private[group] class GroupCoordinatorAdapter(
   }
 
   override def deleteGroups(
-                             context: RequestContext,
-                             groupIds: util.List[String],
-                             bufferSupplier: BufferSupplier
-                           ): CompletableFuture[DeleteGroupsResponseData.DeletableGroupResultCollection] = {
+    context: RequestContext,
+    groupIds: util.List[String],
+    bufferSupplier: BufferSupplier
+  ): CompletableFuture[DeleteGroupsResponseData.DeletableGroupResultCollection] = {
     val results = new DeleteGroupsResponseData.DeletableGroupResultCollection()
     coordinator.handleDeleteGroups(
       groupIds.asScala.toSet,
-      RequestLocal(bufferSupplier)
-    ).forKeyValue { (groupId, error) =>
+      new RequestLocal(bufferSupplier)
+    ).foreachEntry { (groupId, error) =>
       results.add(new DeleteGroupsResponseData.DeletableGroupResult()
         .setGroupId(groupId)
         .setErrorCode(error.code))
@@ -273,56 +299,55 @@ private[group] class GroupCoordinatorAdapter(
   }
 
   override def fetchAllOffsets(
-                                context: RequestContext,
-                                groupId: String,
-                                requireStable: Boolean
-                              ): CompletableFuture[util.List[OffsetFetchResponseData.OffsetFetchResponseTopics]] = {
+    context: RequestContext,
+    request: OffsetFetchRequestData.OffsetFetchRequestGroup,
+    requireStable: Boolean
+  ): CompletableFuture[OffsetFetchResponseData.OffsetFetchResponseGroup] = {
     handleFetchOffset(
-      groupId,
+      request.groupId,
       requireStable,
       None
     )
   }
 
   override def fetchOffsets(
-                             context: RequestContext,
-                             groupId: String,
-                             topics: util.List[OffsetFetchRequestData.OffsetFetchRequestTopics],
-                             requireStable: Boolean
-                           ): CompletableFuture[util.List[OffsetFetchResponseData.OffsetFetchResponseTopics]] = {
+    context: RequestContext,
+    request: OffsetFetchRequestData.OffsetFetchRequestGroup,
+    requireStable: Boolean
+  ): CompletableFuture[OffsetFetchResponseData.OffsetFetchResponseGroup] = {
     val topicPartitions = new mutable.ArrayBuffer[TopicPartition]()
-    topics.forEach { topic =>
+    request.topics.forEach { topic =>
       topic.partitionIndexes.forEach { partition =>
         topicPartitions += new TopicPartition(topic.name, partition)
       }
     }
 
     handleFetchOffset(
-      groupId,
+      request.groupId,
       requireStable,
       Some(topicPartitions.toSeq)
     )
   }
 
   private def handleFetchOffset(
-                                 groupId: String,
-                                 requireStable: Boolean,
-                                 partitions: Option[Seq[TopicPartition]]
-                               ): CompletableFuture[util.List[OffsetFetchResponseData.OffsetFetchResponseTopics]] = {
+    groupId: String,
+    requireStable: Boolean,
+    partitions: Option[Seq[TopicPartition]]
+  ): CompletableFuture[OffsetFetchResponseData.OffsetFetchResponseGroup] = {
     val (error, results) = coordinator.handleFetchOffsets(
       groupId,
       requireStable,
       partitions
     )
 
-    val future = new CompletableFuture[util.List[OffsetFetchResponseData.OffsetFetchResponseTopics]]()
+    val future = new CompletableFuture[OffsetFetchResponseData.OffsetFetchResponseGroup]()
     if (error != Errors.NONE) {
       future.completeExceptionally(error.exception)
     } else {
       val topicsList = new util.ArrayList[OffsetFetchResponseData.OffsetFetchResponseTopics]()
       val topicsMap = new mutable.HashMap[String, OffsetFetchResponseData.OffsetFetchResponseTopics]()
 
-      results.forKeyValue { (tp, offset) =>
+      results.foreachEntry { (tp, offset) =>
         val topic = topicsMap.get(tp.topic) match {
           case Some(topic) =>
             topic
@@ -342,17 +367,19 @@ private[group] class GroupCoordinatorAdapter(
           .setErrorCode(offset.error.code))
       }
 
-      future.complete(topicsList)
+      future.complete(new OffsetFetchResponseData.OffsetFetchResponseGroup()
+        .setGroupId(groupId)
+        .setTopics(topicsList))
     }
 
     future
   }
 
   override def commitOffsets(
-                              context: RequestContext,
-                              request: OffsetCommitRequestData,
-                              bufferSupplier: BufferSupplier
-                            ): CompletableFuture[OffsetCommitResponseData] = {
+    context: RequestContext,
+    request: OffsetCommitRequestData,
+    bufferSupplier: BufferSupplier
+  ): CompletableFuture[OffsetCommitResponseData] = {
     val currentTimeMs = time.milliseconds
     val future = new CompletableFuture[OffsetCommitResponseData]()
 
@@ -360,7 +387,7 @@ private[group] class GroupCoordinatorAdapter(
       val response = new OffsetCommitResponseData()
       val byTopics = new mutable.HashMap[String, OffsetCommitResponseData.OffsetCommitResponseTopic]()
 
-      commitStatus.forKeyValue { (tp, error) =>
+      commitStatus.foreachEntry { (tp, error) =>
         val topic = byTopics.get(tp.topic) match {
           case Some(existingTopic) =>
             existingTopic
@@ -396,7 +423,6 @@ private[group] class GroupCoordinatorAdapter(
           partition.committedOffset,
           partition.committedLeaderEpoch,
           partition.committedMetadata,
-          partition.commitTimestamp,
           expireTimeMs
         )
       }
@@ -406,20 +432,20 @@ private[group] class GroupCoordinatorAdapter(
       request.groupId,
       request.memberId,
       Option(request.groupInstanceId),
-      request.generationId,
+      request.generationIdOrMemberEpoch,
       partitions.toMap,
       callback,
-      RequestLocal(bufferSupplier)
+      new RequestLocal(bufferSupplier)
     )
 
     future
   }
 
   override def commitTransactionalOffsets(
-                                           context: RequestContext,
-                                           request: TxnOffsetCommitRequestData,
-                                           bufferSupplier: BufferSupplier
-                                         ): CompletableFuture[TxnOffsetCommitResponseData] = {
+    context: RequestContext,
+    request: TxnOffsetCommitRequestData,
+    bufferSupplier: BufferSupplier
+  ): CompletableFuture[TxnOffsetCommitResponseData] = {
     val currentTimeMs = time.milliseconds
     val future = new CompletableFuture[TxnOffsetCommitResponseData]()
 
@@ -427,7 +453,7 @@ private[group] class GroupCoordinatorAdapter(
       val response = new TxnOffsetCommitResponseData()
       val byTopics = new mutable.HashMap[String, TxnOffsetCommitResponseData.TxnOffsetCommitResponseTopic]()
 
-      results.forKeyValue { (tp, error) =>
+      results.foreachEntry { (tp, error) =>
         val topic = byTopics.get(tp.topic) match {
           case Some(existingTopic) =>
             existingTopic
@@ -455,7 +481,6 @@ private[group] class GroupCoordinatorAdapter(
           partition.committedOffset,
           partition.committedLeaderEpoch,
           partition.committedMetadata,
-          OffsetCommitRequest.DEFAULT_TIMESTAMP, // means that currentTimeMs is used.
           None
         )
       }
@@ -463,6 +488,7 @@ private[group] class GroupCoordinatorAdapter(
 
     coordinator.handleTxnCommitOffsets(
       request.groupId,
+      request.transactionalId,
       request.producerId,
       request.producerEpoch,
       request.memberId,
@@ -470,43 +496,43 @@ private[group] class GroupCoordinatorAdapter(
       request.generationId,
       partitions.toMap,
       callback,
-      RequestLocal(bufferSupplier)
+      new RequestLocal(bufferSupplier),
+      context.apiVersion()
     )
 
     future
   }
 
   private def createOffsetAndMetadata(
-                                       currentTimeMs: Long,
-                                       offset: Long,
-                                       leaderEpoch: Int,
-                                       metadata: String,
-                                       commitTimestamp: Long,
-                                       expireTimestamp: Option[Long]
-                                     ): OffsetAndMetadata = {
+    currentTimeMs: Long,
+    offset: Long,
+    leaderEpoch: Int,
+    metadata: String,
+    expireTimestamp: Option[Long]
+  ): OffsetAndMetadata = {
     new OffsetAndMetadata(
-      offset = offset,
-      leaderEpoch = leaderEpoch match {
-        case RecordBatch.NO_PARTITION_LEADER_EPOCH => Optional.empty[Integer]
-        case committedLeaderEpoch => Optional.of[Integer](committedLeaderEpoch)
+      offset,
+      leaderEpoch match {
+        case RecordBatch.NO_PARTITION_LEADER_EPOCH => OptionalInt.empty
+        case committedLeaderEpoch => OptionalInt.of(committedLeaderEpoch)
       },
-      metadata = metadata match {
-        case null => OffsetAndMetadata.NoMetadata
+      metadata match {
+        case null => OffsetAndMetadata.NO_METADATA
         case metadata => metadata
       },
-      commitTimestamp = commitTimestamp match {
-        case OffsetCommitRequest.DEFAULT_TIMESTAMP => currentTimeMs
-        case customTimestamp => customTimestamp
-      },
-      expireTimestamp = expireTimestamp
+      currentTimeMs,
+      expireTimestamp match {
+        case Some(timestamp) => OptionalLong.of(timestamp)
+        case None => OptionalLong.empty()
+      }
     )
   }
 
   override def deleteOffsets(
-                              context: RequestContext,
-                              request: OffsetDeleteRequestData,
-                              bufferSupplier: BufferSupplier
-                            ): CompletableFuture[OffsetDeleteResponseData] = {
+    context: RequestContext,
+    request: OffsetDeleteRequestData,
+    bufferSupplier: BufferSupplier
+  ): CompletableFuture[OffsetDeleteResponseData] = {
     val future = new CompletableFuture[OffsetDeleteResponseData]()
 
     val partitions = mutable.ArrayBuffer[TopicPartition]()
@@ -519,14 +545,14 @@ private[group] class GroupCoordinatorAdapter(
     val (groupError, topicPartitionResults) = coordinator.handleDeleteOffsets(
       request.groupId,
       partitions,
-      RequestLocal(bufferSupplier)
+      new RequestLocal(bufferSupplier)
     )
 
     if (groupError != Errors.NONE) {
       future.completeExceptionally(groupError.exception)
     } else {
       val response = new OffsetDeleteResponseData()
-      topicPartitionResults.forKeyValue { (topicPartition, error) =>
+      topicPartitionResults.foreachEntry { (topicPartition, error) =>
         var topic = response.topics.find(topicPartition.topic)
         if (topic == null) {
           topic = new OffsetDeleteResponseData.OffsetDeleteResponseTopic().setName(topicPartition.topic)
@@ -543,52 +569,80 @@ private[group] class GroupCoordinatorAdapter(
     future
   }
 
+  override def completeTransaction(
+    tp: TopicPartition,
+    producerId: Long,
+    producerEpoch: Short,
+    coordinatorEpoch: Int,
+    result: TransactionResult,
+    timeout: Duration
+  ): CompletableFuture[Void] = {
+    FutureUtils.failedFuture(new IllegalStateException(
+      s"The old group coordinator does not support `completeTransaction` API."
+    ))
+  }
+
   override def partitionFor(groupId: String): Int = {
     coordinator.partitionFor(groupId)
   }
 
   override def onTransactionCompleted(
-                                       producerId: Long,
-                                       partitions: java.lang.Iterable[TopicPartition],
-                                       transactionResult: TransactionResult
-                                     ): Unit = {
-    coordinator.scheduleHandleTxnCompletion(
-      producerId,
-      partitions.asScala,
-      transactionResult
-    )
+    producerId: Long,
+    partitions: java.lang.Iterable[TopicPartition],
+    transactionResult: TransactionResult
+  ): CompletableFuture[Void] = {
+    try {
+      coordinator.scheduleHandleTxnCompletion(
+        producerId,
+        partitions.asScala,
+        transactionResult
+      )
+    } catch {
+      case e: Throwable => FutureUtils.failedFuture(e)
+    }
   }
 
   override def onPartitionsDeleted(
-                                    topicPartitions: util.List[TopicPartition],
-                                    bufferSupplier: BufferSupplier
-                                  ): Unit = {
-    coordinator.handleDeletedPartitions(topicPartitions.asScala, RequestLocal(bufferSupplier))
+    topicPartitions: util.List[TopicPartition],
+    bufferSupplier: BufferSupplier
+  ): Unit = {
+    coordinator.handleDeletedPartitions(topicPartitions.asScala, new RequestLocal(bufferSupplier))
   }
 
   override def onElection(
-                           groupMetadataPartitionIndex: Int,
-                           groupMetadataPartitionLeaderEpoch: Int
-                         ): Unit = {
+    groupMetadataPartitionIndex: Int,
+    groupMetadataPartitionLeaderEpoch: Int
+  ): Unit = {
     coordinator.onElection(groupMetadataPartitionIndex, groupMetadataPartitionLeaderEpoch)
   }
 
   override def onResignation(
-                              groupMetadataPartitionIndex: Int,
-                              groupMetadataPartitionLeaderEpoch: OptionalInt
-                            ): Unit = {
+    groupMetadataPartitionIndex: Int,
+    groupMetadataPartitionLeaderEpoch: OptionalInt
+  ): Unit = {
     coordinator.onResignation(groupMetadataPartitionIndex, groupMetadataPartitionLeaderEpoch)
   }
 
   override def onNewMetadataImage(
-                                   newImage: MetadataImage,
-                                   delta: MetadataDelta
-                                 ): Unit = {
+    newImage: MetadataImage,
+    delta: MetadataDelta
+  ): Unit = {
     // The metadata image is not used in the old group coordinator.
   }
 
   override def groupMetadataTopicConfigs(): Properties = {
     coordinator.offsetsTopicConfigs
+  }
+
+  override def groupConfig(groupId: String): Optional[group.GroupConfig] = {
+    throw Errors.UNSUPPORTED_VERSION.exception("The old group coordinator does not support get group config.")
+  }
+
+  override def updateGroupConfig(
+    groupId: String,
+    newGroupConfig: Properties
+  ): Unit = {
+    throw Errors.UNSUPPORTED_VERSION.exception("The old group coordinator does not support update group config.")
   }
 
   override def startup(groupMetadataTopicPartitionCount: IntSupplier): Unit = {
@@ -597,5 +651,23 @@ private[group] class GroupCoordinatorAdapter(
 
   override def shutdown(): Unit = {
     coordinator.shutdown()
+  }
+
+  override def consumerGroupDescribe(
+    context: RequestContext,
+    groupIds: util.List[String]
+  ): CompletableFuture[util.List[ConsumerGroupDescribeResponseData.DescribedGroup]] = {
+    FutureUtils.failedFuture(Errors.UNSUPPORTED_VERSION.exception(
+      s"The old group coordinator does not support ${ApiKeys.CONSUMER_GROUP_DESCRIBE.name} API."
+    ))
+  }
+
+  override def shareGroupDescribe(
+    context: RequestContext,
+    groupIds: util.List[String]
+  ): CompletableFuture[util.List[ShareGroupDescribeResponseData.DescribedGroup]] = {
+    FutureUtils.failedFuture(Errors.UNSUPPORTED_VERSION.exception(
+      s"The old group coordinator does not support ${ApiKeys.SHARE_GROUP_DESCRIBE.name} API."
+    ))
   }
 }

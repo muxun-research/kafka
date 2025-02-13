@@ -42,7 +42,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * Methods of this class are thread safe. Make sure to check `AbstractIndex` subclasses
  * documentation to establish their thread safety.
  */
-public class LazyIndex<T extends AbstractIndex> {
+public class LazyIndex<T extends AbstractIndex> implements Closeable {
 
     private enum IndexType {
         OFFSET, TIME
@@ -182,8 +182,7 @@ public class LazyIndex<T extends AbstractIndex> {
             try {
                 if (indexWrapper instanceof IndexValue<?>)
                     return ((IndexValue<T>) indexWrapper).index;
-                else if (indexWrapper instanceof IndexFile) {
-                    IndexFile indexFile = (IndexFile) indexWrapper;
+                else if (indexWrapper instanceof IndexFile indexFile) {
                     IndexValue<T> indexValue = new IndexValue<>(loadIndex(indexFile.file));
                     indexWrapper = indexValue;
                     return indexValue.index;
@@ -222,6 +221,7 @@ public class LazyIndex<T extends AbstractIndex> {
         }
     }
 
+    @Override
     public void close() throws IOException {
         lock.lock();
         try {

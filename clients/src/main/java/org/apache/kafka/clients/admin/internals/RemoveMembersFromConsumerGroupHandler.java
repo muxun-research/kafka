@@ -25,9 +25,16 @@ import org.apache.kafka.common.requests.FindCoordinatorRequest.CoordinatorType;
 import org.apache.kafka.common.requests.LeaveGroupRequest;
 import org.apache.kafka.common.requests.LeaveGroupResponse;
 import org.apache.kafka.common.utils.LogContext;
+
 import org.slf4j.Logger;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class RemoveMembersFromConsumerGroupHandler extends AdminApiHandler.Batched<CoordinatorKey, Map<MemberIdentity, Errors>> {
 
@@ -36,7 +43,11 @@ public class RemoveMembersFromConsumerGroupHandler extends AdminApiHandler.Batch
     private final Logger log;
     private final AdminApiLookupStrategy<CoordinatorKey> lookupStrategy;
 
-    public RemoveMembersFromConsumerGroupHandler(String groupId, List<MemberIdentity> members, LogContext logContext) {
+    public RemoveMembersFromConsumerGroupHandler(
+        String groupId,
+        List<MemberIdentity> members,
+        LogContext logContext
+    ) {
         this.groupId = CoordinatorKey.byGroupId(groupId);
         this.members = members;
         this.log = logContext.logger(RemoveMembersFromConsumerGroupHandler.class);
@@ -53,13 +64,18 @@ public class RemoveMembersFromConsumerGroupHandler extends AdminApiHandler.Batch
         return lookupStrategy;
     }
 
-    public static AdminApiFuture.SimpleAdminApiFuture<CoordinatorKey, Map<MemberIdentity, Errors>> newFuture(String groupId) {
+    public static AdminApiFuture.SimpleAdminApiFuture<CoordinatorKey, Map<MemberIdentity, Errors>> newFuture(
+        String groupId
+    ) {
         return AdminApiFuture.forKeys(Collections.singleton(CoordinatorKey.byGroupId(groupId)));
     }
 
-    private void validateKeys(Set<CoordinatorKey> groupIds) {
+    private void validateKeys(
+        Set<CoordinatorKey> groupIds
+    ) {
         if (!groupIds.equals(Collections.singleton(groupId))) {
-            throw new IllegalArgumentException("Received unexpected group ids " + groupIds + " (expected only " + Collections.singleton(groupId) + ")");
+            throw new IllegalArgumentException("Received unexpected group ids " + groupIds +
+                " (expected only " + Collections.singleton(groupId) + ")");
         }
     }
 
@@ -70,7 +86,11 @@ public class RemoveMembersFromConsumerGroupHandler extends AdminApiHandler.Batch
     }
 
     @Override
-    public ApiResult<CoordinatorKey, Map<MemberIdentity, Errors>> handleResponse(Node coordinator, Set<CoordinatorKey> groupIds, AbstractResponse abstractResponse) {
+    public ApiResult<CoordinatorKey, Map<MemberIdentity, Errors>> handleResponse(
+        Node coordinator,
+        Set<CoordinatorKey> groupIds,
+        AbstractResponse abstractResponse
+    ) {
         validateKeys(groupIds);
         final LeaveGroupResponse response = (LeaveGroupResponse) abstractResponse;
 
@@ -85,14 +105,22 @@ public class RemoveMembersFromConsumerGroupHandler extends AdminApiHandler.Batch
         } else {
             final Map<MemberIdentity, Errors> memberErrors = new HashMap<>();
             for (MemberResponse memberResponse : response.memberResponses()) {
-                memberErrors.put(new MemberIdentity().setMemberId(memberResponse.memberId()).setGroupInstanceId(memberResponse.groupInstanceId()), Errors.forCode(memberResponse.errorCode()));
+                memberErrors.put(new MemberIdentity()
+                                     .setMemberId(memberResponse.memberId())
+                                     .setGroupInstanceId(memberResponse.groupInstanceId()),
+                                 Errors.forCode(memberResponse.errorCode()));
             }
 
             return ApiResult.completed(groupId, memberErrors);
         }
     }
 
-    private void handleGroupError(CoordinatorKey groupId, Errors error, Map<CoordinatorKey, Throwable> failed, Set<CoordinatorKey> groupsToUnmap) {
+    private void handleGroupError(
+        CoordinatorKey groupId,
+        Errors error,
+        Map<CoordinatorKey, Throwable> failed,
+        Set<CoordinatorKey> groupsToUnmap
+    ) {
         switch (error) {
             case GROUP_AUTHORIZATION_FAILED:
                 log.debug("`LeaveGroup` request for group id {} failed due to error {}", groupId.idValue, error);
@@ -100,13 +128,15 @@ public class RemoveMembersFromConsumerGroupHandler extends AdminApiHandler.Batch
                 break;
             case COORDINATOR_LOAD_IN_PROGRESS:
                 // If the coordinator is in the middle of loading, then we just need to retry
-                log.debug("`LeaveGroup` request for group id {} failed because the coordinator " + "is still in the process of loading state. Will retry", groupId.idValue);
+                log.debug("`LeaveGroup` request for group id {} failed because the coordinator " +
+                    "is still in the process of loading state. Will retry", groupId.idValue);
                 break;
             case COORDINATOR_NOT_AVAILABLE:
             case NOT_COORDINATOR:
                 // If the coordinator is unavailable or there was a coordinator change, then we unmap
                 // the key so that we retry the `FindCoordinator` request
-                log.debug("`LeaveGroup` request for group id {} returned error {}. " + "Will attempt to find the coordinator again and retry", groupId.idValue, error);
+                log.debug("`LeaveGroup` request for group id {} returned error {}. " +
+                    "Will attempt to find the coordinator again and retry", groupId.idValue, error);
                 groupsToUnmap.add(groupId);
                 break;
 

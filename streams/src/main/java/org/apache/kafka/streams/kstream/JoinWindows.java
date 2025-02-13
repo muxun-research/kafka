@@ -69,13 +69,9 @@ import static org.apache.kafka.streams.internals.ApiUtils.validateMillisecondDur
  */
 public class JoinWindows extends Windows<Window> {
 
-    /**
-     * Maximum time difference for tuples that are before the join tuple.
-     */
+    /** Maximum time difference for tuples that are before the join tuple. */
     public final long beforeMs;
-    /**
-     * Maximum time difference for tuples that are after the join tuple.
-     */
+    /** Maximum time difference for tuples that are after the join tuple. */
     public final long afterMs;
 
     private final long graceMs;
@@ -90,7 +86,10 @@ public class JoinWindows extends Windows<Window> {
         this(joinWindows.beforeMs, joinWindows.afterMs, joinWindows.graceMs, joinWindows.enableSpuriousResultFix);
     }
 
-    private JoinWindows(final long beforeMs, final long afterMs, final long graceMs, final boolean enableSpuriousResultFix) {
+    private JoinWindows(final long beforeMs,
+                        final long afterMs,
+                        final long graceMs,
+                        final boolean enableSpuriousResultFix) {
         if (beforeMs + afterMs < 0) {
             throw new IllegalArgumentException("Window interval (ie, beforeMs+afterMs) must not be negative.");
         }
@@ -114,6 +113,7 @@ public class JoinWindows extends Windows<Window> {
      * means that only out-of-order records arriving more than the grace period after the window end will be dropped.
      * The window close, after which any incoming records are considered late and will be rejected, is defined as
      * {@code windowEnd + afterWindowEnd}
+     *
      * @param timeDifference join window interval
      * @param afterWindowEnd The grace period to admit out-of-order events to a window.
      * @return A new JoinWindows object with the specified window definition and grace period
@@ -137,6 +137,7 @@ public class JoinWindows extends Windows<Window> {
      * <p>
      * CAUTION: Using this method implicitly sets the grace period to zero, which means that any out-of-order
      * records arriving after the window ends are considered late and will be dropped.
+     *
      * @param timeDifference join window interval
      * @return a new JoinWindows object with the window definition and no grace period. Note that this means out-of-order records arriving after the window end will be dropped
      * @throws IllegalArgumentException if {@code timeDifference} is negative or can't be represented as {@code long milliseconds}
@@ -149,10 +150,11 @@ public class JoinWindows extends Windows<Window> {
      * Specifies that records of the same key are joinable if their timestamps are within {@code timeDifference},
      * i.e., the timestamp of a record from the secondary stream is max {@code timeDifference} before or after
      * the timestamp of the record from the primary stream.
+     *
      * @param timeDifference join window interval
      * @return a new JoinWindows object with the window definition with and grace period (default to 24 hours minus {@code timeDifference})
      * @throws IllegalArgumentException if {@code timeDifference} is negative or can't be represented as {@code long milliseconds}
-     * @deprecated since 3.0. Use {@link #ofTimeDifferenceWithNoGrace(Duration)}} instead
+     * @deprecated Since 3.0. Use {@link #ofTimeDifferenceWithNoGrace(Duration)}} instead.
      */
     @Deprecated
     public static JoinWindows of(final Duration timeDifference) throws IllegalArgumentException {
@@ -214,17 +216,19 @@ public class JoinWindows extends Windows<Window> {
      * after the end of its window.
      * <p>
      * Delay is defined as (stream_time - record_timestamp).
+     *
      * @param afterWindowEnd The grace period to admit out-of-order events to a window.
      * @return this updated builder
      * @throws IllegalArgumentException if the {@code afterWindowEnd} is negative or can't be represented as {@code long milliseconds}
-     * @throws IllegalStateException    if {@link #grace(Duration)} is called after {@link #ofTimeDifferenceAndGrace(Duration, Duration)} or {@link #ofTimeDifferenceWithNoGrace(Duration)}
-     * @deprecated since 3.0. Use {@link #ofTimeDifferenceAndGrace(Duration, Duration)} instead
+     * @throws IllegalStateException if {@link #grace(Duration)} is called after {@link #ofTimeDifferenceAndGrace(Duration, Duration)} or {@link #ofTimeDifferenceWithNoGrace(Duration)}
+     * @deprecated Since 3.0. Use {@link #ofTimeDifferenceAndGrace(Duration, Duration)} instead.
      */
     @Deprecated
     public JoinWindows grace(final Duration afterWindowEnd) throws IllegalArgumentException {
         // re-use the enableSpuriousResultFix flag to identify if grace is called after ofTimeDifferenceAndGrace/ofTimeDifferenceWithNoGrace
         if (this.enableSpuriousResultFix) {
-            throw new IllegalStateException("Cannot call grace() after setting grace value via ofTimeDifferenceAndGrace or ofTimeDifferenceWithNoGrace.");
+            throw new IllegalStateException(
+                "Cannot call grace() after setting grace value via ofTimeDifferenceAndGrace or ofTimeDifferenceWithNoGrace.");
         }
 
         final String msgPrefix = prepareMillisCheckFailMsgPrefix(afterWindowEnd, "afterWindowEnd");

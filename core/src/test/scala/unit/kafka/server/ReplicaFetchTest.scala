@@ -17,13 +17,13 @@
 
 package kafka.server
 
+import org.junit.jupiter.api.AfterEach
+import kafka.utils.TestUtils
+import TestUtils._
 import kafka.api.IntegrationTestHarness
-import kafka.utils.TestUtils._
-import kafka.utils.{TestInfoUtils, TestUtils}
 import org.apache.kafka.clients.producer.ProducerRecord
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.serialization.StringSerializer
-import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 
@@ -39,22 +39,22 @@ class ReplicaFetchTest extends IntegrationTestHarness {
 
   override def brokerCount: Int = 2
 
-  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
-  @ValueSource(strings = Array("zk", "kraft"))
+  @ParameterizedTest
+  @ValueSource(strings = Array("kraft"))
   def testReplicaFetcherThread(quorum: String): Unit = {
     val partition = 0
     val testMessageList1 = List("test1", "test2", "test3", "test4")
     val testMessageList2 = List("test5", "test6", "test7", "test8")
 
     // create a topic and partition and await leadership
-    for (topic <- List(topic1, topic2)) {
+    for (topic <- List(topic1,topic2)) {
       createTopic(topic, replicationFactor = 2)
     }
 
     // send test messages to leader
     val producer = TestUtils.createProducer(TestUtils.plaintextBootstrapServers(brokers),
-      keySerializer = new StringSerializer,
-      valueSerializer = new StringSerializer)
+                                               keySerializer = new StringSerializer,
+                                               valueSerializer = new StringSerializer)
     val records = testMessageList1.map(m => new ProducerRecord(topic1, m, m)) ++
       testMessageList2.map(m => new ProducerRecord(topic2, m, m))
     records.map(producer.send).foreach(_.get)

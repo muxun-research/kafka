@@ -18,30 +18,33 @@
 package org.apache.kafka.connect.mirror;
 
 import org.apache.kafka.clients.admin.Admin;
-import org.apache.kafka.clients.consumer.*;
+import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.protocol.types.SchemaException;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
 /**
- * Interprets MM2's internal topics (checkpoints, heartbeats) on a given cluster.
- * <p>
- * Given a top-level "mm2.properties" configuration file, MirrorClients can be constructed
- * for individual clusters as follows:
- * </p>
- * <pre>
- *    MirrorMakerConfig mmConfig = new MirrorMakerConfig(props);
- *    MirrorClientConfig mmClientConfig = mmConfig.clientConfig("some-cluster");
- *    MirrorClient mmClient = new Mirrorclient(mmClientConfig);
- *  </pre>
+ * Client to interact with MirrorMaker internal topics (checkpoints, heartbeats) on a given cluster.
+ * Whenever possible use the methods from {@link RemoteClusterUtils} instead of directly using MirrorClient.
  */
 public class MirrorClient implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(MirrorClient.class);
@@ -61,21 +64,22 @@ public class MirrorClient implements AutoCloseable {
     }
 
     // for testing
-    MirrorClient(Admin adminClient, ReplicationPolicy replicationPolicy, Map<String, Object> consumerConfig) {
+    MirrorClient(Admin adminClient, ReplicationPolicy replicationPolicy,
+            Map<String, Object> consumerConfig) {
         this.adminClient = adminClient;
         this.replicationPolicy = replicationPolicy;
         this.consumerConfig = consumerConfig;
     }
 
     /**
-     * Close internal clients.
+     * Closes internal clients.
      */
     public void close() {
         adminClient.close();
     }
 
     /**
-     * Get the ReplicationPolicy instance used to interpret remote topics. This instance is constructed based on
+     * Gets the {@link ReplicationPolicy} instance used to interpret remote topics. This instance is constructed based on
      * relevant configuration properties, including {@code replication.policy.class}.
      */
     public ReplicationPolicy replicationPolicy() {
@@ -83,65 +87,85 @@ public class MirrorClient implements AutoCloseable {
     }
 
     /**
-     * Compute shortest number of hops from an upstream source cluster.
+     * Computes the shortest number of hops from an upstream source cluster.
      * For example, given replication flow A-&gt;B-&gt;C, there are two hops from A to C.
-     * Returns -1 if upstream cluster is unreachable.
+     * Returns -1 if the upstream cluster is unreachable.
      */
     public int replicationHops(String upstreamClusterAlias) throws InterruptedException {
-        return heartbeatTopics().stream().map(x -> countHopsForTopic(x, upstreamClusterAlias)).filter(x -> x != -1).mapToInt(x -> x).min().orElse(-1);
+        return heartbeatTopics().stream()
+            .map(x -> countHopsForTopic(x, upstreamClusterAlias))
+            .filter(x -> x != -1)
+            .mapToInt(x -> x)
+            .min()
+            .orElse(-1);
     }
 
     /**
-     * Find all heartbeat topics on this cluster. Heartbeat topics are replicated from other clusters.
+     * Finds all heartbeats topics on this cluster. Heartbeats topics are replicated from other clusters.
      */
     public Set<String> heartbeatTopics() throws InterruptedException {
-        return listTopics().stream().filter(this::isHeartbeatTopic).collect(Collectors.toSet());
+        return listTopics().stream()
+            .filter(this::isHeartbeatTopic)
+            .collect(Collectors.toSet());
     }
 
     /**
-     * Find all checkpoint topics on this cluster.
+     * Finds all checkpoints topics on this cluster.
      */
     public Set<String> checkpointTopics() throws InterruptedException {
-        return listTopics().stream().filter(this::isCheckpointTopic).collect(Collectors.toSet());
+        return listTopics().stream()
+            .filter(this::isCheckpointTopic)
+            .collect(Collectors.toSet());
     }
 
     /**
-     * Find upstream clusters, which may be multiple hops away, based on incoming heartbeats.
+     * Finds upstream clusters, which may be multiple hops away, based on incoming heartbeats.
      */
     public Set<String> upstreamClusters() throws InterruptedException {
-        return listTopics().stream().filter(this::isHeartbeatTopic).flatMap(x -> allSources(x).stream()).collect(Collectors.toSet());
+        return listTopics().stream()
+            .filter(this::isHeartbeatTopic)
+            .flatMap(x -> allSources(x).stream())
+            .collect(Collectors.toSet());
     }
 
     /**
-     * Find all remote topics on this cluster. This does not include internal topics (heartbeats, checkpoints).
+     * Finds all remote topics on this cluster. This does not include internal topics (heartbeats, checkpoints).
      */
     public Set<String> remoteTopics() throws InterruptedException {
-        return listTopics().stream().filter(this::isRemoteTopic).collect(Collectors.toSet());
+        return listTopics().stream()
+            .filter(this::isRemoteTopic)
+            .collect(Collectors.toSet());
     }
 
     /**
-     * Find all remote topics that have been replicated directly from the given source cluster.
+     * Finds all remote topics that have been replicated directly from the given source cluster.
      */
     public Set<String> remoteTopics(String source) throws InterruptedException {
-        return listTopics().stream().filter(this::isRemoteTopic).filter(x -> source.equals(replicationPolicy.topicSource(x))).collect(Collectors.toSet());
+        return listTopics().stream()
+            .filter(this::isRemoteTopic)
+            .filter(x -> source.equals(replicationPolicy.topicSource(x)))
+            .collect(Collectors.toSet());
     }
 
     /**
-     * Translate a remote consumer group's offsets into corresponding local offsets. Topics are automatically
+     * Translates a remote consumer group's offsets into corresponding local offsets. Topics are automatically
      * renamed according to the ReplicationPolicy.
-     * @param consumerGroupId    group ID of remote consumer group
-     * @param remoteClusterAlias alias of remote cluster
-     * @param timeout            timeout
+     * @param consumerGroupId The group ID of remote consumer group
+     * @param remoteClusterAlias The alias of remote cluster
+     * @param timeout The maximum time to block when consuming from the checkpoints topic
      */
-    public Map<TopicPartition, OffsetAndMetadata> remoteConsumerOffsets(String consumerGroupId, String remoteClusterAlias, Duration timeout) {
+    public Map<TopicPartition, OffsetAndMetadata> remoteConsumerOffsets(String consumerGroupId,
+            String remoteClusterAlias, Duration timeout) {
         long deadline = System.currentTimeMillis() + timeout.toMillis();
         Map<TopicPartition, OffsetAndMetadata> offsets = new HashMap<>();
 
-        try (KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(consumerConfig, new ByteArrayDeserializer(), new ByteArrayDeserializer())) {
+        try (KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(consumerConfig,
+                new ByteArrayDeserializer(), new ByteArrayDeserializer())) {
             // checkpoint topics are not "remote topics", as they are not replicated. So we don't need
             // to use ReplicationPolicy to create the checkpoint topic here.
             String checkpointTopic = replicationPolicy.checkpointsTopic(remoteClusterAlias);
-            List<TopicPartition> checkpointAssignment = Collections.singletonList(new TopicPartition(checkpointTopic, 0));
+            List<TopicPartition> checkpointAssignment =
+                Collections.singletonList(new TopicPartition(checkpointTopic, 0));
             consumer.assign(checkpointAssignment);
             consumer.seekToBeginning(checkpointAssignment);
             while (System.currentTimeMillis() < deadline && !endOfStream(consumer, checkpointAssignment)) {
@@ -157,7 +181,8 @@ public class MirrorClient implements AutoCloseable {
                     }
                 }
             }
-            log.info("Consumed {} checkpoint records for {} from {}.", offsets.size(), consumerGroupId, checkpointTopic);
+            log.info("Consumed {} checkpoint records for {} from {}.", offsets.size(),
+                consumerGroupId, checkpointTopic);
         }
         return offsets;
     }
@@ -201,7 +226,8 @@ public class MirrorClient implements AutoCloseable {
     }
 
     boolean isRemoteTopic(String topic) {
-        return !replicationPolicy.isInternalTopic(topic) && replicationPolicy.topicSource(topic) != null;
+        return !replicationPolicy.isInternalTopic(topic)
+            && replicationPolicy.topicSource(topic) != null;
     }
 
     Set<String> allSources(String topic) {
@@ -216,7 +242,7 @@ public class MirrorClient implements AutoCloseable {
         return sources;
     }
 
-    static private boolean endOfStream(Consumer<?, ?> consumer, Collection<TopicPartition> assignments) {
+    private static boolean endOfStream(Consumer<?, ?> consumer, Collection<TopicPartition> assignments) {
         Map<TopicPartition, Long> endOffsets = consumer.endOffsets(assignments);
         for (TopicPartition topicPartition : assignments) {
             if (consumer.position(topicPartition) < endOffsets.get(topicPartition)) {

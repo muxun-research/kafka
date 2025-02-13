@@ -20,17 +20,46 @@ package org.apache.kafka.connect.runtime.distributed;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.security.auth.SecurityProtocol;
-import org.junit.Test;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
+
+import java.security.InvalidParameterException;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 import javax.crypto.KeyGenerator;
 import javax.crypto.Mac;
-import java.security.NoSuchAlgorithmException;
-import java.util.*;
 
-import static org.apache.kafka.connect.runtime.distributed.DistributedConfig.*;
-import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
+import static org.apache.kafka.connect.runtime.distributed.DistributedConfig.EXACTLY_ONCE_SOURCE_SUPPORT_CONFIG;
+import static org.apache.kafka.connect.runtime.distributed.DistributedConfig.GROUP_ID_CONFIG;
+import static org.apache.kafka.connect.runtime.distributed.DistributedConfig.INTER_WORKER_KEY_GENERATION_ALGORITHM_CONFIG;
+import static org.apache.kafka.connect.runtime.distributed.DistributedConfig.INTER_WORKER_SIGNATURE_ALGORITHM_CONFIG;
+import static org.apache.kafka.connect.runtime.distributed.DistributedConfig.INTER_WORKER_VERIFICATION_ALGORITHMS_CONFIG;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)
 public class DistributedConfigTest {
 
     public Map<String, String> configs() {
@@ -66,15 +95,16 @@ public class DistributedConfigTest {
         configs.put(DistributedConfig.INTER_WORKER_VERIFICATION_ALGORITHMS_CONFIG, fakeMacAlgorithm);
 
         // Make it seem like the default key generation algorithm isn't available on this worker
-        doThrow(new NoSuchAlgorithmException()).when(crypto).keyGenerator(DistributedConfig.INTER_WORKER_KEY_GENERATION_ALGORITHM_DEFAULT);
+        doThrow(new NoSuchAlgorithmException())
+                .when(crypto).keyGenerator(DistributedConfig.INTER_WORKER_KEY_GENERATION_ALGORITHM_DEFAULT);
         // But the one specified in the worker config file is
-        doReturn(fakeKeyGenerator).when(crypto).keyGenerator(fakeKeyGenerationAlgorithm);
+        doReturn(fakeKeyGenerator)
+                .when(crypto).keyGenerator(fakeKeyGenerationAlgorithm);
 
-        // And for the signature algorithm
-        doThrow(new NoSuchAlgorithmException()).when(crypto).mac(DistributedConfig.INTER_WORKER_SIGNATURE_ALGORITHM_DEFAULT);
-        // Likewise for key verification algorithms
+        // And for the key verification algorithms
         for (String verificationAlgorithm : DistributedConfig.INTER_WORKER_VERIFICATION_ALGORITHMS_DEFAULT) {
-            doThrow(new NoSuchAlgorithmException()).when(crypto).mac(verificationAlgorithm);
+            doThrow(new NoSuchAlgorithmException())
+                    .when(crypto).mac(verificationAlgorithm);
         }
         doReturn(fakeMac).when(crypto).mac(fakeMacAlgorithm);
 
@@ -102,7 +132,10 @@ public class DistributedConfigTest {
         // These algorithms are required to be supported on JVMs ranging from at least Java 8 through Java 17; see
         // https://docs.oracle.com/javase/8/docs/api/javax/crypto/Mac.html
         // and https://docs.oracle.com/en/java/javase/17/docs/api/java.base/javax/crypto/Mac.html
-        testSupportedAlgorithms("Mac", "HmacSHA1", "HmacSHA256");
+        testSupportedAlgorithms(
+                "Mac",
+                "HmacSHA1", "HmacSHA256"
+        );
     }
 
     @Test
@@ -110,14 +143,17 @@ public class DistributedConfigTest {
         // These algorithms are required to be supported on JVMs ranging from at least Java 8 through Java 17; see
         // https://docs.oracle.com/javase/8/docs/api/javax/crypto/KeyGenerator.html
         // and https://docs.oracle.com/en/java/javase/17/docs/api/java.base/javax/crypto/KeyGenerator.html
-        testSupportedAlgorithms("KeyGenerator", "AES", "DESede", "HmacSHA1", "HmacSHA256");
+        testSupportedAlgorithms(
+                "KeyGenerator",
+                "AES", "DESede", "HmacSHA1", "HmacSHA256"
+        );
     }
 
     private void testSupportedAlgorithms(String type, String... expectedAlgorithms) {
         Set<String> supportedAlgorithms = DistributedConfig.supportedAlgorithms(type);
-        Set<String> unuspportedAlgorithms = new HashSet<>(Arrays.asList(expectedAlgorithms));
-        unuspportedAlgorithms.removeAll(supportedAlgorithms);
-        assertEquals(type + " algorithms were found that should be supported by this JVM but are not", Collections.emptySet(), unuspportedAlgorithms);
+        Set<String> unsupportedAlgorithms = new HashSet<>(Arrays.asList(expectedAlgorithms));
+        unsupportedAlgorithms.removeAll(supportedAlgorithms);
+        assertEquals(Collections.emptySet(), unsupportedAlgorithms, type + " algorithms were found that should be supported by this JVM but are not");
     }
 
     @Test
@@ -165,15 +201,21 @@ public class DistributedConfigTest {
     }
 
     @Test
-    public void shouldFailWithInvalidKeySize() {
+    public void shouldFailWithInvalidKeySize() throws NoSuchAlgorithmException {
         Map<String, String> configs = configs();
+        Crypto crypto = mock(Crypto.class);
+        KeyGenerator keygen = mock(KeyGenerator.class);
+        when(crypto.keyGenerator(DistributedConfig.INTER_WORKER_KEY_GENERATION_ALGORITHM_DEFAULT)).thenReturn(keygen);
+        // Some implementations of KeyGenerator don't fail with 0 keysize, so mock the error
+        doThrow(InvalidParameterException.class).when(keygen).init(0);
         configs.put(DistributedConfig.INTER_WORKER_KEY_SIZE_CONFIG, "0");
-        assertThrows(ConfigException.class, () -> new DistributedConfig(configs));
+        assertThrows(ConfigException.class, () -> new DistributedConfig(crypto, configs));
     }
 
     @Test
     public void shouldValidateAllVerificationAlgorithms() {
-        List<String> algorithms = new ArrayList<>(Arrays.asList("HmacSHA1", "HmacSHA256", "HmacMD5", "bad-algorithm"));
+        List<String> algorithms =
+            new ArrayList<>(Arrays.asList("HmacSHA1", "HmacSHA256", "HmacMD5", "bad-algorithm"));
         Map<String, String> configs = configs();
         for (int i = 0; i < algorithms.size(); i++) {
             configs.put(DistributedConfig.INTER_WORKER_VERIFICATION_ALGORITHMS_CONFIG, String.join(",", algorithms));
@@ -375,7 +417,8 @@ public class DistributedConfigTest {
         Map<String, String> configs = configs();
 
         configs.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "abc");
-        ConfigException ce = assertThrows(ConfigException.class, () -> new DistributedConfig(configs));
+        ConfigException ce = assertThrows(ConfigException.class,
+                () -> new DistributedConfig(configs));
         assertTrue(ce.getMessage().contains(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
     }
 
@@ -385,7 +428,8 @@ public class DistributedConfigTest {
         final Map<String, String> configs = configs();
         configs.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, saslSslLowerCase);
         final DistributedConfig distributedConfig = new DistributedConfig(configs);
-        assertEquals(saslSslLowerCase, distributedConfig.originalsStrings().get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
+        assertEquals(saslSslLowerCase, distributedConfig.originalsStrings()
+                .get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
     }
 
     @Test
@@ -407,20 +451,31 @@ public class DistributedConfigTest {
         Map<String, String> workerProps = configs();
 
         workerProps.put(GROUP_ID_CONFIG, "why did i stay up all night writing unit tests");
-        assertEquals("connect-cluster-why did i stay up all night writing unit tests", new DistributedConfig(workerProps).transactionalProducerId());
+        assertEquals(
+                "connect-cluster-why did i stay up all night writing unit tests",
+                new DistributedConfig(workerProps).transactionalProducerId()
+        );
 
         workerProps.put(GROUP_ID_CONFIG, "connect-cluster");
-        assertEquals("connect-cluster-connect-cluster", new DistributedConfig(workerProps).transactionalProducerId());
+        assertEquals(
+                "connect-cluster-connect-cluster",
+                new DistributedConfig(workerProps).transactionalProducerId()
+        );
 
         workerProps.put(GROUP_ID_CONFIG, "\u2603");
-        assertEquals("connect-cluster-\u2603", new DistributedConfig(workerProps).transactionalProducerId());
+        assertEquals(
+                "connect-cluster-\u2603",
+                new DistributedConfig(workerProps).transactionalProducerId()
+        );
     }
 
     @Test
     public void testOsDefaultSocketBufferSizes() {
         Map<String, String> configs = configs();
-        configs.put(CommonClientConfigs.SEND_BUFFER_CONFIG, Integer.toString(CommonClientConfigs.SEND_BUFFER_LOWER_BOUND));
-        configs.put(CommonClientConfigs.RECEIVE_BUFFER_CONFIG, Integer.toString(CommonClientConfigs.RECEIVE_BUFFER_LOWER_BOUND));
+        configs.put(CommonClientConfigs.SEND_BUFFER_CONFIG,
+            Integer.toString(CommonClientConfigs.SEND_BUFFER_LOWER_BOUND));
+        configs.put(CommonClientConfigs.RECEIVE_BUFFER_CONFIG,
+            Integer.toString(CommonClientConfigs.RECEIVE_BUFFER_LOWER_BOUND));
         new DistributedConfig(configs);
     }
 

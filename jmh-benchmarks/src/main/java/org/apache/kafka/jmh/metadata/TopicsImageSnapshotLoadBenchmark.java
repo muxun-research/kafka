@@ -22,7 +22,19 @@ import org.apache.kafka.common.metadata.PartitionRecord;
 import org.apache.kafka.common.metadata.TopicRecord;
 import org.apache.kafka.image.TopicsDelta;
 import org.apache.kafka.image.TopicsImage;
-import org.openjdk.jmh.annotations.*;
+
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Warmup;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -67,7 +79,14 @@ public class TopicsImageSnapshotLoadBenchmark {
             IntStream.range(0, partitionsPerTopic).forEach(partitionNumber -> {
                 ArrayList<Integer> replicas = getReplicas(totalTopicCount, partitionsPerTopic, replicationFactor, numReplicasPerBroker, currentLeader.get());
                 ArrayList<Integer> isr = new ArrayList<>(replicas);
-                buildupTopicsDelta.replay(new PartitionRecord().setPartitionId(partitionNumber).setTopicId(topicId).setReplicas(replicas).setIsr(isr).setRemovingReplicas(Collections.emptyList()).setAddingReplicas(Collections.emptyList()).setLeader(currentLeader.get()));
+                buildupTopicsDelta.replay(new PartitionRecord().
+                    setPartitionId(partitionNumber).
+                    setTopicId(topicId).
+                    setReplicas(replicas).
+                    setIsr(isr).
+                    setRemovingReplicas(Collections.emptyList()).
+                    setAddingReplicas(Collections.emptyList()).
+                    setLeader(currentLeader.get()));
                 currentLeader.set((1 + currentLeader.get()) % numBrokers);
             });
         });
@@ -77,7 +96,8 @@ public class TopicsImageSnapshotLoadBenchmark {
     static ArrayList<Integer> getReplicas(int totalTopicCount, int partitionsPerTopic, int replicationFactor, int numReplicasPerBroker, int currentLeader) {
         ArrayList<Integer> replicas = new ArrayList<>();
         int numBrokers = getNumBrokers(totalTopicCount, partitionsPerTopic, replicationFactor, numReplicasPerBroker);
-        IntStream.range(0, replicationFactor).forEach(replicaNumber -> replicas.add((replicaNumber + currentLeader) % numBrokers));
+        IntStream.range(0, replicationFactor).forEach(replicaNumber ->
+            replicas.add((replicaNumber + currentLeader) % numBrokers));
         return replicas;
     }
 

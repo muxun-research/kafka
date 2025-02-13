@@ -19,19 +19,26 @@ package org.apache.kafka.connect.runtime;
 import org.apache.kafka.connect.runtime.rest.entities.ConnectorStateInfo;
 import org.apache.kafka.connect.runtime.rest.entities.ConnectorStateInfo.TaskState;
 import org.apache.kafka.connect.runtime.rest.entities.ConnectorType;
-import org.junit.Test;
+
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class RestartPlanTest {
     private static final String CONNECTOR_NAME = "foo";
 
     @Test
     public void testRestartPlan() {
-        ConnectorStateInfo.ConnectorState state = new ConnectorStateInfo.ConnectorState(AbstractStatus.State.RESTARTING.name(), "foo", null);
+        ConnectorStateInfo.ConnectorState state = new ConnectorStateInfo.ConnectorState(
+                AbstractStatus.State.RESTARTING.name(),
+                "foo",
+                null
+        );
         List<TaskState> tasks = new ArrayList<>();
         tasks.add(new TaskState(1, AbstractStatus.State.RUNNING.name(), "worker1", null));
         tasks.add(new TaskState(2, AbstractStatus.State.PAUSED.name(), "worker1", null));
@@ -53,7 +60,11 @@ public class RestartPlanTest {
 
     @Test
     public void testNoRestartsPlan() {
-        ConnectorStateInfo.ConnectorState state = new ConnectorStateInfo.ConnectorState(AbstractStatus.State.RUNNING.name(), "foo", null);
+        ConnectorStateInfo.ConnectorState state = new ConnectorStateInfo.ConnectorState(
+                AbstractStatus.State.RUNNING.name(),
+                "foo",
+                null
+        );
         List<TaskState> tasks = new ArrayList<>();
         tasks.add(new TaskState(1, AbstractStatus.State.RUNNING.name(), "worker1", null));
         tasks.add(new TaskState(2, AbstractStatus.State.PAUSED.name(), "worker1", null));
@@ -69,7 +80,11 @@ public class RestartPlanTest {
 
     @Test
     public void testRestartsOnlyConnector() {
-        ConnectorStateInfo.ConnectorState state = new ConnectorStateInfo.ConnectorState(AbstractStatus.State.RESTARTING.name(), "foo", null);
+        ConnectorStateInfo.ConnectorState state = new ConnectorStateInfo.ConnectorState(
+                AbstractStatus.State.RESTARTING.name(),
+                "foo",
+                null
+        );
         List<TaskState> tasks = new ArrayList<>();
         tasks.add(new TaskState(1, AbstractStatus.State.RUNNING.name(), "worker1", null));
         tasks.add(new TaskState(2, AbstractStatus.State.PAUSED.name(), "worker1", null));

@@ -19,7 +19,7 @@ package org.apache.kafka.streams.state.internals;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.serialization.Deserializer;
-import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.common.serialization.IntegerSerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.common.utils.LogCaptureAppender;
@@ -31,8 +31,6 @@ import org.apache.kafka.streams.kstream.SessionWindowedDeserializer;
 import org.apache.kafka.streams.kstream.Windowed;
 import org.apache.kafka.streams.kstream.internals.Change;
 import org.apache.kafka.streams.kstream.internals.SessionWindow;
-import org.apache.kafka.streams.processor.ProcessorContext;
-import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.processor.api.Record;
 import org.apache.kafka.streams.processor.internals.MockStreamsMetrics;
 import org.apache.kafka.streams.processor.internals.ProcessorRecordContext;
@@ -41,28 +39,46 @@ import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.SessionStore;
 import org.apache.kafka.test.InternalMockProcessorContext;
 import org.apache.kafka.test.TestUtils;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
-import org.mockito.junit.MockitoJUnitRunner;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Random;
 
 import static java.util.Arrays.asList;
 import static org.apache.kafka.common.utils.Utils.mkEntry;
 import static org.apache.kafka.common.utils.Utils.mkMap;
-import static org.apache.kafka.test.StreamsTestUtils.*;
+import static org.apache.kafka.test.StreamsTestUtils.toListAndCloseIterator;
+import static org.apache.kafka.test.StreamsTestUtils.verifyKeyValueList;
+import static org.apache.kafka.test.StreamsTestUtils.verifyWindowedKeyValue;
 import static org.hamcrest.CoreMatchers.hasItem;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
-import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
-@SuppressWarnings("PointlessArithmeticExpression")
-@RunWith(MockitoJUnitRunner.StrictStubs.class)
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.STRICT_STUBS)
 public class CachingInMemorySessionStoreTest {
 
     private static final int MAX_CACHE_SIZE_BYTES = 600;
@@ -76,33 +92,23 @@ public class CachingInMemorySessionStoreTest {
     private final Bytes keyB = Bytes.wrap("b".getBytes());
 
     private SessionStore<Bytes, byte[]> underlyingStore;
-    private InternalMockProcessorContext context;
+    private InternalMockProcessorContext<?, ?> context;
     private CachingSessionStore cachingStore;
     private ThreadCache cache;
 
-    @Before
+    @BeforeEach
     public void before() {
         underlyingStore = new InMemorySessionStore("store-name", Long.MAX_VALUE, "metric-scope");
         cachingStore = new CachingSessionStore(underlyingStore, SEGMENT_INTERVAL);
         cache = new ThreadCache(new LogContext("testCache "), MAX_CACHE_SIZE_BYTES, new MockStreamsMetrics(new Metrics()));
         context = new InternalMockProcessorContext<>(TestUtils.tempDirectory(), null, null, null, cache);
         context.setRecordContext(new ProcessorRecordContext(DEFAULT_TIMESTAMP, 0, 0, TOPIC, new RecordHeaders()));
-        cachingStore.init((StateStoreContext) context, cachingStore);
+        cachingStore.init(context, cachingStore);
     }
 
-    @After
+    @AfterEach
     public void after() {
         cachingStore.close();
-    }
-
-    @SuppressWarnings("deprecation")
-    @Test
-    public void shouldDelegateDeprecatedInit() {
-        final SessionStore<Bytes, byte[]> inner = mock(InMemorySessionStore.class);
-        final CachingSessionStore outer = new CachingSessionStore(inner, SEGMENT_INTERVAL);
-        when(inner.name()).thenReturn("store");
-        outer.init((ProcessorContext) context, outer);
-        verify(inner).init((ProcessorContext) context, outer);
     }
 
     @Test
@@ -110,8 +116,8 @@ public class CachingInMemorySessionStoreTest {
         final SessionStore<Bytes, byte[]> inner = mock(InMemorySessionStore.class);
         final CachingSessionStore outer = new CachingSessionStore(inner, SEGMENT_INTERVAL);
         when(inner.name()).thenReturn("store");
-        outer.init((StateStoreContext) context, outer);
-        verify(inner).init((StateStoreContext) context, outer);
+        outer.init(context, outer);
+        verify(inner).init(context, outer);
     }
 
     @Test
@@ -122,7 +128,8 @@ public class CachingInMemorySessionStoreTest {
 
         assertEquals(3, cache.size());
 
-        try (final KeyValueIterator<Windowed<Bytes>, byte[]> a = cachingStore.findSessions(keyA, 0, 0); final KeyValueIterator<Windowed<Bytes>, byte[]> b = cachingStore.findSessions(keyB, 0, 0)) {
+        try (final KeyValueIterator<Windowed<Bytes>, byte[]> a = cachingStore.findSessions(keyA, 0, 0);
+             final KeyValueIterator<Windowed<Bytes>, byte[]> b = cachingStore.findSessions(keyB, 0, 0)) {
 
             verifyWindowedKeyValue(a.next(), new Windowed<>(keyA, new SessionWindow(0, 0)), "1");
             verifyWindowedKeyValue(b.next(), new Windowed<>(keyB, new SessionWindow(0, 0)), "1");
@@ -133,8 +140,7 @@ public class CachingInMemorySessionStoreTest {
 
     @Test
     public void shouldMatchPositionAfterPutWithFlushListener() {
-        cachingStore.setFlushListener(record -> {
-        }, false);
+        cachingStore.setFlushListener(record -> { }, false);
         shouldMatchPositionAfterPut();
     }
 
@@ -151,7 +157,9 @@ public class CachingInMemorySessionStoreTest {
         cachingStore.put(new Windowed<>(keyA, new SessionWindow(0, 0)), "1".getBytes());
 
         // Position should correspond to the last record's context, not the current context.
-        context.setRecordContext(new ProcessorRecordContext(0, 3, 0, "", new RecordHeaders()));
+        context.setRecordContext(
+            new ProcessorRecordContext(0, 3, 0, "", new RecordHeaders())
+        );
 
         // the caching session store doesn't maintain a separate
         // position because it never serves queries from the cache
@@ -160,8 +168,14 @@ public class CachingInMemorySessionStoreTest {
 
         cachingStore.flush();
 
-        assertEquals(Position.fromMap(mkMap(mkEntry("", mkMap(mkEntry(0, 2L))))), cachingStore.getPosition());
-        assertEquals(Position.fromMap(mkMap(mkEntry("", mkMap(mkEntry(0, 2L))))), underlyingStore.getPosition());
+        assertEquals(
+            Position.fromMap(mkMap(mkEntry("", mkMap(mkEntry(0, 2L))))),
+            cachingStore.getPosition()
+        );
+        assertEquals(
+            Position.fromMap(mkMap(mkEntry("", mkMap(mkEntry(0, 2L))))),
+            underlyingStore.getPosition()
+        );
     }
 
     @Test
@@ -283,9 +297,9 @@ public class CachingInMemorySessionStoreTest {
         when(underlyingStore.name()).thenReturn("store-name");
         cachingStore = new CachingSessionStore(underlyingStore, SEGMENT_INTERVAL);
         cache = mock(ThreadCache.class);
-        final InternalMockProcessorContext context = new InternalMockProcessorContext<>(TestUtils.tempDirectory(), null, null, null, cache);
+        final InternalMockProcessorContext<?, ?> context = new InternalMockProcessorContext<>(TestUtils.tempDirectory(), null, null, null, cache);
         context.setRecordContext(new ProcessorRecordContext(10, 0, 0, TOPIC, new RecordHeaders()));
-        cachingStore.init((StateStoreContext) context, cachingStore);
+        cachingStore.init(context, cachingStore);
     }
 
     @Test
@@ -296,28 +310,32 @@ public class CachingInMemorySessionStoreTest {
 
         assertEquals(3, cache.size());
 
-        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some = cachingStore.findSessions(keyAA, keyB, 0, 0)) {
+        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some =
+                 cachingStore.findSessions(keyAA, keyB, 0, 0)) {
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyAA, new SessionWindow(0, 0)), "1");
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyB, new SessionWindow(0, 0)), "1");
             assertFalse(some.hasNext());
         }
 
         // infinite keyFrom case
-        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some = cachingStore.findSessions(null, keyAA, 0, 0)) {
+        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some =
+                 cachingStore.findSessions(null, keyAA, 0, 0)) {
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyA, new SessionWindow(0, 0)), "1");
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyAA, new SessionWindow(0, 0)), "1");
             assertFalse(some.hasNext());
         }
 
         // infinite keyTo case
-        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some = cachingStore.findSessions(keyAA, keyB, 0, 0)) {
+        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some =
+                 cachingStore.findSessions(keyAA, keyB, 0, 0)) {
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyAA, new SessionWindow(0, 0)), "1");
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyB, new SessionWindow(0, 0)), "1");
             assertFalse(some.hasNext());
         }
 
         // infinite keyFrom and keyTo case
-        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some = cachingStore.findSessions(null, null, 0, 0)) {
+        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some =
+                 cachingStore.findSessions(null, null, 0, 0)) {
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyA, new SessionWindow(0, 0)), "1");
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyAA, new SessionWindow(0, 0)), "1");
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyB, new SessionWindow(0, 0)), "1");
@@ -333,28 +351,32 @@ public class CachingInMemorySessionStoreTest {
 
         assertEquals(3, cache.size());
 
-        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some = cachingStore.backwardFindSessions(keyAA, keyB, 0, 0)) {
+        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some =
+                 cachingStore.backwardFindSessions(keyAA, keyB, 0, 0)) {
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyB, new SessionWindow(0, 0)), "1");
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyAA, new SessionWindow(0, 0)), "1");
             assertFalse(some.hasNext());
         }
 
         // infinite keyFrom case
-        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some = cachingStore.backwardFindSessions(null, keyAA, 0, 0)) {
+        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some =
+                 cachingStore.backwardFindSessions(null, keyAA, 0, 0)) {
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyAA, new SessionWindow(0, 0)), "1");
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyA, new SessionWindow(0, 0)), "1");
             assertFalse(some.hasNext());
         }
 
         // infinite keyTo case
-        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some = cachingStore.backwardFindSessions(keyAA, keyB, 0, 0)) {
+        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some =
+                 cachingStore.backwardFindSessions(keyAA, keyB, 0, 0)) {
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyB, new SessionWindow(0, 0)), "1");
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyAA, new SessionWindow(0, 0)), "1");
             assertFalse(some.hasNext());
         }
 
         // infinite keyFrom and keyTo case
-        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some = cachingStore.backwardFindSessions(null, null, 0, 0)) {
+        try (final KeyValueIterator<Windowed<Bytes>, byte[]> some =
+                 cachingStore.backwardFindSessions(null, null, 0, 0)) {
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyB, new SessionWindow(0, 0)), "1");
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyAA, new SessionWindow(0, 0)), "1");
             verifyWindowedKeyValue(some.next(), new Windowed<>(keyA, new SessionWindow(0, 0)), "1");
@@ -364,7 +386,12 @@ public class CachingInMemorySessionStoreTest {
 
     @Test
     public void shouldFetchAllSessionsWithSameRecordKey() {
-        final List<KeyValue<Windowed<Bytes>, byte[]>> expected = asList(KeyValue.pair(new Windowed<>(keyA, new SessionWindow(0, 0)), "1".getBytes()), KeyValue.pair(new Windowed<>(keyA, new SessionWindow(10, 10)), "2".getBytes()), KeyValue.pair(new Windowed<>(keyA, new SessionWindow(100, 100)), "3".getBytes()), KeyValue.pair(new Windowed<>(keyA, new SessionWindow(1000, 1000)), "4".getBytes()));
+        final List<KeyValue<Windowed<Bytes>, byte[]>> expected = asList(
+            KeyValue.pair(new Windowed<>(keyA, new SessionWindow(0, 0)), "1".getBytes()),
+            KeyValue.pair(new Windowed<>(keyA, new SessionWindow(10, 10)), "2".getBytes()),
+            KeyValue.pair(new Windowed<>(keyA, new SessionWindow(100, 100)), "3".getBytes()),
+            KeyValue.pair(new Windowed<>(keyA, new SessionWindow(1000, 1000)), "4".getBytes())
+        );
         for (final KeyValue<Windowed<Bytes>, byte[]> kv : expected) {
             cachingStore.put(kv.key, kv.value);
         }
@@ -372,13 +399,18 @@ public class CachingInMemorySessionStoreTest {
         // add one that shouldn't appear in the results
         cachingStore.put(new Windowed<>(keyAA, new SessionWindow(0, 0)), "5".getBytes());
 
-        final List<KeyValue<Windowed<Bytes>, byte[]>> results = toList(cachingStore.fetch(keyA));
+        final List<KeyValue<Windowed<Bytes>, byte[]>> results = toListAndCloseIterator(cachingStore.fetch(keyA));
         verifyKeyValueList(expected, results);
     }
 
     @Test
     public void shouldBackwardFetchAllSessionsWithSameRecordKey() {
-        final List<KeyValue<Windowed<Bytes>, byte[]>> expected = asList(KeyValue.pair(new Windowed<>(keyA, new SessionWindow(0, 0)), "1".getBytes()), KeyValue.pair(new Windowed<>(keyA, new SessionWindow(10, 10)), "2".getBytes()), KeyValue.pair(new Windowed<>(keyA, new SessionWindow(100, 100)), "3".getBytes()), KeyValue.pair(new Windowed<>(keyA, new SessionWindow(1000, 1000)), "4".getBytes()));
+        final List<KeyValue<Windowed<Bytes>, byte[]>> expected = asList(
+            KeyValue.pair(new Windowed<>(keyA, new SessionWindow(0, 0)), "1".getBytes()),
+            KeyValue.pair(new Windowed<>(keyA, new SessionWindow(10, 10)), "2".getBytes()),
+            KeyValue.pair(new Windowed<>(keyA, new SessionWindow(100, 100)), "3".getBytes()),
+            KeyValue.pair(new Windowed<>(keyA, new SessionWindow(1000, 1000)), "4".getBytes())
+        );
         for (final KeyValue<Windowed<Bytes>, byte[]> kv : expected) {
             cachingStore.put(kv.key, kv.value);
         }
@@ -386,7 +418,7 @@ public class CachingInMemorySessionStoreTest {
         // add one that shouldn't appear in the results
         cachingStore.put(new Windowed<>(keyAA, new SessionWindow(0, 0)), "5".getBytes());
 
-        final List<KeyValue<Windowed<Bytes>, byte[]>> results = toList(cachingStore.backwardFetch(keyA));
+        final List<KeyValue<Windowed<Bytes>, byte[]>> results = toListAndCloseIterator(cachingStore.backwardFetch(keyA));
         Collections.reverse(results);
         verifyKeyValueList(expected, results);
     }
@@ -405,7 +437,10 @@ public class CachingInMemorySessionStoreTest {
     @Test
     public void shouldQueryItemsInCacheAndStore() {
         final List<KeyValue<Windowed<Bytes>, byte[]>> added = addSessionsUntilOverflow("a");
-        final List<KeyValue<Windowed<Bytes>, byte[]>> actual = toList(cachingStore.findSessions(Bytes.wrap("a".getBytes(StandardCharsets.UTF_8)), 0, added.size() * 10L));
+        final List<KeyValue<Windowed<Bytes>, byte[]>> actual = toListAndCloseIterator(cachingStore.findSessions(
+                Bytes.wrap("a".getBytes(StandardCharsets.UTF_8)),
+                0,
+                added.size() * 10L));
         verifyKeyValueList(added, actual);
     }
 
@@ -417,7 +452,8 @@ public class CachingInMemorySessionStoreTest {
         cachingStore.put(b, "2".getBytes());
         cachingStore.remove(a);
 
-        try (final KeyValueIterator<Windowed<Bytes>, byte[]> rangeIter = cachingStore.findSessions(keyA, 0, 0)) {
+        try (final KeyValueIterator<Windowed<Bytes>, byte[]> rangeIter =
+                 cachingStore.findSessions(keyA, 0, 0)) {
             assertFalse(rangeIter.hasNext());
 
             assertNull(cachingStore.fetchSession(keyA, 0, 0));
@@ -427,8 +463,8 @@ public class CachingInMemorySessionStoreTest {
 
     @Test
     public void shouldFetchCorrectlyAcrossSegments() {
-        final Windowed<Bytes> a1 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 0, SEGMENT_INTERVAL * 0));
-        final Windowed<Bytes> a2 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 1, SEGMENT_INTERVAL * 1));
+        final Windowed<Bytes> a1 = new Windowed<>(keyA, new SessionWindow(0, 0));
+        final Windowed<Bytes> a2 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL, SEGMENT_INTERVAL));
         final Windowed<Bytes> a3 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 2, SEGMENT_INTERVAL * 2));
         final Windowed<Bytes> a4 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 3, SEGMENT_INTERVAL * 3));
         final Windowed<Bytes> a5 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 4, SEGMENT_INTERVAL * 4));
@@ -440,7 +476,8 @@ public class CachingInMemorySessionStoreTest {
         cachingStore.put(a4, "4".getBytes());
         cachingStore.put(a5, "5".getBytes());
         cachingStore.put(a6, "6".getBytes());
-        try (final KeyValueIterator<Windowed<Bytes>, byte[]> results = cachingStore.findSessions(keyA, 0, SEGMENT_INTERVAL * 5)) {
+        try (final KeyValueIterator<Windowed<Bytes>, byte[]> results =
+                 cachingStore.findSessions(keyA, 0, SEGMENT_INTERVAL * 5)) {
             assertEquals(a1, results.next().key);
             assertEquals(a2, results.next().key);
             assertEquals(a3, results.next().key);
@@ -453,8 +490,8 @@ public class CachingInMemorySessionStoreTest {
 
     @Test
     public void shouldBackwardFetchCorrectlyAcrossSegments() {
-        final Windowed<Bytes> a1 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 0, SEGMENT_INTERVAL * 0));
-        final Windowed<Bytes> a2 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 1, SEGMENT_INTERVAL * 1));
+        final Windowed<Bytes> a1 = new Windowed<>(keyA, new SessionWindow(0,  0));
+        final Windowed<Bytes> a2 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL, SEGMENT_INTERVAL));
         final Windowed<Bytes> a3 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 2, SEGMENT_INTERVAL * 2));
         final Windowed<Bytes> a4 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 3, SEGMENT_INTERVAL * 3));
         final Windowed<Bytes> a5 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 4, SEGMENT_INTERVAL * 4));
@@ -466,7 +503,8 @@ public class CachingInMemorySessionStoreTest {
         cachingStore.put(a4, "4".getBytes());
         cachingStore.put(a5, "5".getBytes());
         cachingStore.put(a6, "6".getBytes());
-        try (final KeyValueIterator<Windowed<Bytes>, byte[]> results = cachingStore.backwardFindSessions(keyA, 0, SEGMENT_INTERVAL * 5)) {
+        try (final KeyValueIterator<Windowed<Bytes>, byte[]> results =
+                 cachingStore.backwardFindSessions(keyA, 0, SEGMENT_INTERVAL * 5)) {
             assertEquals(a6, results.next().key);
             assertEquals(a5, results.next().key);
             assertEquals(a4, results.next().key);
@@ -479,9 +517,9 @@ public class CachingInMemorySessionStoreTest {
 
     @Test
     public void shouldFetchRangeCorrectlyAcrossSegments() {
-        final Windowed<Bytes> a1 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 0, SEGMENT_INTERVAL * 0));
-        final Windowed<Bytes> aa1 = new Windowed<>(keyAA, new SessionWindow(SEGMENT_INTERVAL * 0, SEGMENT_INTERVAL * 0));
-        final Windowed<Bytes> a2 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 1, SEGMENT_INTERVAL * 1));
+        final Windowed<Bytes> a1 = new Windowed<>(keyA, new SessionWindow(0, 0));
+        final Windowed<Bytes> aa1 = new Windowed<>(keyAA, new SessionWindow(0, 0));
+        final Windowed<Bytes> a2 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL, SEGMENT_INTERVAL));
         final Windowed<Bytes> a3 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 2, SEGMENT_INTERVAL * 2));
         final Windowed<Bytes> aa3 = new Windowed<>(keyAA, new SessionWindow(SEGMENT_INTERVAL * 2, SEGMENT_INTERVAL * 2));
         cachingStore.put(a1, "1".getBytes());
@@ -490,7 +528,8 @@ public class CachingInMemorySessionStoreTest {
         cachingStore.put(a3, "3".getBytes());
         cachingStore.put(aa3, "3".getBytes());
 
-        final KeyValueIterator<Windowed<Bytes>, byte[]> rangeResults = cachingStore.findSessions(keyA, keyAA, 0, SEGMENT_INTERVAL * 2);
+        final KeyValueIterator<Windowed<Bytes>, byte[]> rangeResults =
+            cachingStore.findSessions(keyA, keyAA, 0, SEGMENT_INTERVAL * 2);
         final List<Windowed<Bytes>> keys = new ArrayList<>();
         while (rangeResults.hasNext()) {
             keys.add(rangeResults.next().key);
@@ -501,9 +540,9 @@ public class CachingInMemorySessionStoreTest {
 
     @Test
     public void shouldBackwardFetchRangeCorrectlyAcrossSegments() {
-        final Windowed<Bytes> a1 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 0, SEGMENT_INTERVAL * 0));
-        final Windowed<Bytes> aa1 = new Windowed<>(keyAA, new SessionWindow(SEGMENT_INTERVAL * 0, SEGMENT_INTERVAL * 0));
-        final Windowed<Bytes> a2 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 1, SEGMENT_INTERVAL * 1));
+        final Windowed<Bytes> a1 = new Windowed<>(keyA, new SessionWindow(0, 0));
+        final Windowed<Bytes> aa1 = new Windowed<>(keyAA, new SessionWindow(0, 0));
+        final Windowed<Bytes> a2 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL, SEGMENT_INTERVAL));
         final Windowed<Bytes> a3 = new Windowed<>(keyA, new SessionWindow(SEGMENT_INTERVAL * 2, SEGMENT_INTERVAL * 2));
         final Windowed<Bytes> aa3 = new Windowed<>(keyAA, new SessionWindow(SEGMENT_INTERVAL * 2, SEGMENT_INTERVAL * 2));
         cachingStore.put(a1, "1".getBytes());
@@ -512,7 +551,8 @@ public class CachingInMemorySessionStoreTest {
         cachingStore.put(a3, "3".getBytes());
         cachingStore.put(aa3, "3".getBytes());
 
-        final KeyValueIterator<Windowed<Bytes>, byte[]> rangeResults = cachingStore.backwardFindSessions(keyA, keyAA, 0, SEGMENT_INTERVAL * 2);
+        final KeyValueIterator<Windowed<Bytes>, byte[]> rangeResults =
+            cachingStore.backwardFindSessions(keyA, keyAA, 0, SEGMENT_INTERVAL * 2);
         final List<Windowed<Bytes>> keys = new ArrayList<>();
         while (rangeResults.hasNext()) {
             keys.add(rangeResults.next().key);
@@ -533,31 +573,62 @@ public class CachingInMemorySessionStoreTest {
         final Windowed<Bytes> b = new Windowed<>(keyA, new SessionWindow(1, 2));
         final Windowed<String> aDeserialized = new Windowed<>("a", new SessionWindow(2, 4));
         final Windowed<String> bDeserialized = new Windowed<>("a", new SessionWindow(1, 2));
-        final CacheFlushListenerStub<Windowed<String>, String> flushListener = new CacheFlushListenerStub<>(new SessionWindowedDeserializer<>(new StringDeserializer()), new StringDeserializer());
+        final CacheFlushListenerStub<Windowed<String>, String> flushListener =
+            new CacheFlushListenerStub<>(
+                new SessionWindowedDeserializer<>(new StringDeserializer()),
+                new StringDeserializer());
         cachingStore.setFlushListener(flushListener, true);
 
         cachingStore.put(b, "1".getBytes());
         cachingStore.flush();
 
-        assertEquals(Collections.singletonList(new KeyValueTimestamp<>(bDeserialized, new Change<>("1", null), DEFAULT_TIMESTAMP)), flushListener.forwarded);
+        assertEquals(
+            Collections.singletonList(
+                new KeyValueTimestamp<>(
+                    bDeserialized,
+                    new Change<>("1", null),
+                    DEFAULT_TIMESTAMP)),
+            flushListener.forwarded
+        );
         flushListener.forwarded.clear();
 
         cachingStore.put(a, "1".getBytes());
         cachingStore.flush();
 
-        assertEquals(Collections.singletonList(new KeyValueTimestamp<>(aDeserialized, new Change<>("1", null), DEFAULT_TIMESTAMP)), flushListener.forwarded);
+        assertEquals(
+            Collections.singletonList(
+                new KeyValueTimestamp<>(
+                    aDeserialized,
+                    new Change<>("1", null),
+                    DEFAULT_TIMESTAMP)),
+            flushListener.forwarded
+        );
         flushListener.forwarded.clear();
 
         cachingStore.put(a, "2".getBytes());
         cachingStore.flush();
 
-        assertEquals(Collections.singletonList(new KeyValueTimestamp<>(aDeserialized, new Change<>("2", "1"), DEFAULT_TIMESTAMP)), flushListener.forwarded);
+        assertEquals(
+            Collections.singletonList(
+                new KeyValueTimestamp<>(
+                    aDeserialized,
+                    new Change<>("2", "1"),
+                    DEFAULT_TIMESTAMP)),
+            flushListener.forwarded
+        );
         flushListener.forwarded.clear();
 
         cachingStore.remove(a);
         cachingStore.flush();
 
-        assertEquals(Collections.singletonList(new KeyValueTimestamp<>(aDeserialized, new Change<>(null, "2"), DEFAULT_TIMESTAMP)), flushListener.forwarded);
+        assertEquals(
+            Collections.singletonList(
+                new KeyValueTimestamp<>(
+                    aDeserialized,
+                    new Change<>(null, "2"),
+                    DEFAULT_TIMESTAMP)),
+            flushListener.forwarded
+        );
         flushListener.forwarded.clear();
 
         cachingStore.put(a, "1".getBytes());
@@ -565,7 +636,10 @@ public class CachingInMemorySessionStoreTest {
         cachingStore.remove(a);
         cachingStore.flush();
 
-        assertEquals(Collections.emptyList(), flushListener.forwarded);
+        assertEquals(
+            Collections.emptyList(),
+            flushListener.forwarded
+        );
         flushListener.forwarded.clear();
     }
 
@@ -573,7 +647,10 @@ public class CachingInMemorySessionStoreTest {
     public void shouldNotForwardChangedValuesDuringFlushWhenSendOldValuesDisabled() {
         final Windowed<Bytes> a = new Windowed<>(keyA, new SessionWindow(0, 0));
         final Windowed<String> aDeserialized = new Windowed<>("a", new SessionWindow(0, 0));
-        final CacheFlushListenerStub<Windowed<String>, String> flushListener = new CacheFlushListenerStub<>(new SessionWindowedDeserializer<>(new StringDeserializer()), new StringDeserializer());
+        final CacheFlushListenerStub<Windowed<String>, String> flushListener =
+            new CacheFlushListenerStub<>(
+                new SessionWindowedDeserializer<>(new StringDeserializer()),
+                new StringDeserializer());
         cachingStore.setFlushListener(flushListener, false);
 
         cachingStore.put(a, "1".getBytes());
@@ -585,7 +662,21 @@ public class CachingInMemorySessionStoreTest {
         cachingStore.remove(a);
         cachingStore.flush();
 
-        assertEquals(asList(new KeyValueTimestamp<>(aDeserialized, new Change<>("1", null), DEFAULT_TIMESTAMP), new KeyValueTimestamp<>(aDeserialized, new Change<>("2", null), DEFAULT_TIMESTAMP), new KeyValueTimestamp<>(aDeserialized, new Change<>(null, null), DEFAULT_TIMESTAMP)), flushListener.forwarded);
+        assertEquals(
+            asList(new KeyValueTimestamp<>(
+                    aDeserialized,
+                    new Change<>("1", null),
+                    DEFAULT_TIMESTAMP),
+                new KeyValueTimestamp<>(
+                    aDeserialized,
+                    new Change<>("2", null),
+                    DEFAULT_TIMESTAMP),
+                new KeyValueTimestamp<>(
+                    aDeserialized,
+                    new Change<>(null, null),
+                    DEFAULT_TIMESTAMP)),
+            flushListener.forwarded
+        );
         flushListener.forwarded.clear();
 
         cachingStore.put(a, "1".getBytes());
@@ -593,7 +684,10 @@ public class CachingInMemorySessionStoreTest {
         cachingStore.remove(a);
         cachingStore.flush();
 
-        assertEquals(Collections.emptyList(), flushListener.forwarded);
+        assertEquals(
+            Collections.emptyList(),
+            flushListener.forwarded
+        );
         flushListener.forwarded.clear();
     }
 
@@ -604,7 +698,8 @@ public class CachingInMemorySessionStoreTest {
         cachingStore.put(new Windowed<>(keyAA, new SessionWindow(4, 5)), "3".getBytes());
         cachingStore.put(new Windowed<>(keyB, new SessionWindow(6, 7)), "4".getBytes());
 
-        try (final KeyValueIterator<Windowed<Bytes>, byte[]> singleKeyIterator = cachingStore.findSessions(keyAA, 0L, 10L); final KeyValueIterator<Windowed<Bytes>, byte[]> keyRangeIterator = cachingStore.findSessions(keyAA, keyAA, 0L, 10L)) {
+        try (final KeyValueIterator<Windowed<Bytes>, byte[]> singleKeyIterator = cachingStore.findSessions(keyAA, 0L, 10L);
+             final KeyValueIterator<Windowed<Bytes>, byte[]> keyRangeIterator = cachingStore.findSessions(keyAA, keyAA, 0L, 10L)) {
 
             assertEquals(singleKeyIterator.next(), keyRangeIterator.next());
             assertEquals(singleKeyIterator.next(), keyRangeIterator.next());
@@ -620,7 +715,10 @@ public class CachingInMemorySessionStoreTest {
         cachingStore.put(new Windowed<>(keyAA, new SessionWindow(4, 5)), "3".getBytes());
         cachingStore.put(new Windowed<>(keyB, new SessionWindow(6, 7)), "4".getBytes());
 
-        try (final KeyValueIterator<Windowed<Bytes>, byte[]> singleKeyIterator = cachingStore.backwardFindSessions(keyAA, 0L, 10L); final KeyValueIterator<Windowed<Bytes>, byte[]> keyRangeIterator = cachingStore.backwardFindSessions(keyAA, keyAA, 0L, 10L)) {
+        try (final KeyValueIterator<Windowed<Bytes>, byte[]> singleKeyIterator =
+                 cachingStore.backwardFindSessions(keyAA, 0L, 10L);
+             final KeyValueIterator<Windowed<Bytes>, byte[]> keyRangeIterator =
+                 cachingStore.backwardFindSessions(keyAA, keyAA, 0L, 10L)) {
 
             assertEquals(singleKeyIterator.next(), keyRangeIterator.next());
             assertEquals(singleKeyIterator.next(), keyRangeIterator.next());
@@ -638,12 +736,14 @@ public class CachingInMemorySessionStoreTest {
         assertEquals(0, cache.size());
     }
 
+    @SuppressWarnings("resource")
     @Test
     public void shouldThrowIfTryingToFetchFromClosedCachingStore() {
         cachingStore.close();
         assertThrows(InvalidStateStoreException.class, () -> cachingStore.fetch(keyA));
     }
 
+    @SuppressWarnings("resource")
     @Test
     public void shouldThrowIfTryingToFindMergeSessionFromClosedCachingStore() {
         cachingStore.close();
@@ -662,11 +762,13 @@ public class CachingInMemorySessionStoreTest {
         assertThrows(InvalidStateStoreException.class, () -> cachingStore.put(new Windowed<>(keyA, new SessionWindow(0, 0)), "1".getBytes()));
     }
 
+    @SuppressWarnings("resource")
     @Test
     public void shouldThrowNullPointerExceptionOnFindSessionsNullKey() {
         assertThrows(NullPointerException.class, () -> cachingStore.findSessions(null, 1L, 2L));
     }
 
+    @SuppressWarnings("resource")
     @Test
     public void shouldThrowNullPointerExceptionOnFetchNullKey() {
         assertThrows(NullPointerException.class, () -> cachingStore.fetch(null));
@@ -682,29 +784,47 @@ public class CachingInMemorySessionStoreTest {
         assertThrows(NullPointerException.class, () -> cachingStore.put(null, "1".getBytes()));
     }
 
+    @SuppressWarnings("resource")
     @Test
     public void shouldNotThrowInvalidRangeExceptionWhenBackwardWithNegativeFromKey() {
-        final Bytes keyFrom = Bytes.wrap(Serdes.Integer().serializer().serialize("", -1));
-        final Bytes keyTo = Bytes.wrap(Serdes.Integer().serializer().serialize("", 1));
+        final Bytes keyFrom = Bytes.wrap(new IntegerSerializer().serialize("", -1));
+        final Bytes keyTo = Bytes.wrap(new IntegerSerializer().serialize("", 1));
 
-        try (final LogCaptureAppender appender = LogCaptureAppender.createAndRegister(CachingSessionStore.class); final KeyValueIterator<Windowed<Bytes>, byte[]> iterator = cachingStore.backwardFindSessions(keyFrom, keyTo, 0L, 10L)) {
+        try (final LogCaptureAppender appender = LogCaptureAppender.createAndRegister(CachingSessionStore.class);
+             final KeyValueIterator<Windowed<Bytes>, byte[]> iterator = cachingStore.backwardFindSessions(keyFrom, keyTo, 0L, 10L)) {
             assertFalse(iterator.hasNext());
 
             final List<String> messages = appender.getMessages();
-            assertThat(messages, hasItem("Returning empty iterator for fetch with invalid key range: from > to." + " This may be due to range arguments set in the wrong order, " + "or serdes that don't preserve ordering when lexicographically comparing the serialized bytes." + " Note that the built-in numerical serdes do not follow this for negative numbers"));
+            assertThat(
+                messages,
+                hasItem(
+                    "Returning empty iterator for fetch with invalid key range: from > to." +
+                        " This may be due to range arguments set in the wrong order, " +
+                        "or serdes that don't preserve ordering when lexicographically comparing the serialized bytes." +
+                        " Note that the built-in numerical serdes do not follow this for negative numbers"
+                )
+            );
         }
     }
 
+    @SuppressWarnings("resource")
     @Test
     public void shouldNotThrowInvalidRangeExceptionWithNegativeFromKey() {
-        final Bytes keyFrom = Bytes.wrap(Serdes.Integer().serializer().serialize("", -1));
-        final Bytes keyTo = Bytes.wrap(Serdes.Integer().serializer().serialize("", 1));
+        final Bytes keyFrom = Bytes.wrap(new IntegerSerializer().serialize("", -1));
+        final Bytes keyTo = Bytes.wrap(new IntegerSerializer().serialize("", 1));
 
-        try (final LogCaptureAppender appender = LogCaptureAppender.createAndRegister(CachingSessionStore.class); final KeyValueIterator<Windowed<Bytes>, byte[]> iterator = cachingStore.findSessions(keyFrom, keyTo, 0L, 10L)) {
+        try (final LogCaptureAppender appender = LogCaptureAppender.createAndRegister(CachingSessionStore.class);
+             final KeyValueIterator<Windowed<Bytes>, byte[]> iterator = cachingStore.findSessions(keyFrom, keyTo, 0L, 10L)) {
             assertFalse(iterator.hasNext());
 
             final List<String> messages = appender.getMessages();
-            assertThat(messages, hasItem("Returning empty iterator for fetch with invalid key range: from > to." + " This may be due to range arguments set in the wrong order, " + "or serdes that don't preserve ordering when lexicographically comparing the serialized bytes." + " Note that the built-in numerical serdes do not follow this for negative numbers"));
+            assertThat(
+                messages,
+                hasItem("Returning empty iterator for fetch with invalid key range: from > to." +
+                    " This may be due to range arguments set in the wrong order, " +
+                    "or serdes that don't preserve ordering when lexicographically comparing the serialized bytes." +
+                    " Note that the built-in numerical serdes do not follow this for negative numbers")
+            );
         }
     }
 
@@ -731,14 +851,23 @@ public class CachingInMemorySessionStoreTest {
         final Deserializer<V> valueDeserializer;
         final List<KeyValueTimestamp<K, Change<V>>> forwarded = new LinkedList<>();
 
-        CacheFlushListenerStub(final Deserializer<K> keyDeserializer, final Deserializer<V> valueDeserializer) {
+        CacheFlushListenerStub(final Deserializer<K> keyDeserializer,
+                               final Deserializer<V> valueDeserializer) {
             this.keyDeserializer = keyDeserializer;
             this.valueDeserializer = valueDeserializer;
         }
 
         @Override
         public void apply(final Record<byte[], Change<byte[]>> record) {
-            forwarded.add(new KeyValueTimestamp<>(keyDeserializer.deserialize(null, record.key()), new Change<>(valueDeserializer.deserialize(null, record.value().newValue), valueDeserializer.deserialize(null, record.value().oldValue)), record.timestamp()));
+            forwarded.add(
+                new KeyValueTimestamp<>(
+                    keyDeserializer.deserialize(null, record.key()),
+                    new Change<>(
+                        valueDeserializer.deserialize(null, record.value().newValue),
+                        valueDeserializer.deserialize(null, record.value().oldValue)),
+                    record.timestamp()
+                )
+            );
         }
     }
 }

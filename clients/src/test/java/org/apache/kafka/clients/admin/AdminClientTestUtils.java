@@ -27,6 +27,8 @@ import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.internals.KafkaFutureImpl;
 
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -101,6 +103,16 @@ public class AdminClientTestUtils {
         return new AlterConfigsResult(futures);
     }
 
+    /** Helper to create a DescribeConfigsResult instance for a given ConfigResource.
+     * DescribeConfigsResult's constructor is only accessible from within the
+     * admin package.
+     */
+    public static DescribeConfigsResult describeConfigsResult(ConfigResource cr, Config config) {
+        KafkaFutureImpl<Config> future = new KafkaFutureImpl<>();
+        future.complete(config);
+        return new DescribeConfigsResult(Collections.singletonMap(cr, future));
+    }
+
     /**
      * Helper to create a CreatePartitionsResult instance for a given Throwable.
      * CreatePartitionsResult's constructor is only accessible from within the
@@ -124,11 +136,24 @@ public class AdminClientTestUtils {
     }
 
     public static DescribeTopicsResult describeTopicsResult(Map<String, TopicDescription> topicDescriptions) {
-        return DescribeTopicsResult.ofTopicNames(topicDescriptions.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> KafkaFuture.completedFuture(e.getValue()))));
+        return DescribeTopicsResult.ofTopicNames(topicDescriptions.entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> KafkaFuture.completedFuture(e.getValue()))));
+    }
+
+    public static ListGroupsResult listGroupsResult(GroupListing... groups) {
+        return new ListGroupsResult(
+            KafkaFuture.completedFuture(Arrays.stream(groups)
+                .collect(Collectors.toList())));
+    }
+
+    public static ListGroupsResult listGroupsResult(KafkaException exception) {
+        return new ListGroupsResult(KafkaFuture.completedFuture(Collections.singleton(exception)));
     }
 
     public static ListConsumerGroupOffsetsResult listConsumerGroupOffsetsResult(Map<String, Map<TopicPartition, OffsetAndMetadata>> offsets) {
-        Map<CoordinatorKey, KafkaFuture<Map<TopicPartition, OffsetAndMetadata>>> resultMap = offsets.entrySet().stream().collect(Collectors.toMap(e -> CoordinatorKey.byGroupId(e.getKey()), e -> KafkaFutureImpl.completedFuture(e.getValue())));
+        Map<CoordinatorKey, KafkaFuture<Map<TopicPartition, OffsetAndMetadata>>> resultMap = offsets.entrySet().stream()
+            .collect(Collectors.toMap(e -> CoordinatorKey.byGroupId(e.getKey()),
+                                      e -> KafkaFutureImpl.completedFuture(e.getValue())));
         return new ListConsumerGroupOffsetsResult(resultMap);
     }
 
@@ -136,6 +161,28 @@ public class AdminClientTestUtils {
         final KafkaFutureImpl<Map<TopicPartition, OffsetAndMetadata>> future = new KafkaFutureImpl<>();
         future.completeExceptionally(exception);
         return new ListConsumerGroupOffsetsResult(Collections.singletonMap(CoordinatorKey.byGroupId(group), future));
+    }
+
+    public static ListClientMetricsResourcesResult listClientMetricsResourcesResult(String... names) {
+        return new ListClientMetricsResourcesResult(
+                KafkaFuture.completedFuture(Arrays.stream(names)
+                        .map(ClientMetricsResourceListing::new)
+                        .collect(Collectors.toList())));
+    }
+
+    public static ListClientMetricsResourcesResult listClientMetricsResourcesResult(KafkaException exception) {
+        final KafkaFutureImpl<Collection<ClientMetricsResourceListing>> future = new KafkaFutureImpl<>();
+        future.completeExceptionally(exception);
+        return new ListClientMetricsResourcesResult(future);
+    }
+
+    public static ListShareGroupOffsetsResult createListShareGroupOffsetsResult(Map<String, KafkaFuture<Map<TopicPartition, Long>>> groupOffsets) {
+        Map<CoordinatorKey, KafkaFuture<Map<TopicPartition, Long>>> coordinatorFutures = groupOffsets.entrySet().stream()
+            .collect(Collectors.toMap(
+                entry -> CoordinatorKey.byGroupId(entry.getKey()),
+                Map.Entry::getValue
+            ));
+        return new ListShareGroupOffsetsResult(coordinatorFutures);
     }
 
     /**

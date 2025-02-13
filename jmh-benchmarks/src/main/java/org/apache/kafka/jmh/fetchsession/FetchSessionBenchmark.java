@@ -27,9 +27,25 @@ import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.requests.FetchRequest;
 import org.apache.kafka.common.requests.FetchResponse;
 import org.apache.kafka.common.utils.LogContext;
-import org.openjdk.jmh.annotations.*;
 
-import java.util.*;
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Warmup;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 @State(Scope.Benchmark)
@@ -70,18 +86,22 @@ public class FetchSessionBenchmark {
             FetchRequest.PartitionData partitionData = new FetchRequest.PartitionData(id, 0, 0, 200, Optional.empty());
             fetches.put(tp, partitionData);
             builder.add(tp, partitionData);
-            respMap.put(new TopicIdPartition(id, tp), new FetchResponseData.PartitionData().setPartitionIndex(tp.partition()).setLastStableOffset(0).setLogStartOffset(0));
+            respMap.put(new TopicIdPartition(id, tp), new FetchResponseData.PartitionData()
+                            .setPartitionIndex(tp.partition())
+                            .setLastStableOffset(0)
+                            .setLogStartOffset(0));
         }
         builder.build();
         // build and handle an initial response so that the next fetch will be incremental
         handler.handleResponse(FetchResponse.of(Errors.NONE, 0, 1, respMap), ApiKeys.FETCH.latestVersion());
 
         int counter = 0;
-        for (TopicPartition topicPartition : new ArrayList<>(fetches.keySet())) {
+        for (TopicPartition topicPartition: new ArrayList<>(fetches.keySet())) {
             if (updatedPercentage != 0 && counter % (100 / updatedPercentage) == 0) {
                 // reorder in fetch session, and update log start offset
                 fetches.remove(topicPartition);
-                fetches.put(topicPartition, new FetchRequest.PartitionData(id, 50, 40, 200, Optional.empty()));
+                fetches.put(topicPartition, new FetchRequest.PartitionData(id, 50, 40, 200,
+                        Optional.empty()));
             }
             counter++;
         }
@@ -96,7 +116,7 @@ public class FetchSessionBenchmark {
         else
             builder = handler.newBuilder();
 
-        for (Map.Entry<TopicPartition, FetchRequest.PartitionData> entry : fetches.entrySet()) {
+        for (Map.Entry<TopicPartition, FetchRequest.PartitionData> entry: fetches.entrySet()) {
             TopicPartition topicPartition = entry.getKey();
             builder.add(topicPartition, entry.getValue());
         }

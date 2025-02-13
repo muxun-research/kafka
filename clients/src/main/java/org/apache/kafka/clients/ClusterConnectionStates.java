@@ -19,32 +19,49 @@ package org.apache.kafka.clients;
 import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.utils.ExponentialBackoff;
 import org.apache.kafka.common.utils.LogContext;
+
 import org.slf4j.Logger;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
  * The state of our connection to each node in the cluster.
+ *
  */
 final class ClusterConnectionStates {
-    final static int RECONNECT_BACKOFF_EXP_BASE = 2;
-    final static double RECONNECT_BACKOFF_JITTER = 0.2;
-    final static int CONNECTION_SETUP_TIMEOUT_EXP_BASE = 2;
-    final static double CONNECTION_SETUP_TIMEOUT_JITTER = 0.2;
+    static final int RECONNECT_BACKOFF_EXP_BASE = 2;
+    static final double RECONNECT_BACKOFF_JITTER = 0.2;
+    static final int CONNECTION_SETUP_TIMEOUT_EXP_BASE = 2;
+    static final double CONNECTION_SETUP_TIMEOUT_JITTER = 0.2;
     private final Map<String, NodeConnectionState> nodeState;
     private final Logger log;
     private final HostResolver hostResolver;
-    private Set<String> connectingNodes;
-    private ExponentialBackoff reconnectBackoff;
-    private ExponentialBackoff connectionSetupTimeout;
+    private final Set<String> connectingNodes;
+    private final ExponentialBackoff reconnectBackoff;
+    private final ExponentialBackoff connectionSetupTimeout;
 
-    public ClusterConnectionStates(long reconnectBackoffMs, long reconnectBackoffMaxMs, long connectionSetupTimeoutMs, long connectionSetupTimeoutMaxMs, LogContext logContext, HostResolver hostResolver) {
+    public ClusterConnectionStates(long reconnectBackoffMs, long reconnectBackoffMaxMs,
+                                   long connectionSetupTimeoutMs, long connectionSetupTimeoutMaxMs,
+                                   LogContext logContext, HostResolver hostResolver) {
         this.log = logContext.logger(ClusterConnectionStates.class);
-        this.reconnectBackoff = new ExponentialBackoff(reconnectBackoffMs, RECONNECT_BACKOFF_EXP_BASE, reconnectBackoffMaxMs, RECONNECT_BACKOFF_JITTER);
-        this.connectionSetupTimeout = new ExponentialBackoff(connectionSetupTimeoutMs, CONNECTION_SETUP_TIMEOUT_EXP_BASE, connectionSetupTimeoutMaxMs, CONNECTION_SETUP_TIMEOUT_JITTER);
+        this.reconnectBackoff = new ExponentialBackoff(
+                reconnectBackoffMs,
+                RECONNECT_BACKOFF_EXP_BASE,
+                reconnectBackoffMaxMs,
+                RECONNECT_BACKOFF_JITTER);
+        this.connectionSetupTimeout = new ExponentialBackoff(
+                connectionSetupTimeoutMs,
+                CONNECTION_SETUP_TIMEOUT_EXP_BASE,
+                connectionSetupTimeoutMaxMs,
+                CONNECTION_SETUP_TIMEOUT_JITTER);
         this.nodeState = new HashMap<>();
         this.connectingNodes = new HashSet<>();
         this.hostResolver = hostResolver;
@@ -87,8 +104,7 @@ final class ClusterConnectionStates {
      */
     public long connectionDelay(String id, long now) {
         NodeConnectionState state = nodeState.get(id);
-        if (state == null)
-            return 0;
+        if (state == null) return 0;
 
         if (state.state == ConnectionState.CONNECTING) {
             return connectionSetupTimeoutMs(id);
@@ -143,7 +159,8 @@ final class ClusterConnectionStates {
 
         // Create a new NodeConnectionState if nodeState does not already contain one
         // for the specified id or if the hostname associated with the node id changed.
-        nodeState.put(id, new NodeConnectionState(ConnectionState.CONNECTING, now, reconnectBackoff.backoff(0), connectionSetupTimeout.backoff(0), host, hostResolver));
+        nodeState.put(id, new NodeConnectionState(ConnectionState.CONNECTING, now,
+                reconnectBackoff.backoff(0), connectionSetupTimeout.backoff(0), host, hostResolver, log));
         connectingNodes.add(id);
     }
 
@@ -330,6 +347,7 @@ final class ClusterConnectionStates {
     /**
      * Resets the failure count for a node and sets the connection setup timeout to the base
      * value configured via socket.connection.setup.timeout.ms
+     *
      * @param nodeState The node state object to update
      */
     private void resetConnectionSetupTimeout(NodeConnectionState nodeState) {
@@ -338,10 +356,10 @@ final class ClusterConnectionStates {
     }
 
     /**
-     * Increment the failure counter, update the node reconnect backoff exponentially,
-     * and record the current timestamp.
+     * Increment the failure counter, update the node reconnect backoff exponentially.
      * The delay is reconnect.backoff.ms * 2**(failures - 1) * (+/- 20% random jitter)
      * Up to a (pre-jitter) maximum of reconnect.backoff.max.ms
+     *
      * @param nodeState The node state object to update
      */
     private void updateReconnectBackoff(NodeConnectionState nodeState) {
@@ -352,7 +370,8 @@ final class ClusterConnectionStates {
     /**
      * Increment the failure counter and update the node connection setup timeout exponentially.
      * The delay is socket.connection.setup.timeout.ms * 2**(failures) * (+/- 20% random jitter)
-     * Up to a (pre-jitter) maximum of reconnect.backoff.max.ms
+     * Up to a (pre-jitter) maximum of socket.connection.setup.timeout.max.ms
+     *
      * @param nodeState The node state object to update
      */
     private void updateConnectionSetupTimeout(NodeConnectionState nodeState) {
@@ -364,6 +383,7 @@ final class ClusterConnectionStates {
      * Remove the given node from the tracked connection states. The main difference between this and `disconnected`
      * is the impact on `connectionDelay`: it will be 0 after this call whereas `reconnectBackoffMs` will be taken
      * into account after `disconnected` is called.
+     *
      * @param id the connection to remove
      */
     public void remove(String id) {
@@ -420,7 +440,7 @@ final class ClusterConnectionStates {
 
     /**
      * Test if the connection to the given node has reached its timeout
-     * @param id  the connection to fetch the state for
+     * @param id the connection to fetch the state for
      * @param now the current time in ms
      */
     public boolean isConnectionSetupTimeout(String id, long now) {
@@ -435,13 +455,18 @@ final class ClusterConnectionStates {
      * @param now the current time in ms
      */
     public List<String> nodesWithConnectionSetupTimeout(long now) {
-        return connectingNodes.stream().filter(id -> isConnectionSetupTimeout(id, now)).collect(Collectors.toList());
+        return connectingNodes.stream()
+            .filter(id -> isConnectionSetupTimeout(id, now))
+            .collect(Collectors.toList());
     }
 
     /**
      * The state of our connection to a node.
      */
     private static class NodeConnectionState {
+        private final String host;
+        private final HostResolver hostResolver;
+        private final Logger log;
 
         ConnectionState state;
         AuthenticationException authenticationException;
@@ -454,21 +479,22 @@ final class ClusterConnectionStates {
         long throttleUntilTimeMs;
         private List<InetAddress> addresses;
         private int addressIndex;
-        private final String host;
-        private final HostResolver hostResolver;
+        private InetAddress lastAttemptedAddress;
 
-        private NodeConnectionState(ConnectionState state, long lastConnectAttempt, long reconnectBackoffMs, long connectionSetupTimeoutMs, String host, HostResolver hostResolver) {
+        private NodeConnectionState(ConnectionState state, long lastConnectAttemptMs, long reconnectBackoffMs,
+                long connectionSetupTimeoutMs, String host, HostResolver hostResolver, Logger log) {
             this.state = state;
             this.addresses = Collections.emptyList();
             this.addressIndex = -1;
             this.authenticationException = null;
-            this.lastConnectAttemptMs = lastConnectAttempt;
+            this.lastConnectAttemptMs = lastConnectAttemptMs;
             this.failedAttempts = 0;
             this.reconnectBackoffMs = reconnectBackoffMs;
             this.connectionSetupTimeoutMs = connectionSetupTimeoutMs;
             this.throttleUntilTimeMs = 0;
             this.host = host;
             this.hostResolver = hostResolver;
+            this.log = log;
         }
 
         public String host() {
@@ -482,12 +508,14 @@ final class ClusterConnectionStates {
          */
         private InetAddress currentAddress() throws UnknownHostException {
             if (addresses.isEmpty()) {
-                // (Re-)initialize list
-                addresses = ClientUtils.resolve(host, hostResolver);
-                addressIndex = 0;
+                resolveAddresses();
             }
 
-            return addresses.get(addressIndex);
+            // Save the address that we return so that we don't try it twice in a row when we re-resolve due to
+            // disconnecting or exhausting the addresses
+            InetAddress currentAddress = addresses.get(addressIndex);
+            lastAttemptedAddress = currentAddress;
+            return currentAddress;
         }
 
         /**
@@ -500,7 +528,24 @@ final class ClusterConnectionStates {
 
             addressIndex = (addressIndex + 1) % addresses.size();
             if (addressIndex == 0)
-                addresses = Collections.emptyList(); // Exhausted list. Re-resolve on next currentAddress() call
+                clearAddresses(); // Exhausted list. Re-resolve on next currentAddress() call
+        }
+
+        private void resolveAddresses() throws UnknownHostException {
+            // (Re-)initialize list
+            addresses = ClientUtils.resolve(host, hostResolver);
+            if (log.isDebugEnabled()) {
+                log.debug("Resolved host {} to addresses {}", host, addresses);
+            }
+            addressIndex = 0;
+
+            // We re-resolve DNS after disconnecting, but we don't want to immediately reconnect to the address we
+            // just disconnected from, in case we disconnected due to a problem with that IP (such as a load
+            // balancer instance failure). Check the first address in the list and skip it if it was the last address
+            // we tried and there are multiple addresses to choose from.
+            if (addresses.size() > 1 && addresses.get(addressIndex).equals(lastAttemptedAddress)) {
+                addressIndex++;
+            }
         }
 
         /**
@@ -511,7 +556,12 @@ final class ClusterConnectionStates {
         }
 
         public String toString() {
-            return "NodeState(" + state + ", " + lastConnectAttemptMs + ", " + failedAttempts + ", " + throttleUntilTimeMs + ")";
+            return "NodeConnectionState(" +
+                "state=" + state + ", " +
+                "lastConnectAttemptMs=" + lastConnectAttemptMs + ", " +
+                "failedAttempts=" + failedAttempts + ", " +
+                "failedConnectAttempts=" + failedConnectAttempts + ", " +
+                "throttleUntilTimeMs=" + throttleUntilTimeMs + ")";
         }
     }
 }

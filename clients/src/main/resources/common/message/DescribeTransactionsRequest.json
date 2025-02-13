@@ -16,20 +16,12 @@
 {
   "apiKey": 65,
   "type": "request",
-  "listeners": [
-    "zkBroker",
-    "broker"
-  ],
+  "listeners": ["broker"],
   "name": "DescribeTransactionsRequest",
   "validVersions": "0",
   "flexibleVersions": "0+",
   "fields": [
-    {
-      "name": "TransactionalIds",
-      "entityType": "transactionalId",
-      "type": "[]string",
-      "versions": "0+",
-      "about": "Array of transactionalIds to include in describe results. If empty, then no results will be returned."
-    }
+      { "name": "TransactionalIds", "entityType": "transactionalId", "type": "[]string", "versions": "0+",
+        "about": "Array of transactionalIds to include in describe results. If empty, then no results will be returned." }
   ]
 }

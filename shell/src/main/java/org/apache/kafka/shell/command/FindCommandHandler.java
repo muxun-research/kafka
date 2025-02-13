@@ -17,12 +17,14 @@
 
 package org.apache.kafka.shell.command;
 
-import net.sourceforge.argparse4j.inf.ArgumentParser;
-import net.sourceforge.argparse4j.inf.Namespace;
 import org.apache.kafka.image.node.MetadataNode;
 import org.apache.kafka.shell.InteractiveShell;
 import org.apache.kafka.shell.glob.GlobVisitor;
 import org.apache.kafka.shell.state.MetadataShellState;
+
+import net.sourceforge.argparse4j.inf.ArgumentParser;
+import net.sourceforge.argparse4j.inf.Namespace;
+
 import org.jline.reader.Candidate;
 
 import java.io.PrintWriter;
@@ -35,7 +37,7 @@ import java.util.Optional;
  * Implements the find command.
  */
 public final class FindCommandHandler implements Commands.Handler {
-    public final static Commands.Type TYPE = new FindCommandType();
+    public static final Commands.Type TYPE = new FindCommandType();
 
     public static class FindCommandType implements Commands.Type {
         private FindCommandType() {
@@ -58,7 +60,9 @@ public final class FindCommandHandler implements Commands.Handler {
 
         @Override
         public void addArguments(ArgumentParser parser) {
-            parser.addArgument("paths").nargs("*").help("The paths to start at.");
+            parser.addArgument("paths").
+                nargs("*").
+                help("The paths to start at.");
         }
 
         @Override
@@ -67,7 +71,11 @@ public final class FindCommandHandler implements Commands.Handler {
         }
 
         @Override
-        public void completeNext(MetadataShellState state, List<String> nextWords, List<Candidate> candidates) throws Exception {
+        public void completeNext(
+            MetadataShellState state,
+            List<String> nextWords,
+            List<Candidate> candidates
+        ) throws Exception {
             CommandUtils.completePath(state, nextWords.get(nextWords.size() - 1), candidates);
         }
     }
@@ -79,7 +87,11 @@ public final class FindCommandHandler implements Commands.Handler {
     }
 
     @Override
-    public void run(Optional<InteractiveShell> shell, PrintWriter writer, MetadataShellState state) throws Exception {
+    public void run(
+        Optional<InteractiveShell> shell,
+        PrintWriter writer,
+        MetadataShellState state
+    ) throws Exception {
         for (String path : CommandUtils.getEffectivePaths(paths)) {
             new GlobVisitor(path, entryOption -> {
                 if (entryOption.isPresent()) {
@@ -100,7 +112,8 @@ public final class FindCommandHandler implements Commands.Handler {
                 String nextPath = path.equals("/") ? path + name : path + "/" + name;
                 MetadataNode child = node.child(name);
                 if (child == null) {
-                    throw new RuntimeException("Expected " + name + " to be a valid child of " + path + ", but it was not.");
+                    throw new RuntimeException("Expected " + name + " to be a valid child of " +
+                            path + ", but it was not.");
                 }
                 find(writer, nextPath, child);
             }
@@ -114,11 +127,7 @@ public final class FindCommandHandler implements Commands.Handler {
 
     @Override
     public boolean equals(Object other) {
-        if (!(other instanceof FindCommandHandler))
-            return false;
-        FindCommandHandler o = (FindCommandHandler) other;
-        if (!Objects.equals(o.paths, paths))
-            return false;
-        return true;
+        if (!(other instanceof FindCommandHandler o)) return false;
+        return Objects.equals(o.paths, paths);
     }
 }

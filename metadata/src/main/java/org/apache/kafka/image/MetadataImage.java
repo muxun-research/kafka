@@ -27,11 +27,21 @@ import java.util.Objects;
 
 /**
  * The broker metadata image.
- * <p>
+ *
  * This class is thread-safe.
  */
 public final class MetadataImage {
-    public final static MetadataImage EMPTY = new MetadataImage(MetadataProvenance.EMPTY, FeaturesImage.EMPTY, ClusterImage.EMPTY, TopicsImage.EMPTY, ConfigurationsImage.EMPTY, ClientQuotasImage.EMPTY, ProducerIdsImage.EMPTY, AclsImage.EMPTY, ScramImage.EMPTY);
+    public static final MetadataImage EMPTY = new MetadataImage(
+        MetadataProvenance.EMPTY,
+        FeaturesImage.EMPTY,
+        ClusterImage.EMPTY,
+        TopicsImage.EMPTY,
+        ConfigurationsImage.EMPTY,
+        ClientQuotasImage.EMPTY,
+        ProducerIdsImage.EMPTY,
+        AclsImage.EMPTY,
+        ScramImage.EMPTY,
+        DelegationTokenImage.EMPTY);
 
     private final MetadataProvenance provenance;
 
@@ -51,7 +61,20 @@ public final class MetadataImage {
 
     private final ScramImage scram;
 
-    public MetadataImage(MetadataProvenance provenance, FeaturesImage features, ClusterImage cluster, TopicsImage topics, ConfigurationsImage configs, ClientQuotasImage clientQuotas, ProducerIdsImage producerIds, AclsImage acls, ScramImage scram) {
+    private final DelegationTokenImage delegationTokens;
+
+    public MetadataImage(
+        MetadataProvenance provenance,
+        FeaturesImage features,
+        ClusterImage cluster,
+        TopicsImage topics,
+        ConfigurationsImage configs,
+        ClientQuotasImage clientQuotas,
+        ProducerIdsImage producerIds,
+        AclsImage acls,
+        ScramImage scram,
+        DelegationTokenImage delegationTokens
+    ) {
         this.provenance = provenance;
         this.features = features;
         this.cluster = cluster;
@@ -61,10 +84,19 @@ public final class MetadataImage {
         this.producerIds = producerIds;
         this.acls = acls;
         this.scram = scram;
+        this.delegationTokens = delegationTokens;
     }
 
     public boolean isEmpty() {
-        return features.isEmpty() && cluster.isEmpty() && topics.isEmpty() && configs.isEmpty() && clientQuotas.isEmpty() && producerIds.isEmpty() && acls.isEmpty() && scram.isEmpty();
+        return features.isEmpty() &&
+            cluster.isEmpty() &&
+            topics.isEmpty() &&
+            configs.isEmpty() &&
+            clientQuotas.isEmpty() &&
+            producerIds.isEmpty() &&
+            acls.isEmpty() &&
+            scram.isEmpty() &&
+            delegationTokens.isEmpty();
     }
 
     public MetadataProvenance provenance() {
@@ -111,6 +143,10 @@ public final class MetadataImage {
         return scram;
     }
 
+    public DelegationTokenImage delegationTokens() {
+        return delegationTokens;
+    }
+
     public void write(ImageWriter writer, ImageWriterOptions options) {
         // Features should be written out first so we can include the metadata.version at the beginning of the
         // snapshot
@@ -122,20 +158,39 @@ public final class MetadataImage {
         producerIds.write(writer, options);
         acls.write(writer, options);
         scram.write(writer, options);
+        delegationTokens.write(writer, options);
         writer.close(true);
     }
 
     @Override
     public boolean equals(Object o) {
-        if (o == null || !o.getClass().equals(this.getClass()))
-            return false;
+        if (o == null || !o.getClass().equals(this.getClass())) return false;
         MetadataImage other = (MetadataImage) o;
-        return provenance.equals(other.provenance) && features.equals(other.features) && cluster.equals(other.cluster) && topics.equals(other.topics) && configs.equals(other.configs) && clientQuotas.equals(other.clientQuotas) && producerIds.equals(other.producerIds) && acls.equals(other.acls) && scram.equals(other.scram);
+        return provenance.equals(other.provenance) &&
+            features.equals(other.features) &&
+            cluster.equals(other.cluster) &&
+            topics.equals(other.topics) &&
+            configs.equals(other.configs) &&
+            clientQuotas.equals(other.clientQuotas) &&
+            producerIds.equals(other.producerIds) &&
+            acls.equals(other.acls) &&
+            scram.equals(other.scram) &&
+            delegationTokens.equals(other.delegationTokens);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(provenance, features, cluster, topics, configs, clientQuotas, producerIds, acls, scram);
+        return Objects.hash(
+            provenance,
+            features,
+            cluster,
+            topics,
+            configs,
+            clientQuotas,
+            producerIds,
+            acls,
+            scram,
+            delegationTokens);
     }
 
     @Override

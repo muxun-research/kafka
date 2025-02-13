@@ -23,33 +23,39 @@ import org.apache.kafka.common.security.JaasContext;
 import org.apache.kafka.common.security.auth.AuthenticateCallbackHandler;
 import org.apache.kafka.common.security.auth.SaslExtensions;
 import org.apache.kafka.common.security.authenticator.SaslInternalConfigs;
-import org.apache.kafka.common.security.oauthbearer.*;
+import org.apache.kafka.common.security.oauthbearer.OAuthBearerExtensionsValidatorCallback;
+import org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule;
+import org.apache.kafka.common.security.oauthbearer.OAuthBearerToken;
+import org.apache.kafka.common.security.oauthbearer.OAuthBearerTokenCallback;
+import org.apache.kafka.common.security.oauthbearer.OAuthBearerTokenMock;
+import org.apache.kafka.common.security.oauthbearer.OAuthBearerValidatorCallback;
 import org.apache.kafka.common.security.oauthbearer.internals.unsecured.OAuthBearerConfigException;
 import org.apache.kafka.common.security.oauthbearer.internals.unsecured.OAuthBearerUnsecuredLoginCallbackHandler;
 import org.apache.kafka.common.security.oauthbearer.internals.unsecured.OAuthBearerUnsecuredValidatorCallbackHandler;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import javax.security.auth.callback.Callback;
-import javax.security.auth.callback.UnsupportedCallbackException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import javax.security.auth.callback.Callback;
+import javax.security.auth.callback.UnsupportedCallbackException;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class OAuthBearerSaslServerTest {
     private static final String USER = "user";
-    private static final Map<String, ?> CONFIGS;
-    static {
-        String jaasConfigText = "org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule Required"
+    private static final String JAAS_CONFIG_TEXT = "org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule Required"
                 + " unsecuredLoginStringClaim_sub=\"" + USER + "\";";
-        Map<String, Object> tmp = new HashMap<>();
-        tmp.put(SaslConfigs.SASL_JAAS_CONFIG, new Password(jaasConfigText));
-        CONFIGS = Collections.unmodifiableMap(tmp);
-    }
+    private static final Map<String, ?> CONFIGS = Map.of(SaslConfigs.SASL_JAAS_CONFIG, new Password(JAAS_CONFIG_TEXT));
+
     private static final AuthenticateCallbackHandler LOGIN_CALLBACK_HANDLER;
     static {
         LOGIN_CALLBACK_HANDLER = new OAuthBearerUnsecuredLoginCallbackHandler();
@@ -113,7 +119,8 @@ public class OAuthBearerSaslServerTest {
         customExtensions.put("firstKey", "value1");
         customExtensions.put("secondKey", "value2");
 
-        byte[] nextChallenge = saslServer.evaluateResponse(clientInitialResponse(null, false, customExtensions));
+        byte[] nextChallenge = saslServer
+                .evaluateResponse(clientInitialResponse(null, false, customExtensions));
 
         assertEquals(0, nextChallenge.length, "Next challenge is not empty");
         assertEquals("value1", saslServer.getNegotiatedProperty("firstKey"));
@@ -132,7 +139,8 @@ public class OAuthBearerSaslServerTest {
         customExtensions.put("secondKey", "value1");
         customExtensions.put("thirdKey", "value1");
 
-        byte[] nextChallenge = saslServer.evaluateResponse(clientInitialResponse(null, false, customExtensions));
+        byte[] nextChallenge = saslServer
+                .evaluateResponse(clientInitialResponse(null, false, customExtensions));
 
         assertEquals(0, nextChallenge.length, "Next challenge is not empty");
         assertNull(saslServer.getNegotiatedProperty("thirdKey"), "Extensions not recognized by the server must be ignored");
@@ -140,7 +148,7 @@ public class OAuthBearerSaslServerTest {
 
     /**
      * If the callback handler handles the `OAuthBearerExtensionsValidatorCallback`
-     * and finds an invalid extension, SaslServer should throw an authentication exception
+     *  and finds an invalid extension, SaslServer should throw an authentication exception
      */
     @Test
     public void throwsAuthenticationExceptionOnInvalidExtensions() {
@@ -165,18 +173,21 @@ public class OAuthBearerSaslServerTest {
         customExtensions.put("firstKey", "value");
         customExtensions.put("secondKey", "value");
 
-        assertThrows(SaslAuthenticationException.class, () -> saslServer.evaluateResponse(clientInitialResponse(null, false, customExtensions)));
+        assertThrows(SaslAuthenticationException.class,
+            () -> saslServer.evaluateResponse(clientInitialResponse(null, false, customExtensions)));
     }
 
     @Test
     public void authorizationIdEqualsAuthenticationId() throws Exception {
-        byte[] nextChallenge = saslServer.evaluateResponse(clientInitialResponse(USER));
+        byte[] nextChallenge = saslServer
+                .evaluateResponse(clientInitialResponse(USER));
         assertEquals(0, nextChallenge.length, "Next challenge is not empty");
     }
 
     @Test
     public void authorizationIdNotEqualsAuthenticationId() {
-        assertThrows(SaslAuthenticationException.class, () -> saslServer.evaluateResponse(clientInitialResponse(USER + "x")));
+        assertThrows(SaslAuthenticationException.class,
+            () -> saslServer.evaluateResponse(clientInitialResponse(USER + "x")));
     }
 
     @Test
@@ -186,15 +197,13 @@ public class OAuthBearerSaslServerTest {
         assertEquals("{\"status\":\"invalid_token\"}", challenge);
     }
 
-    private byte[] clientInitialResponse(String authorizationId) throws OAuthBearerConfigException, IOException, UnsupportedCallbackException {
-        return clientInitialResponse(authorizationId, false);
-    }
-
-    private byte[] clientInitialResponse(String authorizationId, boolean illegalToken) throws OAuthBearerConfigException, IOException, UnsupportedCallbackException {
+    private byte[] clientInitialResponse(String authorizationId)
+            throws OAuthBearerConfigException, IOException, UnsupportedCallbackException {
         return clientInitialResponse(authorizationId, false, Collections.emptyMap());
     }
 
-    private byte[] clientInitialResponse(String authorizationId, boolean illegalToken, Map<String, String> customExtensions) throws OAuthBearerConfigException, IOException, UnsupportedCallbackException {
+    private byte[] clientInitialResponse(String authorizationId, boolean illegalToken, Map<String, String> customExtensions)
+            throws OAuthBearerConfigException, IOException, UnsupportedCallbackException {
         OAuthBearerTokenCallback callback = new OAuthBearerTokenCallback();
         LOGIN_CALLBACK_HANDLER.handle(new Callback[] {callback});
         OAuthBearerToken token = callback.token();

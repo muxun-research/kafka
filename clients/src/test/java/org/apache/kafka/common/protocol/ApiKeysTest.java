@@ -18,6 +18,7 @@ package org.apache.kafka.common.protocol;
 
 import org.apache.kafka.common.protocol.types.BoundField;
 import org.apache.kafka.common.protocol.types.Schema;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -25,7 +26,12 @@ import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class ApiKeysTest {
 
@@ -59,10 +65,11 @@ public class ApiKeysTest {
         Set<ApiKeys> authenticationKeys = EnumSet.of(ApiKeys.SASL_HANDSHAKE, ApiKeys.SASL_AUTHENTICATE);
         // Newer protocol apis include throttle time ms even for cluster actions
         Set<ApiKeys> clusterActionsWithThrottleTimeMs = EnumSet.of(ApiKeys.ALTER_PARTITION, ApiKeys.ALLOCATE_PRODUCER_IDS, ApiKeys.UPDATE_FEATURES);
-        for (ApiKeys apiKey : ApiKeys.zkBrokerApis()) {
+        for (ApiKeys apiKey: ApiKeys.clientApis()) {
             Schema responseSchema = apiKey.messageType.responseSchemas()[apiKey.latestVersion()];
             BoundField throttleTimeField = responseSchema.get("throttle_time_ms");
-            if ((apiKey.clusterAction && !clusterActionsWithThrottleTimeMs.contains(apiKey)) || authenticationKeys.contains(apiKey))
+            if ((apiKey.clusterAction && !clusterActionsWithThrottleTimeMs.contains(apiKey))
+                || authenticationKeys.contains(apiKey))
                 assertNull(throttleTimeField, "Unexpected throttle time field: " + apiKey);
             else
                 assertNotNull(throttleTimeField, "Throttle time field missing: " + apiKey);
@@ -73,11 +80,35 @@ public class ApiKeysTest {
     public void testApiScope() {
         Set<ApiKeys> apisMissingScope = new HashSet<>();
         for (ApiKeys apiKey : ApiKeys.values()) {
-            if (apiKey.messageType.listeners().isEmpty()) {
+            if (apiKey.messageType.listeners().isEmpty() && apiKey.hasValidVersion()) {
                 apisMissingScope.add(apiKey);
             }
         }
-        assertEquals(Collections.emptySet(), apisMissingScope, "Found some APIs missing scope definition");
+        assertEquals(Collections.emptySet(), apisMissingScope,
+            "Found some APIs missing scope definition");
     }
 
+    @Test
+    public void testHasValidVersions() {
+        var apiKeysWithNoValidVersions = Set.of(ApiKeys.LEADER_AND_ISR, ApiKeys.STOP_REPLICA, ApiKeys.UPDATE_METADATA,
+            ApiKeys.CONTROLLED_SHUTDOWN);
+        for (ApiKeys apiKey : ApiKeys.values()) {
+            if (apiKeysWithNoValidVersions.contains(apiKey))
+                assertFalse(apiKey.hasValidVersion());
+            else
+                assertTrue(apiKey.hasValidVersion());
+        }
+    }
+
+    @Test
+    public void testHtmlOnlyHaveStableApi() {
+        String html = ApiKeys.toHtml();
+        for (ApiKeys apiKeys : ApiKeys.clientApis()) {
+            if (apiKeys.toApiVersion(false).isPresent()) {
+                assertTrue(html.contains("The_Messages_" + apiKeys.name), "Html should contain stable api: " + apiKeys.name);
+            } else {
+                assertFalse(html.contains("The_Messages_" + apiKeys.name), "Html should not contain unstable api: " + apiKeys.name);
+            }
+        }
+    }
 }

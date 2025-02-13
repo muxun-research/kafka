@@ -19,17 +19,20 @@ package org.apache.kafka.connect.runtime.rest;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.runtime.distributed.Crypto;
 import org.apache.kafka.connect.runtime.rest.errors.BadRequestException;
-import org.eclipse.jetty.client.api.Request;
 
-import javax.crypto.Mac;
-import javax.crypto.SecretKey;
-import javax.ws.rs.core.HttpHeaders;
+import org.eclipse.jetty.client.Request;
+
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Objects;
+
+import javax.crypto.Mac;
+import javax.crypto.SecretKey;
+
+import jakarta.ws.rs.core.HttpHeaders;
 
 public class InternalRequestSignature {
 
@@ -42,6 +45,7 @@ public class InternalRequestSignature {
 
     /**
      * Add a signature to a request.
+     *
      * @param crypto             the cryptography library used to generate {@link Mac} instances, may not be null
      * @param key                the key to sign the request with; may not be null
      * @param requestBody        the body of the request; may not be null
@@ -52,18 +56,22 @@ public class InternalRequestSignature {
         Mac mac;
         try {
             mac = crypto.mac(signatureAlgorithm);
-        } catch (NoSuchAlgorithmException e) {
+        }  catch (NoSuchAlgorithmException e) {
             throw new ConnectException(e);
         }
         byte[] requestSignature = sign(mac, key, requestBody);
-        request.header(InternalRequestSignature.SIGNATURE_HEADER, Base64.getEncoder().encodeToString(requestSignature)).header(InternalRequestSignature.SIGNATURE_ALGORITHM_HEADER, signatureAlgorithm);
+        request.headers(field -> {
+            field.add(InternalRequestSignature.SIGNATURE_HEADER, Base64.getEncoder().encodeToString(requestSignature));
+            field.add(InternalRequestSignature.SIGNATURE_ALGORITHM_HEADER, signatureAlgorithm);
+        });
     }
 
     /**
      * Extract a signature from a request.
-     * @param crypto      the cryptography library used to generate {@link Mac} instances, may not be null
-     * @param requestBody the body of the request; may not be null
-     * @param headers     the headers for the request; may be null
+     *
+     * @param crypto        the cryptography library used to generate {@link Mac} instances, may not be null
+     * @param requestBody   the body of the request; may not be null
+     * @param headers       the headers for the request; may be null
      * @return the signature extracted from the request, or null if one or more request signature
      * headers was not present
      */
@@ -92,7 +100,11 @@ public class InternalRequestSignature {
             throw new BadRequestException(e.getMessage());
         }
 
-        return new InternalRequestSignature(requestBody, mac, decodedSignature);
+        return new InternalRequestSignature(
+            requestBody,
+            mac,
+            decodedSignature
+        );
     }
 
     // Public for testing
@@ -126,7 +138,11 @@ public class InternalRequestSignature {
         if (o == null || getClass() != o.getClass())
             return false;
         InternalRequestSignature that = (InternalRequestSignature) o;
-        return MessageDigest.isEqual(requestBody, that.requestBody) && mac.getAlgorithm().equals(that.mac.getAlgorithm()) && mac.getMacLength() == that.mac.getMacLength() && mac.getProvider().equals(that.mac.getProvider()) && MessageDigest.isEqual(requestSignature, that.requestSignature);
+        return MessageDigest.isEqual(requestBody, that.requestBody)
+            && mac.getAlgorithm().equals(that.mac.getAlgorithm())
+            && mac.getMacLength() == that.mac.getMacLength()
+            && mac.getProvider().equals(that.mac.getProvider())
+            && MessageDigest.isEqual(requestSignature, that.requestSignature);
     }
 
     @Override

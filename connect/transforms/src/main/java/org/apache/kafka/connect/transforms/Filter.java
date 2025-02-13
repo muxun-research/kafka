@@ -17,6 +17,8 @@
 package org.apache.kafka.connect.transforms;
 
 import org.apache.kafka.common.config.ConfigDef;
+import org.apache.kafka.common.utils.AppInfoParser;
+import org.apache.kafka.connect.components.Versioned;
 import org.apache.kafka.connect.connector.ConnectRecord;
 
 import java.util.Map;
@@ -27,30 +29,35 @@ import java.util.Map;
  * a particular {@link org.apache.kafka.connect.transforms.predicates.Predicate}.
  * @param <R> The type of record.
  */
-public class Filter<R extends ConnectRecord<R>> implements Transformation<R> {
+public class Filter<R extends ConnectRecord<R>> implements Transformation<R>, Versioned {
 
-	public static final String OVERVIEW_DOC = "Drops all records, filtering them from subsequent transformations in the chain. " +
-			"This is intended to be used conditionally to filter out records matching (or not matching) " +
-			"a particular Predicate.";
-	public static final ConfigDef CONFIG_DEF = new ConfigDef();
+    public static final String OVERVIEW_DOC = "Drops all records, filtering them from subsequent transformations in the chain. " +
+            "This is intended to be used conditionally to filter out records matching (or not matching) " +
+            "a particular Predicate.";
+    public static final ConfigDef CONFIG_DEF = new ConfigDef();
 
-	@Override
-	public R apply(R record) {
-		return null;
-	}
+    @Override
+    public R apply(R record) {
+        return null;
+    }
 
-	@Override
-	public ConfigDef config() {
-		return CONFIG_DEF;
-	}
+    @Override
+    public String version() {
+        return AppInfoParser.getVersion();
+    }
 
-	@Override
-	public void close() {
+    @Override
+    public ConfigDef config() {
+        return CONFIG_DEF;
+    }
 
-	}
+    @Override
+    public void close() {
 
-	@Override
-	public void configure(Map<String, ?> configs) {
+    }
 
-	}
+    @Override
+    public void configure(Map<String, ?> configs) {
+
+    }
 }

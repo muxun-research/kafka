@@ -16,10 +16,7 @@
 {
   "apiKey": 13,
   "type": "request",
-  "listeners": [
-    "zkBroker",
-    "broker"
-  ],
+  "listeners": ["broker"],
   "name": "LeaveGroupRequest",
   // Version 1 and 2 are the same as version 0.
   //
@@ -31,48 +28,20 @@
   "validVersions": "0-5",
   "flexibleVersions": "4+",
   "fields": [
-    {
-      "name": "GroupId",
-      "type": "string",
-      "versions": "0+",
-      "entityType": "groupId",
-      "about": "The ID of the group to leave."
-    },
-    {
-      "name": "MemberId",
-      "type": "string",
-      "versions": "0-2",
-      "about": "The member ID to remove from the group."
-    },
-    {
-      "name": "Members",
-      "type": "[]MemberIdentity",
-      "versions": "3+",
-      "about": "List of leaving member identities.",
-      "fields": [
-        {
-          "name": "MemberId",
-          "type": "string",
-          "versions": "3+",
-          "about": "The member ID to remove from the group."
-        },
-        {
-          "name": "GroupInstanceId",
-          "type": "string",
-          "versions": "3+",
-          "nullableVersions": "3+",
-          "default": "null",
-          "about": "The group instance ID to remove from the group."
-        },
-        {
-          "name": "Reason",
-          "type": "string",
-          "versions": "5+",
-          "nullableVersions": "5+",
-          "default": "null",
-          "ignorable": true,
-          "about": "The reason why the member left the group."
-        }
-      ]}
+    { "name": "GroupId", "type": "string", "versions": "0+", "entityType": "groupId",
+      "about": "The ID of the group to leave." },
+    { "name": "MemberId", "type": "string", "versions": "0-2",
+      "about": "The member ID to remove from the group." },
+    { "name": "Members", "type": "[]MemberIdentity", "versions": "3+",
+      "about": "List of leaving member identities.", "fields": [
+      { "name": "MemberId", "type": "string", "versions": "3+",
+        "about": "The member ID to remove from the group." },
+      { "name": "GroupInstanceId", "type": "string",
+        "versions": "3+", "nullableVersions": "3+", "default": "null",
+        "about": "The group instance ID to remove from the group." },
+      { "name": "Reason", "type": "string",
+        "versions": "5+", "nullableVersions": "5+", "default": "null", "ignorable": true,
+        "about": "The reason why the member left the group." }
+    ]}
   ]
 }

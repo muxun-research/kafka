@@ -19,7 +19,11 @@ package org.apache.kafka.connect.data;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.errors.SchemaBuilderException;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * <p>
@@ -84,7 +88,7 @@ public class SchemaBuilder implements Schema {
 
     @Override
     public boolean isOptional() {
-        return optional == null ? false : optional;
+        return optional != null && optional;
     }
 
     /**
@@ -225,6 +229,7 @@ public class SchemaBuilder implements Schema {
      * <p>
      * Usually it will be simpler to use one of the variants like {@link #string()} or {@link #struct()}, but this form
      * can be useful when generating schemas dynamically.
+     *
      * @param type the schema type
      * @return a new SchemaBuilder
      */
@@ -367,45 +372,45 @@ public class SchemaBuilder implements Schema {
      * @return a new {@link Schema.Type#MAP} SchemaBuilder
      */
     public static SchemaBuilder map(Schema keySchema, Schema valueSchema) {
-		if (null == keySchema)
-			throw new SchemaBuilderException("keySchema cannot be null.");
-		if (null == valueSchema)
-			throw new SchemaBuilderException("valueSchema cannot be null.");
-		SchemaBuilder builder = new SchemaBuilder(Type.MAP);
-		builder.keySchema = keySchema;
-		builder.valueSchema = valueSchema;
-		return builder;
-	}
+        if (null == keySchema)
+            throw new SchemaBuilderException("keySchema cannot be null.");
+        if (null == valueSchema)
+            throw new SchemaBuilderException("valueSchema cannot be null.");
+        SchemaBuilder builder = new SchemaBuilder(Type.MAP);
+        builder.keySchema = keySchema;
+        builder.valueSchema = valueSchema;
+        return builder;
+    }
 
-	static SchemaBuilder arrayOfNull() {
-		return new SchemaBuilder(Type.ARRAY);
-	}
+    static SchemaBuilder arrayOfNull() {
+        return new SchemaBuilder(Type.ARRAY);
+    }
 
-	static SchemaBuilder mapOfNull() {
-		return new SchemaBuilder(Type.MAP);
-	}
+    static SchemaBuilder mapOfNull() {
+        return new SchemaBuilder(Type.MAP);
+    }
 
-	static SchemaBuilder mapWithNullKeys(Schema valueSchema) {
-		SchemaBuilder result = new SchemaBuilder(Type.MAP);
-		result.valueSchema = valueSchema;
-		return result;
-	}
+    static SchemaBuilder mapWithNullKeys(Schema valueSchema) {
+        SchemaBuilder result = new SchemaBuilder(Type.MAP);
+        result.valueSchema = valueSchema;
+        return result;
+    }
 
-	static SchemaBuilder mapWithNullValues(Schema keySchema) {
-		SchemaBuilder result = new SchemaBuilder(Type.MAP);
-		result.keySchema = keySchema;
-		return result;
-	}
+    static SchemaBuilder mapWithNullValues(Schema keySchema) {
+        SchemaBuilder result = new SchemaBuilder(Type.MAP);
+        result.keySchema = keySchema;
+        return result;
+    }
 
-	@Override
-	public Schema keySchema() {
-		return keySchema;
-	}
+    @Override
+    public Schema keySchema() {
+        return keySchema;
+    }
 
-	@Override
-	public Schema valueSchema() {
-		return valueSchema;
-	}
+    @Override
+    public Schema valueSchema() {
+        return valueSchema;
+    }
 
 
     /**
@@ -413,9 +418,9 @@ public class SchemaBuilder implements Schema {
      * @return the {@link Schema}
      */
     public Schema build() {
-		return new ConnectSchema(type, isOptional(), defaultValue, name, version, doc,
-				parameters == null ? null : Collections.unmodifiableMap(parameters),
-				fields == null ? null : Collections.unmodifiableList(new ArrayList<>(fields.values())), keySchema, valueSchema);
+        return new ConnectSchema(type, isOptional(), defaultValue, name, version, doc,
+                parameters == null ? null : Collections.unmodifiableMap(parameters),
+                fields == null ? null : List.copyOf(fields.values()), keySchema, valueSchema);
     }
 
     /**

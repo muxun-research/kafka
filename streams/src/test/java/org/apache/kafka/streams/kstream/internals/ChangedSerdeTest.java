@@ -22,8 +22,8 @@ import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.common.utils.ByteUtils;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.errors.StreamsException;
-import org.junit.Assert;
-import org.junit.Test;
+
+import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
 import java.util.Collections;
@@ -32,14 +32,16 @@ import java.util.Map;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
-import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class ChangedSerdeTest {
     private static final String TOPIC = "some-topic";
 
     private static final Serializer<String> STRING_SERIALIZER = Serdes.String().serializer();
-    private static final ChangedSerializer<String> CHANGED_STRING_SERIALIZER = new ChangedSerializer<>(STRING_SERIALIZER);
-    private static final ChangedDeserializer<String> CHANGED_STRING_DESERIALIZER = new ChangedDeserializer<>(Serdes.String().deserializer());
+    private static final ChangedSerializer<String> CHANGED_STRING_SERIALIZER =
+            new ChangedSerializer<>(STRING_SERIALIZER);
+    private static final ChangedDeserializer<String> CHANGED_STRING_DESERIALIZER =
+            new ChangedDeserializer<>(Serdes.String().deserializer());
 
     private static final int ENCODING_FLAG_SIZE = 1;
     private static final int IS_LATEST_FLAG_SIZE = 1;
@@ -59,7 +61,9 @@ public class ChangedSerdeTest {
     public void serializerShouldThrowIfGivenAChangeWithBothNewAndOldValuesAsNull() {
         final Change<String> data = new Change<>(null, null);
 
-        assertThrows(StreamsException.class, () -> CHANGED_STRING_SERIALIZER.serialize(TOPIC, data));
+        assertThrows(
+                StreamsException.class,
+                () -> CHANGED_STRING_SERIALIZER.serialize(TOPIC, data));
     }
 
     @Test
@@ -69,7 +73,9 @@ public class ChangedSerdeTest {
         final Map<String, String> configs = Collections.singletonMap(StreamsConfig.UPGRADE_FROM_CONFIG, StreamsConfig.UPGRADE_FROM_33);
         serializer.configure(configs, false);
 
-        assertThrows(StreamsException.class, () -> serializer.serialize(TOPIC, data));
+        assertThrows(
+                StreamsException.class,
+                () -> serializer.serialize(TOPIC, data));
     }
 
     @Test
@@ -101,7 +107,9 @@ public class ChangedSerdeTest {
         buffer.position(serialized.length - 1);
         buffer.put((byte) -1);
 
-        Assert.assertThrows(StreamsException.class, () -> CHANGED_STRING_DESERIALIZER.deserialize(TOPIC, serialized));
+        assertThrows(
+            StreamsException.class,
+            () -> CHANGED_STRING_DESERIALIZER.deserialize(TOPIC, serialized));
     }
 
     @Test

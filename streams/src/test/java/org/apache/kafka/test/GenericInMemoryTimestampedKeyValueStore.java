@@ -17,8 +17,8 @@
 package org.apache.kafka.test;
 
 import org.apache.kafka.streams.KeyValue;
-import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateStore;
+import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.state.KeyValueIterator;
 import org.apache.kafka.streams.state.TimestampedKeyValueStore;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
@@ -26,8 +26,12 @@ import org.apache.kafka.streams.state.internals.CacheFlushListener;
 import org.apache.kafka.streams.state.internals.DelegatingPeekingKeyValueIterator;
 import org.apache.kafka.streams.state.internals.WrappedStateStore;
 
-import java.util.*;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.NavigableMap;
+import java.util.TreeMap;
 
 /**
  * This class is a generic version of the in-memory key-value store that is useful for testing when you
@@ -56,12 +60,10 @@ public class GenericInMemoryTimestampedKeyValueStore<K extends Comparable, V>
         return this.name;
     }
 
-    @Deprecated
     @Override
-    /* This is a "dummy" store used for testing;
-       it does not support restoring from changelog since we allow it to be serde-ignorant */ public void init(final ProcessorContext context, final StateStore root) {
+    public void init(final StateStoreContext stateStoreContext, final StateStore root) {
         if (root != null) {
-            context.register(root, null);
+            stateStoreContext.register(root, null);
         }
 
         this.open = true;

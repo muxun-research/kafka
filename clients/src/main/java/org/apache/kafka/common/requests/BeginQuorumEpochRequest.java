@@ -27,68 +27,63 @@ import java.nio.ByteBuffer;
 import java.util.Collections;
 
 public class BeginQuorumEpochRequest extends AbstractRequest {
-	public static class Builder extends AbstractRequest.Builder<BeginQuorumEpochRequest> {
-		private final BeginQuorumEpochRequestData data;
+    public static class Builder extends AbstractRequest.Builder<BeginQuorumEpochRequest> {
+        private final BeginQuorumEpochRequestData data;
 
-		public Builder(BeginQuorumEpochRequestData data) {
-			super(ApiKeys.BEGIN_QUORUM_EPOCH);
-			this.data = data;
-		}
+        public Builder(BeginQuorumEpochRequestData data) {
+            super(ApiKeys.BEGIN_QUORUM_EPOCH);
+            this.data = data;
+        }
 
-		@Override
-		public BeginQuorumEpochRequest build(short version) {
-			return new BeginQuorumEpochRequest(data, version);
-		}
+        @Override
+        public BeginQuorumEpochRequest build(short version) {
+            return new BeginQuorumEpochRequest(data, version);
+        }
 
-		@Override
-		public String toString() {
-			return data.toString();
-		}
-	}
+        @Override
+        public String toString() {
+            return data.toString();
+        }
+    }
 
-	private final BeginQuorumEpochRequestData data;
+    private final BeginQuorumEpochRequestData data;
 
-	private BeginQuorumEpochRequest(BeginQuorumEpochRequestData data, short version) {
-		super(ApiKeys.BEGIN_QUORUM_EPOCH, version);
-		this.data = data;
-	}
+    private BeginQuorumEpochRequest(BeginQuorumEpochRequestData data, short version) {
+        super(ApiKeys.BEGIN_QUORUM_EPOCH, version);
+        this.data = data;
+    }
 
-	@Override
-	public BeginQuorumEpochRequestData data() {
-		return data;
-	}
+    @Override
+    public BeginQuorumEpochRequestData data() {
+        return data;
+    }
 
-	@Override
-	public BeginQuorumEpochResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-		return new BeginQuorumEpochResponse(new BeginQuorumEpochResponseData()
-				.setErrorCode(Errors.forException(e).code()));
-	}
+    @Override
+    public BeginQuorumEpochResponse getErrorResponse(int throttleTimeMs, Throwable e) {
+        return new BeginQuorumEpochResponse(new BeginQuorumEpochResponseData()
+            .setErrorCode(Errors.forException(e).code()));
+    }
 
-	public static BeginQuorumEpochRequest parse(ByteBuffer buffer, short version) {
-		return new BeginQuorumEpochRequest(new BeginQuorumEpochRequestData(new ByteBufferAccessor(buffer), version), version);
-	}
+    public static BeginQuorumEpochRequest parse(ByteBuffer buffer, short version) {
+        return new BeginQuorumEpochRequest(new BeginQuorumEpochRequestData(new ByteBufferAccessor(buffer), version), version);
+    }
 
-	public static BeginQuorumEpochRequestData singletonRequest(TopicPartition topicPartition,
-															   int leaderEpoch,
-															   int leaderId) {
-		return singletonRequest(topicPartition, null, leaderEpoch, leaderId);
-	}
-
-	public static BeginQuorumEpochRequestData singletonRequest(TopicPartition topicPartition,
-															   String clusterId,
-															   int leaderEpoch,
-															   int leaderId) {
-		return new BeginQuorumEpochRequestData()
-				.setClusterId(clusterId)
-				.setTopics(Collections.singletonList(
-						new BeginQuorumEpochRequestData.TopicData()
-								.setTopicName(topicPartition.topic())
-								.setPartitions(Collections.singletonList(
-										new BeginQuorumEpochRequestData.PartitionData()
-												.setPartitionIndex(topicPartition.partition())
-												.setLeaderEpoch(leaderEpoch)
-												.setLeaderId(leaderId))))
-				);
-	}
-
+    public static BeginQuorumEpochRequestData singletonRequest(
+        TopicPartition topicPartition,
+        String clusterId,
+        int leaderEpoch,
+        int leaderId
+    ) {
+        return new BeginQuorumEpochRequestData()
+                   .setClusterId(clusterId)
+                   .setTopics(Collections.singletonList(
+                       new BeginQuorumEpochRequestData.TopicData()
+                           .setTopicName(topicPartition.topic())
+                           .setPartitions(Collections.singletonList(
+                               new BeginQuorumEpochRequestData.PartitionData()
+                                   .setPartitionIndex(topicPartition.partition())
+                                   .setLeaderEpoch(leaderEpoch)
+                                   .setLeaderId(leaderId))))
+                   );
+    }
 }

@@ -20,13 +20,20 @@ import org.apache.kafka.server.log.remote.storage.RemoteLogSegmentId;
 import org.apache.kafka.server.log.remote.storage.RemoteLogSegmentMetadata;
 import org.apache.kafka.server.log.remote.storage.RemoteResourceNotFoundException;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.NavigableMap;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 
 /**
  * This class represents the in-memory state of segments associated with a leader epoch. This includes the mapping of offset to
- * segment ids and unreferenced segments which are not mapped to any offset but they exist in remote storage.
+ * segment ids and unreferenced segments which are not mapped to any offset, but they exist in remote storage.
  * <p>
  * This is used by {@link RemoteLogMetadataCache} to track the segments for each leader epoch.
  */
@@ -49,10 +56,12 @@ class RemoteLogLeaderEpochState {
 
     /**
      * Returns all the segments associated with this leader epoch sorted by start offset in ascending order.
+     *
      * @param idToSegmentMetadata mapping of id to segment metadata. This will be used to get RemoteLogSegmentMetadata
      *                            for an id to be used for sorting.
      */
-    Iterator<RemoteLogSegmentMetadata> listAllRemoteLogSegments(Map<RemoteLogSegmentId, RemoteLogSegmentMetadata> idToSegmentMetadata) throws RemoteResourceNotFoundException {
+    Iterator<RemoteLogSegmentMetadata> listAllRemoteLogSegments(Map<RemoteLogSegmentId, RemoteLogSegmentMetadata> idToSegmentMetadata)
+            throws RemoteResourceNotFoundException {
         // Return all the segments including unreferenced metadata.
         int size = offsetToId.size() + unreferencedSegmentIds.size();
         if (size == 0) {
@@ -72,7 +81,9 @@ class RemoteLogLeaderEpochState {
         return metadataList.iterator();
     }
 
-    private void collectConvertedIdToMetadata(Collection<RemoteLogSegmentId> segmentIds, Map<RemoteLogSegmentId, RemoteLogSegmentMetadata> idToSegmentMetadata, Collection<RemoteLogSegmentMetadata> result) throws RemoteResourceNotFoundException {
+    private void collectConvertedIdToMetadata(Collection<RemoteLogSegmentId> segmentIds,
+                                              Map<RemoteLogSegmentId, RemoteLogSegmentMetadata> idToSegmentMetadata,
+                                              Collection<RemoteLogSegmentMetadata> result) throws RemoteResourceNotFoundException {
         for (RemoteLogSegmentId id : segmentIds) {
             RemoteLogSegmentMetadata metadata = idToSegmentMetadata.get(id);
             if (metadata == null) {
@@ -87,17 +98,30 @@ class RemoteLogLeaderEpochState {
         unreferencedSegmentIds.add(remoteLogSegmentId);
     }
 
-    void handleSegmentWithCopySegmentFinishedState(Long startOffset, RemoteLogSegmentId remoteLogSegmentId, Long leaderEpochEndOffset) {
+    void handleSegmentWithCopySegmentFinishedState(Long startOffset, RemoteLogSegmentId remoteLogSegmentId,
+                                                   Long leaderEpochEndOffset) {
+        // If there are duplicate segments uploaded due to leader-election, then mark them as unreferenced.
+        // Duplicate segments can be uploaded when the previous leader had tier-lags and the next leader uploads the
+        // segment for the same leader-epoch which is a super-set of previously uploaded segments.
+        // (eg)
+        // case-1: Duplicate segment
+        //      L0 uploaded segment S0 with offsets 0-100 and L1 uploaded segment S1 with offsets 0-200.
+        //      We will mark the segment S0 as duplicate and add it to unreferencedSegmentIds.
+        // case-2: Overlapping segments
+        //      L0 uploaded segment S0 with offsets 10-90 and L1 uploaded segment S1 with offsets 5-100, S2-101-200,
+        //      and so on. When the consumer request for segment with offset 95, it should get the segment S1 and not S0.
+        Map.Entry<Long, RemoteLogSegmentId> lastEntry = offsetToId.lastEntry();
+        while (lastEntry != null && lastEntry.getKey() >= startOffset && highestLogOffset <= leaderEpochEndOffset) {
+            offsetToId.remove(lastEntry.getKey());
+            unreferencedSegmentIds.add(lastEntry.getValue());
+            lastEntry = offsetToId.lastEntry();
+        }
+
         // Add the segment epochs mapping as the segment is copied successfully.
-        RemoteLogSegmentId oldEntry = offsetToId.put(startOffset, remoteLogSegmentId);
+        offsetToId.put(startOffset, remoteLogSegmentId);
 
         // Remove the metadata from unreferenced entries as it is successfully copied and added to the offset mapping.
         unreferencedSegmentIds.remove(remoteLogSegmentId);
-
-        // Add the old entry to unreferenced entries as the mapping is removed for the old entry.
-        if (oldEntry != null) {
-            unreferencedSegmentIds.add(oldEntry);
-        }
 
         // Update the highest offset entry for this leader epoch as we added a new mapping.
         if (highestLogOffset == null || leaderEpochEndOffset > highestLogOffset) {
@@ -126,6 +150,7 @@ class RemoteLogLeaderEpochState {
     /**
      * Returns the RemoteLogSegmentId of a segment for the given offset, if there exists a mapping associated with
      * the greatest offset less than or equal to the given offset, or null if there is no such mapping.
+     *
      * @param offset offset
      */
     RemoteLogSegmentId floorEntry(long offset) {
@@ -150,12 +175,16 @@ class RemoteLogLeaderEpochState {
 
         /**
          * Performs this operation with the given {@code remoteLogLeaderEpochState}.
+         *
          * @param leaderEpoch               leader epoch value
          * @param remoteLogLeaderEpochState In-memory state of the segments for a leader epoch.
          * @param startOffset               start offset of the segment.
          * @param segmentId                 segment id.
          */
-        void accept(int leaderEpoch, RemoteLogLeaderEpochState remoteLogLeaderEpochState, long startOffset, RemoteLogSegmentId segmentId);
+        void accept(int leaderEpoch,
+                    RemoteLogLeaderEpochState remoteLogLeaderEpochState,
+                    long startOffset,
+                    RemoteLogSegmentId segmentId);
     }
 
 }

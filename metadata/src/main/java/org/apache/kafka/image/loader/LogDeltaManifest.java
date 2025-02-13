@@ -27,6 +27,59 @@ import java.util.Objects;
  * Contains information about a set of changes that were loaded from the metadata log.
  */
 public class LogDeltaManifest implements LoaderManifest {
+
+    public static class Builder {
+        private MetadataProvenance provenance;
+        private LeaderAndEpoch leaderAndEpoch;
+        private int numBatches = -1;
+        private long elapsedNs = -1L;
+        private long numBytes = -1L;
+
+        public Builder provenance(MetadataProvenance provenance) {
+            this.provenance = provenance;
+            return this;
+        }
+
+        public Builder leaderAndEpoch(LeaderAndEpoch leaderAndEpoch) {
+            this.leaderAndEpoch = leaderAndEpoch;
+            return this;
+        }
+
+        public Builder numBatches(int numBatches) {
+            this.numBatches = numBatches;
+            return this;
+        }
+
+        public Builder elapsedNs(long elapsedNs) {
+            this.elapsedNs = elapsedNs;
+            return this;
+        }
+
+        public Builder numBytes(long numBytes) {
+            this.numBytes = numBytes;
+            return this;
+        }
+
+        public LogDeltaManifest build() {
+            if (provenance == null) {
+                throw new RuntimeException("provenance must not be null");
+            }
+            if (leaderAndEpoch == null) {
+                throw new RuntimeException("leaderAndEpoch must not be null");
+            }
+            if (numBatches == -1) {
+                throw new RuntimeException("numBatches must not be null");
+            }
+            if (elapsedNs == -1L) {
+                throw new RuntimeException("elapsedNs must not be null");
+            }
+            if (numBytes == -1L) {
+                throw new RuntimeException("numBytes must not be null");
+            }
+            return new LogDeltaManifest(provenance, leaderAndEpoch, numBatches, elapsedNs, numBytes);
+        }
+    }
+
     /**
      * The highest offset and epoch included in this delta, inclusive.
      */
@@ -52,12 +105,22 @@ public class LogDeltaManifest implements LoaderManifest {
      */
     private final long numBytes;
 
-    public LogDeltaManifest(MetadataProvenance provenance, LeaderAndEpoch leaderAndEpoch, int numBatches, long elapsedNs, long numBytes) {
+    LogDeltaManifest(
+        MetadataProvenance provenance,
+        LeaderAndEpoch leaderAndEpoch,
+        int numBatches,
+        long elapsedNs,
+        long numBytes
+    ) {
         this.provenance = provenance;
         this.leaderAndEpoch = leaderAndEpoch;
         this.numBatches = numBatches;
         this.elapsedNs = elapsedNs;
         this.numBytes = numBytes;
+    }
+
+    public static Builder newBuilder() {
+        return new Builder();
     }
 
     @Override
@@ -88,19 +151,33 @@ public class LogDeltaManifest implements LoaderManifest {
 
     @Override
     public int hashCode() {
-        return Objects.hash(provenance, leaderAndEpoch, numBatches, elapsedNs, numBytes);
+        return Objects.hash(
+                provenance,
+                leaderAndEpoch,
+                numBatches,
+                elapsedNs,
+                numBytes);
     }
 
     @Override
     public boolean equals(Object o) {
-        if (o == null || !o.getClass().equals(this.getClass()))
-            return false;
+        if (o == null || !o.getClass().equals(this.getClass())) return false;
         LogDeltaManifest other = (LogDeltaManifest) o;
-        return provenance.equals(other.provenance) && leaderAndEpoch == other.leaderAndEpoch && numBatches == other.numBatches && elapsedNs == other.elapsedNs && numBytes == other.numBytes;
+        return provenance.equals(other.provenance) &&
+                leaderAndEpoch == other.leaderAndEpoch &&
+                numBatches == other.numBatches &&
+                elapsedNs == other.elapsedNs &&
+                numBytes == other.numBytes;
     }
 
     @Override
     public String toString() {
-        return "LogDeltaManifest(" + "provenance=" + provenance + ", leaderAndEpoch=" + leaderAndEpoch + ", numBatches=" + numBatches + ", elapsedNs=" + elapsedNs + ", numBytes=" + numBytes + ")";
+        return "LogDeltaManifest(" +
+                "provenance=" + provenance +
+                ", leaderAndEpoch=" + leaderAndEpoch +
+                ", numBatches=" + numBatches +
+                ", elapsedNs=" + elapsedNs +
+                ", numBytes=" + numBytes +
+                ")";
     }
 }

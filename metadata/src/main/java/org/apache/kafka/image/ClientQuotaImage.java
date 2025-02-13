@@ -25,17 +25,22 @@ import org.apache.kafka.image.node.ClientQuotaImageNode;
 import org.apache.kafka.image.writer.ImageWriter;
 import org.apache.kafka.image.writer.ImageWriterOptions;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
 
 
 /**
  * Represents a quota for a client entity in the metadata image.
- * <p>
+ *
  * This class is thread-safe.
  */
 public final class ClientQuotaImage {
-    public final static ClientQuotaImage EMPTY = new ClientQuotaImage(Collections.emptyMap());
+    public static final ClientQuotaImage EMPTY = new ClientQuotaImage(Collections.emptyMap());
 
     private final Map<String, Double> quotas;
 
@@ -51,16 +56,26 @@ public final class ClientQuotaImage {
         return Collections.unmodifiableMap(quotas);
     }
 
-    public void write(ClientQuotaEntity entity, ImageWriter writer, ImageWriterOptions options) {
+    public void write(
+        ClientQuotaEntity entity,
+        ImageWriter writer,
+        ImageWriterOptions options
+    ) {
         for (Entry<String, Double> entry : quotas.entrySet()) {
-            writer.write(0, new ClientQuotaRecord().setEntity(entityToData(entity)).setKey(entry.getKey()).setValue(entry.getValue()).setRemove(false));
+            writer.write(0, new ClientQuotaRecord().
+                setEntity(entityToData(entity)).
+                setKey(entry.getKey()).
+                setValue(entry.getValue()).
+                setRemove(false));
         }
     }
 
     public static List<EntityData> entityToData(ClientQuotaEntity entity) {
         List<EntityData> entityData = new ArrayList<>(entity.entries().size());
         for (Entry<String, String> entry : entity.entries().entrySet()) {
-            entityData.add(new EntityData().setEntityType(entry.getKey()).setEntityName(entry.getValue()));
+            entityData.add(new EntityData().
+                setEntityType(entry.getKey()).
+                setEntityName(entry.getValue()));
         }
         return entityData;
     }
@@ -87,9 +102,7 @@ public final class ClientQuotaImage {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof ClientQuotaImage))
-            return false;
-        ClientQuotaImage other = (ClientQuotaImage) o;
+        if (!(o instanceof ClientQuotaImage other)) return false;
         return quotas.equals(other.quotas);
     }
 

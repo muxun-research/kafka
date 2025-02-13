@@ -17,49 +17,48 @@
 
 package org.apache.kafka.trogdor.common;
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import org.apache.kafka.trogdor.agent.Agent;
 import org.apache.kafka.trogdor.basic.BasicNode;
 import org.apache.kafka.trogdor.basic.BasicTopology;
-
 import org.apache.kafka.trogdor.coordinator.Coordinator;
+
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 
-import org.junit.jupiter.api.Timeout;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@Timeout(value = 120000, unit = MILLISECONDS)
+@Timeout(value = 120)
 public class TopologyTest {
 
-	@Test
-	public void testAgentNodeNames() {
-		TreeMap<String, Node> nodes = new TreeMap<>();
-		final int numNodes = 5;
-		for (int i = 0; i < numNodes; i++) {
-			HashMap<String, String> conf = new HashMap<>();
-			if (i == 0) {
-				conf.put(Platform.Config.TROGDOR_COORDINATOR_PORT, String.valueOf(Coordinator.DEFAULT_PORT));
-			} else {
-				conf.put(Platform.Config.TROGDOR_AGENT_PORT, String.valueOf(Agent.DEFAULT_PORT));
-			}
-			BasicNode node = new BasicNode(String.format("node%02d", i),
-					String.format("node%d.example.com", i),
-					conf,
-					new HashSet<>());
-			nodes.put(node.name(), node);
-		}
-		Topology topology = new BasicTopology(nodes);
-		Set<String> names = Topology.Util.agentNodeNames(topology);
-		assertEquals(4, names.size());
-		for (int i = 1; i < numNodes - 1; i++) {
-			assertTrue(names.contains(String.format("node%02d", i)));
-		}
-	}
+    @Test
+    public void testAgentNodeNames() {
+        TreeMap<String, Node> nodes = new TreeMap<>();
+        final int numNodes = 5;
+        for (int i = 0; i < numNodes; i++) {
+            Map<String, String> conf = new HashMap<>();
+            if (i == 0) {
+                conf.put(Platform.Config.TROGDOR_COORDINATOR_PORT, String.valueOf(Coordinator.DEFAULT_PORT));
+            } else {
+                conf.put(Platform.Config.TROGDOR_AGENT_PORT, String.valueOf(Agent.DEFAULT_PORT));
+            }
+            BasicNode node = new BasicNode(String.format("node%02d", i),
+                String.format("node%d.example.com", i),
+                conf,
+                new HashSet<>());
+            nodes.put(node.name(), node);
+        }
+        Topology topology = new BasicTopology(nodes);
+        Set<String> names = Topology.Util.agentNodeNames(topology);
+        assertEquals(4, names.size());
+        for (int i = 1; i < numNodes - 1; i++) {
+            assertTrue(names.contains(String.format("node%02d", i)));
+        }
+    }
 }

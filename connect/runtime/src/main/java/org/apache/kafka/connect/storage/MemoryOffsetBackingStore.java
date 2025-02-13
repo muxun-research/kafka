@@ -19,8 +19,6 @@ package org.apache.kafka.connect.storage;
 import org.apache.kafka.common.utils.ThreadUtils;
 import org.apache.kafka.connect.runtime.WorkerConfig;
 import org.apache.kafka.connect.util.Callback;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.util.Collection;
@@ -38,7 +36,6 @@ import java.util.concurrent.TimeUnit;
  * background thread.
  */
 public abstract class MemoryOffsetBackingStore implements OffsetBackingStore {
-    private static final Logger log = LoggerFactory.getLogger(MemoryOffsetBackingStore.class);
 
     protected Map<ByteBuffer, ByteBuffer> data = new HashMap<>();
     protected ExecutorService executor;
@@ -53,7 +50,8 @@ public abstract class MemoryOffsetBackingStore implements OffsetBackingStore {
 
     @Override
     public void start() {
-        executor = Executors.newFixedThreadPool(1, ThreadUtils.createThreadFactory(this.getClass().getSimpleName() + "-%d", false));
+        executor = Executors.newFixedThreadPool(1, ThreadUtils.createThreadFactory(
+                this.getClass().getSimpleName() + "-%d", false));
     }
 
     @Override
@@ -76,7 +74,8 @@ public abstract class MemoryOffsetBackingStore implements OffsetBackingStore {
     }
 
     @Override
-    public Future<Void> set(final Map<ByteBuffer, ByteBuffer> values, final Callback<Void> callback) {
+    public Future<Void> set(final Map<ByteBuffer, ByteBuffer> values,
+                            final Callback<Void> callback) {
         return executor.submit(() -> {
             data.putAll(values);
             save();

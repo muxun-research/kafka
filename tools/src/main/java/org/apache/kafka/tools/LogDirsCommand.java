@@ -16,11 +16,11 @@
  */
 package org.apache.kafka.tools;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import joptsimple.OptionSpec;
-import joptsimple.OptionSpecBuilder;
-import org.apache.kafka.clients.admin.*;
+import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.DescribeLogDirsResult;
+import org.apache.kafka.clients.admin.LogDirDescription;
+import org.apache.kafka.clients.admin.ReplicaInfo;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.utils.Exit;
@@ -28,10 +28,22 @@ import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.server.util.CommandDefaultOptions;
 import org.apache.kafka.server.util.CommandLineUtils;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.io.IOException;
-import java.util.*;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import joptsimple.OptionSpec;
+import joptsimple.OptionSpecBuilder;
 
 public class LogDirsCommand {
 
@@ -70,13 +82,19 @@ public class LogDirsCommand {
         nonExistingBrokers.removeAll(clusterBrokers);
 
         if (!nonExistingBrokers.isEmpty()) {
-            throw new TerseException(String.format("ERROR: The given brokers do not exist from --broker-list: %s. Current existent brokers: %s", commaDelimitedStringFromIntegerSet(nonExistingBrokers), commaDelimitedStringFromIntegerSet(clusterBrokers)));
+            throw new TerseException(
+                    String.format(
+                            "ERROR: The given brokers do not exist from --broker-list: %s. Current existent brokers: %s",
+                            commaDelimitedStringFromIntegerSet(nonExistingBrokers),
+                            commaDelimitedStringFromIntegerSet(clusterBrokers)));
         } else {
             System.out.println("Querying brokers for log directories information");
             DescribeLogDirsResult describeLogDirsResult = adminClient.describeLogDirs(existingBrokers);
             Map<Integer, Map<String, LogDirDescription>> logDirInfosByBroker = describeLogDirsResult.allDescriptions().get();
 
-            System.out.printf("Received log directory information from brokers %s%n", commaDelimitedStringFromIntegerSet(existingBrokers));
+            System.out.printf(
+                    "Received log directory information from brokers %s%n",
+                    commaDelimitedStringFromIntegerSet(existingBrokers));
             System.out.println(formatAsJson(logDirInfosByBroker, topics));
         }
     }
@@ -89,11 +107,11 @@ public class LogDirsCommand {
         return replicasInfo.entrySet().stream().map(entry -> {
             TopicPartition topicPartition = entry.getKey();
             return new HashMap<String, Object>() {{
-                put("partition", topicPartition.toString());
-                put("size", entry.getValue().size());
-                put("offsetLag", entry.getValue().offsetLag());
-                put("isFuture", entry.getValue().isFuture());
-            }};
+                    put("partition", topicPartition.toString());
+                    put("size", entry.getValue().size());
+                    put("offsetLag", entry.getValue().offsetLag());
+                    put("isFuture", entry.getValue().isFuture());
+                }};
         }).collect(Collectors.toList());
     }
 
@@ -101,28 +119,30 @@ public class LogDirsCommand {
         return logDirInfos.entrySet().stream().map(entry -> {
             String logDir = entry.getKey();
             return new HashMap<String, Object>() {{
-                put("logDir", logDir);
-                put("error", entry.getValue().error() != null ? entry.getValue().error().getClass().getName() : null);
-                put("partitions", fromReplicasInfoToPrintableRepresentation(entry.getValue().replicaInfos().entrySet().stream().filter(entry -> {
-                    TopicPartition topicPartition = entry.getKey();
-                    return topicSet.isEmpty() || topicSet.contains(topicPartition.topic());
-                }).collect(Collectors.toMap(Entry::getKey, Entry::getValue))));
-            }};
+                    put("logDir", logDir);
+                    put("error", entry.getValue().error() != null ? entry.getValue().error().getClass().getName() : null);
+                    put("partitions", fromReplicasInfoToPrintableRepresentation(
+                            entry.getValue().replicaInfos().entrySet().stream().filter(entry -> {
+                                TopicPartition topicPartition = entry.getKey();
+                                return topicSet.isEmpty() || topicSet.contains(topicPartition.topic());
+                            }).collect(Collectors.toMap(Entry::getKey, Entry::getValue))
+                    ));
+                }};
         }).collect(Collectors.toList());
     }
 
     private static String formatAsJson(Map<Integer, Map<String, LogDirDescription>> logDirInfosByBroker, Set<String> topicSet) throws JsonProcessingException {
         return new ObjectMapper().writeValueAsString(new HashMap<String, Object>() {{
-            put("version", 1);
-            put("brokers", logDirInfosByBroker.entrySet().stream().map(entry -> {
-                int broker = entry.getKey();
-                Map<String, LogDirDescription> logDirInfos = entry.getValue();
-                return new HashMap<String, Object>() {{
-                    put("broker", broker);
-                    put("logDirs", fromLogDirInfosToPrintableRepresentation(logDirInfos, topicSet));
-                }};
-            }).collect(Collectors.toList()));
-        }});
+                put("version", 1);
+                put("brokers", logDirInfosByBroker.entrySet().stream().map(entry -> {
+                    int broker = entry.getKey();
+                    Map<String, LogDirDescription> logDirInfos = entry.getValue();
+                    return new HashMap<String, Object>() {{
+                            put("broker", broker);
+                            put("logDirs", fromLogDirInfosToPrintableRepresentation(logDirInfos, topicSet));
+                        }};
+                }).collect(Collectors.toList()));
+            }});
     }
 
     private static Admin createAdminClient(LogDirsCommandOptions options) throws IOException {
@@ -146,11 +166,27 @@ public class LogDirsCommand {
         public LogDirsCommandOptions(String... args) {
             super(args);
 
-            bootstrapServerOpt = parser.accepts("bootstrap-server", "REQUIRED: the server(s) to use for bootstrapping").withRequiredArg().describedAs("The server(s) to use for bootstrapping").ofType(String.class);
-            commandConfigOpt = parser.accepts("command-config", "Property file containing configs to be passed to Admin Client.").withRequiredArg().describedAs("Admin client property file").ofType(String.class);
+            bootstrapServerOpt = parser.accepts("bootstrap-server", "REQUIRED: the server(s) to use for bootstrapping")
+                    .withRequiredArg()
+                    .describedAs("The server(s) to use for bootstrapping")
+                    .ofType(String.class);
+            commandConfigOpt = parser.accepts("command-config", "Property file containing configs to be passed to Admin Client.")
+                    .withRequiredArg()
+                    .describedAs("Admin client property file")
+                    .ofType(String.class);
             describeOpt = parser.accepts("describe", "Describe the specified log directories on the specified brokers.");
-            topicListOpt = parser.accepts("topic-list", "The list of topics to be queried in the form \"topic1,topic2,topic3\". " + "All topics will be queried if no topic list is specified").withRequiredArg().describedAs("Topic list").defaultsTo("").ofType(String.class);
-            brokerListOpt = parser.accepts("broker-list", "The list of brokers to be queried in the form \"0,1,2\". " + "All brokers in the cluster will be queried if no broker list is specified").withRequiredArg().describedAs("Broker list").ofType(String.class).defaultsTo("");
+            topicListOpt = parser.accepts("topic-list", "The list of topics to be queried in the form \"topic1,topic2,topic3\". " +
+                            "All topics will be queried if no topic list is specified")
+                    .withRequiredArg()
+                    .describedAs("Topic list")
+                    .defaultsTo("")
+                    .ofType(String.class);
+            brokerListOpt = parser.accepts("broker-list", "The list of brokers to be queried in the form \"0,1,2\". " +
+                            "All brokers in the cluster will be queried if no broker list is specified")
+                    .withRequiredArg()
+                    .describedAs("Broker list")
+                    .ofType(String.class)
+                    .defaultsTo("");
 
             options = parser.parse(args);
 

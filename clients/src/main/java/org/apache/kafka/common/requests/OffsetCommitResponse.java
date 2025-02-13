@@ -33,19 +33,23 @@ import java.util.function.Function;
 
 /**
  * Possible error codes:
- * <p>
- * - {@link Errors#UNKNOWN_TOPIC_OR_PARTITION}
- * - {@link Errors#REQUEST_TIMED_OUT}
- * - {@link Errors#OFFSET_METADATA_TOO_LARGE}
- * - {@link Errors#COORDINATOR_LOAD_IN_PROGRESS}
- * - {@link Errors#COORDINATOR_NOT_AVAILABLE}
- * - {@link Errors#NOT_COORDINATOR}
- * - {@link Errors#ILLEGAL_GENERATION}
- * - {@link Errors#UNKNOWN_MEMBER_ID}
- * - {@link Errors#REBALANCE_IN_PROGRESS}
- * - {@link Errors#INVALID_COMMIT_OFFSET_SIZE}
- * - {@link Errors#TOPIC_AUTHORIZATION_FAILED}
- * - {@link Errors#GROUP_AUTHORIZATION_FAILED}
+ *
+ *   - {@link Errors#UNKNOWN_TOPIC_OR_PARTITION}
+ *   - {@link Errors#REQUEST_TIMED_OUT}
+ *   - {@link Errors#OFFSET_METADATA_TOO_LARGE}
+ *   - {@link Errors#COORDINATOR_LOAD_IN_PROGRESS}
+ *   - {@link Errors#COORDINATOR_NOT_AVAILABLE}
+ *   - {@link Errors#NOT_COORDINATOR}
+ *   - {@link Errors#ILLEGAL_GENERATION}
+ *   - {@link Errors#UNKNOWN_MEMBER_ID}
+ *   - {@link Errors#REBALANCE_IN_PROGRESS}
+ *   - {@link Errors#INVALID_COMMIT_OFFSET_SIZE}
+ *   - {@link Errors#TOPIC_AUTHORIZATION_FAILED}
+ *   - {@link Errors#GROUP_AUTHORIZATION_FAILED}
+ *   - {@link Errors#INVALID_PRODUCER_ID_MAPPING}
+ *   - {@link Errors#INVALID_TXN_STATE}
+ *   - {@link Errors#GROUP_ID_NOT_FOUND}
+ *   - {@link Errors#STALE_MEMBER_EPOCH}
  */
 public class OffsetCommitResponse extends AbstractResponse {
 
@@ -53,28 +57,28 @@ public class OffsetCommitResponse extends AbstractResponse {
 
     public OffsetCommitResponse(OffsetCommitResponseData data) {
         super(ApiKeys.OFFSET_COMMIT);
-		this.data = data;
-	}
+        this.data = data;
+    }
 
-	public OffsetCommitResponse(int requestThrottleMs, Map<TopicPartition, Errors> responseData) {
+    public OffsetCommitResponse(int requestThrottleMs, Map<TopicPartition, Errors> responseData) {
         super(ApiKeys.OFFSET_COMMIT);
-		Map<String, OffsetCommitResponseTopic>
-				responseTopicDataMap = new HashMap<>();
+        Map<String, OffsetCommitResponseTopic>
+                responseTopicDataMap = new HashMap<>();
 
-		for (Map.Entry<TopicPartition, Errors> entry : responseData.entrySet()) {
-			TopicPartition topicPartition = entry.getKey();
-			String topicName = topicPartition.topic();
+        for (Map.Entry<TopicPartition, Errors> entry : responseData.entrySet()) {
+            TopicPartition topicPartition = entry.getKey();
+            String topicName = topicPartition.topic();
 
-			OffsetCommitResponseTopic topic = responseTopicDataMap.getOrDefault(
-					topicName, new OffsetCommitResponseTopic().setName(topicName));
+            OffsetCommitResponseTopic topic = responseTopicDataMap.getOrDefault(
+                topicName, new OffsetCommitResponseTopic().setName(topicName));
 
-			topic.partitions().add(new OffsetCommitResponsePartition()
-					.setErrorCode(entry.getValue().code())
-					.setPartitionIndex(topicPartition.partition()));
-			responseTopicDataMap.put(topicName, topic);
-		}
+            topic.partitions().add(new OffsetCommitResponsePartition()
+                                       .setErrorCode(entry.getValue().code())
+                                       .setPartitionIndex(topicPartition.partition()));
+            responseTopicDataMap.put(topicName, topic);
+        }
 
-		data = new OffsetCommitResponseData()
+        data = new OffsetCommitResponseData()
                 .setTopics(new ArrayList<>(responseTopicDataMap.values()))
                 .setThrottleTimeMs(requestThrottleMs);
     }
@@ -91,13 +95,13 @@ public class OffsetCommitResponse extends AbstractResponse {
     @Override
     public Map<Errors, Integer> errorCounts() {
         return errorCounts(data.topics().stream().flatMap(topicResult ->
-				topicResult.partitions().stream().map(partitionResult ->
-						Errors.forCode(partitionResult.errorCode()))));
-	}
+                topicResult.partitions().stream().map(partitionResult ->
+                        Errors.forCode(partitionResult.errorCode()))));
+    }
 
-	public static OffsetCommitResponse parse(ByteBuffer buffer, short version) {
+    public static OffsetCommitResponse parse(ByteBuffer buffer, short version) {
         return new OffsetCommitResponse(new OffsetCommitResponseData(new ByteBufferAccessor(buffer), version));
-	}
+    }
 
     @Override
     public String toString() {
@@ -123,7 +127,9 @@ public class OffsetCommitResponse extends AbstractResponse {
         OffsetCommitResponseData data = new OffsetCommitResponseData();
         HashMap<String, OffsetCommitResponseTopic> byTopicName = new HashMap<>();
 
-        private OffsetCommitResponseTopic getOrCreateTopic(String topicName) {
+        private OffsetCommitResponseTopic getOrCreateTopic(
+            String topicName
+        ) {
             OffsetCommitResponseTopic topic = byTopicName.get(topicName);
             if (topic == null) {
                 topic = new OffsetCommitResponseTopic().setName(topicName);
@@ -133,25 +139,38 @@ public class OffsetCommitResponse extends AbstractResponse {
             return topic;
         }
 
-        public Builder addPartition(String topicName, int partitionIndex, Errors error) {
+        public Builder addPartition(
+            String topicName,
+            int partitionIndex,
+            Errors error
+        ) {
             final OffsetCommitResponseTopic topicResponse = getOrCreateTopic(topicName);
 
-            topicResponse.partitions().add(new OffsetCommitResponsePartition().setPartitionIndex(partitionIndex).setErrorCode(error.code()));
+            topicResponse.partitions().add(new OffsetCommitResponsePartition()
+                .setPartitionIndex(partitionIndex)
+                .setErrorCode(error.code()));
 
             return this;
         }
 
-        public <P> Builder addPartitions(String topicName, List<P> partitions, Function<P, Integer> partitionIndex, Errors error) {
+        public <P> Builder addPartitions(
+            String topicName,
+            List<P> partitions,
+            Function<P, Integer> partitionIndex,
+            Errors error
+        ) {
             final OffsetCommitResponseTopic topicResponse = getOrCreateTopic(topicName);
-
-            partitions.forEach(partition -> {
-                topicResponse.partitions().add(new OffsetCommitResponsePartition().setPartitionIndex(partitionIndex.apply(partition)).setErrorCode(error.code()));
-            });
-
+            partitions.forEach(partition ->
+                topicResponse.partitions().add(new OffsetCommitResponsePartition()
+                    .setPartitionIndex(partitionIndex.apply(partition))
+                    .setErrorCode(error.code()))
+            );
             return this;
         }
 
-        public Builder merge(OffsetCommitResponseData newData) {
+        public Builder merge(
+            OffsetCommitResponseData newData
+        ) {
             if (data.topics().isEmpty()) {
                 // If the current data is empty, we can discard it and use the new data.
                 data = newData;

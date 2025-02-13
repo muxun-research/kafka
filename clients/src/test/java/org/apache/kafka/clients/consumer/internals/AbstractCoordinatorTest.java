@@ -16,33 +16,76 @@
  */
 package org.apache.kafka.clients.consumer.internals;
 
+import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.GroupRebalanceConfig;
 import org.apache.kafka.clients.MockClient;
-import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.Node;
-import org.apache.kafka.common.errors.*;
+import org.apache.kafka.common.errors.AuthenticationException;
+import org.apache.kafka.common.errors.DisconnectException;
+import org.apache.kafka.common.errors.FencedInstanceIdException;
+import org.apache.kafka.common.errors.GroupMaxSizeReachedException;
+import org.apache.kafka.common.errors.InconsistentGroupProtocolException;
+import org.apache.kafka.common.errors.UnknownMemberIdException;
+import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.internals.ClusterResourceListeners;
-import org.apache.kafka.common.message.*;
+import org.apache.kafka.common.message.HeartbeatResponseData;
+import org.apache.kafka.common.message.JoinGroupRequestData;
+import org.apache.kafka.common.message.JoinGroupResponseData;
+import org.apache.kafka.common.message.LeaveGroupRequestData;
+import org.apache.kafka.common.message.LeaveGroupResponseData;
 import org.apache.kafka.common.message.LeaveGroupResponseData.MemberResponse;
+import org.apache.kafka.common.message.SyncGroupRequestData;
+import org.apache.kafka.common.message.SyncGroupResponseData;
 import org.apache.kafka.common.metrics.KafkaMetric;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.Errors;
-import org.apache.kafka.common.requests.*;
+import org.apache.kafka.common.requests.AbstractRequest;
+import org.apache.kafka.common.requests.FindCoordinatorResponse;
+import org.apache.kafka.common.requests.HeartbeatRequest;
+import org.apache.kafka.common.requests.HeartbeatResponse;
+import org.apache.kafka.common.requests.JoinGroupRequest;
+import org.apache.kafka.common.requests.JoinGroupResponse;
+import org.apache.kafka.common.requests.LeaveGroupRequest;
+import org.apache.kafka.common.requests.LeaveGroupResponse;
+import org.apache.kafka.common.requests.RequestTestUtils;
+import org.apache.kafka.common.requests.SyncGroupRequest;
+import org.apache.kafka.common.requests.SyncGroupResponse;
+import org.apache.kafka.common.test.api.Flaky;
+import org.apache.kafka.common.utils.LogContext;
+import org.apache.kafka.common.utils.MockTime;
+import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Timer;
 import org.apache.kafka.common.utils.Utils;
-import org.apache.kafka.common.utils.*;
 import org.apache.kafka.test.TestUtils;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static java.util.Collections.emptyMap;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class AbstractCoordinatorTest {
     private static final ByteBuffer EMPTY_DATA = ByteBuffer.wrap(new byte[0]);
@@ -50,6 +93,7 @@ public class AbstractCoordinatorTest {
     private static final int SESSION_TIMEOUT_MS = 10000;
     private static final int HEARTBEAT_INTERVAL_MS = 3000;
     private static final int RETRY_BACKOFF_MS = 100;
+    private static final int RETRY_BACKOFF_MAX_MS = 1000;
     private static final int REQUEST_TIMEOUT_MS = 40000;
     private static final String GROUP_ID = "dummy-group";
     private static final String METRIC_GROUP_PREFIX = "consumer";
@@ -75,28 +119,48 @@ public class AbstractCoordinatorTest {
     }
 
     private void setupCoordinator() {
-        setupCoordinator(RETRY_BACKOFF_MS, REBALANCE_TIMEOUT_MS, Optional.empty());
+        setupCoordinator(RETRY_BACKOFF_MS, RETRY_BACKOFF_MAX_MS, REBALANCE_TIMEOUT_MS,
+            Optional.empty());
     }
 
-    private void setupCoordinator(int retryBackoffMs) {
-        setupCoordinator(retryBackoffMs, REBALANCE_TIMEOUT_MS, Optional.empty());
+    private void setupCoordinator(int retryBackoffMs, int retryBackoffMaxMs) {
+        setupCoordinator(retryBackoffMs, retryBackoffMaxMs, REBALANCE_TIMEOUT_MS,
+            Optional.empty());
     }
 
-    private void setupCoordinator(int retryBackoffMs, int rebalanceTimeoutMs, Optional<String> groupInstanceId) {
+    private void setupCoordinator(int retryBackoffMs, int retryBackoffMaxMs, int rebalanceTimeoutMs, Optional<String> groupInstanceId) {
         LogContext logContext = new LogContext();
         this.mockTime = new MockTime();
-        ConsumerMetadata metadata = new ConsumerMetadata(retryBackoffMs, 60 * 60 * 1000L, false, false, new SubscriptionState(logContext, OffsetResetStrategy.EARLIEST), logContext, new ClusterResourceListeners());
+        ConsumerMetadata metadata = new ConsumerMetadata(retryBackoffMs, retryBackoffMaxMs, 60 * 60 * 1000L,
+                false, false, new SubscriptionState(logContext, AutoOffsetResetStrategy.EARLIEST),
+                logContext, new ClusterResourceListeners());
 
         this.mockClient = new MockClient(mockTime, metadata);
-        this.consumerClient = new ConsumerNetworkClient(logContext, mockClient, metadata, mockTime, retryBackoffMs, REQUEST_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS);
+        this.consumerClient = new ConsumerNetworkClient(logContext,
+                                                        mockClient,
+                                                        metadata,
+                                                        mockTime,
+                                                        retryBackoffMs,
+                                                        REQUEST_TIMEOUT_MS,
+                                                        HEARTBEAT_INTERVAL_MS);
         metrics = new Metrics(mockTime);
 
         mockClient.updateMetadata(RequestTestUtils.metadataUpdateWith(1, emptyMap()));
         this.node = metadata.fetch().nodes().get(0);
         this.coordinatorNode = new Node(Integer.MAX_VALUE - node.id(), node.host(), node.port());
 
-        GroupRebalanceConfig rebalanceConfig = new GroupRebalanceConfig(SESSION_TIMEOUT_MS, rebalanceTimeoutMs, HEARTBEAT_INTERVAL_MS, GROUP_ID, groupInstanceId, retryBackoffMs, !groupInstanceId.isPresent());
-        this.coordinator = new DummyCoordinator(rebalanceConfig, consumerClient, metrics, mockTime);
+        GroupRebalanceConfig rebalanceConfig = new GroupRebalanceConfig(SESSION_TIMEOUT_MS,
+                                                                        rebalanceTimeoutMs,
+                                                                        HEARTBEAT_INTERVAL_MS,
+                                                                        GROUP_ID,
+                                                                        groupInstanceId,
+                                                                        retryBackoffMs,
+                                                                        retryBackoffMaxMs,
+                                                                        groupInstanceId.isEmpty());
+        this.coordinator = new DummyCoordinator(rebalanceConfig,
+                                                consumerClient,
+                                                metrics,
+                                                mockTime);
     }
 
     private void joinGroup() {
@@ -196,21 +260,34 @@ public class AbstractCoordinatorTest {
     }
 
     @Test
-    public void testCoordinatorDiscoveryBackoff() {
-        setupCoordinator();
+    public void testCoordinatorDiscoveryExponentialBackoff() {
+        // With exponential backoff, we will get retries at 10, 20, 40, 80, 100 ms (with jitter)
+        int shortRetryBackoffMs = 10;
+        int shortRetryBackoffMaxMs = 100;
+        setupCoordinator(shortRetryBackoffMs, shortRetryBackoffMaxMs);
 
-        mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
-        mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
+        for (int i = 0; i < 5; i++) {
+            mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
+        }
 
-        // cut out the coordinator for 10 milliseconds to simulate a disconnect.
+        // cut out the coordinator for 100 milliseconds to simulate a disconnect.
         // after backing off, we should be able to connect.
-        mockClient.backoff(coordinatorNode, 10L);
+        mockClient.backoff(coordinatorNode, 100L);
 
         long initialTime = mockTime.milliseconds();
         coordinator.ensureCoordinatorReady(mockTime.timer(Long.MAX_VALUE));
         long endTime = mockTime.milliseconds();
 
-        assertTrue(endTime - initialTime >= RETRY_BACKOFF_MS);
+        long lowerBoundBackoffMs = 0;
+        long upperBoundBackoffMs = 0;
+        for (int i = 0; i < 4; i++) {
+            lowerBoundBackoffMs += (long) (shortRetryBackoffMs * Math.pow(CommonClientConfigs.RETRY_BACKOFF_EXP_BASE, i) * (1 - CommonClientConfigs.RETRY_BACKOFF_JITTER));
+            upperBoundBackoffMs += (long) (shortRetryBackoffMs * Math.pow(CommonClientConfigs.RETRY_BACKOFF_EXP_BASE, i) * (1 + CommonClientConfigs.RETRY_BACKOFF_JITTER));
+        }
+
+        long timeElapsed = endTime - initialTime;
+        assertTrue(timeElapsed >= lowerBoundBackoffMs);
+        assertTrue(timeElapsed <= upperBoundBackoffMs + shortRetryBackoffMs);
     }
 
     @Test
@@ -223,9 +300,9 @@ public class AbstractCoordinatorTest {
         coordinator.ensureCoordinatorReadyAsync();
 
         // But should wakeup in sync variation even if timer is 0.
-        assertThrows(WakeupException.class, () -> {
-            coordinator.ensureCoordinatorReady(mockTime.timer(0));
-        });
+        assertThrows(WakeupException.class, () ->
+            coordinator.ensureCoordinatorReady(mockTime.timer(0))
+        );
     }
 
     @Test
@@ -266,13 +343,14 @@ public class AbstractCoordinatorTest {
 
         RequestFuture<ByteBuffer> future = coordinator.sendJoinGroupRequest();
         assertTrue(consumerClient.poll(future, mockTime.timer(REQUEST_TIMEOUT_MS)));
-        assertTrue(future.exception().getClass().isInstance(Errors.GROUP_MAX_SIZE_REACHED.exception()));
+        assertInstanceOf(future.exception().getClass(), Errors.GROUP_MAX_SIZE_REACHED.exception());
         assertFalse(future.isRetriable());
     }
 
     @Test
     public void testJoinGroupRequestTimeout() {
-        setupCoordinator(RETRY_BACKOFF_MS, REBALANCE_TIMEOUT_MS, Optional.empty());
+        setupCoordinator(RETRY_BACKOFF_MS, RETRY_BACKOFF_MAX_MS, REBALANCE_TIMEOUT_MS,
+            Optional.empty());
         mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
         coordinator.ensureCoordinatorReady(mockTime.timer(0));
 
@@ -283,13 +361,13 @@ public class AbstractCoordinatorTest {
 
         mockTime.sleep(REBALANCE_TIMEOUT_MS - REQUEST_TIMEOUT_MS + AbstractCoordinator.JOIN_GROUP_TIMEOUT_LAPSE);
         assertTrue(consumerClient.poll(future, mockTime.timer(0)));
-        assertTrue(future.exception() instanceof DisconnectException);
+        assertInstanceOf(DisconnectException.class, future.exception());
     }
 
     @Test
     public void testJoinGroupRequestTimeoutLowerBoundedByDefaultRequestTimeout() {
         int rebalanceTimeoutMs = REQUEST_TIMEOUT_MS - 10000;
-        setupCoordinator(RETRY_BACKOFF_MS, rebalanceTimeoutMs, Optional.empty());
+        setupCoordinator(RETRY_BACKOFF_MS, RETRY_BACKOFF_MAX_MS, rebalanceTimeoutMs, Optional.empty());
         mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
         coordinator.ensureCoordinatorReady(mockTime.timer(0));
 
@@ -301,14 +379,15 @@ public class AbstractCoordinatorTest {
 
         mockTime.sleep(expectedRequestDeadline - mockTime.milliseconds() + 1);
         assertTrue(consumerClient.poll(future, mockTime.timer(0)));
-        assertTrue(future.exception() instanceof DisconnectException);
+        assertInstanceOf(DisconnectException.class, future.exception());
     }
 
     @Test
     public void testJoinGroupRequestMaxTimeout() {
         // Ensure we can handle the maximum allowed rebalance timeout
 
-        setupCoordinator(RETRY_BACKOFF_MS, Integer.MAX_VALUE, Optional.empty());
+        setupCoordinator(RETRY_BACKOFF_MS, RETRY_BACKOFF_MAX_MS, Integer.MAX_VALUE,
+            Optional.empty());
         mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
         coordinator.ensureCoordinatorReady(mockTime.timer(0));
 
@@ -372,17 +451,20 @@ public class AbstractCoordinatorTest {
         assertTrue(joinGroupWithProtocolTypeAndName(PROTOCOL_TYPE, PROTOCOL_TYPE, PROTOCOL_NAME));
 
         // Wrong protocol type in the JoinGroupResponse
-        assertThrows(InconsistentGroupProtocolException.class, () -> joinGroupWithProtocolTypeAndName("wrong", null, null));
+        assertThrows(InconsistentGroupProtocolException.class,
+            () -> joinGroupWithProtocolTypeAndName("wrong", null, null));
 
         // Correct protocol type in the JoinGroupResponse
         // Wrong protocol type in the SyncGroupResponse
         // Correct protocol name in the SyncGroupResponse
-        assertThrows(InconsistentGroupProtocolException.class, () -> joinGroupWithProtocolTypeAndName(PROTOCOL_TYPE, wrongProtocolType, PROTOCOL_NAME));
+        assertThrows(InconsistentGroupProtocolException.class,
+            () -> joinGroupWithProtocolTypeAndName(PROTOCOL_TYPE, wrongProtocolType, PROTOCOL_NAME));
 
         // Correct protocol type in the JoinGroupResponse
         // Correct protocol type in the SyncGroupResponse
         // Wrong protocol name in the SyncGroupResponse
-        assertThrows(InconsistentGroupProtocolException.class, () -> joinGroupWithProtocolTypeAndName(PROTOCOL_TYPE, PROTOCOL_TYPE, wrongProtocolName));
+        assertThrows(InconsistentGroupProtocolException.class,
+            () -> joinGroupWithProtocolTypeAndName(PROTOCOL_TYPE, PROTOCOL_TYPE, wrongProtocolName));
     }
 
     @Test
@@ -466,7 +548,8 @@ public class AbstractCoordinatorTest {
         // max group size reached
         mockClient.prepareResponse(joinGroupFollowerResponse(defaultGeneration, memberId, JoinGroupRequest.UNKNOWN_MEMBER_ID, Errors.GROUP_MAX_SIZE_REACHED));
         coordinator.requestRejoin("Manual test trigger 2");
-        Throwable e = assertThrows(GroupMaxSizeReachedException.class, () -> coordinator.joinGroupIfNeeded(mockTime.timer(100L)));
+        Throwable e = assertThrows(GroupMaxSizeReachedException.class,
+                () -> coordinator.joinGroupIfNeeded(mockTime.timer(100L)));
 
         // next join group request should contain exception message
         expectJoinGroup(memberId, String.format("rebalance failed due to %s", e.getClass().getSimpleName()), generation, memberId);
@@ -484,49 +567,82 @@ public class AbstractCoordinatorTest {
         assertEquals("", coordinator.rejoinReason());
     }
 
-    private void ensureActiveGroup(int generation, String memberId) {
+    private void ensureActiveGroup(
+        int generation,
+        String memberId
+    ) {
         coordinator.ensureActiveGroup();
         assertEquals(generation, coordinator.generation().generationId);
         assertEquals(memberId, coordinator.generation().memberId);
         assertFalse(coordinator.rejoinNeededOrPending());
     }
 
-    private void expectSyncGroup(int expectedGeneration, String expectedMemberId) {
+    private void expectSyncGroup(
+        int expectedGeneration,
+        String expectedMemberId
+    ) {
         mockClient.prepareResponse(body -> {
             if (!(body instanceof SyncGroupRequest)) {
                 return false;
             }
             SyncGroupRequestData syncGroupRequest = ((SyncGroupRequest) body).data();
-            return syncGroupRequest.generationId() == expectedGeneration && syncGroupRequest.memberId().equals(expectedMemberId) && syncGroupRequest.protocolType().equals(PROTOCOL_TYPE) && syncGroupRequest.protocolName().equals(PROTOCOL_NAME);
+            return syncGroupRequest.generationId() == expectedGeneration
+                && syncGroupRequest.memberId().equals(expectedMemberId)
+                && syncGroupRequest.protocolType().equals(PROTOCOL_TYPE)
+                && syncGroupRequest.protocolName().equals(PROTOCOL_NAME);
         }, syncGroupResponse(Errors.NONE, PROTOCOL_TYPE, PROTOCOL_NAME));
     }
 
-    private void expectDisconnectInSyncGroup(int expectedGeneration, String expectedMemberId) {
+    private void expectDisconnectInSyncGroup(
+        int expectedGeneration,
+        String expectedMemberId
+    ) {
         mockClient.prepareResponse(body -> {
             if (!(body instanceof SyncGroupRequest)) {
                 return false;
             }
             SyncGroupRequestData syncGroupRequest = ((SyncGroupRequest) body).data();
-            return syncGroupRequest.generationId() == expectedGeneration && syncGroupRequest.memberId().equals(expectedMemberId) && syncGroupRequest.protocolType().equals(PROTOCOL_TYPE) && syncGroupRequest.protocolName().equals(PROTOCOL_NAME);
+            return syncGroupRequest.generationId() == expectedGeneration
+                && syncGroupRequest.memberId().equals(expectedMemberId)
+                && syncGroupRequest.protocolType().equals(PROTOCOL_TYPE)
+                && syncGroupRequest.protocolName().equals(PROTOCOL_NAME);
         }, null, true);
     }
 
-    private void expectDisconnectInJoinGroup(String expectedMemberId) {
+    private void expectDisconnectInJoinGroup(
+        String expectedMemberId
+    ) {
         mockClient.prepareResponse(body -> {
             if (!(body instanceof JoinGroupRequest)) {
                 return false;
             }
             JoinGroupRequestData joinGroupRequest = ((JoinGroupRequest) body).data();
-            return joinGroupRequest.memberId().equals(expectedMemberId) && joinGroupRequest.protocolType().equals(PROTOCOL_TYPE);
+            return joinGroupRequest.memberId().equals(expectedMemberId)
+                && joinGroupRequest.protocolType().equals(PROTOCOL_TYPE);
         }, null, true);
     }
 
-    private void expectJoinGroup(String expectedMemberId, int responseGeneration, String responseMemberId) {
+    private void expectJoinGroup(
+        String expectedMemberId,
+        int responseGeneration,
+        String responseMemberId
+    ) {
         expectJoinGroup(expectedMemberId, null, responseGeneration, responseMemberId);
     }
 
-    private void expectJoinGroup(String expectedMemberId, String expectedReason, int responseGeneration, String responseMemberId) {
-        JoinGroupResponse response = joinGroupFollowerResponse(responseGeneration, responseMemberId, "leaderId", Errors.NONE, PROTOCOL_TYPE);
+    private void expectJoinGroup(
+        String expectedMemberId,
+        String expectedReason,
+        int responseGeneration,
+        String responseMemberId
+    ) {
+        JoinGroupResponse response = joinGroupFollowerResponse(
+            responseGeneration,
+            responseMemberId,
+            "leaderId",
+            Errors.NONE,
+            PROTOCOL_TYPE
+        );
 
         mockClient.prepareResponse(body -> {
             if (!(body instanceof JoinGroupRequest)) {
@@ -536,7 +652,9 @@ public class AbstractCoordinatorTest {
             // abstract coordinator never sets reason to null
             String actualReason = joinGroupRequest.reason();
             boolean isReasonMatching = expectedReason == null || expectedReason.equals(actualReason);
-            return joinGroupRequest.memberId().equals(expectedMemberId) && joinGroupRequest.protocolType().equals(PROTOCOL_TYPE) && isReasonMatching;
+            return joinGroupRequest.memberId().equals(expectedMemberId)
+                && joinGroupRequest.protocolType().equals(PROTOCOL_TYPE)
+                && isReasonMatching;
         }, response);
     }
 
@@ -555,7 +673,8 @@ public class AbstractCoordinatorTest {
             }
             JoinGroupRequest joinGroupRequest = (JoinGroupRequest) body;
             return joinGroupRequest.data().protocolType().equals(PROTOCOL_TYPE);
-        }, joinGroupFollowerResponse(defaultGeneration, memberId, "memberid", Errors.NONE, PROTOCOL_TYPE));
+        }, joinGroupFollowerResponse(defaultGeneration, memberId,
+            "memberid", Errors.NONE, PROTOCOL_TYPE));
 
         mockClient.prepareResponse(body -> {
             if (!(body instanceof SyncGroupRequest)) {
@@ -564,7 +683,8 @@ public class AbstractCoordinatorTest {
             coordinator.resetGenerationOnLeaveGroup();
 
             SyncGroupRequest syncGroupRequest = (SyncGroupRequest) body;
-            return syncGroupRequest.data().protocolType().equals(PROTOCOL_TYPE) && syncGroupRequest.data().protocolName().equals(PROTOCOL_NAME);
+            return syncGroupRequest.data().protocolType().equals(PROTOCOL_TYPE)
+                       && syncGroupRequest.data().protocolName().equals(PROTOCOL_NAME);
         }, syncGroupResponse(Errors.NONE, PROTOCOL_TYPE, wrongProtocolName));
 
         // let the retry to complete successfully to break out of the while loop
@@ -574,7 +694,8 @@ public class AbstractCoordinatorTest {
             }
             JoinGroupRequest joinGroupRequest = (JoinGroupRequest) body;
             return joinGroupRequest.data().protocolType().equals(PROTOCOL_TYPE);
-        }, joinGroupFollowerResponse(1, memberId, "memberid", Errors.NONE, PROTOCOL_TYPE));
+        }, joinGroupFollowerResponse(1, memberId,
+                "memberid", Errors.NONE, PROTOCOL_TYPE));
 
         mockClient.prepareResponse(body -> {
             if (!(body instanceof SyncGroupRequest)) {
@@ -582,14 +703,17 @@ public class AbstractCoordinatorTest {
             }
 
             SyncGroupRequest syncGroupRequest = (SyncGroupRequest) body;
-            return syncGroupRequest.data().protocolType().equals(PROTOCOL_TYPE) && syncGroupRequest.data().protocolName().equals(PROTOCOL_NAME);
+            return syncGroupRequest.data().protocolType().equals(PROTOCOL_TYPE)
+                    && syncGroupRequest.data().protocolName().equals(PROTOCOL_NAME);
         }, syncGroupResponse(Errors.NONE, PROTOCOL_TYPE, PROTOCOL_NAME));
 
         // No exception shall be thrown as the generation is reset.
         coordinator.joinGroupIfNeeded(mockTime.timer(100L));
     }
 
-    private boolean joinGroupWithProtocolTypeAndName(String joinGroupResponseProtocolType, String syncGroupResponseProtocolType, String syncGroupResponseProtocolName) {
+    private boolean joinGroupWithProtocolTypeAndName(String joinGroupResponseProtocolType,
+                                                     String syncGroupResponseProtocolType,
+                                                     String syncGroupResponseProtocolName) {
         setupCoordinator();
         mockClient.reset();
         mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
@@ -601,14 +725,16 @@ public class AbstractCoordinatorTest {
             }
             JoinGroupRequest joinGroupRequest = (JoinGroupRequest) body;
             return joinGroupRequest.data().protocolType().equals(PROTOCOL_TYPE);
-        }, joinGroupFollowerResponse(defaultGeneration, memberId, "memberid", Errors.NONE, joinGroupResponseProtocolType));
+        }, joinGroupFollowerResponse(defaultGeneration, memberId,
+            "memberid", Errors.NONE, joinGroupResponseProtocolType));
 
         mockClient.prepareResponse(body -> {
             if (!(body instanceof SyncGroupRequest)) {
                 return false;
             }
             SyncGroupRequest syncGroupRequest = (SyncGroupRequest) body;
-            return syncGroupRequest.data().protocolType().equals(PROTOCOL_TYPE) && syncGroupRequest.data().protocolName().equals(PROTOCOL_NAME);
+            return syncGroupRequest.data().protocolType().equals(PROTOCOL_TYPE)
+                && syncGroupRequest.data().protocolName().equals(PROTOCOL_NAME);
         }, syncGroupResponse(Errors.NONE, syncGroupResponseProtocolType, syncGroupResponseProtocolName));
 
         return coordinator.joinGroupIfNeeded(mockTime.timer(5000L));
@@ -636,16 +762,20 @@ public class AbstractCoordinatorTest {
 
         RequestFuture<ByteBuffer> future = coordinator.sendJoinGroupRequest();
 
-        TestUtils.waitForCondition(() -> !mockClient.requests().isEmpty(), 2000, "The join-group request was not sent");
+        TestUtils.waitForCondition(() -> !mockClient.requests().isEmpty(), 2000,
+            "The join-group request was not sent");
 
         // change the generation after the join-group request
-        final AbstractCoordinator.Generation newGen = new AbstractCoordinator.Generation(currGen.generationId, currGen.memberId + "-new", currGen.protocolName);
+        final AbstractCoordinator.Generation newGen = new AbstractCoordinator.Generation(
+            currGen.generationId,
+            currGen.memberId + "-new",
+            currGen.protocolName);
         coordinator.setNewGeneration(newGen);
 
         mockClient.respond(joinGroupFollowerResponse(currGen.generationId + 1, memberId, JoinGroupRequest.UNKNOWN_MEMBER_ID, Errors.UNKNOWN_MEMBER_ID));
 
         assertTrue(consumerClient.poll(future, mockTime.timer(REQUEST_TIMEOUT_MS)));
-        assertTrue(future.exception().getClass().isInstance(Errors.UNKNOWN_MEMBER_ID.exception()));
+        assertInstanceOf(future.exception().getClass(), Errors.UNKNOWN_MEMBER_ID.exception());
 
         // the generation should not be reset
         assertEquals(newGen, coordinator.generation());
@@ -664,7 +794,8 @@ public class AbstractCoordinatorTest {
         TestUtils.waitForCondition(() -> {
             consumerClient.poll(mockTime.timer(REQUEST_TIMEOUT_MS));
             return !mockClient.requests().isEmpty();
-        }, 2000, "The join-group request was not sent");
+        }, 2000,
+            "The join-group request was not sent");
 
         mockClient.respond(joinGroupFollowerResponse(currGen.generationId, memberId, JoinGroupRequest.UNKNOWN_MEMBER_ID, Errors.NONE));
         assertTrue(mockClient.requests().isEmpty());
@@ -672,15 +803,19 @@ public class AbstractCoordinatorTest {
         TestUtils.waitForCondition(() -> {
             consumerClient.poll(mockTime.timer(REQUEST_TIMEOUT_MS));
             return !mockClient.requests().isEmpty();
-        }, 2000, "The sync-group request was not sent");
+        }, 2000,
+            "The sync-group request was not sent");
 
         // change the generation after the sync-group request
-        final AbstractCoordinator.Generation newGen = new AbstractCoordinator.Generation(currGen.generationId, currGen.memberId + "-new", currGen.protocolName);
+        final AbstractCoordinator.Generation newGen = new AbstractCoordinator.Generation(
+            currGen.generationId,
+            currGen.memberId + "-new",
+            currGen.protocolName);
         coordinator.setNewGeneration(newGen);
 
         mockClient.respond(syncGroupResponse(Errors.UNKNOWN_MEMBER_ID));
         assertTrue(consumerClient.poll(future, mockTime.timer(REQUEST_TIMEOUT_MS)));
-        assertTrue(future.exception().getClass().isInstance(Errors.UNKNOWN_MEMBER_ID.exception()));
+        assertInstanceOf(future.exception().getClass(), Errors.UNKNOWN_MEMBER_ID.exception());
 
         // the generation should not be reset
         assertEquals(newGen, coordinator.generation());
@@ -699,7 +834,8 @@ public class AbstractCoordinatorTest {
         TestUtils.waitForCondition(() -> {
             consumerClient.poll(mockTime.timer(REQUEST_TIMEOUT_MS));
             return !mockClient.requests().isEmpty();
-        }, 2000, "The join-group request was not sent");
+        }, 2000,
+            "The join-group request was not sent");
 
         mockClient.respond(joinGroupFollowerResponse(currGen.generationId, memberId, JoinGroupRequest.UNKNOWN_MEMBER_ID, Errors.NONE));
         assertTrue(mockClient.requests().isEmpty());
@@ -707,15 +843,19 @@ public class AbstractCoordinatorTest {
         TestUtils.waitForCondition(() -> {
             consumerClient.poll(mockTime.timer(REQUEST_TIMEOUT_MS));
             return !mockClient.requests().isEmpty();
-        }, 2000, "The sync-group request was not sent");
+        }, 2000,
+            "The sync-group request was not sent");
 
         // change the generation after the sync-group request
-        final AbstractCoordinator.Generation newGen = new AbstractCoordinator.Generation(currGen.generationId, currGen.memberId + "-new", currGen.protocolName);
+        final AbstractCoordinator.Generation newGen = new AbstractCoordinator.Generation(
+            currGen.generationId,
+            currGen.memberId + "-new",
+            currGen.protocolName);
         coordinator.setNewGeneration(newGen);
 
         mockClient.respond(syncGroupResponse(Errors.ILLEGAL_GENERATION));
         assertTrue(consumerClient.poll(future, mockTime.timer(REQUEST_TIMEOUT_MS)));
-        assertTrue(future.exception().getClass().isInstance(Errors.ILLEGAL_GENERATION.exception()));
+        assertInstanceOf(future.exception().getClass(), Errors.ILLEGAL_GENERATION.exception());
 
         // the generation should not be reset
         assertEquals(newGen, coordinator.generation());
@@ -732,7 +872,8 @@ public class AbstractCoordinatorTest {
 
         // the heartbeat should be sent out during a rebalance
         mockTime.sleep(HEARTBEAT_INTERVAL_MS);
-        TestUtils.waitForCondition(() -> !mockClient.requests().isEmpty(), 2000, "The heartbeat request was not sent");
+        TestUtils.waitForCondition(() -> !mockClient.requests().isEmpty(), 2000,
+                "The heartbeat request was not sent");
         assertTrue(coordinator.heartbeat().hasInflight());
 
         mockClient.respond(heartbeatResponse(Errors.REBALANCE_IN_PROGRESS));
@@ -749,11 +890,15 @@ public class AbstractCoordinatorTest {
         // let the heartbeat thread send out a request
         mockTime.sleep(HEARTBEAT_INTERVAL_MS);
 
-        TestUtils.waitForCondition(() -> !mockClient.requests().isEmpty(), 2000, "The heartbeat request was not sent");
+        TestUtils.waitForCondition(() -> !mockClient.requests().isEmpty(), 2000,
+            "The heartbeat request was not sent");
         assertTrue(coordinator.heartbeat().hasInflight());
 
         // change the generation
-        final AbstractCoordinator.Generation newGen = new AbstractCoordinator.Generation(currGen.generationId + 1, currGen.memberId, currGen.protocolName);
+        final AbstractCoordinator.Generation newGen = new AbstractCoordinator.Generation(
+            currGen.generationId + 1,
+            currGen.memberId,
+            currGen.protocolName);
         coordinator.setNewGeneration(newGen);
 
         mockClient.respond(heartbeatResponse(Errors.ILLEGAL_GENERATION));
@@ -762,7 +907,8 @@ public class AbstractCoordinatorTest {
         TestUtils.waitForCondition(() -> {
             coordinator.pollHeartbeat(mockTime.milliseconds());
             return !coordinator.heartbeat().hasInflight();
-        }, 2000, "The heartbeat response was not received");
+        }, 2000,
+            "The heartbeat response was not received");
 
         // the generation should not be reset
         assertEquals(newGen, coordinator.generation());
@@ -778,11 +924,15 @@ public class AbstractCoordinatorTest {
         // let the heartbeat request to send out a request
         mockTime.sleep(HEARTBEAT_INTERVAL_MS);
 
-        TestUtils.waitForCondition(() -> !mockClient.requests().isEmpty(), 2000, "The heartbeat request was not sent");
+        TestUtils.waitForCondition(() -> !mockClient.requests().isEmpty(), 2000,
+            "The heartbeat request was not sent");
         assertTrue(coordinator.heartbeat().hasInflight());
 
         // change the generation
-        final AbstractCoordinator.Generation newGen = new AbstractCoordinator.Generation(currGen.generationId, currGen.memberId + "-new", currGen.protocolName);
+        final AbstractCoordinator.Generation newGen = new AbstractCoordinator.Generation(
+            currGen.generationId,
+            currGen.memberId + "-new",
+            currGen.protocolName);
         coordinator.setNewGeneration(newGen);
 
         mockClient.respond(heartbeatResponse(Errors.UNKNOWN_MEMBER_ID));
@@ -791,7 +941,8 @@ public class AbstractCoordinatorTest {
         TestUtils.waitForCondition(() -> {
             coordinator.pollHeartbeat(mockTime.milliseconds());
             return !coordinator.heartbeat().hasInflight();
-        }, 2000, "The heartbeat response was not received");
+        }, 2000,
+            "The heartbeat response was not received");
 
         // the generation should not be reset
         assertEquals(newGen, coordinator.generation());
@@ -807,7 +958,8 @@ public class AbstractCoordinatorTest {
         // let the heartbeat request to send out a request
         mockTime.sleep(HEARTBEAT_INTERVAL_MS);
 
-        TestUtils.waitForCondition(() -> !mockClient.requests().isEmpty(), 2000, "The heartbeat request was not sent");
+        TestUtils.waitForCondition(() -> !mockClient.requests().isEmpty(), 2000,
+            "The heartbeat request was not sent");
 
         assertTrue(coordinator.heartbeat().hasInflight());
 
@@ -818,7 +970,9 @@ public class AbstractCoordinatorTest {
         TestUtils.waitForCondition(() -> {
             coordinator.ensureActiveGroup(new MockTime(1L).timer(100L));
             return !coordinator.heartbeat().hasInflight();
-        }, 2000, "The heartbeat response was not received");
+        },
+            2000,
+            "The heartbeat response was not received");
 
         // the generation would not be reset while the rebalance is in progress
         assertEquals(currGen, coordinator.generation());
@@ -840,11 +994,15 @@ public class AbstractCoordinatorTest {
         // let the heartbeat request to send out a request
         mockTime.sleep(HEARTBEAT_INTERVAL_MS);
 
-        TestUtils.waitForCondition(() -> !mockClient.requests().isEmpty(), 2000, "The heartbeat request was not sent");
+        TestUtils.waitForCondition(() -> !mockClient.requests().isEmpty(), 2000,
+            "The heartbeat request was not sent");
         assertTrue(coordinator.heartbeat().hasInflight());
 
         // change the generation
-        final AbstractCoordinator.Generation newGen = new AbstractCoordinator.Generation(currGen.generationId, currGen.memberId + "-new", currGen.protocolName);
+        final AbstractCoordinator.Generation newGen = new AbstractCoordinator.Generation(
+            currGen.generationId,
+            currGen.memberId + "-new",
+            currGen.protocolName);
         coordinator.setNewGeneration(newGen);
 
         mockClient.respond(heartbeatResponse(Errors.FENCED_INSTANCE_ID));
@@ -853,14 +1011,15 @@ public class AbstractCoordinatorTest {
         TestUtils.waitForCondition(() -> {
             coordinator.pollHeartbeat(mockTime.milliseconds());
             return !coordinator.heartbeat().hasInflight();
-        }, 2000, "The heartbeat response was not received");
+        }, 2000,
+            "The heartbeat response was not received");
 
         // the generation should not be reset
         assertEquals(newGen, coordinator.generation());
     }
 
     @Test
-    public void testHeartbeatRequestWithFencedInstanceIdException() throws InterruptedException {
+    public void testHeartbeatRequestWithFencedInstanceIdException() {
         setupCoordinator();
         mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
 
@@ -870,18 +1029,17 @@ public class AbstractCoordinatorTest {
         mockClient.prepareResponse(syncGroupResponse(Errors.NONE));
         mockClient.prepareResponse(heartbeatResponse(Errors.FENCED_INSTANCE_ID));
 
-        try {
-            coordinator.ensureActiveGroup();
-            mockTime.sleep(HEARTBEAT_INTERVAL_MS);
-            long startMs = System.currentTimeMillis();
-            while (System.currentTimeMillis() - startMs < 1000) {
-                Thread.sleep(10);
-                coordinator.pollHeartbeat(mockTime.milliseconds());
-            }
-            fail("Expected pollHeartbeat to raise fenced instance id exception in 1 second");
-        } catch (RuntimeException exception) {
-            assertTrue(exception instanceof FencedInstanceIdException);
-        }
+        assertThrows(FencedInstanceIdException.class,
+            () -> {
+                coordinator.ensureActiveGroup();
+                mockTime.sleep(HEARTBEAT_INTERVAL_MS);
+                long startMs = System.currentTimeMillis();
+                while (System.currentTimeMillis() - startMs < 1000) {
+                    Thread.sleep(10);
+                    coordinator.pollHeartbeat(mockTime.milliseconds());
+                }
+            },
+            "Expected pollHeartbeat to raise fenced instance id exception in 1 second");
     }
 
     @Test
@@ -906,12 +1064,13 @@ public class AbstractCoordinatorTest {
         mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
         coordinator.ensureCoordinatorReady(mockTime.timer(0));
 
-        mockClient.prepareResponse(joinGroupFollowerResponse(defaultGeneration, memberId, JoinGroupRequest.UNKNOWN_MEMBER_ID, Errors.REBALANCE_IN_PROGRESS));
+        mockClient.prepareResponse(
+            joinGroupFollowerResponse(defaultGeneration, memberId, JoinGroupRequest.UNKNOWN_MEMBER_ID, Errors.REBALANCE_IN_PROGRESS));
 
         RequestFuture<ByteBuffer> future = coordinator.sendJoinGroupRequest();
 
         assertTrue(consumerClient.poll(future, mockTime.timer(REQUEST_TIMEOUT_MS)));
-        assertTrue(future.exception().getClass().isInstance(Errors.REBALANCE_IN_PROGRESS.exception()));
+        assertInstanceOf(future.exception().getClass(), Errors.REBALANCE_IN_PROGRESS.exception());
         assertEquals(Errors.REBALANCE_IN_PROGRESS.message(), future.exception().getMessage());
         assertTrue(coordinator.rejoinNeededOrPending());
 
@@ -935,7 +1094,7 @@ public class AbstractCoordinatorTest {
     }
 
     private void checkLeaveGroupRequestSent(Optional<String> groupInstanceId) {
-        setupCoordinator(RETRY_BACKOFF_MS, Integer.MAX_VALUE, groupInstanceId);
+        setupCoordinator(RETRY_BACKOFF_MS, RETRY_BACKOFF_MAX_MS, Integer.MAX_VALUE, groupInstanceId);
 
         mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
         mockClient.prepareResponse(joinGroupFollowerResponse(1, memberId, leaderId, Errors.NONE));
@@ -967,8 +1126,11 @@ public class AbstractCoordinatorTest {
 
     @Test
     public void testHandleNormalLeaveGroupResponse() {
-        MemberResponse memberResponse = new MemberResponse().setMemberId(memberId).setErrorCode(Errors.NONE.code());
-        LeaveGroupResponse response = leaveGroupResponse(Collections.singletonList(memberResponse));
+        MemberResponse memberResponse = new MemberResponse()
+                                            .setMemberId(memberId)
+                                            .setErrorCode(Errors.NONE.code());
+        LeaveGroupResponse response =
+            leaveGroupResponse(Collections.singletonList(memberResponse));
         RequestFuture<Void> leaveGroupFuture = setupLeaveGroup(response);
         assertNotNull(leaveGroupFuture);
         assertTrue(leaveGroupFuture.succeeded());
@@ -976,8 +1138,11 @@ public class AbstractCoordinatorTest {
 
     @Test
     public void testHandleNormalLeaveGroupResponseAndTruncatedLeaveReason() {
-        MemberResponse memberResponse = new MemberResponse().setMemberId(memberId).setErrorCode(Errors.NONE.code());
-        LeaveGroupResponse response = leaveGroupResponse(Collections.singletonList(memberResponse));
+        MemberResponse memberResponse = new MemberResponse()
+                .setMemberId(memberId)
+                .setErrorCode(Errors.NONE.code());
+        LeaveGroupResponse response =
+                leaveGroupResponse(Collections.singletonList(memberResponse));
         String leaveReason = "Very looooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong leaveReason that is 271 characters long to make sure that length limit logic handles the scenario nicely";
         RequestFuture<Void> leaveGroupFuture = setupLeaveGroup(response, leaveReason, leaveReason.substring(0, 255));
         assertNotNull(leaveGroupFuture);
@@ -986,11 +1151,14 @@ public class AbstractCoordinatorTest {
 
     @Test
     public void testHandleMultipleMembersLeaveGroupResponse() {
-        MemberResponse memberResponse = new MemberResponse().setMemberId(memberId).setErrorCode(Errors.NONE.code());
-        LeaveGroupResponse response = leaveGroupResponse(Arrays.asList(memberResponse, memberResponse));
+        MemberResponse memberResponse = new MemberResponse()
+                                            .setMemberId(memberId)
+                                            .setErrorCode(Errors.NONE.code());
+        LeaveGroupResponse response =
+            leaveGroupResponse(Arrays.asList(memberResponse, memberResponse));
         RequestFuture<Void> leaveGroupFuture = setupLeaveGroup(response);
         assertNotNull(leaveGroupFuture);
-        assertTrue(leaveGroupFuture.exception() instanceof IllegalStateException);
+        assertInstanceOf(IllegalStateException.class, leaveGroupFuture.exception());
     }
 
     @Test
@@ -1004,19 +1172,24 @@ public class AbstractCoordinatorTest {
 
     @Test
     public void testHandleLeaveGroupResponseWithException() {
-        MemberResponse memberResponse = new MemberResponse().setMemberId(memberId).setErrorCode(Errors.UNKNOWN_MEMBER_ID.code());
-        LeaveGroupResponse response = leaveGroupResponse(Collections.singletonList(memberResponse));
+        MemberResponse memberResponse = new MemberResponse()
+                                            .setMemberId(memberId)
+                                            .setErrorCode(Errors.UNKNOWN_MEMBER_ID.code());
+        LeaveGroupResponse response =
+            leaveGroupResponse(Collections.singletonList(memberResponse));
         RequestFuture<Void> leaveGroupFuture = setupLeaveGroup(response);
         assertNotNull(leaveGroupFuture);
-        assertTrue(leaveGroupFuture.exception() instanceof UnknownMemberIdException);
+        assertInstanceOf(UnknownMemberIdException.class, leaveGroupFuture.exception());
     }
 
     private RequestFuture<Void> setupLeaveGroup(LeaveGroupResponse leaveGroupResponse) {
         return setupLeaveGroup(leaveGroupResponse, "test maybe leave group", "test maybe leave group");
     }
 
-    private RequestFuture<Void> setupLeaveGroup(LeaveGroupResponse leaveGroupResponse, String leaveReason, String expectedLeaveReason) {
-        setupCoordinator(RETRY_BACKOFF_MS, Integer.MAX_VALUE, Optional.empty());
+    private RequestFuture<Void> setupLeaveGroup(LeaveGroupResponse leaveGroupResponse,
+                                                String leaveReason,
+                                                String expectedLeaveReason) {
+        setupCoordinator(RETRY_BACKOFF_MS, RETRY_BACKOFF_MAX_MS, Integer.MAX_VALUE, Optional.empty());
 
         mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
         mockClient.prepareResponse(joinGroupFollowerResponse(1, memberId, leaderId, Errors.NONE));
@@ -1026,7 +1199,8 @@ public class AbstractCoordinatorTest {
                 return false;
             }
             LeaveGroupRequestData leaveGroupRequest = ((LeaveGroupRequest) body).data();
-            return leaveGroupRequest.members().get(0).memberId().equals(memberId) && leaveGroupRequest.members().get(0).reason().equals(expectedLeaveReason);
+            return leaveGroupRequest.members().get(0).memberId().equals(memberId) &&
+                   leaveGroupRequest.members().get(0).reason().equals(expectedLeaveReason);
         }, leaveGroupResponse);
 
         coordinator.ensureActiveGroup();
@@ -1078,7 +1252,8 @@ public class AbstractCoordinatorTest {
     @Test
     public void testPollHeartbeatAwakesHeartbeatThread() throws Exception {
         final int longRetryBackoffMs = 10000;
-        setupCoordinator(longRetryBackoffMs);
+        final int longRetryBackoffMaxMs = 10000;
+        setupCoordinator(longRetryBackoffMs, longRetryBackoffMaxMs);
 
         mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
         mockClient.prepareResponse(joinGroupFollowerResponse(1, memberId, leaderId, Errors.NONE));
@@ -1244,11 +1419,7 @@ public class AbstractCoordinatorTest {
         mockClient.prepareResponse(syncGroupResponse(Errors.NONE));
         AtomicBoolean heartbeatReceived = prepareFirstHeartbeat();
 
-        try {
-            coordinator.ensureActiveGroup();
-            fail("Should have woken up from ensureActiveGroup()");
-        } catch (WakeupException e) {
-        }
+        assertThrows(WakeupException.class, () -> coordinator.ensureActiveGroup(), "Should have woken up from ensureActiveGroup()");
 
         assertEquals(1, coordinator.onJoinPrepareInvokes);
         assertEquals(0, coordinator.onJoinCompleteInvokes);
@@ -1264,6 +1435,7 @@ public class AbstractCoordinatorTest {
         awaitFirstHeartbeat(heartbeatReceived);
     }
 
+    @Flaky("KAFKA-18310")
     @Test
     public void testWakeupAfterSyncGroupSentExternalCompletion() throws Exception {
         setupCoordinator();
@@ -1284,11 +1456,7 @@ public class AbstractCoordinatorTest {
         }, syncGroupResponse(Errors.NONE));
         AtomicBoolean heartbeatReceived = prepareFirstHeartbeat();
 
-        try {
-            coordinator.ensureActiveGroup();
-            fail("Should have woken up from ensureActiveGroup()");
-        } catch (WakeupException e) {
-        }
+        assertThrows(WakeupException.class, () -> coordinator.ensureActiveGroup(), "Should have woken up from ensureActiveGroup()");
 
         assertEquals(1, coordinator.onJoinPrepareInvokes);
         assertEquals(0, coordinator.onJoinCompleteInvokes);
@@ -1304,6 +1472,7 @@ public class AbstractCoordinatorTest {
         awaitFirstHeartbeat(heartbeatReceived);
     }
 
+    @Flaky("KAFKA-18310")
     @Test
     public void testWakeupAfterSyncGroupReceived() throws Exception {
         setupCoordinator();
@@ -1337,6 +1506,7 @@ public class AbstractCoordinatorTest {
         awaitFirstHeartbeat(heartbeatReceived);
     }
 
+    @Flaky("KAFKA-15474,KAFKA-18310")
     @Test
     public void testWakeupAfterSyncGroupReceivedExternalCompletion() throws Exception {
         setupCoordinator();
@@ -1352,11 +1522,7 @@ public class AbstractCoordinatorTest {
         }, syncGroupResponse(Errors.NONE));
         AtomicBoolean heartbeatReceived = prepareFirstHeartbeat();
 
-        try {
-            coordinator.ensureActiveGroup();
-            fail("Should have woken up from ensureActiveGroup()");
-        } catch (WakeupException e) {
-        }
+        assertThrows(WakeupException.class, () -> coordinator.ensureActiveGroup(), "Should have woken up from ensureActiveGroup()");
 
         assertEquals(1, coordinator.onJoinPrepareInvokes);
         assertEquals(0, coordinator.onJoinCompleteInvokes);
@@ -1421,7 +1587,7 @@ public class AbstractCoordinatorTest {
         long currentTimeMs = System.currentTimeMillis();
         this.mockTime.setCurrentTimeMs(System.currentTimeMillis());
 
-        setupCoordinator(); // note: uses 100ms backoff
+        setupCoordinator();
         mockClient.prepareResponse(groupCoordinatorResponse(node, Errors.NONE));
         coordinator.ensureCoordinatorReady(mockTime.timer(0));
 
@@ -1431,7 +1597,8 @@ public class AbstractCoordinatorTest {
         mockClient.prepareResponse(syncGroupResponse(Errors.NONE));
         coordinator.joinGroupIfNeeded(mockTime.timer(REQUEST_TIMEOUT_MS));
 
-        assertEquals(100, mockTime.milliseconds() - currentTimeMs, 1);
+        assertEquals(RETRY_BACKOFF_MS, mockTime.milliseconds() - currentTimeMs,
+                (int) (RETRY_BACKOFF_MS * CommonClientConfigs.RETRY_BACKOFF_JITTER) + 1);
     }
 
     @Test
@@ -1467,7 +1634,8 @@ public class AbstractCoordinatorTest {
 
     private void awaitFirstHeartbeat(final AtomicBoolean heartbeatReceived) throws Exception {
         mockTime.sleep(HEARTBEAT_INTERVAL_MS);
-        TestUtils.waitForCondition(heartbeatReceived::get, 3000, "Should have received a heartbeat request after joining the group");
+        TestUtils.waitForCondition(heartbeatReceived::get,
+            3000, "Should have received a heartbeat request after joining the group");
     }
 
     private FindCoordinatorResponse groupCoordinatorResponse(Node node, Errors error) {
@@ -1478,28 +1646,56 @@ public class AbstractCoordinatorTest {
         return new HeartbeatResponse(new HeartbeatResponseData().setErrorCode(error.code()));
     }
 
-    private JoinGroupResponse joinGroupFollowerResponse(int generationId, String memberId, String leaderId, Errors error) {
+    private JoinGroupResponse joinGroupFollowerResponse(int generationId,
+                                                        String memberId,
+                                                        String leaderId,
+                                                        Errors error) {
         return joinGroupFollowerResponse(generationId, memberId, leaderId, error, null);
     }
 
-    private JoinGroupResponse joinGroupFollowerResponse(int generationId, String memberId, String leaderId, Errors error, String protocolType) {
-        return new JoinGroupResponse(new JoinGroupResponseData().setErrorCode(error.code()).setGenerationId(generationId).setProtocolType(protocolType).setProtocolName(PROTOCOL_NAME).setMemberId(memberId).setLeader(leaderId).setMembers(Collections.emptyList()), ApiKeys.JOIN_GROUP.latestVersion());
+    private JoinGroupResponse joinGroupFollowerResponse(int generationId,
+                                                        String memberId,
+                                                        String leaderId,
+                                                        Errors error,
+                                                        String protocolType) {
+        return new JoinGroupResponse(
+                new JoinGroupResponseData()
+                        .setErrorCode(error.code())
+                        .setGenerationId(generationId)
+                        .setProtocolType(protocolType)
+                        .setProtocolName(PROTOCOL_NAME)
+                        .setMemberId(memberId)
+                        .setLeader(leaderId)
+                        .setMembers(Collections.emptyList()),
+                ApiKeys.JOIN_GROUP.latestVersion()
+        );
     }
 
     private JoinGroupResponse joinGroupResponse(Errors error) {
-        return joinGroupFollowerResponse(JoinGroupRequest.UNKNOWN_GENERATION_ID, JoinGroupRequest.UNKNOWN_MEMBER_ID, JoinGroupRequest.UNKNOWN_MEMBER_ID, error);
+        return joinGroupFollowerResponse(JoinGroupRequest.UNKNOWN_GENERATION_ID,
+            JoinGroupRequest.UNKNOWN_MEMBER_ID, JoinGroupRequest.UNKNOWN_MEMBER_ID, error);
     }
 
     private SyncGroupResponse syncGroupResponse(Errors error) {
         return syncGroupResponse(error, null, null);
     }
 
-    private SyncGroupResponse syncGroupResponse(Errors error, String protocolType, String protocolName) {
-        return new SyncGroupResponse(new SyncGroupResponseData().setErrorCode(error.code()).setProtocolType(protocolType).setProtocolName(protocolName).setAssignment(new byte[0]));
+    private SyncGroupResponse syncGroupResponse(Errors error,
+                                                String protocolType,
+                                                String protocolName) {
+        return new SyncGroupResponse(
+                new SyncGroupResponseData()
+                        .setErrorCode(error.code())
+                        .setProtocolType(protocolType)
+                        .setProtocolName(protocolName)
+                        .setAssignment(new byte[0])
+        );
     }
 
     private LeaveGroupResponse leaveGroupResponse(List<MemberResponse> members) {
-        return new LeaveGroupResponse(new LeaveGroupResponseData().setErrorCode(Errors.NONE.code()).setMembers(members));
+        return new LeaveGroupResponse(new LeaveGroupResponseData()
+                .setErrorCode(Errors.NONE.code())
+                .setMembers(members));
     }
 
     public static class DummyCoordinator extends AbstractCoordinator {
@@ -1508,7 +1704,10 @@ public class AbstractCoordinatorTest {
         private int onJoinCompleteInvokes = 0;
         private boolean wakeupOnJoinComplete = false;
 
-        DummyCoordinator(GroupRebalanceConfig rebalanceConfig, ConsumerNetworkClient client, Metrics metrics, Time time) {
+        DummyCoordinator(GroupRebalanceConfig rebalanceConfig,
+                         ConsumerNetworkClient client,
+                         Metrics metrics,
+                         Time time) {
             super(rebalanceConfig, new LogContext(), client, metrics, METRIC_GROUP_PREFIX, time);
         }
 
@@ -1519,11 +1718,18 @@ public class AbstractCoordinatorTest {
 
         @Override
         protected JoinGroupRequestData.JoinGroupRequestProtocolCollection metadata() {
-            return new JoinGroupRequestData.JoinGroupRequestProtocolCollection(Collections.singleton(new JoinGroupRequestData.JoinGroupRequestProtocol().setName(PROTOCOL_NAME).setMetadata(EMPTY_DATA.array())).iterator());
+            return new JoinGroupRequestData.JoinGroupRequestProtocolCollection(
+                    Collections.singleton(new JoinGroupRequestData.JoinGroupRequestProtocol()
+                            .setName(PROTOCOL_NAME)
+                            .setMetadata(EMPTY_DATA.array())).iterator()
+            );
         }
 
         @Override
-        protected Map<String, ByteBuffer> onLeaderElected(String leaderId, String protocol, List<JoinGroupResponseData.JoinGroupResponseMember> allMemberMetadata, boolean skipAssignment) {
+        protected Map<String, ByteBuffer> onLeaderElected(String leaderId,
+                                                          String protocol,
+                                                          List<JoinGroupResponseData.JoinGroupResponseMember> allMemberMetadata,
+                                                          boolean skipAssignment) {
             Map<String, ByteBuffer> assignment = new HashMap<>();
             for (JoinGroupResponseData.JoinGroupResponseMember member : allMemberMetadata) {
                 assignment.put(member.memberId(), EMPTY_DATA);

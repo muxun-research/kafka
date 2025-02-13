@@ -40,6 +40,7 @@ public abstract class Type {
     /**
      * Read the typed object from the buffer
      * Please remember to do size validation before creating the container (ex: array) for the following data
+     *
      * @throws SchemaException If the object is not valid for its type
      */
     public abstract Object read(ByteBuffer buffer);
@@ -81,7 +82,7 @@ public abstract class Type {
     /**
      * A Type that can return its description for documentation purposes.
      */
-    public static abstract class DocumentedType extends Type {
+    public abstract static class DocumentedType extends Type {
 
         /**
          * Short name of the type to identify it in documentation;
@@ -91,6 +92,7 @@ public abstract class Type {
 
         /**
          * Documentation of the Type.
+         *
          * @return details about valid values, representation
          */
         public abstract String documentation();
@@ -214,7 +216,8 @@ public abstract class Type {
 
         @Override
         public String documentation() {
-            return "Represents an integer between -2<sup>15</sup> and 2<sup>15</sup>-1 inclusive. " + "The values are encoded using two bytes in network byte order (big-endian).";
+            return "Represents an integer between -2<sup>15</sup> and 2<sup>15</sup>-1 inclusive. " +
+                    "The values are encoded using two bytes in network byte order (big-endian).";
         }
     };
 
@@ -228,7 +231,7 @@ public abstract class Type {
         @Override
         public Object read(ByteBuffer buffer) {
             short value = buffer.getShort();
-            return Integer.valueOf(Short.toUnsignedInt(value));
+            return Short.toUnsignedInt(value);
         }
 
         @Override
@@ -251,7 +254,8 @@ public abstract class Type {
 
         @Override
         public String documentation() {
-            return "Represents an integer between 0 and 65535 inclusive. " + "The values are encoded using two bytes in network byte order (big-endian).";
+            return "Represents an integer between 0 and 65535 inclusive. " +
+                    "The values are encoded using two bytes in network byte order (big-endian).";
         }
     };
 
@@ -358,7 +362,8 @@ public abstract class Type {
 
         @Override
         public String documentation() {
-            return "Represents an integer between -2<sup>63</sup> and 2<sup>63</sup>-1 inclusive. " + "The values are encoded using eight bytes in network byte order (big-endian).";
+            return "Represents an integer between -2<sup>63</sup> and 2<sup>63</sup>-1 inclusive. " +
+                    "The values are encoded using eight bytes in network byte order (big-endian).";
         }
     };
 
@@ -395,7 +400,8 @@ public abstract class Type {
 
         @Override
         public String documentation() {
-            return "Represents a type 4 immutable universally unique identifier (Uuid). " + "The values are encoded using sixteen bytes in network byte order (big-endian).";
+            return "Represents a type 4 immutable universally unique identifier (Uuid). " +
+                    "The values are encoded using sixteen bytes in network byte order (big-endian).";
         }
     };
 
@@ -430,7 +436,8 @@ public abstract class Type {
 
         @Override
         public String documentation() {
-            return "Represents a double-precision 64-bit format IEEE 754 value. " + "The values are encoded using eight bytes in network byte order (big-endian).";
+            return "Represents a double-precision 64-bit format IEEE 754 value. " +
+                    "The values are encoded using eight bytes in network byte order (big-endian).";
         }
     };
 
@@ -476,7 +483,9 @@ public abstract class Type {
 
         @Override
         public String documentation() {
-            return "Represents a sequence of characters. First the length N is given as an " + INT16 + ". Then N bytes follow which are the UTF-8 encoding of the character sequence. " + "Length must not be negative.";
+            return "Represents a sequence of characters. First the length N is given as an " + INT16 +
+                    ". Then N bytes follow which are the UTF-8 encoding of the character sequence. " +
+                    "Length must not be negative.";
         }
     };
 
@@ -525,7 +534,8 @@ public abstract class Type {
 
         @Override
         public String documentation() {
-            return "Represents a sequence of characters. First the length N + 1 is given as an UNSIGNED_VARINT " + ". Then N bytes follow which are the UTF-8 encoding of the character sequence.";
+            return "Represents a sequence of characters. First the length N + 1 is given as an UNSIGNED_VARINT " +
+                    ". Then N bytes follow which are the UTF-8 encoding of the character sequence.";
         }
     };
 
@@ -587,7 +597,9 @@ public abstract class Type {
 
         @Override
         public String documentation() {
-            return "Represents a sequence of characters or null. For non-null strings, first the length N is given as an " + INT16 + ". Then N bytes follow which are the UTF-8 encoding of the character sequence. " + "A null value is encoded with length of -1 and there are no following bytes.";
+            return "Represents a sequence of characters or null. For non-null strings, first the length N is given as an " + INT16 +
+                    ". Then N bytes follow which are the UTF-8 encoding of the character sequence. " +
+                    "A null value is encoded with length of -1 and there are no following bytes.";
         }
     };
 
@@ -653,7 +665,9 @@ public abstract class Type {
 
         @Override
         public String documentation() {
-            return "Represents a sequence of characters. First the length N + 1 is given as an UNSIGNED_VARINT " + ". Then N bytes follow which are the UTF-8 encoding of the character sequence. " + "A null string is represented with a length of 0.";
+            return "Represents a sequence of characters. First the length N + 1 is given as an UNSIGNED_VARINT " +
+                    ". Then N bytes follow which are the UTF-8 encoding of the character sequence. " +
+                    "A null string is represented with a length of 0.";
         }
     };
 
@@ -705,7 +719,8 @@ public abstract class Type {
 
         @Override
         public String documentation() {
-            return "Represents a raw sequence of bytes. First the length N is given as an " + INT32 + ". Then N bytes follow.";
+            return "Represents a raw sequence of bytes. First the length N is given as an " + INT32 +
+                    ". Then N bytes follow.";
         }
     };
 
@@ -758,7 +773,8 @@ public abstract class Type {
 
         @Override
         public String documentation() {
-            return "Represents a raw sequence of bytes. First the length N+1 is given as an UNSIGNED_VARINT." + "Then N bytes follow.";
+            return "Represents a raw sequence of bytes. First the length N+1 is given as an UNSIGNED_VARINT." +
+                    "Then N bytes follow.";
         }
     };
 
@@ -826,7 +842,8 @@ public abstract class Type {
 
         @Override
         public String documentation() {
-            return "Represents a raw sequence of bytes or null. For non-null values, first the length N is given as an " + INT32 + ". Then N bytes follow. A null value is encoded with length of -1 and there are no following bytes.";
+            return "Represents a raw sequence of bytes or null. For non-null values, first the length N is given as an " + INT32 +
+                    ". Then N bytes follow. A null value is encoded with length of -1 and there are no following bytes.";
         }
     };
 
@@ -894,7 +911,8 @@ public abstract class Type {
 
         @Override
         public String documentation() {
-            return "Represents a raw sequence of bytes. First the length N+1 is given as an UNSIGNED_VARINT." + "Then N bytes follow. A null object is represented with a length of 0.";
+            return "Represents a raw sequence of bytes. First the length N+1 is given as an UNSIGNED_VARINT." +
+                    "Then N bytes follow. A null object is represented with a length of 0.";
         }
     };
 
@@ -955,7 +973,9 @@ public abstract class Type {
 
         @Override
         public String documentation() {
-            return "Represents a sequence of Kafka records as " + COMPACT_NULLABLE_BYTES + ". " + "For a detailed description of records see " + "<a href=\"/documentation/#messageformat\">Message Sets</a>.";
+            return "Represents a sequence of Kafka records as " + COMPACT_NULLABLE_BYTES + ". " +
+                "For a detailed description of records see " +
+                "<a href=\"/documentation/#messageformat\">Message Sets</a>.";
         }
     };
 
@@ -1051,7 +1071,7 @@ public abstract class Type {
         public String documentation() {
             return "Represents an integer between -2<sup>31</sup> and 2<sup>31</sup>-1 inclusive. " +
                     "Encoding follows the variable-length zig-zag encoding from " +
-                    " <a href=\"http://code.google.com/apis/protocolbuffers/docs/encoding.html\"> Google Protocol Buffers</a>.";
+                    " <a href=\"https://code.google.com/apis/protocolbuffers/docs/encoding.html\"> Google Protocol Buffers</a>.";
         }
     };
 
@@ -1086,12 +1106,17 @@ public abstract class Type {
         public String documentation() {
             return "Represents an integer between -2<sup>63</sup> and 2<sup>63</sup>-1 inclusive. " +
                     "Encoding follows the variable-length zig-zag encoding from " +
-                    " <a href=\"http://code.google.com/apis/protocolbuffers/docs/encoding.html\"> Google Protocol Buffers</a>.";
+                    " <a href=\"https://code.google.com/apis/protocolbuffers/docs/encoding.html\"> Google Protocol Buffers</a>.";
         }
     };
 
     private static String toHtml() {
-        DocumentedType[] types = {BOOLEAN, INT8, INT16, INT32, INT64, UNSIGNED_INT32, VARINT, VARLONG, UUID, FLOAT64, STRING, COMPACT_STRING, NULLABLE_STRING, COMPACT_NULLABLE_STRING, BYTES, COMPACT_BYTES, NULLABLE_BYTES, COMPACT_NULLABLE_BYTES, RECORDS, new ArrayOf(STRING), new CompactArrayOf(COMPACT_STRING)};
+        DocumentedType[] types = {
+            BOOLEAN, INT8, INT16, INT32, INT64,
+            UINT16, UNSIGNED_INT32, VARINT, VARLONG, UUID, FLOAT64,
+            STRING, COMPACT_STRING, NULLABLE_STRING, COMPACT_NULLABLE_STRING,
+            BYTES, COMPACT_BYTES, NULLABLE_BYTES, COMPACT_NULLABLE_BYTES,
+            RECORDS, COMPACT_RECORDS, new ArrayOf(STRING), new CompactArrayOf(COMPACT_STRING)};
         final StringBuilder b = new StringBuilder();
         b.append("<table class=\"data-table\"><tbody>\n");
         b.append("<tr>");

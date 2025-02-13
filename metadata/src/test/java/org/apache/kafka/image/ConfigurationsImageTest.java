@@ -23,10 +23,16 @@ import org.apache.kafka.image.writer.ImageWriterOptions;
 import org.apache.kafka.image.writer.RecordListWriter;
 import org.apache.kafka.metadata.RecordTestUtils;
 import org.apache.kafka.server.common.ApiMessageAndVersion;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.kafka.common.config.ConfigResource.Type.BROKER;
 import static org.apache.kafka.common.metadata.MetadataRecordType.CONFIG_RECORD;
@@ -35,40 +41,56 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @Timeout(value = 40)
 public class ConfigurationsImageTest {
-    public final static ConfigurationsImage IMAGE1;
+    public static final ConfigurationsImage IMAGE1;
 
-    public final static List<ApiMessageAndVersion> DELTA1_RECORDS;
+    public static final List<ApiMessageAndVersion> DELTA1_RECORDS;
 
-    final static ConfigurationsDelta DELTA1;
+    static final ConfigurationsDelta DELTA1;
 
-    final static ConfigurationsImage IMAGE2;
+    static final ConfigurationsImage IMAGE2;
 
     static {
         Map<ConfigResource, ConfigurationImage> map1 = new HashMap<>();
         Map<String, String> broker0Map = new HashMap<>();
         broker0Map.put("foo", "bar");
         broker0Map.put("baz", "quux");
-        map1.put(new ConfigResource(BROKER, "0"), new ConfigurationImage(new ConfigResource(BROKER, "0"), broker0Map));
+        map1.put(new ConfigResource(BROKER, "0"),
+            new ConfigurationImage(new ConfigResource(BROKER, "0"), broker0Map));
         Map<String, String> broker1Map = new HashMap<>();
         broker1Map.put("foobar", "foobaz");
-        map1.put(new ConfigResource(BROKER, "1"), new ConfigurationImage(new ConfigResource(BROKER, "1"), broker1Map));
+        map1.put(new ConfigResource(BROKER, "1"),
+            new ConfigurationImage(new ConfigResource(BROKER, "1"), broker1Map));
         IMAGE1 = new ConfigurationsImage(map1);
 
         DELTA1_RECORDS = new ArrayList<>();
-        DELTA1_RECORDS.add(new ApiMessageAndVersion(new ConfigRecord().setResourceType(BROKER.id()).setResourceName("0").setName("foo").setValue(null), CONFIG_RECORD.highestSupportedVersion()));
-        DELTA1_RECORDS.add(new ApiMessageAndVersion(new ConfigRecord().setResourceType(BROKER.id()).setResourceName("1").setName("barfoo").setValue("bazfoo"), CONFIG_RECORD.highestSupportedVersion()));
+        // remove configs
+        DELTA1_RECORDS.add(new ApiMessageAndVersion(new ConfigRecord().setResourceType(BROKER.id()).
+            setResourceName("0").setName("foo").setValue(null),
+            CONFIG_RECORD.highestSupportedVersion()));
+        DELTA1_RECORDS.add(new ApiMessageAndVersion(new ConfigRecord().setResourceType(BROKER.id()).
+            setResourceName("0").setName("baz").setValue(null),
+            CONFIG_RECORD.highestSupportedVersion()));
+        DELTA1_RECORDS.add(new ApiMessageAndVersion(new ConfigRecord().setResourceType(BROKER.id()).
+            setResourceName("1").setName("foobar").setValue(null),
+            CONFIG_RECORD.highestSupportedVersion()));
+        // add new config to b1
+        DELTA1_RECORDS.add(new ApiMessageAndVersion(new ConfigRecord().setResourceType(BROKER.id()).
+            setResourceName("1").setName("barfoo").setValue("bazfoo"),
+            CONFIG_RECORD.highestSupportedVersion()));
+        // add new config to b2
+        DELTA1_RECORDS.add(new ApiMessageAndVersion(new ConfigRecord().setResourceType(BROKER.id()).
+            setResourceName("2").setName("foo").setValue("bar"),
+            CONFIG_RECORD.highestSupportedVersion()));
 
         DELTA1 = new ConfigurationsDelta(IMAGE1);
         RecordTestUtils.replayAll(DELTA1, DELTA1_RECORDS);
 
         Map<ConfigResource, ConfigurationImage> map2 = new HashMap<>();
-        Map<String, String> broker0Map2 = new HashMap<>();
-        broker0Map2.put("baz", "quux");
-        map2.put(new ConfigResource(BROKER, "0"), new ConfigurationImage(new ConfigResource(BROKER, "0"), broker0Map2));
-        Map<String, String> broker1Map2 = new HashMap<>();
-        broker1Map2.put("foobar", "foobaz");
-        broker1Map2.put("barfoo", "bazfoo");
-        map2.put(new ConfigResource(BROKER, "1"), new ConfigurationImage(new ConfigResource(BROKER, "1"), broker1Map2));
+        Map<String, String> broker1Map2 = Collections.singletonMap("barfoo", "bazfoo");
+        map2.put(new ConfigResource(BROKER, "1"),
+            new ConfigurationImage(new ConfigResource(BROKER, "1"), broker1Map2));
+        Map<String, String> broker2Map = Collections.singletonMap("foo", "bar");
+        map2.put(new ConfigResource(BROKER, "2"), new ConfigurationImage(new ConfigResource(BROKER, "2"), broker2Map));
         IMAGE2 = new ConfigurationsImage(map2);
     }
 
@@ -106,7 +128,10 @@ public class ConfigurationsImageTest {
 
     private static void testToImage(ConfigurationsImage image, List<ApiMessageAndVersion> fromRecords) {
         // test from empty image stopping each of the various intermediate images along the way
-        new RecordTestUtils.TestThroughAllIntermediateImagesLeadingToFinalImageHelper<>(() -> ConfigurationsImage.EMPTY, ConfigurationsDelta::new).test(image, fromRecords);
+        new RecordTestUtils.TestThroughAllIntermediateImagesLeadingToFinalImageHelper<>(
+            () -> ConfigurationsImage.EMPTY,
+            ConfigurationsDelta::new
+        ).test(image, fromRecords);
     }
 
     private static List<ApiMessageAndVersion> getImageRecords(ConfigurationsImage image) {

@@ -25,7 +25,7 @@ import java.util.Map;
 
 public abstract class AbstractRequest implements AbstractRequestResponse {
 
-    public static abstract class Builder<T extends AbstractRequest> {
+    public abstract static class Builder<T extends AbstractRequest> {
         private final ApiKeys apiKey;
         private final short oldestAllowedVersion;
         private final short latestAllowedVersion;
@@ -33,8 +33,15 @@ public abstract class AbstractRequest implements AbstractRequestResponse {
         /**
          * Construct a new builder which allows any supported version
          */
+        public Builder(ApiKeys apiKey, boolean enableUnstableLastVersion) {
+            this(apiKey, apiKey.oldestVersion(), apiKey.latestVersion(enableUnstableLastVersion));
+        }
+
+        /**
+         * Construct a new builder which allows any supported and released version
+         */
         public Builder(ApiKeys apiKey) {
-            this(apiKey, apiKey.oldestVersion(), apiKey.latestVersion());
+            this(apiKey, false);
         }
 
         /**
@@ -185,14 +192,6 @@ public abstract class AbstractRequest implements AbstractRequestResponse {
                 return LeaveGroupRequest.parse(buffer, apiVersion);
             case SYNC_GROUP:
                 return SyncGroupRequest.parse(buffer, apiVersion);
-            case STOP_REPLICA:
-                return StopReplicaRequest.parse(buffer, apiVersion);
-            case CONTROLLED_SHUTDOWN:
-                return ControlledShutdownRequest.parse(buffer, apiVersion);
-            case UPDATE_METADATA:
-                return UpdateMetadataRequest.parse(buffer, apiVersion);
-            case LEADER_AND_ISR:
-                return LeaderAndIsrRequest.parse(buffer, apiVersion);
             case DESCRIBE_GROUPS:
                 return DescribeGroupsRequest.parse(buffer, apiVersion);
             case LIST_GROUPS:
@@ -301,6 +300,50 @@ public abstract class AbstractRequest implements AbstractRequestResponse {
                 return AllocateProducerIdsRequest.parse(buffer, apiVersion);
             case CONSUMER_GROUP_HEARTBEAT:
                 return ConsumerGroupHeartbeatRequest.parse(buffer, apiVersion);
+            case CONSUMER_GROUP_DESCRIBE:
+                return ConsumerGroupDescribeRequest.parse(buffer, apiVersion);
+            case CONTROLLER_REGISTRATION:
+                return ControllerRegistrationRequest.parse(buffer, apiVersion);
+            case GET_TELEMETRY_SUBSCRIPTIONS:
+                return GetTelemetrySubscriptionsRequest.parse(buffer, apiVersion);
+            case PUSH_TELEMETRY:
+                return PushTelemetryRequest.parse(buffer, apiVersion);
+            case ASSIGN_REPLICAS_TO_DIRS:
+                return AssignReplicasToDirsRequest.parse(buffer, apiVersion);
+            case LIST_CLIENT_METRICS_RESOURCES:
+                return ListClientMetricsResourcesRequest.parse(buffer, apiVersion);
+            case DESCRIBE_TOPIC_PARTITIONS:
+                return DescribeTopicPartitionsRequest.parse(buffer, apiVersion);
+            case SHARE_GROUP_HEARTBEAT:
+                return ShareGroupHeartbeatRequest.parse(buffer, apiVersion);
+            case SHARE_GROUP_DESCRIBE:
+                return ShareGroupDescribeRequest.parse(buffer, apiVersion);
+            case SHARE_FETCH:
+                return ShareFetchRequest.parse(buffer, apiVersion);
+            case SHARE_ACKNOWLEDGE:
+                return ShareAcknowledgeRequest.parse(buffer, apiVersion);
+            case ADD_RAFT_VOTER:
+                return AddRaftVoterRequest.parse(buffer, apiVersion);
+            case REMOVE_RAFT_VOTER:
+                return RemoveRaftVoterRequest.parse(buffer, apiVersion);
+            case UPDATE_RAFT_VOTER:
+                return UpdateRaftVoterRequest.parse(buffer, apiVersion);
+            case INITIALIZE_SHARE_GROUP_STATE:
+                return InitializeShareGroupStateRequest.parse(buffer, apiVersion);
+            case READ_SHARE_GROUP_STATE:
+                return ReadShareGroupStateRequest.parse(buffer, apiVersion);
+            case WRITE_SHARE_GROUP_STATE:
+                return WriteShareGroupStateRequest.parse(buffer, apiVersion);
+            case DELETE_SHARE_GROUP_STATE:
+                return DeleteShareGroupStateRequest.parse(buffer, apiVersion);
+            case READ_SHARE_GROUP_STATE_SUMMARY:
+                return ReadShareGroupStateSummaryRequest.parse(buffer, apiVersion);
+            case STREAMS_GROUP_HEARTBEAT:
+                return StreamsGroupHeartbeatRequest.parse(buffer, apiVersion);
+            case STREAMS_GROUP_DESCRIBE:
+                return StreamsGroupDescribeRequest.parse(buffer, apiVersion);
+            case DESCRIBE_SHARE_GROUP_OFFSETS:
+                return DescribeShareGroupOffsetsRequest.parse(buffer, apiVersion);
             default:
                 throw new AssertionError(String.format("ApiKey %s is not currently handled in `parseRequest`, the " + "code should be updated to do so.", apiKey));
         }

@@ -27,9 +27,10 @@ import org.apache.kafka.common.protocol.types.Type;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 /**
- * Checkpoint records emitted from MirrorCheckpointConnector. Encodes remote consumer group state.
+ * Checkpoint records emitted by MirrorCheckpointConnector.
  */
 public class Checkpoint {
     public static final String TOPIC_KEY = "topic";
@@ -41,11 +42,18 @@ public class Checkpoint {
     public static final String VERSION_KEY = "version";
     public static final short VERSION = 0;
 
-    public static final Schema VALUE_SCHEMA_V0 = new Schema(new Field(UPSTREAM_OFFSET_KEY, Type.INT64), new Field(DOWNSTREAM_OFFSET_KEY, Type.INT64), new Field(METADATA_KEY, Type.STRING));
+    public static final Schema VALUE_SCHEMA_V0 = new Schema(
+            new Field(UPSTREAM_OFFSET_KEY, Type.INT64),
+            new Field(DOWNSTREAM_OFFSET_KEY, Type.INT64),
+            new Field(METADATA_KEY, Type.STRING));
 
-    public static final Schema KEY_SCHEMA = new Schema(new Field(CONSUMER_GROUP_ID_KEY, Type.STRING), new Field(TOPIC_KEY, Type.STRING), new Field(PARTITION_KEY, Type.INT32));
+    public static final Schema KEY_SCHEMA = new Schema(
+            new Field(CONSUMER_GROUP_ID_KEY, Type.STRING),
+            new Field(TOPIC_KEY, Type.STRING),
+            new Field(PARTITION_KEY, Type.INT32));
 
-    public static final Schema HEADER_SCHEMA = new Schema(new Field(VERSION_KEY, Type.INT16));
+    public static final Schema HEADER_SCHEMA = new Schema(
+            new Field(VERSION_KEY, Type.INT16));
 
     private final String consumerGroupId;
     private final TopicPartition topicPartition;
@@ -53,7 +61,8 @@ public class Checkpoint {
     private final long downstreamOffset;
     private final String metadata;
 
-    public Checkpoint(String consumerGroupId, TopicPartition topicPartition, long upstreamOffset, long downstreamOffset, String metadata) {
+    public Checkpoint(String consumerGroupId, TopicPartition topicPartition, long upstreamOffset,
+            long downstreamOffset, String metadata) {
         this.consumerGroupId = consumerGroupId;
         this.topicPartition = topicPartition;
         this.upstreamOffset = upstreamOffset;
@@ -87,7 +96,9 @@ public class Checkpoint {
 
     @Override
     public String toString() {
-        return String.format("Checkpoint{consumerGroupId=%s, topicPartition=%s, " + "upstreamOffset=%d, downstreamOffset=%d, metadata=%s}", consumerGroupId, topicPartition, upstreamOffset, downstreamOffset, metadata);
+        return String.format("Checkpoint{consumerGroupId=%s, topicPartition=%s, "
+            + "upstreamOffset=%d, downstreamOffset=%d, metadata=%s}",
+            consumerGroupId, topicPartition, upstreamOffset, downstreamOffset, metadata);
     }
 
     ByteBuffer serializeValue(short version) {
@@ -122,7 +133,8 @@ public class Checkpoint {
         String group = keyStruct.getString(CONSUMER_GROUP_ID_KEY);
         String topic = keyStruct.getString(TOPIC_KEY);
         int partition = keyStruct.getInt(PARTITION_KEY);
-        return new Checkpoint(group, new TopicPartition(topic, partition), upstreamOffset, downstreamOffset, metadata);
+        return new Checkpoint(group, new TopicPartition(topic, partition), upstreamOffset,
+            downstreamOffset, metadata);
     }
 
     private static Schema valueSchema(short version) {
@@ -171,5 +183,17 @@ public class Checkpoint {
     byte[] recordValue() {
         return serializeValue(VERSION).array();
     }
-}
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Checkpoint that = (Checkpoint) o;
+        return upstreamOffset == that.upstreamOffset && downstreamOffset == that.downstreamOffset && Objects.equals(consumerGroupId, that.consumerGroupId) && Objects.equals(topicPartition, that.topicPartition) && Objects.equals(metadata, that.metadata);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(consumerGroupId, topicPartition, upstreamOffset, downstreamOffset, metadata);
+    }
+}

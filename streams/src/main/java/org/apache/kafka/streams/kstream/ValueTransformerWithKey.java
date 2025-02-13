@@ -22,6 +22,8 @@ import org.apache.kafka.streams.processor.*;
 
 import java.time.Duration;
 
+import java.time.Duration;
+
 /**
  * The {@code ValueTransformerWithKey} interface for stateful mapping of a value to a new value (with possible new type).
  * This is a stateful record-by-record operation, i.e, {@link #transform(Object, Object)} is invoked individually for each
@@ -43,8 +45,7 @@ import java.time.Duration;
  * @param <VR> transformed value type
  * @see ValueTransformer
  * @see ValueTransformerWithKeySupplier
- * @see KStream#transformValues(ValueTransformerSupplier, String...)
- * @see KStream#transformValues(ValueTransformerWithKeySupplier, String...)
+ * @see KTable#transformValues(ValueTransformerWithKeySupplier, String...) 
  * @see Transformer
  */
 
@@ -73,7 +74,7 @@ public interface ValueTransformerWithKey<K, V, VR> {
 
     /**
      * Transform the given [key and] value to a new value.
-     * Additionally, any {@link StateStore} that is {@link KStream#transformValues(ValueTransformerWithKeySupplier, String...)
+     * Additionally, any {@link StateStore} that is {@link KTable#transformValues(ValueTransformerWithKeySupplier, Named, String...)
      * attached} to this operator can be accessed and modified arbitrarily (cf.
      * {@link ProcessorContext#getStateStore(String)}).
      * <p>

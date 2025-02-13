@@ -24,65 +24,68 @@ import java.util.Objects;
  */
 public class LagInfo {
 
-	private final long currentOffsetPosition;
+    private final long currentOffsetPosition;
 
-	private final long endOffsetPosition;
+    private final long endOffsetPosition;
 
-	private final long offsetLag;
+    private final long offsetLag;
 
-	LagInfo(final long currentOffsetPosition, final long endOffsetPosition) {
-		this.currentOffsetPosition = currentOffsetPosition;
-		this.endOffsetPosition = endOffsetPosition;
-		this.offsetLag = Math.max(0, endOffsetPosition - currentOffsetPosition);
-	}
+    LagInfo(final long currentOffsetPosition, final long endOffsetPosition) {
+        this.currentOffsetPosition = currentOffsetPosition;
+        this.endOffsetPosition = endOffsetPosition;
+        this.offsetLag = Math.max(0, endOffsetPosition - currentOffsetPosition);
+    }
 
-	/**
-	 * Get the current maximum offset on the store partition's changelog topic, that has been successfully written into
-	 * the store partition's state store.
-	 * @return current consume offset for standby/restoring store partitions &amp;   simply endoffset for active store partition replicas
-	 */
-	public long currentOffsetPosition() {
-		return this.currentOffsetPosition;
-	}
+    /**
+     * Get the current maximum offset on the store partition's changelog topic, that has been successfully written into
+     * the store partition's state store.
+     *
+     * @return current consume offset for standby/restoring store partitions &amp; simply end offset for active store partition replicas
+     */
+    public long currentOffsetPosition() {
+        return this.currentOffsetPosition;
+    }
 
-	/**
-	 * Get the end offset position for this store partition's changelog topic on the Kafka brokers.
-	 * @return last offset written to the changelog topic partition
-	 */
-	public long endOffsetPosition() {
-		return this.endOffsetPosition;
-	}
+    /**
+     * Get the end offset position for this store partition's changelog topic on the Kafka brokers.
+     *
+     * @return last offset written to the changelog topic partition
+     */
+    public long endOffsetPosition() {
+        return this.endOffsetPosition;
+    }
 
-	/**
-	 * Get the measured lag between current and end offset positions, for this store partition replica
-	 * @return lag as measured by message offsets
-	 */
-	public long offsetLag() {
-		return this.offsetLag;
-	}
+    /**
+     * Get the measured lag between current and end offset positions, for this store partition replica
+     *
+     * @return lag as measured by message offsets
+     */
+    public long offsetLag() {
+        return this.offsetLag;
+    }
 
-	@Override
-	public boolean equals(final Object obj) {
-		if (!(obj instanceof LagInfo)) {
-			return false;
-		}
-		final LagInfo other = (LagInfo) obj;
-		return currentOffsetPosition == other.currentOffsetPosition
-				&& endOffsetPosition == other.endOffsetPosition
-				&& this.offsetLag == other.offsetLag;
-	}
+    @Override
+    public boolean equals(final Object obj) {
+        if (!(obj instanceof LagInfo)) {
+            return false;
+        }
+        final LagInfo other = (LagInfo) obj;
+        return currentOffsetPosition == other.currentOffsetPosition
+            && endOffsetPosition == other.endOffsetPosition
+            && this.offsetLag == other.offsetLag;
+    }
 
-	@Override
-	public int hashCode() {
-		return Objects.hash(currentOffsetPosition, endOffsetPosition, offsetLag);
-	}
+    @Override
+    public int hashCode() {
+        return Objects.hash(currentOffsetPosition, endOffsetPosition, offsetLag);
+    }
 
-	@Override
-	public String toString() {
-		return "LagInfo {" +
-				" currentOffsetPosition=" + currentOffsetPosition +
-				", endOffsetPosition=" + endOffsetPosition +
-				", offsetLag=" + offsetLag +
-				'}';
-	}
+    @Override
+    public String toString() {
+        return "LagInfo {" +
+            " currentOffsetPosition=" + currentOffsetPosition +
+            ", endOffsetPosition=" + endOffsetPosition +
+            ", offsetLag=" + offsetLag +
+            '}';
+    }
 }

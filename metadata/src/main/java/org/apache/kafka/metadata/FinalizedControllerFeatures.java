@@ -17,7 +17,11 @@
 
 package org.apache.kafka.metadata;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 
 
 /**
@@ -34,6 +38,10 @@ public class FinalizedControllerFeatures {
 
     public Optional<Short> get(String name) {
         return Optional.ofNullable(featureMap.get(name));
+    }
+
+    public short versionOrDefault(String name, short defaultValue) {
+        return featureMap.getOrDefault(name, defaultValue);
     }
 
     public Set<String> featureNames() {
@@ -55,19 +63,15 @@ public class FinalizedControllerFeatures {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof FinalizedControllerFeatures))
-            return false;
-        FinalizedControllerFeatures other = (FinalizedControllerFeatures) o;
+        if (!(o instanceof FinalizedControllerFeatures other)) return false;
         return featureMap.equals(other.featureMap) && epoch == other.epoch;
     }
 
     @Override
     public String toString() {
-        StringBuilder bld = new StringBuilder();
-        bld.append("{");
-        bld.append("featureMap=").append(featureMap.toString());
-        bld.append(", epoch=").append(epoch);
-        bld.append("}");
-        return bld.toString();
+        return "FinalizedControllerFeatures(" +
+                "featureMap=" + featureMap.toString() +
+                ", epoch=" + epoch +
+                ")";
     }
 }

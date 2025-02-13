@@ -18,6 +18,7 @@ package org.apache.kafka.tools;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.utils.Exit;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,39 +53,24 @@ public class ConsumerPerformanceTest {
 
     @Test
     public void testDetailedHeaderMatchBody() {
-        testHeaderMatchContent(true, 2, () -> ConsumerPerformance.printConsumerProgress(1, 1024 * 1024, 0, 1, 0, 0, 1, dateFormat, 1L));
+        testHeaderMatchContent(true, 2,
+            () -> ConsumerPerformance.printConsumerProgress(1, 1024 * 1024, 0, 1, 0, 0, 1, dateFormat, 1L));
     }
 
     @Test
     public void testNonDetailedHeaderMatchBody() {
-        testHeaderMatchContent(false, 2, () -> ConsumerPerformance.printConsumerProgress(1, 1024 * 1024, 0, 1, 0, 0, 1, dateFormat, 1L));
-    }
-
-    @Test
-    public void testConfigBrokerList() {
-        String[] args = new String[]{"--broker-list", "localhost:9092", "--topic", "test", "--messages", "10"};
-
-        ConsumerPerformance.ConsumerPerfOptions config = new ConsumerPerformance.ConsumerPerfOptions(args);
-
-        assertEquals("localhost:9092", config.brokerHostsAndPorts());
-        assertTrue(config.topic().contains("test"));
-        assertEquals(10, config.numMessages());
+        testHeaderMatchContent(false, 2,
+            () -> ConsumerPerformance.printConsumerProgress(1, 1024 * 1024, 0, 1, 0, 0, 1, dateFormat, 1L));
     }
 
     @Test
     public void testConfigBootStrapServer() {
-        String[] args = new String[]{"--bootstrap-server", "localhost:9092", "--topic", "test", "--messages", "10", "--print-metrics"};
-
-        ConsumerPerformance.ConsumerPerfOptions config = new ConsumerPerformance.ConsumerPerfOptions(args);
-
-        assertEquals("localhost:9092", config.brokerHostsAndPorts());
-        assertTrue(config.topic().contains("test"));
-        assertEquals(10, config.numMessages());
-    }
-
-    @Test
-    public void testBrokerListOverride() {
-        String[] args = new String[]{"--broker-list", "localhost:9094", "--bootstrap-server", "localhost:9092", "--topic", "test", "--messages", "10"};
+        String[] args = new String[]{
+            "--bootstrap-server", "localhost:9092",
+            "--topic", "test",
+            "--messages", "10",
+            "--print-metrics"
+        };
 
         ConsumerPerformance.ConsumerPerfOptions config = new ConsumerPerformance.ConsumerPerfOptions(args);
 
@@ -95,7 +81,12 @@ public class ConsumerPerformanceTest {
 
     @Test
     public void testConfigWithUnrecognizedOption() {
-        String[] args = new String[]{"--broker-list", "localhost:9092", "--topic", "test", "--messages", "10", "--new-consumer"};
+        String[] args = new String[]{
+            "--bootstrap-server", "localhost:9092",
+            "--topic", "test",
+            "--messages", "10",
+            "--new-consumer"
+        };
 
         String err = ToolsTestUtils.captureStandardErr(() -> new ConsumerPerformance.ConsumerPerfOptions(args));
 
@@ -110,7 +101,12 @@ public class ConsumerPerformanceTest {
             output.flush();
         }
 
-        String[] args = new String[]{"--broker-list", "localhost:9092", "--topic", "test", "--messages", "10", "--consumer.config", tempFile.getAbsolutePath()};
+        String[] args = new String[]{
+            "--bootstrap-server", "localhost:9092",
+            "--topic", "test",
+            "--messages", "10",
+            "--consumer.config", tempFile.getAbsolutePath()
+        };
 
         ConsumerPerformance.ConsumerPerfOptions config = new ConsumerPerformance.ConsumerPerfOptions(args);
 
@@ -119,7 +115,11 @@ public class ConsumerPerformanceTest {
 
     @Test
     public void testDefaultClientId() throws IOException {
-        String[] args = new String[]{"--broker-list", "localhost:9092", "--topic", "test", "--messages", "10"};
+        String[] args = new String[]{
+            "--bootstrap-server", "localhost:9092",
+            "--topic", "test",
+            "--messages", "10"
+        };
 
         ConsumerPerformance.ConsumerPerfOptions config = new ConsumerPerformance.ConsumerPerfOptions(args);
 

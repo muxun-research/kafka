@@ -21,20 +21,24 @@ import org.apache.kafka.common.errors.UnsupportedVersionException;
 import java.util.Arrays;
 import java.util.Objects;
 
-public class SubscriptionResponseWrapper<FV> {
-    final static byte CURRENT_VERSION = 0;
+public class SubscriptionResponseWrapper<VRight> {
+    static final byte CURRENT_VERSION = 0;
     // v0 fields:
     private final long[] originalValueHash;
-    private final FV foreignValue;
+    private final VRight foreignValue;
     private final byte version;
     // non-serializing fields
     private final Integer primaryPartition;
 
-    public SubscriptionResponseWrapper(final long[] originalValueHash, final FV foreignValue, final Integer primaryPartition) {
+    public SubscriptionResponseWrapper(final long[] originalValueHash, final VRight foreignValue, final Integer primaryPartition) {
         this(originalValueHash, foreignValue, CURRENT_VERSION, primaryPartition);
     }
 
-    public SubscriptionResponseWrapper(final long[] originalValueHash, final FV foreignValue, final byte version, final Integer primaryPartition) {
+    public SubscriptionResponseWrapper(
+        final long[] originalValueHash,
+        final VRight foreignValue,
+        final byte version,
+        final Integer primaryPartition) {
         if (version < 0 || version > CURRENT_VERSION) {
             throw new UnsupportedVersionException("SubscriptionWrapper does not support version " + version);
         }
@@ -44,25 +48,30 @@ public class SubscriptionResponseWrapper<FV> {
         this.primaryPartition = primaryPartition;
     }
 
-    public long[] getOriginalValueHash() {
+    public long[] originalValueHash() {
         return originalValueHash;
     }
 
-    public FV getForeignValue() {
+    public VRight foreignValue() {
         return foreignValue;
     }
 
-    public byte getVersion() {
+    public byte version() {
         return version;
     }
 
-    public Integer getPrimaryPartition() {
+    public Integer primaryPartition() {
         return primaryPartition;
     }
 
     @Override
     public String toString() {
-        return "SubscriptionResponseWrapper{" + "version=" + version + ", foreignValue=" + foreignValue + ", originalValueHash=" + Arrays.toString(originalValueHash) + ", primaryPartition=" + primaryPartition + '}';
+        return "SubscriptionResponseWrapper{" +
+            "version=" + version +
+            ", foreignValue=" + foreignValue +
+            ", originalValueHash=" + Arrays.toString(originalValueHash) +
+            ", primaryPartition=" + primaryPartition +
+            '}';
     }
 
     @Override
@@ -74,7 +83,11 @@ public class SubscriptionResponseWrapper<FV> {
             return false;
         }
         final SubscriptionResponseWrapper<?> that = (SubscriptionResponseWrapper<?>) o;
-        return version == that.version && Arrays.equals(originalValueHash, that.originalValueHash) && Objects.equals(foreignValue, that.foreignValue) && Objects.equals(primaryPartition, that.primaryPartition);
+        return version == that.version &&
+               Arrays.equals(originalValueHash,
+               that.originalValueHash) &&
+               Objects.equals(foreignValue, that.foreignValue) &&
+               Objects.equals(primaryPartition, that.primaryPartition);
     }
 
     @Override

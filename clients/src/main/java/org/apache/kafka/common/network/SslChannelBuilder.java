@@ -28,7 +28,6 @@ import org.apache.kafka.common.security.ssl.SslFactory;
 import org.apache.kafka.common.security.ssl.SslPrincipalMapper;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Utils;
-import org.slf4j.Logger;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -43,21 +42,22 @@ import java.util.function.Supplier;
 public class SslChannelBuilder implements ChannelBuilder, ListenerReconfigurable {
     private final ListenerName listenerName;
     private final boolean isInterBrokerListener;
+    private final ConnectionMode connectionMode;
     private SslFactory sslFactory;
-    private Mode mode;
     private Map<String, ?> configs;
     private SslPrincipalMapper sslPrincipalMapper;
-    private final Logger log;
 
     /**
      * Constructs an SSL channel builder. ListenerName is provided only
      * for server channel builder and will be null for client channel builder.
      */
-    public SslChannelBuilder(Mode mode, ListenerName listenerName, boolean isInterBrokerListener, LogContext logContext) {
-        this.mode = mode;
+    public SslChannelBuilder(ConnectionMode connectionMode,
+                             ListenerName listenerName,
+                             boolean isInterBrokerListener,
+                             LogContext logContext) {
+        this.connectionMode = connectionMode;
         this.listenerName = listenerName;
         this.isInterBrokerListener = isInterBrokerListener;
-        this.log = logContext.logger(getClass());
     }
 
     public void configure(Map<String, ?> configs) throws KafkaException {
@@ -66,7 +66,7 @@ public class SslChannelBuilder implements ChannelBuilder, ListenerReconfigurable
             String sslPrincipalMappingRules = (String) configs.get(BrokerSecurityConfigs.SSL_PRINCIPAL_MAPPING_RULES_CONFIG);
             if (sslPrincipalMappingRules != null)
                 sslPrincipalMapper = SslPrincipalMapper.fromRules(sslPrincipalMappingRules);
-            this.sslFactory = new SslFactory(mode, null, isInterBrokerListener);
+            this.sslFactory = new SslFactory(connectionMode, null, isInterBrokerListener);
             this.sslFactory.configure(this.configs);
         } catch (KafkaException e) {
             throw e;
@@ -96,25 +96,33 @@ public class SslChannelBuilder implements ChannelBuilder, ListenerReconfigurable
     }
 
     @Override
-    public KafkaChannel buildChannel(String id, SelectionKey key, int maxReceiveSize, MemoryPool memoryPool, ChannelMetadataRegistry metadataRegistry) throws KafkaException {
+    public KafkaChannel buildChannel(String id, SelectionKey key, int maxReceiveSize,
+                                     MemoryPool memoryPool, ChannelMetadataRegistry metadataRegistry) throws KafkaException {
+        SslTransportLayer transportLayer = null;
         try {
-            SslTransportLayer transportLayer = buildTransportLayer(sslFactory, id, key, metadataRegistry);
-            Supplier<Authenticator> authenticatorCreator = () -> new SslAuthenticator(configs, transportLayer, listenerName, sslPrincipalMapper);
-            return new KafkaChannel(id, transportLayer, authenticatorCreator, maxReceiveSize, memoryPool != null ? memoryPool : MemoryPool.NONE, metadataRegistry);
+            transportLayer = buildTransportLayer(sslFactory, id, key, metadataRegistry);
+            final SslTransportLayer finalTransportLayer = transportLayer;
+            Supplier<Authenticator> authenticatorCreator = () ->
+                new SslAuthenticator(configs, finalTransportLayer, listenerName, sslPrincipalMapper);
+            return new KafkaChannel(id, transportLayer, authenticatorCreator, maxReceiveSize,
+                    memoryPool != null ? memoryPool : MemoryPool.NONE, metadataRegistry);
         } catch (Exception e) {
+            // Ideally these resources are closed by the KafkaChannel but this builder should close the resources instead
+            // if an error occurs due to which KafkaChannel is not created.
+            Utils.closeQuietly(transportLayer, "transport layer for channel Id: " + id);
             throw new KafkaException(e);
         }
     }
 
     @Override
     public void close() {
-        if (sslFactory != null)
-            sslFactory.close();
+        if (sslFactory != null) sslFactory.close();
     }
 
     protected SslTransportLayer buildTransportLayer(SslFactory sslFactory, String id, SelectionKey key, ChannelMetadataRegistry metadataRegistry) throws IOException {
         SocketChannel socketChannel = (SocketChannel) key.channel();
-        return SslTransportLayer.create(id, key, sslFactory.createSslEngine(socketChannel.socket()), metadataRegistry);
+        return SslTransportLayer.create(id, key, sslFactory.createSslEngine(socketChannel.socket()),
+            metadataRegistry);
     }
 
     /**
@@ -147,7 +155,10 @@ public class SslChannelBuilder implements ChannelBuilder, ListenerReconfigurable
             // listenerName should only be null in Client mode where principal() should not be called
             if (listenerName == null)
                 throw new IllegalStateException("Unexpected call to principal() when listenerName is null");
-            SslAuthenticationContext context = new SslAuthenticationContext(transportLayer.sslSession(), clientAddress, listenerName.value());
+            SslAuthenticationContext context = new SslAuthenticationContext(
+                    transportLayer.sslSession(),
+                    clientAddress,
+                    listenerName.value());
             return principalBuilder.build(context);
         }
 
@@ -157,7 +168,7 @@ public class SslChannelBuilder implements ChannelBuilder, ListenerReconfigurable
         }
 
         @Override
-        public void close() throws IOException {
+        public void close() {
             if (principalBuilder instanceof Closeable)
                 Utils.closeQuietly((Closeable) principalBuilder, "principal builder");
         }

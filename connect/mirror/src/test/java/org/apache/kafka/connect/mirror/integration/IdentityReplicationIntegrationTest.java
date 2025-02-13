@@ -17,6 +17,7 @@
 package org.apache.kafka.connect.mirror.integration;
 
 import org.apache.kafka.connect.mirror.IdentityReplicationPolicy;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 
@@ -36,9 +37,9 @@ public class IdentityReplicationIntegrationTest extends MirrorConnectorsIntegrat
     public void startClusters() throws Exception {
         replicateBackupToPrimary = false;
         super.startClusters(new HashMap<String, String>() {{
-            put("replication.policy.class", IdentityReplicationPolicy.class.getName());
-            put("topics", "test-topic-.*");
-        }});
+                put("replication.policy.class", IdentityReplicationPolicy.class.getName());
+                put("topics", "test-topic-.*");
+            }});
     }
 
     /*

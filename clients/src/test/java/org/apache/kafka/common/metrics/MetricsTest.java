@@ -19,36 +19,65 @@ package org.apache.kafka.common.metrics;
 import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.metrics.internals.MetricsUtils;
-import org.apache.kafka.common.metrics.stats.*;
+import org.apache.kafka.common.metrics.stats.Avg;
+import org.apache.kafka.common.metrics.stats.CumulativeSum;
+import org.apache.kafka.common.metrics.stats.Max;
+import org.apache.kafka.common.metrics.stats.Meter;
+import org.apache.kafka.common.metrics.stats.Min;
+import org.apache.kafka.common.metrics.stats.Percentile;
+import org.apache.kafka.common.metrics.stats.Percentiles;
 import org.apache.kafka.common.metrics.stats.Percentiles.BucketSizing;
+import org.apache.kafka.common.metrics.stats.Rate;
+import org.apache.kafka.common.metrics.stats.SimpleRate;
+import org.apache.kafka.common.metrics.stats.Value;
+import org.apache.kafka.common.metrics.stats.WindowedCount;
+import org.apache.kafka.common.metrics.stats.WindowedSum;
 import org.apache.kafka.common.utils.MockTime;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class MetricsTest {
     private static final Logger log = LoggerFactory.getLogger(MetricsTest.class);
-
     private static final double EPS = 0.000001;
-    private MockTime time = new MockTime();
-    private MetricConfig config = new MetricConfig();
+
+    private final MockTime time = new MockTime();
+    private final MetricConfig config = new MetricConfig();
     private Metrics metrics;
     private ExecutorService executorService;
 
     @BeforeEach
     public void setup() {
-        this.metrics = new Metrics(config, Arrays.asList(new JmxReporter()), time, true);
+        this.metrics = new Metrics(config, singletonList(new JmxReporter()), time, true);
     }
 
     @AfterEach
@@ -90,10 +119,14 @@ public class MetricsTest {
         s.add(metrics.metricName("test.avg", "grp1"), new Avg());
         s.add(metrics.metricName("test.max", "grp1"), new Max());
         s.add(metrics.metricName("test.min", "grp1"), new Min());
-        s.add(new Meter(TimeUnit.SECONDS, metrics.metricName("test.rate", "grp1"), metrics.metricName("test.total", "grp1")));
-        s.add(new Meter(TimeUnit.SECONDS, new WindowedCount(), metrics.metricName("test.occurrences", "grp1"), metrics.metricName("test.occurrences.total", "grp1")));
+        s.add(new Meter(TimeUnit.SECONDS, metrics.metricName("test.rate", "grp1"),
+                metrics.metricName("test.total", "grp1")));
+        s.add(new Meter(TimeUnit.SECONDS, new WindowedCount(), metrics.metricName("test.occurrences", "grp1"),
+                metrics.metricName("test.occurrences.total", "grp1")));
         s.add(metrics.metricName("test.count", "grp1"), new WindowedCount());
-        s.add(new Percentiles(100, -100, 100, BucketSizing.CONSTANT, new Percentile(metrics.metricName("test.median", "grp1"), 50.0), new Percentile(metrics.metricName("test.perc99_9", "grp1"), 99.9)));
+        s.add(new Percentiles(100, -100, 100, BucketSizing.CONSTANT,
+                             new Percentile(metrics.metricName("test.median", "grp1"), 50.0),
+                             new Percentile(metrics.metricName("test.perc99_9", "grp1"), 99.9)));
 
         Sensor s2 = metrics.sensor("test.sensor2");
         s2.add(metrics.metricName("s2.total", "grp1"), new CumulativeSum());
@@ -107,20 +140,28 @@ public class MetricsTest {
         }
         // prior to any time passing
         double elapsedSecs = (config.timeWindowMs() * (config.samples() - 1)) / 1000.0;
-        assertEquals(count / elapsedSecs, metricValueFunc.apply(metrics.metrics().get(metrics.metricName("test.occurrences", "grp1"))), EPS, String.format("Occurrences(0...%d) = %f", count, count / elapsedSecs));
+        assertEquals(count / elapsedSecs, metricValueFunc.apply(metrics.metrics().get(metrics.metricName("test.occurrences", "grp1"))), EPS,
+            String.format("Occurrences(0...%d) = %f", count, count / elapsedSecs));
 
         // pretend 2 seconds passed...
         long sleepTimeMs = 2;
         time.sleep(sleepTimeMs * 1000);
         elapsedSecs += sleepTimeMs;
 
-        assertEquals(5.0, metricValueFunc.apply(metrics.metric(metrics.metricName("s2.total", "grp1"))), EPS, "s2 reflects the constant value");
-        assertEquals(4.5, metricValueFunc.apply(metrics.metric(metrics.metricName("test.avg", "grp1"))), EPS, "Avg(0...9) = 4.5");
-        assertEquals(count - 1, metricValueFunc.apply(metrics.metric(metrics.metricName("test.max", "grp1"))), EPS, "Max(0...9) = 9");
-        assertEquals(0.0, metricValueFunc.apply(metrics.metric(metrics.metricName("test.min", "grp1"))), EPS, "Min(0...9) = 0");
-        assertEquals(sum / elapsedSecs, metricValueFunc.apply(metrics.metric(metrics.metricName("test.rate", "grp1"))), EPS, "Rate(0...9) = 1.40625");
-        assertEquals(count / elapsedSecs, metricValueFunc.apply(metrics.metric(metrics.metricName("test.occurrences", "grp1"))), EPS, String.format("Occurrences(0...%d) = %f", count, count / elapsedSecs));
-        assertEquals(count, metricValueFunc.apply(metrics.metric(metrics.metricName("test.count", "grp1"))), EPS, "Count(0...9) = 10");
+        assertEquals(5.0, metricValueFunc.apply(metrics.metric(metrics.metricName("s2.total", "grp1"))), EPS,
+            "s2 reflects the constant value");
+        assertEquals(4.5, metricValueFunc.apply(metrics.metric(metrics.metricName("test.avg", "grp1"))), EPS,
+            "Avg(0...9) = 4.5");
+        assertEquals(count - 1,  metricValueFunc.apply(metrics.metric(metrics.metricName("test.max", "grp1"))), EPS,
+            "Max(0...9) = 9");
+        assertEquals(0.0, metricValueFunc.apply(metrics.metric(metrics.metricName("test.min", "grp1"))), EPS,
+            "Min(0...9) = 0");
+        assertEquals(sum / elapsedSecs, metricValueFunc.apply(metrics.metric(metrics.metricName("test.rate", "grp1"))), EPS,
+            "Rate(0...9) = 1.40625");
+        assertEquals(count / elapsedSecs, metricValueFunc.apply(metrics.metric(metrics.metricName("test.occurrences", "grp1"))), EPS,
+            String.format("Occurrences(0...%d) = %f", count, count / elapsedSecs));
+        assertEquals(count, metricValueFunc.apply(metrics.metric(metrics.metricName("test.count", "grp1"))), EPS,
+            "Count(0...9) = 10");
     }
 
     @Test
@@ -156,7 +197,7 @@ public class MetricsTest {
         assertEquals(1.0 + c1, p2, EPS);
         assertEquals(1.0 + c1 + c2, p1, EPS);
         assertEquals(Arrays.asList(child1, child2), metrics.childrenSensors().get(parent1));
-        assertEquals(Arrays.asList(child1), metrics.childrenSensors().get(parent2));
+        assertEquals(singletonList(child1), metrics.childrenSensors().get(parent2));
         assertNull(metrics.childrenSensors().get(grandchild));
     }
 
@@ -240,16 +281,20 @@ public class MetricsTest {
         Metrics.ExpireSensorTask purger = metrics.new ExpireSensorTask();
         purger.run();
         assertNotNull(metrics.getSensor("test.s1"), "Sensor test.s1 must be present");
-        assertNotNull(metrics.metrics().get(metrics.metricName("test.s1.count", "grp1")), "MetricName test.s1.count must be present");
+        assertNotNull(
+                metrics.metrics().get(metrics.metricName("test.s1.count", "grp1")), "MetricName test.s1.count must be present");
         assertNotNull(metrics.getSensor("test.s2"), "Sensor test.s2 must be present");
-        assertNotNull(metrics.metrics().get(metrics.metricName("test.s2.count", "grp1")), "MetricName test.s2.count must be present");
+        assertNotNull(
+                metrics.metrics().get(metrics.metricName("test.s2.count", "grp1")), "MetricName test.s2.count must be present");
 
         time.sleep(1001);
         purger.run();
         assertNull(metrics.getSensor("test.s1"), "Sensor test.s1 should have been purged");
-        assertNull(metrics.metrics().get(metrics.metricName("test.s1.count", "grp1")), "MetricName test.s1.count should have been purged");
+        assertNull(
+                metrics.metrics().get(metrics.metricName("test.s1.count", "grp1")), "MetricName test.s1.count should have been purged");
         assertNotNull(metrics.getSensor("test.s2"), "Sensor test.s2 must be present");
-        assertNotNull(metrics.metrics().get(metrics.metricName("test.s2.count", "grp1")), "MetricName test.s2.count must be present");
+        assertNotNull(
+                metrics.metrics().get(metrics.metricName("test.s2.count", "grp1")), "MetricName test.s2.count must be present");
 
         // record a value in sensor s2. This should reset the clock for that sensor.
         // It should not get purged at the 3 second mark after creation
@@ -257,19 +302,22 @@ public class MetricsTest {
         time.sleep(2000);
         purger.run();
         assertNotNull(metrics.getSensor("test.s2"), "Sensor test.s2 must be present");
-        assertNotNull(metrics.metrics().get(metrics.metricName("test.s2.count", "grp1")), "MetricName test.s2.count must be present");
+        assertNotNull(
+                metrics.metrics().get(metrics.metricName("test.s2.count", "grp1")), "MetricName test.s2.count must be present");
 
         // After another 1001 ms sleep, the metric should be purged
         time.sleep(1001);
         purger.run();
         assertNull(metrics.getSensor("test.s2"), "Sensor test.s2 should have been purged");
-        assertNull(metrics.metrics().get(metrics.metricName("test.s2.count", "grp1")), "MetricName test.s2.count should have been purged");
+        assertNull(
+                metrics.metrics().get(metrics.metricName("test.s2.count", "grp1")), "MetricName test.s2.count should have been purged");
 
         // After purging, it should be possible to recreate a metric
         s1 = metrics.sensor("test.s1", null, 1);
         s1.add(metrics.metricName("test.s1.count", "grp1"), new WindowedCount());
         assertNotNull(metrics.getSensor("test.s1"), "Sensor test.s1 must be present");
-        assertNotNull(metrics.metrics().get(metrics.metricName("test.s1.count", "grp1")), "MetricName test.s1.count must be present");
+        assertNotNull(
+                metrics.metrics().get(metrics.metricName("test.s1.count", "grp1")), "MetricName test.s1.count must be present");
     }
 
     @Test
@@ -286,17 +334,6 @@ public class MetricsTest {
         assertNull(metrics.metrics().get(metrics.metricName("test2", "grp1")));
 
         assertEquals(size, metrics.metrics().size());
-    }
-
-    @Test
-    public void testEventWindowing() {
-        WindowedCount count = new WindowedCount();
-        MetricConfig config = new MetricConfig().eventWindow(1).samples(2);
-        count.record(config, 1.0, time.milliseconds());
-        count.record(config, 1.0, time.milliseconds());
-        assertEquals(2.0, count.measure(config, time.milliseconds()), EPS);
-        count.record(config, 1.0, time.milliseconds()); // first event times out
-        assertEquals(2.0, count.measure(config, time.milliseconds()), EPS);
     }
 
     @Test
@@ -372,7 +409,8 @@ public class MetricsTest {
     @Test
     public void testDuplicateMetricName() {
         metrics.sensor("test").add(metrics.metricName("test", "grp1"), new Avg());
-        assertThrows(IllegalArgumentException.class, () -> metrics.sensor("test2").add(metrics.metricName("test", "grp1"), new CumulativeSum()));
+        assertThrows(IllegalArgumentException.class, () ->
+                metrics.sensor("test2").add(metrics.metricName("test", "grp1"), new CumulativeSum()));
     }
 
     @Test
@@ -426,35 +464,24 @@ public class MetricsTest {
         Metric p50 = this.metrics.metrics().get(metrics.metricName("test.p50", "grp1"));
         Metric p75 = this.metrics.metrics().get(metrics.metricName("test.p75", "grp1"));
 
-        // record two windows worth of sequential values
+        // record 100 sequential values
         for (int i = 0; i < buckets; i++)
             sensor.record(i);
 
-        assertEquals(25, (Double) p25.metricValue(), 1.0);
-        assertEquals(50, (Double) p50.metricValue(), 1.0);
-        assertEquals(75, (Double) p75.metricValue(), 1.0);
-
-        for (int i = 0; i < buckets; i++)
-            sensor.record(0.0);
-
-        assertEquals(0.0, (Double) p25.metricValue(), 1.0);
-        assertEquals(0.0, (Double) p50.metricValue(), 1.0);
-        assertEquals(0.0, (Double) p75.metricValue(), 1.0);
-
-        // record two more windows worth of sequential values
-        for (int i = 0; i < buckets; i++)
-            sensor.record(i);
-
-        assertEquals(25, (Double) p25.metricValue(), 1.0);
-        assertEquals(50, (Double) p50.metricValue(), 1.0);
-        assertEquals(75, (Double) p75.metricValue(), 1.0);
+        assertEquals(25, (Double) p25.metricValue());
+        assertEquals(50, (Double) p50.metricValue());
+        assertEquals(75, (Double) p75.metricValue());
     }
 
     @Test
     public void shouldPinSmallerValuesToMin() {
         final double min = 0.0d;
         final double max = 100d;
-        Percentiles percs = new Percentiles(1000, min, max, BucketSizing.LINEAR, new Percentile(metrics.metricName("test.p50", "grp1"), 50));
+        Percentiles percs = new Percentiles(1000,
+                                            min,
+                                            max,
+                                            BucketSizing.LINEAR,
+                                            new Percentile(metrics.metricName("test.p50", "grp1"), 50));
         MetricConfig config = new MetricConfig().eventWindow(50).samples(2);
         Sensor sensor = metrics.sensor("test", config);
         sensor.add(percs);
@@ -469,7 +496,11 @@ public class MetricsTest {
     public void shouldPinLargerValuesToMax() {
         final double min = 0.0d;
         final double max = 100d;
-        Percentiles percs = new Percentiles(1000, min, max, BucketSizing.LINEAR, new Percentile(metrics.metricName("test.p50", "grp1"), 50));
+        Percentiles percs = new Percentiles(1000,
+                                            min,
+                                            max,
+                                            BucketSizing.LINEAR,
+                                            new Percentile(metrics.metricName("test.p50", "grp1"), 50));
         MetricConfig config = new MetricConfig().eventWindow(50).samples(2);
         Sensor sensor = metrics.sensor("test", config);
         sensor.add(percs);
@@ -490,7 +521,11 @@ public class MetricsTest {
             Random prng = new Random(seed);
             int numberOfValues = 5000 + prng.nextInt(10_000);  // range is [5000, 15000]
 
-            Percentiles percs = new Percentiles(sizeInBytes, maximumValue, BucketSizing.LINEAR, new Percentile(metrics.metricName("test.p90", "grp1"), 90), new Percentile(metrics.metricName("test.p99", "grp1"), 99));
+            Percentiles percs = new Percentiles(sizeInBytes,
+                                                maximumValue,
+                                                BucketSizing.LINEAR,
+                                                new Percentile(metrics.metricName("test.p90", "grp1"), 90),
+                                                new Percentile(metrics.metricName("test.p99", "grp1"), 99));
             MetricConfig config = new MetricConfig().eventWindow(50).samples(2);
             Sensor sensor = metrics.sensor("test", config);
             sensor.add(percs);
@@ -554,7 +589,8 @@ public class MetricsTest {
         KafkaMetric countRateMetric = metrics.metrics().get(countRateMetricName);
         assertEquals(sum / elapsedSecs, (Double) rateMetric.metricValue(), EPS, "Rate(0...2) = 2.666");
         assertEquals(count / elapsedSecs, (Double) countRateMetric.metricValue(), EPS, "Count rate(0...2) = 0.02666");
-        assertEquals(elapsedSecs, MetricsUtils.convert(((Rate) rateMetric.measurable()).windowSize(cfg, time.milliseconds()), TimeUnit.SECONDS), EPS, "Elapsed Time = 75 seconds");
+        assertEquals(elapsedSecs,
+                MetricsUtils.convert(((Rate) rateMetric.measurable()).windowSize(cfg, time.milliseconds()), TimeUnit.SECONDS), EPS, "Elapsed Time = 75 seconds");
         assertEquals(sum, (Double) totalMetric.metricValue(), EPS);
         assertEquals(count, (Double) countTotalMetric.metricValue(), EPS);
 
@@ -657,7 +693,7 @@ public class MetricsTest {
         Map<String, String> childTagsWithValues = new HashMap<>();
         childTagsWithValues.put("child-tag", "child-tag-value");
 
-        try (Metrics inherited = new Metrics(new MetricConfig().tags(parentTagsWithValues), Arrays.asList(new JmxReporter()), time, true)) {
+        try (Metrics inherited = new Metrics(new MetricConfig().tags(parentTagsWithValues), singletonList(new JmxReporter()), time, true)) {
             MetricName inheritedMetric = inherited.metricInstance(SampleMetrics.METRIC_WITH_INHERITED_TAGS, childTagsWithValues);
 
             Map<String, String> filledOutTags = inheritedMetric.tags();
@@ -698,7 +734,8 @@ public class MetricsTest {
 
         final AtomicBoolean alive = new AtomicBoolean(true);
         executorService = Executors.newSingleThreadExecutor();
-        executorService.submit(new ConcurrentMetricOperation(alive, "record", () -> sensors.forEach(sensor -> sensor.record(random.nextInt(10000)))));
+        executorService.submit(new ConcurrentMetricOperation(alive, "record",
+            () -> sensors.forEach(sensor -> sensor.record(random.nextInt(10000)))));
 
         for (int i = 0; i < 10000; i++) {
             if (sensors.size() > 5) {
@@ -724,8 +761,7 @@ public class MetricsTest {
     public void testConcurrentReadUpdateReport() {
 
         class LockingReporter implements MetricsReporter {
-            Map<MetricName, KafkaMetric> activeMetrics = new HashMap<>();
-
+            final Map<MetricName, KafkaMetric> activeMetrics = new HashMap<>();
             @Override
             public synchronized void init(List<KafkaMetric> metrics) {
             }
@@ -757,7 +793,7 @@ public class MetricsTest {
 
         final LockingReporter reporter = new LockingReporter();
         this.metrics.close();
-        this.metrics = new Metrics(config, Arrays.asList(reporter), new MockTime(10), true);
+        this.metrics = new Metrics(config, singletonList(reporter), new MockTime(10), true);
         final Deque<Sensor> sensors = new ConcurrentLinkedDeque<>();
         SensorCreator sensorCreator = new SensorCreator(metrics);
 
@@ -765,9 +801,13 @@ public class MetricsTest {
         final AtomicBoolean alive = new AtomicBoolean(true);
         executorService = Executors.newFixedThreadPool(3);
 
-        Future<?> writeFuture = executorService.submit(new ConcurrentMetricOperation(alive, "record", () -> sensors.forEach(sensor -> sensor.record(random.nextInt(10000)))));
-        Future<?> readFuture = executorService.submit(new ConcurrentMetricOperation(alive, "read", () -> sensors.forEach(sensor -> sensor.metrics().forEach(metric -> assertNotNull(metric.metricValue(), "Invalid metric value")))));
-        Future<?> reportFuture = executorService.submit(new ConcurrentMetricOperation(alive, "report", reporter::processMetrics));
+        Future<?> writeFuture = executorService.submit(new ConcurrentMetricOperation(alive, "record",
+            () -> sensors.forEach(sensor -> sensor.record(random.nextInt(10000)))));
+        Future<?> readFuture = executorService.submit(new ConcurrentMetricOperation(alive, "read",
+            () -> sensors.forEach(sensor -> sensor.metrics().forEach(metric ->
+                assertNotNull(metric.metricValue(), "Invalid metric value")))));
+        Future<?> reportFuture = executorService.submit(new ConcurrentMetricOperation(alive, "report",
+                reporter::processMetrics));
 
         for (int i = 0; i < 10000; i++) {
             if (sensors.size() > 10) {
@@ -784,17 +824,15 @@ public class MetricsTest {
         alive.set(false);
     }
 
-    private class ConcurrentMetricOperation implements Runnable {
+    private static class ConcurrentMetricOperation implements Runnable {
         private final AtomicBoolean alive;
         private final String opName;
         private final Runnable op;
-
         ConcurrentMetricOperation(AtomicBoolean alive, String opName, Runnable op) {
             this.alive = alive;
             this.opName = opName;
             this.op = op;
         }
-
         @Override
         public void run() {
             try {
@@ -820,7 +858,7 @@ public class MetricsTest {
         PERCENTILES(9),
         METER(10);
 
-        int id;
+        final int id;
         StatType(int id) {
             this.id = id;
         }

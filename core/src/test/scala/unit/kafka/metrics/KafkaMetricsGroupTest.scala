@@ -28,12 +28,8 @@ class KafkaMetricsGroupTest {
 
   @Test
   def testUntaggedMetricName(): Unit = {
-    val metricName = KafkaMetricsGroup.explicitMetricName(
-      "kafka.metrics",
-      "TestMetrics",
-      "TaggedMetric",
-      Collections.emptyMap()
-    )
+    val metricsGroup = new KafkaMetricsGroup("kafka.metrics", "TestMetrics")
+    val metricName = metricsGroup.metricName("TaggedMetric", Collections.emptyMap())
 
     assertEquals("kafka.metrics", metricName.getGroup)
     assertEquals("TestMetrics", metricName.getType)
@@ -46,12 +42,8 @@ class KafkaMetricsGroupTest {
   @Test
   def testTaggedMetricName(): Unit = {
     val tags = Map("foo" -> "bar", "bar" -> "baz", "baz" -> "raz.taz").asJava
-    val metricName = KafkaMetricsGroup.explicitMetricName(
-      "kafka.metrics",
-      "TestMetrics",
-      "TaggedMetric",
-      tags
-    )
+    val metricsGroup = new KafkaMetricsGroup("kafka.metrics", "TestMetrics")
+    val metricName = metricsGroup.metricName("TaggedMetric", tags)
 
     assertEquals("kafka.metrics", metricName.getGroup)
     assertEquals("TestMetrics", metricName.getType)
@@ -64,12 +56,8 @@ class KafkaMetricsGroupTest {
   @Test
   def testTaggedMetricNameWithEmptyValue(): Unit = {
     val tags = Map("foo" -> "bar", "bar" -> "", "baz" -> "raz.taz").asJava
-    val metricName = KafkaMetricsGroup.explicitMetricName(
-      "kafka.metrics",
-      "TestMetrics",
-      "TaggedMetric",
-      tags
-    )
+    val metricsGroup = new KafkaMetricsGroup("kafka.metrics", "TestMetrics")
+    val metricName = metricsGroup.metricName("TaggedMetric", tags)
 
     assertEquals("kafka.metrics", metricName.getGroup)
     assertEquals("TestMetrics", metricName.getType)

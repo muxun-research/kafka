@@ -82,6 +82,10 @@ public class MockTimer implements Timer {
         return taskQueue.size();
     }
 
+    public PriorityQueue<TimerTaskEntry> taskQueue() {
+        return taskQueue;
+    }
+
     @Override
     public void close() throws Exception {
     }

@@ -31,55 +31,55 @@ public class DeleteRecordsRequest extends AbstractRequest {
 
     public static final long HIGH_WATERMARK = -1L;
 
-	private final DeleteRecordsRequestData data;
+    private final DeleteRecordsRequestData data;
 
     public static class Builder extends AbstractRequest.Builder<DeleteRecordsRequest> {
-		private DeleteRecordsRequestData data;
+        private final DeleteRecordsRequestData data;
 
-		public Builder(DeleteRecordsRequestData data) {
-			super(ApiKeys.DELETE_RECORDS);
-			this.data = data;
-		}
+        public Builder(DeleteRecordsRequestData data) {
+            super(ApiKeys.DELETE_RECORDS);
+            this.data = data;
+        }
 
         @Override
         public DeleteRecordsRequest build(short version) {
-			return new DeleteRecordsRequest(data, version);
+            return new DeleteRecordsRequest(data, version);
         }
 
         @Override
         public String toString() {
-			return data.toString();
+            return data.toString();
         }
     }
 
-	private DeleteRecordsRequest(DeleteRecordsRequestData data, short version) {
-		super(ApiKeys.DELETE_RECORDS, version);
-		this.data = data;
-	}
+    private DeleteRecordsRequest(DeleteRecordsRequestData data, short version) {
+        super(ApiKeys.DELETE_RECORDS, version);
+        this.data = data;
+    }
 
-	@Override
-	public DeleteRecordsRequestData data() {
-		return data;
-	}
+    @Override
+    public DeleteRecordsRequestData data() {
+        return data;
+    }
 
     @Override
     public AbstractResponse getErrorResponse(int throttleTimeMs, Throwable e) {
-		DeleteRecordsResponseData result = new DeleteRecordsResponseData().setThrottleTimeMs(throttleTimeMs);
-		short errorCode = Errors.forException(e).code();
-		for (DeleteRecordsTopic topic : data.topics()) {
-			DeleteRecordsTopicResult topicResult = new DeleteRecordsTopicResult().setName(topic.name());
-			result.topics().add(topicResult);
-			for (DeleteRecordsRequestData.DeleteRecordsPartition partition : topic.partitions()) {
-				topicResult.partitions().add(new DeleteRecordsResponseData.DeleteRecordsPartitionResult()
-						.setPartitionIndex(partition.partitionIndex())
-						.setErrorCode(errorCode)
-						.setLowWatermark(DeleteRecordsResponse.INVALID_LOW_WATERMARK));
-			}
-		}
-		return new DeleteRecordsResponse(result);
-	}
+        DeleteRecordsResponseData result = new DeleteRecordsResponseData().setThrottleTimeMs(throttleTimeMs);
+        short errorCode = Errors.forException(e).code();
+        for (DeleteRecordsTopic topic : data.topics()) {
+            DeleteRecordsTopicResult topicResult = new DeleteRecordsTopicResult().setName(topic.name());
+            result.topics().add(topicResult);
+            for (DeleteRecordsRequestData.DeleteRecordsPartition partition : topic.partitions()) {
+                topicResult.partitions().add(new DeleteRecordsResponseData.DeleteRecordsPartitionResult()
+                        .setPartitionIndex(partition.partitionIndex())
+                        .setErrorCode(errorCode)
+                        .setLowWatermark(DeleteRecordsResponse.INVALID_LOW_WATERMARK));
+            }
+        }
+        return new DeleteRecordsResponse(result);
+    }
 
     public static DeleteRecordsRequest parse(ByteBuffer buffer, short version) {
-		return new DeleteRecordsRequest(new DeleteRecordsRequestData(new ByteBufferAccessor(buffer), version), version);
+        return new DeleteRecordsRequest(new DeleteRecordsRequestData(new ByteBufferAccessor(buffer), version), version);
     }
 }

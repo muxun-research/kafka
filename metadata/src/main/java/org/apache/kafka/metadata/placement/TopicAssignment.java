@@ -17,21 +17,19 @@
 
 package org.apache.kafka.metadata.placement;
 
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
 /**
  * The topic assignment.
- * <p>
+ *
  * This class is immutable. It's internal state does not change.
  */
 public class TopicAssignment {
     private final List<PartitionAssignment> assignments;
 
     public TopicAssignment(List<PartitionAssignment> assignments) {
-        this.assignments = Collections.unmodifiableList(new ArrayList<>(assignments));
+        this.assignments = List.copyOf(assignments);
     }
 
     /**
@@ -43,9 +41,7 @@ public class TopicAssignment {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof TopicAssignment))
-            return false;
-        TopicAssignment other = (TopicAssignment) o;
+        if (!(o instanceof TopicAssignment other)) return false;
         return assignments.equals(other.assignments);
     }
 
@@ -56,6 +52,8 @@ public class TopicAssignment {
 
     @Override
     public String toString() {
-        return "TopicAssignment" + "(assignments=" + assignments + ")";
+        return "TopicAssignment" +
+            "(assignments=" + assignments +
+            ")";
     }
 }

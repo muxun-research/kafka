@@ -18,7 +18,6 @@ package org.apache.kafka.clients.admin.internals;
 
 import org.apache.kafka.clients.admin.DeletedRecords;
 import org.apache.kafka.clients.admin.RecordsToDelete;
-import org.apache.kafka.clients.admin.internals.AdminApiFuture.SimpleAdminApiFuture;
 import org.apache.kafka.clients.admin.internals.AdminApiHandler.Batched;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
@@ -33,9 +32,16 @@ import org.apache.kafka.common.requests.AbstractResponse;
 import org.apache.kafka.common.requests.DeleteRecordsRequest;
 import org.apache.kafka.common.requests.DeleteRecordsResponse;
 import org.apache.kafka.common.utils.LogContext;
+
 import org.slf4j.Logger;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public final class DeleteRecordsHandler extends Batched<TopicPartition, DeletedRecords> {
 
@@ -45,7 +51,10 @@ public final class DeleteRecordsHandler extends Batched<TopicPartition, DeletedR
 
     private final int timeout;
 
-    public DeleteRecordsHandler(Map<TopicPartition, RecordsToDelete> recordsToDelete, LogContext logContext, int timeout) {
+    public DeleteRecordsHandler(
+            Map<TopicPartition, RecordsToDelete> recordsToDelete,
+            LogContext logContext, int timeout
+    ) {
         this.recordsToDelete = recordsToDelete;
         this.log = logContext.logger(DeleteRecordsHandler.class);
         this.lookupStrategy = new PartitionLeaderStrategy(logContext);
@@ -62,33 +71,47 @@ public final class DeleteRecordsHandler extends Batched<TopicPartition, DeletedR
         return this.lookupStrategy;
     }
 
-    public static SimpleAdminApiFuture<TopicPartition, DeletedRecords> newFuture(Collection<TopicPartition> topicPartitions) {
-        return AdminApiFuture.forKeys(new HashSet<>(topicPartitions));
+    public static PartitionLeaderStrategy.PartitionLeaderFuture<DeletedRecords> newFuture(
+            Collection<TopicPartition> topicPartitions,
+            Map<TopicPartition, Integer> partitionLeaderCache
+    ) {
+        return new PartitionLeaderStrategy.PartitionLeaderFuture<>(new HashSet<>(topicPartitions), partitionLeaderCache);
     }
 
     @Override
     public DeleteRecordsRequest.Builder buildBatchedRequest(int brokerId, Set<TopicPartition> keys) {
         Map<String, DeleteRecordsRequestData.DeleteRecordsTopic> deletionsForTopic = new HashMap<>();
-        for (Map.Entry<TopicPartition, RecordsToDelete> entry : recordsToDelete.entrySet()) {
-            TopicPartition topicPartition = entry.getKey();
-            DeleteRecordsRequestData.DeleteRecordsTopic deleteRecords = deletionsForTopic.computeIfAbsent(topicPartition.topic(), key -> new DeleteRecordsRequestData.DeleteRecordsTopic().setName(topicPartition.topic()));
-            deleteRecords.partitions().add(new DeleteRecordsRequestData.DeleteRecordsPartition().setPartitionIndex(topicPartition.partition()).setOffset(entry.getValue().beforeOffset()));
+        for (TopicPartition topicPartition : keys) {
+            RecordsToDelete toDelete = recordsToDelete.get(topicPartition);
+            DeleteRecordsRequestData.DeleteRecordsTopic deleteRecords = deletionsForTopic.computeIfAbsent(
+                    topicPartition.topic(),
+                    key -> new DeleteRecordsRequestData.DeleteRecordsTopic().setName(topicPartition.topic())
+            );
+            deleteRecords.partitions().add(new DeleteRecordsRequestData.DeleteRecordsPartition()
+                    .setPartitionIndex(topicPartition.partition())
+                    .setOffset(toDelete.beforeOffset()));
         }
 
-        DeleteRecordsRequestData data = new DeleteRecordsRequestData().setTopics(new ArrayList<>(deletionsForTopic.values())).setTimeoutMs(timeout);
+        DeleteRecordsRequestData data = new DeleteRecordsRequestData()
+                .setTopics(new ArrayList<>(deletionsForTopic.values()))
+                .setTimeoutMs(timeout);
         return new DeleteRecordsRequest.Builder(data);
     }
 
 
     @Override
-    public ApiResult<TopicPartition, DeletedRecords> handleResponse(Node broker, Set<TopicPartition> keys, AbstractResponse abstractResponse) {
+    public ApiResult<TopicPartition, DeletedRecords> handleResponse(
+        Node broker,
+        Set<TopicPartition> keys,
+        AbstractResponse abstractResponse
+    ) {
         DeleteRecordsResponse response = (DeleteRecordsResponse) abstractResponse;
         Map<TopicPartition, DeletedRecords> completed = new HashMap<>();
         Map<TopicPartition, Throwable> failed = new HashMap<>();
         List<TopicPartition> unmapped = new ArrayList<>();
         Set<TopicPartition> retriable = new HashSet<>();
 
-        for (DeleteRecordsResponseData.DeleteRecordsTopicResult topicResult : response.data().topics()) {
+        for (DeleteRecordsResponseData.DeleteRecordsTopicResult topicResult: response.data().topics()) {
             for (DeleteRecordsResponseData.DeleteRecordsPartitionResult partitionResult : topicResult.partitions()) {
                 Errors error = Errors.forCode(partitionResult.errorCode());
                 TopicPartition topicPartition = new TopicPartition(topicResult.name(), partitionResult.partitionIndex());
@@ -102,9 +125,18 @@ public final class DeleteRecordsHandler extends Batched<TopicPartition, DeletedR
 
         // Sanity-check if the current leader for these partitions returned results for all of them
         for (TopicPartition topicPartition : keys) {
-            if (unmapped.isEmpty() && !completed.containsKey(topicPartition) && !failed.containsKey(topicPartition) && !retriable.contains(topicPartition)) {
-                ApiException sanityCheckException = new ApiException("The response from broker " + broker.id() + " did not contain a result for topic partition " + topicPartition);
-                log.error("DeleteRecords request for topic partition {} failed sanity check", topicPartition, sanityCheckException);
+            if (unmapped.isEmpty()
+                    && !completed.containsKey(topicPartition)
+                    && !failed.containsKey(topicPartition)
+                    && !retriable.contains(topicPartition)
+            ) {
+                ApiException sanityCheckException = new ApiException(
+                        "The response from broker " + broker.id() +
+                                " did not contain a result for topic partition " + topicPartition);
+                log.error(
+                        "DeleteRecords request for topic partition {} failed sanity check",
+                        topicPartition,
+                        sanityCheckException);
                 failed.put(topicPartition, sanityCheckException);
             }
         }
@@ -112,18 +144,36 @@ public final class DeleteRecordsHandler extends Batched<TopicPartition, DeletedR
         return new ApiResult<>(completed, failed, unmapped);
     }
 
-    private void handlePartitionError(TopicPartition topicPartition, Errors error, Map<TopicPartition, Throwable> failed, List<TopicPartition> unmapped, Set<TopicPartition> retriable) {
+    private void handlePartitionError(
+        TopicPartition topicPartition,
+        Errors error,
+        Map<TopicPartition, Throwable> failed,
+        List<TopicPartition> unmapped,
+        Set<TopicPartition> retriable
+    ) {
         if (error.exception() instanceof InvalidMetadataException) {
-            log.debug("DeleteRecords lookup request for topic partition {} will be retried due to invalid leader metadata {}", topicPartition, error);
+            log.debug(
+                "DeleteRecords lookup request for topic partition {} will be retried due to invalid leader metadata {}",
+                 topicPartition,
+                 error);
             unmapped.add(topicPartition);
         } else if (error.exception() instanceof RetriableException) {
-            log.debug("DeleteRecords fulfillment request for topic partition {} will be retried due to {}", topicPartition, error);
+            log.debug(
+                "DeleteRecords fulfillment request for topic partition {} will be retried due to {}",
+                topicPartition,
+                error);
             retriable.add(topicPartition);
         } else if (error.exception() instanceof TopicAuthorizationException) {
-            log.error("DeleteRecords request for topic partition {} failed due to an error {}", topicPartition, error);
+            log.error(
+                "DeleteRecords request for topic partition {} failed due to an error {}",
+                topicPartition,
+                error);
             failed.put(topicPartition, error.exception());
         } else {
-            log.error("DeleteRecords request for topic partition {} failed due to an unexpected error {}", topicPartition, error);
+            log.error(
+                "DeleteRecords request for topic partition {} failed due to an unexpected error {}",
+                topicPartition,
+                error);
             failed.put(topicPartition, error.exception());
         }
     }

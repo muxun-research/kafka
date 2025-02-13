@@ -18,13 +18,23 @@ package org.apache.kafka.clients;
 
 import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.feature.SupportedVersionRange;
+import org.apache.kafka.common.message.ApiVersionsResponseData;
 import org.apache.kafka.common.message.ApiVersionsResponseData.ApiVersion;
 import org.apache.kafka.common.message.ApiVersionsResponseData.SupportedFeatureKey;
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.requests.ApiVersionsResponse;
 import org.apache.kafka.common.utils.Utils;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.TreeMap;
 
 /**
  * An internal class which represents the API versions supported by a particular node.
@@ -39,10 +49,13 @@ public class NodeApiVersions {
 
     private final Map<String, SupportedVersionRange> supportedFeatures;
 
-    private final boolean zkMigrationEnabled;
+    private final Map<String, Short> finalizedFeatures;
+
+    private final long finalizedFeaturesEpoch;
 
     /**
      * Create a NodeApiVersions object with the current ApiVersions.
+     *
      * @return A new NodeApiVersions object.
      */
     public static NodeApiVersions create() {
@@ -51,13 +64,14 @@ public class NodeApiVersions {
 
     /**
      * Create a NodeApiVersions object.
+     *
      * @param overrides API versions to override. Any ApiVersion not specified here will be set to the current client
      *                  value.
      * @return A new NodeApiVersions object.
      */
     public static NodeApiVersions create(Collection<ApiVersion> overrides) {
         List<ApiVersion> apiVersions = new LinkedList<>(overrides);
-        for (ApiKeys apiKey : ApiKeys.zkBrokerApis()) {
+        for (ApiKeys apiKey : ApiKeys.clientApis()) {
             boolean exists = false;
             for (ApiVersion apiVersion : apiVersions) {
                 if (apiVersion.apiKey() == apiKey.id) {
@@ -65,25 +79,40 @@ public class NodeApiVersions {
                     break;
                 }
             }
-            if (!exists)
-                apiVersions.add(ApiVersionsResponse.toApiVersion(apiKey));
+            if (!exists) apiVersions.add(ApiVersionsResponse.toApiVersion(apiKey));
         }
-        return new NodeApiVersions(apiVersions, Collections.emptyList(), false);
+        return new NodeApiVersions(apiVersions, Collections.emptyList(), Collections.emptyList(), -1);
     }
 
 
     /**
      * Create a NodeApiVersions object with a single ApiKey. It is mainly used in tests.
-     * @param apiKey     ApiKey's id.
+     *
+     * @param apiKey ApiKey's id.
      * @param minVersion ApiKey's minimum version.
      * @param maxVersion ApiKey's maximum version.
      * @return A new NodeApiVersions object.
      */
     public static NodeApiVersions create(short apiKey, short minVersion, short maxVersion) {
-        return create(Collections.singleton(new ApiVersion().setApiKey(apiKey).setMinVersion(minVersion).setMaxVersion(maxVersion)));
+        return create(Collections.singleton(new ApiVersion()
+                .setApiKey(apiKey)
+                .setMinVersion(minVersion)
+                .setMaxVersion(maxVersion)));
     }
 
-    public NodeApiVersions(Collection<ApiVersion> nodeApiVersions, Collection<SupportedFeatureKey> nodeSupportedFeatures, boolean zkMigrationEnabled) {
+    public NodeApiVersions(
+            Collection<ApiVersion> nodeApiVersions,
+            Collection<SupportedFeatureKey> nodeSupportedFeatures
+    ) {
+        this(nodeApiVersions, nodeSupportedFeatures, Collections.emptyList(), -1);
+    }
+
+    public NodeApiVersions(
+            Collection<ApiVersion> nodeApiVersions,
+            Collection<SupportedFeatureKey> nodeSupportedFeatures,
+            Collection<ApiVersionsResponseData.FinalizedFeatureKey> nodeFinalizedFeatures,
+            long finalizedFeaturesEpoch
+    ) {
         for (ApiVersion nodeApiVersion : nodeApiVersions) {
             if (ApiKeys.hasId(nodeApiVersion.apiKey())) {
                 ApiKeys nodeApiKey = ApiKeys.forId(nodeApiVersion.apiKey());
@@ -96,10 +125,15 @@ public class NodeApiVersions {
 
         Map<String, SupportedVersionRange> supportedFeaturesBuilder = new HashMap<>();
         for (SupportedFeatureKey supportedFeature : nodeSupportedFeatures) {
-            supportedFeaturesBuilder.put(supportedFeature.name(), new SupportedVersionRange(supportedFeature.minVersion(), supportedFeature.maxVersion()));
+            supportedFeaturesBuilder.put(supportedFeature.name(),
+                    new SupportedVersionRange(supportedFeature.minVersion(), supportedFeature.maxVersion()));
         }
         this.supportedFeatures = Collections.unmodifiableMap(supportedFeaturesBuilder);
-        this.zkMigrationEnabled = zkMigrationEnabled;
+        this.finalizedFeaturesEpoch = finalizedFeaturesEpoch;
+        this.finalizedFeatures = new HashMap<>();
+        for (ApiVersionsResponseData.FinalizedFeatureKey finalizedFeature : nodeFinalizedFeatures) {
+            this.finalizedFeatures.put(finalizedFeature.name(), finalizedFeature.maxVersionLevel());
+        }
     }
 
     /**
@@ -114,14 +148,20 @@ public class NodeApiVersions {
      */
     public short latestUsableVersion(ApiKeys apiKey, short oldestAllowedVersion, short latestAllowedVersion) {
         if (!supportedVersions.containsKey(apiKey))
-            throw new UnsupportedVersionException("The broker does not support " + apiKey);
+            throw new UnsupportedVersionException("The node does not support " + apiKey);
         ApiVersion supportedVersion = supportedVersions.get(apiKey);
-        Optional<ApiVersion> intersectVersion = ApiVersionsResponse.intersect(supportedVersion, new ApiVersion().setApiKey(apiKey.id).setMinVersion(oldestAllowedVersion).setMaxVersion(latestAllowedVersion));
+        Optional<ApiVersion> intersectVersion = ApiVersionsResponse.intersect(supportedVersion,
+            new ApiVersion()
+                .setApiKey(apiKey.id)
+                .setMinVersion(oldestAllowedVersion)
+                .setMaxVersion(latestAllowedVersion));
 
         if (intersectVersion.isPresent())
             return intersectVersion.get().maxVersion();
         else
-            throw new UnsupportedVersionException("The broker does not support " + apiKey + " with version in range [" + oldestAllowedVersion + "," + latestAllowedVersion + "]. The supported" + " range is [" + supportedVersion.minVersion() + "," + supportedVersion.maxVersion() + "].");
+            throw new UnsupportedVersionException("The node does not support " + apiKey +
+                " with version in range [" + oldestAllowedVersion + "," + latestAllowedVersion + "]. The supported" +
+                " range is [" + supportedVersion.minVersion() + "," + supportedVersion.maxVersion() + "].");
     }
 
     /**
@@ -136,6 +176,7 @@ public class NodeApiVersions {
 
     /**
      * Convert the object to a string.
+     *
      * @param lineBreaks True if we should add a linebreak after each api.
      */
     public String toString(boolean lineBreaks) {
@@ -150,11 +191,11 @@ public class NodeApiVersions {
 
         // Also handle the case where some apiKey types are not specified at all in the given ApiVersions,
         // which may happen when the remote is too old.
-        for (ApiKeys apiKey : ApiKeys.zkBrokerApis()) {
+        for (ApiKeys apiKey : ApiKeys.clientApis()) {
             if (!apiKeysText.containsKey(apiKey.id)) {
-                StringBuilder bld = new StringBuilder();
-                bld.append(apiKey.name).append("(").append(apiKey.id).append("): ").append("UNSUPPORTED");
-                apiKeysText.put(apiKey.id, bld.toString());
+                String bld = apiKey.name + "(" +
+                        apiKey.id + "): " + "UNSUPPORTED";
+                apiKeysText.put(apiKey.id, bld);
             }
         }
         String separator = lineBreaks ? ",\n\t" : ", ";
@@ -162,7 +203,7 @@ public class NodeApiVersions {
         bld.append("(");
         if (lineBreaks)
             bld.append("\n\t");
-        bld.append(Utils.join(apiKeysText.values(), separator));
+        bld.append(String.join(separator, apiKeysText.values()));
         if (lineBreaks)
             bld.append("\n");
         bld.append(")");
@@ -201,6 +242,7 @@ public class NodeApiVersions {
 
     /**
      * Get the version information for a given API.
+     *
      * @param apiKey The api key to lookup
      * @return The api version information from the broker or null if it is unsupported
      */
@@ -216,7 +258,11 @@ public class NodeApiVersions {
         return supportedFeatures;
     }
 
-    public boolean zkMigrationEnabled() {
-        return zkMigrationEnabled;
+    public Map<String, Short> finalizedFeatures() {
+        return finalizedFeatures;
+    }
+
+    public long finalizedFeaturesEpoch() {
+        return finalizedFeaturesEpoch;
     }
 }

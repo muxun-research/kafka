@@ -28,41 +28,59 @@ import org.apache.kafka.connect.sink.SinkRecord;
 import org.apache.kafka.connect.sink.SinkTask;
 import org.apache.kafka.connect.storage.Converter;
 import org.apache.kafka.connect.storage.HeaderConverter;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 public class WorkerErrantRecordReporter implements ErrantRecordReporter {
 
     private static final Logger log = LoggerFactory.getLogger(WorkerErrantRecordReporter.class);
 
-    private final RetryWithToleranceOperator retryWithToleranceOperator;
+    private final RetryWithToleranceOperator<ConsumerRecord<byte[], byte[]>> retryWithToleranceOperator;
     private final Converter keyConverter;
     private final Converter valueConverter;
     private final HeaderConverter headerConverter;
 
     // Visible for testing
     protected final ConcurrentMap<TopicPartition, List<Future<Void>>> futures;
+    private final AtomicReference<Throwable> taskPutException;
 
-    public WorkerErrantRecordReporter(RetryWithToleranceOperator retryWithToleranceOperator, Converter keyConverter, Converter valueConverter, HeaderConverter headerConverter) {
+    public WorkerErrantRecordReporter(
+        RetryWithToleranceOperator<ConsumerRecord<byte[], byte[]>> retryWithToleranceOperator,
+        Converter keyConverter,
+        Converter valueConverter,
+        HeaderConverter headerConverter
+    ) {
         this.retryWithToleranceOperator = retryWithToleranceOperator;
         this.keyConverter = keyConverter;
         this.valueConverter = valueConverter;
         this.headerConverter = headerConverter;
         this.futures = new ConcurrentHashMap<>();
+        this.taskPutException = new AtomicReference<>();
     }
 
     @Override
     public Future<Void> report(SinkRecord record, Throwable error) {
-        ConsumerRecord<byte[], byte[]> consumerRecord;
+        ProcessingContext<ConsumerRecord<byte[], byte[]>> context;
 
         // Most of the records will be an internal sink record, but the task could potentially
         // report modified or new records, so handle both cases
         if (record instanceof InternalSinkRecord) {
-            consumerRecord = ((InternalSinkRecord) record).originalRecord();
+            context = ((InternalSinkRecord) record).context();
         } else {
             // Generate a new consumer record from the modified sink record. We prefer
             // to send the original consumer record (pre-transformed) to the DLQ,
@@ -70,13 +88,15 @@ public class WorkerErrantRecordReporter implements ErrantRecordReporter {
             // record instead
             String topic = record.topic();
             byte[] key = keyConverter.fromConnectData(topic, record.keySchema(), record.key());
-            byte[] value = valueConverter.fromConnectData(topic, record.valueSchema(), record.value());
+            byte[] value = valueConverter.fromConnectData(topic,
+                record.valueSchema(), record.value());
 
             RecordHeaders headers = new RecordHeaders();
             if (record.headers() != null) {
                 for (Header header : record.headers()) {
                     String headerKey = header.key();
-                    byte[] rawHeader = headerConverter.fromConnectHeader(topic, headerKey, header.schema(), header.value());
+                    byte[] rawHeader = headerConverter.fromConnectHeader(topic, headerKey,
+                        header.schema(), header.value());
                     headers.add(headerKey, rawHeader);
                 }
             }
@@ -84,13 +104,17 @@ public class WorkerErrantRecordReporter implements ErrantRecordReporter {
             int keyLength = key != null ? key.length : -1;
             int valLength = value != null ? value.length : -1;
 
-            consumerRecord = new ConsumerRecord<>(record.topic(), record.kafkaPartition(), record.kafkaOffset(), record.timestamp(), record.timestampType(), keyLength, valLength, key, value, headers, Optional.empty());
+            ConsumerRecord<byte[], byte[]> consumerRecord = new ConsumerRecord<>(record.topic(), record.kafkaPartition(),
+                record.kafkaOffset(), record.timestamp(), record.timestampType(), keyLength,
+                valLength, key, value, headers, Optional.empty());
+            context = new ProcessingContext<>(consumerRecord);
         }
 
-        Future<Void> future = retryWithToleranceOperator.executeFailed(Stage.TASK_PUT, SinkTask.class, consumerRecord, error);
+        Future<Void> future = retryWithToleranceOperator.executeFailed(context, Stage.TASK_PUT, SinkTask.class, error);
+        taskPutException.compareAndSet(null, error);
 
         if (!future.isDone()) {
-            TopicPartition partition = new TopicPartition(consumerRecord.topic(), consumerRecord.partition());
+            TopicPartition partition = new TopicPartition(context.original().topic(), context.original().partition());
             futures.computeIfAbsent(partition, p -> new ArrayList<>()).add(future);
         }
         return future;
@@ -128,7 +152,17 @@ public class WorkerErrantRecordReporter implements ErrantRecordReporter {
 
     // Removes and returns all futures for the given topic partitions from the set of currently-active futures
     private Collection<Future<Void>> futuresFor(Collection<TopicPartition> topicPartitions) {
-        return topicPartitions.stream().map(futures::remove).filter(Objects::nonNull).flatMap(List::stream).collect(Collectors.toList());
+        return topicPartitions.stream()
+                .map(futures::remove)
+                .filter(Objects::nonNull)
+                .flatMap(List::stream)
+                .collect(Collectors.toList());
+    }
+
+    public synchronized void maybeThrowAsyncError() {
+        if (taskPutException.get() != null && !retryWithToleranceOperator.withinToleranceLimits()) {
+            throw new ConnectException("Tolerance exceeded in error handler", taskPutException.get());
+        }
     }
 
     /**
@@ -156,14 +190,15 @@ public class WorkerErrantRecordReporter implements ErrantRecordReporter {
         }
 
         public Void get() throws InterruptedException, ExecutionException {
-            for (Future<RecordMetadata> future : futures) {
+            for (Future<RecordMetadata> future: futures) {
                 future.get();
             }
             return null;
         }
 
-        public Void get(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
-            for (Future<RecordMetadata> future : futures) {
+        public Void get(long timeout, TimeUnit unit)
+            throws InterruptedException, ExecutionException, TimeoutException {
+            for (Future<RecordMetadata> future: futures) {
                 future.get(timeout, unit);
             }
             return null;

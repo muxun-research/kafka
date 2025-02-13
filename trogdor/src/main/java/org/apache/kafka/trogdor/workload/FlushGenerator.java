@@ -17,29 +17,28 @@
 
 package org.apache.kafka.trogdor.workload;
 
+import org.apache.kafka.clients.producer.KafkaProducer;
+
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import org.apache.kafka.clients.producer.KafkaProducer;
 
 /**
  * This interface is used to facilitate flushing the KafkaProducers on a cadence specified by the user.
- * <p>
+ *
  * Currently there are 3 flushing methods:
- * <p>
- * * Disabled, by not specifying this parameter.
- * * `constant` will use `ConstantFlushGenerator` to keep the number of messages per batch constant.
- * * `gaussian` will use `GaussianFlushGenerator` to vary the number of messages per batch on a normal distribution.
- * <p>
+ *
+ *   * Disabled, by not specifying this parameter.
+ *   * `constant` will use `ConstantFlushGenerator` to keep the number of messages per batch constant.
+ *   * `gaussian` will use `GaussianFlushGenerator` to vary the number of messages per batch on a normal distribution.
+ *
  * Please see the implementation classes for more details.
  */
 
-@JsonTypeInfo(use = JsonTypeInfo.Id.NAME,
-		include = JsonTypeInfo.As.PROPERTY,
-		property = "type")
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
 @JsonSubTypes(value = {
-		@JsonSubTypes.Type(value = ConstantFlushGenerator.class, name = "constant"),
-		@JsonSubTypes.Type(value = GaussianFlushGenerator.class, name = "gaussian")
-})
+    @JsonSubTypes.Type(value = ConstantFlushGenerator.class, name = "constant"),
+    @JsonSubTypes.Type(value = GaussianFlushGenerator.class, name = "gaussian")
+    })
 public interface FlushGenerator {
-	<K, V> void increment(KafkaProducer<K, V> producer);
+    <K, V> void increment(KafkaProducer<K, V> producer);
 }

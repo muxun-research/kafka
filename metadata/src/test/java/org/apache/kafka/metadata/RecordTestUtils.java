@@ -18,21 +18,33 @@
 package org.apache.kafka.metadata;
 
 import org.apache.kafka.common.Uuid;
+import org.apache.kafka.common.metadata.RegisterControllerRecord;
 import org.apache.kafka.common.metadata.TopicRecord;
 import org.apache.kafka.common.protocol.ApiMessage;
 import org.apache.kafka.common.protocol.Message;
 import org.apache.kafka.common.protocol.ObjectSerializationCache;
+import org.apache.kafka.common.security.auth.SecurityProtocol;
 import org.apache.kafka.common.utils.ImplicitLinkedHashCollection;
 import org.apache.kafka.raft.Batch;
 import org.apache.kafka.raft.BatchReader;
 import org.apache.kafka.raft.internals.MemoryBatchReader;
 import org.apache.kafka.server.common.ApiMessageAndVersion;
+import org.apache.kafka.server.common.MetadataVersion;
 import org.apache.kafka.server.util.MockRandom;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -46,10 +58,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class RecordTestUtils {
     /**
      * Replay a list of records.
-     * @param target             The object to invoke the replay function on.
-     * @param recordsAndVersions A list of records.
+     *
+     * @param target                The object to invoke the replay function on.
+     * @param recordsAndVersions    A list of records.
      */
-    public static void replayAll(Object target, List<ApiMessageAndVersion> recordsAndVersions) {
+    public static void replayAll(Object target,
+                                 List<ApiMessageAndVersion> recordsAndVersions) {
         for (ApiMessageAndVersion recordAndVersion : recordsAndVersions) {
             ApiMessage record = recordAndVersion.message();
             try {
@@ -58,15 +72,12 @@ public class RecordTestUtils {
                     method.invoke(target, record);
                 } catch (NoSuchMethodException e) {
                     try {
-                        Method method = target.getClass().getMethod("replay", record.getClass(), Optional.class);
-                        method.invoke(target, record, Optional.empty());
-                    } catch (NoSuchMethodException t) {
-                        try {
-                            Method method = target.getClass().getMethod("replay", record.getClass(), long.class);
-                            method.invoke(target, record, 0L);
-                        } catch (NoSuchMethodException i) {
-                            // ignore
-                        }
+                        Method method = target.getClass().getMethod("replay",
+                            record.getClass(),
+                            long.class);
+                        method.invoke(target, record, 0L);
+                    } catch (NoSuchMethodException i) {
+                        // ignore
                     }
                 }
             } catch (InvocationTargetException e) {
@@ -77,15 +88,64 @@ public class RecordTestUtils {
         }
     }
 
-    public static void replayOne(Object target, ApiMessageAndVersion recordAndVersion) {
+    public static void replayOne(
+        Object target,
+        ApiMessageAndVersion recordAndVersion
+    ) {
         replayAll(target, Collections.singletonList(recordAndVersion));
+    }
+
+    public static <T extends ApiMessage> Optional<T> recordAtIndexAs(
+            Class<T> recordClazz,
+            List<ApiMessageAndVersion> recordsAndVersions,
+            int recordIndex
+    ) {
+        if (recordIndex > recordsAndVersions.size() - 1) {
+            return Optional.empty();
+        } else {
+            if (recordIndex == -1) {
+                return recordsAndVersions.stream().map(ApiMessageAndVersion::message)
+                    .filter(record -> record.getClass().isAssignableFrom(recordClazz))
+                    .map(recordClazz::cast)
+                    .findFirst();
+            } else {
+                ApiMessageAndVersion messageAndVersion = recordsAndVersions.get(recordIndex);
+                ApiMessage record = messageAndVersion.message();
+                if (record.getClass().isAssignableFrom(recordClazz)) {
+                    return Optional.of(recordClazz.cast(record));
+                } else {
+                    return Optional.empty();
+                }
+            }
+
+        }
+    }
+
+    public static class ImageDeltaPair<I, D> {
+        private final Supplier<I> imageSupplier;
+        private final Function<I, D> deltaCreator;
+
+        public ImageDeltaPair(Supplier<I> imageSupplier, Function<I, D> deltaCreator) {
+            this.imageSupplier = imageSupplier;
+            this.deltaCreator = deltaCreator;
+        }
+
+        public Supplier<I> imageSupplier() {
+            return imageSupplier;
+        }
+
+        public Function<I, D> deltaCreator() {
+            return deltaCreator;
+        }
     }
 
     public static class TestThroughAllIntermediateImagesLeadingToFinalImageHelper<D, I> {
         private final Supplier<I> emptyImageSupplier;
         private final Function<I, D> deltaUponImageCreator;
 
-        public TestThroughAllIntermediateImagesLeadingToFinalImageHelper(Supplier<I> emptyImageSupplier, Function<I, D> deltaUponImageCreator) {
+        public TestThroughAllIntermediateImagesLeadingToFinalImageHelper(
+            Supplier<I> emptyImageSupplier, Function<I, D> deltaUponImageCreator
+        ) {
             this.emptyImageSupplier = Objects.requireNonNull(emptyImageSupplier);
             this.deltaUponImageCreator = Objects.requireNonNull(deltaUponImageCreator);
         }
@@ -145,14 +205,28 @@ public class RecordTestUtils {
                 }
             }
         }
+
+        /**
+         * Tests applying records in all variations of batch sizes will result in the same image as applying all records in one batch.
+         * @param fromRecords    The list of records to apply.
+         */
+        public void test(List<ApiMessageAndVersion> fromRecords) {
+            D finalImageDelta = createDeltaUponImage(getEmptyImage());
+            RecordTestUtils.replayAll(finalImageDelta, fromRecords);
+            I finalImage = createImageByApplyingDelta(finalImageDelta);
+
+            test(finalImage, fromRecords);
+        }
     }
 
     /**
      * Replay a list of record batches.
-     * @param target  The object to invoke the replay function on.
-     * @param batches A list of batches of records.
+     *
+     * @param target        The object to invoke the replay function on.
+     * @param batches       A list of batches of records.
      */
-    public static void replayAllBatches(Object target, List<List<ApiMessageAndVersion>> batches) {
+    public static void replayAllBatches(Object target,
+                                        List<List<ApiMessageAndVersion>> batches) {
         for (List<ApiMessageAndVersion> batch : batches) {
             replayAll(target, batch);
         }
@@ -160,8 +234,10 @@ public class RecordTestUtils {
 
     /**
      * Materialize the output of an iterator into a set.
-     * @param iterator The input iterator.
-     * @return The output set.
+     *
+     * @param iterator      The input iterator.
+     *
+     * @return              The output set.
      */
     public static <T> Set<T> iteratorToSet(Iterator<T> iterator) {
         HashSet<T> set = new HashSet<>();
@@ -173,10 +249,12 @@ public class RecordTestUtils {
 
     /**
      * Assert that a batch iterator yields a given set of record batches.
-     * @param batches  A list of record batches.
-     * @param iterator The input iterator.
+     *
+     * @param batches       A list of record batches.
+     * @param iterator      The input iterator.
      */
-    public static void assertBatchIteratorContains(List<List<ApiMessageAndVersion>> batches, Iterator<List<ApiMessageAndVersion>> iterator) throws Exception {
+    public static void assertBatchIteratorContains(List<List<ApiMessageAndVersion>> batches,
+                                                   Iterator<List<ApiMessageAndVersion>> iterator) throws Exception {
         List<List<ApiMessageAndVersion>> actual = new ArrayList<>();
         while (iterator.hasNext()) {
             actual.add(new ArrayList<>(iterator.next()));
@@ -192,14 +270,13 @@ public class RecordTestUtils {
 
     /**
      * Sort the contents of an object which contains records.
-     * @param o The input object. It will be modified in-place.
+     *
+     * @param o     The input object. It will be modified in-place.
      */
-    @SuppressWarnings("unchecked")
     public static void deepSortRecords(Object o) throws Exception {
         if (o == null) {
             return;
-        } else if (o instanceof List) {
-            List<?> list = (List<?>) o;
+        } else if (o instanceof List<?> list) {
             for (Object entry : list) {
                 if (entry != null) {
                     if (Number.class.isAssignableFrom(entry.getClass())) {
@@ -209,8 +286,7 @@ public class RecordTestUtils {
                 }
             }
             list.sort(Comparator.comparing(Object::toString));
-        } else if (o instanceof ImplicitLinkedHashCollection) {
-            ImplicitLinkedHashCollection<?> coll = (ImplicitLinkedHashCollection<?>) o;
+        } else if (o instanceof ImplicitLinkedHashCollection<?> coll) {
             for (Object entry : coll) {
                 deepSortRecords(entry);
             }
@@ -225,12 +301,17 @@ public class RecordTestUtils {
 
     /**
      * Create a batch reader for testing.
-     * @param lastOffset      the last offset of the given list of records
+     *
+     * @param lastOffset the last offset of the given list of records
      * @param appendTimestamp the append timestamp for the batches created
-     * @param records         the records
+     * @param records the records
      * @return a batch reader which will return the given records
      */
-    public static BatchReader<ApiMessageAndVersion> mockBatchReader(long lastOffset, long appendTimestamp, List<ApiMessageAndVersion> records) {
+    public static BatchReader<ApiMessageAndVersion> mockBatchReader(
+        long lastOffset,
+        long appendTimestamp,
+        List<ApiMessageAndVersion> records
+    ) {
         List<Batch<ApiMessageAndVersion>> batches = new ArrayList<>();
         long offset = lastOffset - records.size() + 1;
         Iterator<ApiMessageAndVersion> iterator = records.iterator();
@@ -247,8 +328,7 @@ public class RecordTestUtils {
             }
             curRecords.add(iterator.next());
         }
-        return MemoryBatchReader.of(batches, __ -> {
-        });
+        return MemoryBatchReader.of(batches, __ -> { });
     }
 
 
@@ -263,6 +343,40 @@ public class RecordTestUtils {
 
     public static ApiMessageAndVersion testRecord(int index) {
         MockRandom random = new MockRandom(index);
-        return new ApiMessageAndVersion(new TopicRecord().setName("test" + index).setTopicId(new Uuid(random.nextLong(), random.nextLong())), (short) 0);
+        return new ApiMessageAndVersion(
+            new TopicRecord().setName("test" + index).
+            setTopicId(new Uuid(random.nextLong(), random.nextLong())), (short) 0);
+    }
+
+    public static RegisterControllerRecord createTestControllerRegistration(
+        int id,
+        boolean zkMigrationReady
+    ) {
+        return new RegisterControllerRecord().
+            setControllerId(id).
+            setIncarnationId(new Uuid(3465346L, id)).
+            setZkMigrationReady(zkMigrationReady).
+            setEndPoints(new RegisterControllerRecord.ControllerEndpointCollection(
+                Arrays.asList(
+                    new RegisterControllerRecord.ControllerEndpoint().
+                        setName("CONTROLLER").
+                        setHost("localhost").
+                        setPort(8000 + id).
+                        setSecurityProtocol(SecurityProtocol.PLAINTEXT.id),
+                    new RegisterControllerRecord.ControllerEndpoint().
+                        setName("CONTROLLER_SSL").
+                        setHost("localhost").
+                        setPort(9000 + id).
+                        setSecurityProtocol(SecurityProtocol.SSL.id)
+                ).iterator()
+            )).
+            setFeatures(new RegisterControllerRecord.ControllerFeatureCollection(
+                Collections.singletonList(
+                    new RegisterControllerRecord.ControllerFeature().
+                        setName(MetadataVersion.FEATURE_NAME).
+                        setMinSupportedVersion(MetadataVersion.MINIMUM_KRAFT_VERSION.featureLevel()).
+                        setMaxSupportedVersion(MetadataVersion.IBP_3_6_IV1.featureLevel())
+                ).iterator()
+            ));
     }
 }

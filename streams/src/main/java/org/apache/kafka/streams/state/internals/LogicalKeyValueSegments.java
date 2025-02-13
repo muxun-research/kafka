@@ -16,8 +16,9 @@
  */
 package org.apache.kafka.streams.state.internals;
 
-import org.apache.kafka.streams.processor.ProcessorContext;
+import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.processor.internals.ProcessorContextUtils;
+import org.apache.kafka.streams.query.Position;
 import org.apache.kafka.streams.state.internals.metrics.RocksDBMetricsRecorder;
 
 import java.util.HashMap;
@@ -28,8 +29,8 @@ import java.util.Map;
  * Regular segments with {@code segmentId >= 0} expire according to the specified
  * retention period. "Reserved" segments with {@code segmentId < 0} do not expire
  * and are completely separate from regular segments in that methods such as
- * {@link #getSegmentForTimestamp(long)}, {@link #getOrCreateSegment(long, ProcessorContext)},
- * {@link #getOrCreateSegmentIfLive(long, ProcessorContext, long)},
+ * {@link #segmentForTimestamp(long)}, {@link #getOrCreateSegment(long, StateStoreContext)},
+ * {@link #getOrCreateSegmentIfLive(long, StateStoreContext, long)},
  * {@link #segments(long, long, boolean)}, and {@link #allSegments(boolean)}
  * only return regular segments and not reserved segments. The methods {@link #flush()}
  * and {@link #close()} flush and close both regular and reserved segments, due to
@@ -44,19 +45,31 @@ public class LogicalKeyValueSegments extends AbstractSegments<LogicalKeyValueSeg
     // reserved segments do not expire, and are tracked here separately from regular segments
     private final Map<Long, LogicalKeyValueSegment> reservedSegments = new HashMap<>();
 
-    LogicalKeyValueSegments(final String name, final String parentDir, final long retentionPeriod, final long segmentInterval, final RocksDBMetricsRecorder metricsRecorder) {
+    LogicalKeyValueSegments(final String name,
+                            final String parentDir,
+                            final long retentionPeriod,
+                            final long segmentInterval,
+                            final RocksDBMetricsRecorder metricsRecorder) {
         super(name, retentionPeriod, segmentInterval);
         this.metricsRecorder = metricsRecorder;
         this.physicalStore = new RocksDBStore(name, parentDir, metricsRecorder, false);
     }
 
     @Override
-    public LogicalKeyValueSegment getOrCreateSegment(final long segmentId, final ProcessorContext context) {
+    public void setPosition(final Position position) {
+        this.physicalStore.position = position;
+    }
+
+    @Override
+    public LogicalKeyValueSegment getOrCreateSegment(final long segmentId,
+                                                     final StateStoreContext context) {
         if (segments.containsKey(segmentId)) {
             return segments.get(segmentId);
         } else {
             if (segmentId < 0) {
-                throw new IllegalArgumentException("Negative segment IDs are reserved for reserved segments, " + "and should be created through createReservedSegment() instead");
+                throw new IllegalArgumentException(
+                    "Negative segment IDs are reserved for reserved segments, "
+                        + "and should be created through createReservedSegment() instead");
             }
 
             final LogicalKeyValueSegment newSegment = new LogicalKeyValueSegment(segmentId, segmentName(segmentId), physicalStore);
@@ -69,7 +82,8 @@ public class LogicalKeyValueSegments extends AbstractSegments<LogicalKeyValueSeg
         }
     }
 
-    LogicalKeyValueSegment createReservedSegment(final long segmentId, final String segmentName) {
+    LogicalKeyValueSegment createReservedSegment(final long segmentId,
+                                                 final String segmentName) {
         if (segmentId >= 0) {
             throw new IllegalArgumentException("segmentId for a reserved segment must be negative");
         }
@@ -89,8 +103,8 @@ public class LogicalKeyValueSegments extends AbstractSegments<LogicalKeyValueSeg
     }
 
     @Override
-    public void openExisting(final ProcessorContext context, final long streamTime) {
-        metricsRecorder.init(ProcessorContextUtils.getMetricsImpl(context), context.taskId());
+    public void openExisting(final StateStoreContext context, final long streamTime) {
+        metricsRecorder.init(ProcessorContextUtils.metricsImpl(context), context.taskId());
         physicalStore.openDB(context.appConfigs(), context.stateDir());
     }
 
@@ -121,7 +135,9 @@ public class LogicalKeyValueSegments extends AbstractSegments<LogicalKeyValueSeg
     @Override
     public String segmentName(final long segmentId) {
         if (segmentId < 0) {
-            throw new IllegalArgumentException("Negative segment IDs are reserved for reserved segments, " + "which have custom names that should not be accessed from this method");
+            throw new IllegalArgumentException(
+                "Negative segment IDs are reserved for reserved segments, "
+                    + "which have custom names that should not be accessed from this method");
         }
 
         return super.segmentName(segmentId);

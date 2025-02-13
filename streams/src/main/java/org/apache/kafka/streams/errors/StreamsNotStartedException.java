@@ -26,13 +26,14 @@ import org.apache.kafka.streams.KafkaStreams.State;
  */
 public class StreamsNotStartedException extends InvalidStateStoreException {
 
-	private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 1L;
 
-	public StreamsNotStartedException(final String message) {
-		super(message);
-	}
+    public StreamsNotStartedException(final String message) {
+        super(message);
+    }
 
-	public StreamsNotStartedException(final String message, final Throwable throwable) {
-		super(message, throwable);
-	}
+    @SuppressWarnings("unused")
+    public StreamsNotStartedException(final String message, final Throwable throwable) {
+        super(message, throwable);
+    }
 }
